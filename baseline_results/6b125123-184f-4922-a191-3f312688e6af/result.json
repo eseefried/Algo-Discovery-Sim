@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "6b125123-184f-4922-a191-3f312688e6af",
+  "parent_run_id": "77f3a41f-64a7-425a-9c99-24a791c701c3",
+  "created_at": "2026-10-31T17:50:40.598641+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "736b254e0458b283b6aef03e0e6c7473882594e5d4c511fba6bb5090e7d08e07",
+  "source_specification_sha256": "c6722b40af85257249a0a0962010884a8a6389302f0417ede369b62ade8af6b4",
+  "source_python_sha256": "1e27334939ef0f20286707267136dd10aa1f04b5f44070b0bb9b74559c53ceb6",
+  "elapsed_seconds": 72.374,
+  "usage": {
+    "input_tokens": 7898,
+    "output_tokens": 6284,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the discretised search-Hamiltonian evolution operator U(delta,m) = [exp(-i delta |s><s|) exp(-i delta |t><t|)]^m on an n-qubit search register (no state preparation, no measurement). Two step modes are supported: 'trotter' (Lie-Trotter small steps, delta = T/m with T = pi*sqrt(N)/2, eq_3) and 'reflection' (maximal step delta = pi, each factor an exact reflection, so m steps equal m Grover iterations up to global phase, eq_4/eq_5). Each projector exponential is realised exactly as an X-conjugated multi-controlled phase gate (marked-state term) and its H^{\\otimes n}-conjugate (uniform-superposition term). Example: n=2, t=3, reflection mode, 1 step, which maps |s> to |11> exactly (up to global phase).",
+    "source_python": "\"\"\"Discretised Hamiltonian-evolution operator for Grover search.\n\nImplements U(delta, m) = [ exp(-i*delta*|s><s|) * exp(-i*delta*|t><t|) ]^m\non an n-qubit search register (qubit 0 = least significant bit of x).\n\n- step_mode 'trotter'    : delta = T/m with T = pi*sqrt(N)/2  (eq_2, eq_3)\n- step_mode 'reflection' : delta = pi, each factor is an exact reflection\n                           (eq_4); m steps = m Grover iterations up to a\n                           global phase (-1)^m  (eq_5 for n=2, t=3, m=1).\n\nThe runner prepares the input state (|s> = H^{(x)n}|0>) and measures.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _is_int(value):\n    return isinstance(value, int) and not isinstance(value, bool)\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object (dict)\")\n    for key in (\"n\", \"marked\", \"steps\", \"step_mode\"):\n        if key not in instance:\n            raise ValueError(\"instance is missing key '%s'\" % key)\n    n = instance[\"n\"]\n    marked = instance[\"marked\"]\n    steps = instance[\"steps\"]\n    mode = instance[\"step_mode\"]\n    if not _is_int(n) or n < 1 or n > MAX_QUBITS:\n        raise ValueError(\"n must be an integer in [1, %d]\" % MAX_QUBITS)\n    if not _is_int(marked) or marked < 0 or marked >= (1 << n):\n        raise ValueError(\"marked must be an integer in [0, 2^n)\")\n    if not _is_int(steps) or steps < 1:\n        raise ValueError(\"steps must be a positive integer\")\n    if mode not in (\"trotter\", \"reflection\"):\n        raise ValueError(\"step_mode must be 'trotter' or 'reflection'\")\n    return n, marked, steps, mode\n\n\ndef _projector_phase(qc, qubits, marked, delta):\n    \"\"\"Append exp(-i*delta*|marked><marked|) on the given qubits (eq_3 factor).\n\n    exp(-i*delta*|t><t|) = 1 + (e^{-i delta} - 1)|t><t| is a phase e^{-i delta}\n    on the single basis state |t>, realised as X-conjugation (to map |t> to\n    |1...1>) around a multi-controlled phase gate with angle -delta.\n    For delta = pi this is exactly the reflection 1 - 2|t><t| (eq_4).\n    \"\"\"\n    n = len(qubits)\n    flip = [qubits[q] for q in range(n) if ((marked >> q) & 1) == 0]\n    for q in flip:\n        qc.x(q)\n    if n == 1:\n        qc.p(-delta, qubits[0])\n    else:\n        qc.mcp(-delta, qubits[:-1], qubits[-1])\n    for q in flip:\n        qc.x(q)\n\n\ndef _uniform_projector_phase(qc, qubits, delta):\n    \"\"\"Append exp(-i*delta*|s><s|) = H^{(x)n} exp(-i*delta*|0><0|) H^{(x)n} (eq_3).\n\n    For delta = pi this is exactly 1 - 2|s><s| = -(2|s><s| - 1), i.e. the\n    Grover diffusion reflection up to a global sign (eq_4, eq_5).\n    \"\"\"\n    for q in qubits:\n        qc.h(q)\n    _projector_phase(qc, qubits, 0, delta)\n    for q in qubits:\n        qc.h(q)\n\n\ndef build_circuit(instance):\n    \"\"\"Return the discretised evolution operator U(delta, m) as a QuantumCircuit.\n\n    instance keys:\n      n         : number of search qubits (N = 2^n), 1 <= n <= 12\n      marked    : marked item t in [0, 2^n), little-endian encoding\n      steps     : number m of product-formula steps (m >= 1)\n      step_mode : 'trotter' (delta = T/m, T = pi*sqrt(N)/2) or\n                  'reflection' (delta = pi, exact reflections / Grover steps)\n    \"\"\"\n    n, marked, steps, mode = _validate(instance)\n    big_n = 1 << n\n    if mode == \"trotter\":\n        # eq_2: exact evolution time T = pi*sqrt(N)/2 ; eq_3: delta = T/m\n        total_time = math.pi * math.sqrt(big_n) / 2.0\n        delta = total_time / steps\n    else:\n        # eq_4: maximal step delta = pi turns each exponential into a reflection\n        delta = math.pi\n    reg = QuantumRegister(n, \"search\")\n    qc = QuantumCircuit(reg, name=\"search_evolution_%s\" % mode)\n    qubits = list(range(n))\n    for _ in range(steps):\n        # one product-formula step: oracle factor first, then uniform factor\n        # (eq_3 split of H = |s><s| + |t><t|; Grover ordering of eq_4/eq_5)\n        _projector_phase(qc, qubits, marked, delta)\n        _uniform_projector_phase(qc, qubits, delta)\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"marked\": 3, \"steps\": 1, \"step_mode\": \"reflection\"}",
+    "register_layout": [
+      "search[0] = qubit 0: least significant bit x_0 of the database index x",
+      "search[1] = qubit 1: most significant bit x_1 of the database index x (for n=2)",
+      "Basis state |x> = |x_1 x_0>, little-endian; marked item t=3 is |11>",
+      "Input state |s> = H^{(x)2}|00> is prepared by the runner; expected output for the example is |11> up to global phase -1"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Defines H = |s><s| + |t><t| and the initial state |s>; |s> is prepared by the runner, and the two projectors appear only through their exponentials in _projector_phase and _uniform_projector_phase."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: total_time = math.pi * math.sqrt(big_n) / 2.0 (trotter branch)",
+        "explanation": "The exact evolution time T = pi*sqrt(N)/2 is used to set the Trotter step delta = T/m; the exact exp(-iHT) itself is not built (it is the target the discretisations approximate)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop with step_mode='trotter'; _projector_phase, _uniform_projector_phase",
+        "explanation": "The first-order product formula [exp(-i delta |s><s|) exp(-i delta |t><t|)]^m with delta = T/m, each factor realised exactly as an (H-conjugated) X-conjugated multi-controlled phase gate. The error bound itself is not computed in code."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit with step_mode='reflection' (delta = math.pi); docstrings of _projector_phase and _uniform_projector_phase",
+        "explanation": "With delta = pi, mcp(-pi) gives exactly 1 - 2|t><t| and the H-conjugate gives exactly 1 - 2|s><s|; m steps equal (-1)^m G^m, i.e. the Grover iteration up to global phase."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "example_instance_json (n=2, marked=3, steps=1, step_mode='reflection')",
+        "explanation": "The N=4, t=3 instance: one reflection step. For n=2 the marked-state factor becomes X-conjugation-free cp(-pi) = CZ and the uniform factor becomes H^2 X^2 CZ X^2 H^2, reaching |11> exactly up to global phase."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Within each product-formula step the marked-state (oracle) factor exp(-i delta |t><t|) is applied first and the uniform factor exp(-i delta |s><s|) second, i.e. the operator product is [exp(-i delta P_s) exp(-i delta P_t)]^m rather than the written [exp(-i delta P_t) exp(-i delta P_s)]^m.",
+        "reason": "Matches the Grover ordering G = (2|s><s|-1)(1-2|t><t|) and step 4 of the specification; the two orderings differ only by a boundary conjugation and, acting on |s>, by a global phase in the first factor, so the first-order error scaling is unchanged."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The reflection-mode circuit implements (1-2P_s)(1-2P_t) = -G per step, so the output equals G^m|s> up to a global phase (-1)^m.",
+        "reason": "exp(-i pi |s><s|) = 1 - 2|s><s| differs from the diffusion operator 2|s><s| - 1 by a sign; implementing the exponential exactly preserves the Hamiltonian-evolution meaning and the global phase is unobservable."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "The module returns only the discretised evolution operator; preparation of |s> (H^{(x)n}) and the final measurement are excluded.",
+        "reason": "Task requires a measurement-free operation with inputs prepared by the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The Trotter error bound and the claimed power-law/logarithmic complexity scalings are not computed or verified; only the circuits for the two discretisations are provided.",
+        "reason": "Scope narrowing: the module is an operation generator; error analysis is left to the runner/analysis stage."
+      }
+    ],
+    "assumptions": [
+      "Hamiltonian is the projector-sum H = |s><s| + |t><t| (Farhi-Gutmann), as assumed in the specification.",
+      "Single marked item, N = 2^n, little-endian encoding with qubit 0 the least significant bit.",
+      "Units hbar = 1; the 'reflection operators' are the delta = pi exponentials of the two projectors.",
+      "mcp(-delta) on all qubits after X-conjugation realises exp(-i delta |t><t|) exactly (no approximation); for n=1 a single p gate is used.",
+      "Total qubit count equals n and is capped at 12 by validation before allocation."
+    ],
+    "unresolved_issues": [
+      "The paper's actual Hamiltonian, splitting and error measure are unknown; the power-law exponent and the mechanism for logarithmic error dependence in the reflection trajectory are not reconstructible from the abstract and are not modelled.",
+      "For general N, the number of reflection steps k = round(pi/(4 theta) - 1/2) is left to the instance ('steps'); the module does not choose it automatically.",
+      "Multi-controlled phase gates (mcp) are decomposed by Qiskit at transpile time; gate counts are not optimised."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 18,
+    "depth": 13,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

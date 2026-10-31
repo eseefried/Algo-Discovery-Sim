@@ -1,0 +1,135 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "dd0503a8-1eb5-41cc-b73e-aabc282a2386",
+  "parent_run_id": "58b11b66-beb4-49d5-8502-a332d6d9ccc4",
+  "created_at": "2026-10-31T17:35:09.297334+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "57b4677eb41f5e94ac256bd1f3542b0d1a52a22685ec7d99f3d5e54aa2ee8b55",
+  "source_specification_sha256": "11b511e90ce7a686a36c98e2fd74a20fb87a1f3e2cce2f64d2ee6f7051450bd8",
+  "source_python_sha256": "d3fea414e7b8776fda5acedf0ebc7aeabf52bee74663443b5136b08bb38dac28",
+  "elapsed_seconds": 71.332,
+  "usage": {
+    "input_tokens": 7712,
+    "output_tokens": 6386,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the erroneous search iteration of eq_2, G_{phi,psi} = -I_s^{psi} I_t^{phi}, applied k times on an n-qubit data register (N = 2^n, single marked item t). The marked-state phase inversion I_t^{phi} = I - (1-e^{i phi})|t><t| is realized by X gates on the qubits where t has bit 0, a multi-controlled phase gate with angle phi = pi + delta1 on all data qubits, and the X gates undone. The mean-state inversion I_s^{psi} = I - (1-e^{i psi})|s><s| is realized as H^{(x)n} X^{(x)n} MCP(psi) X^{(x)n} H^{(x)n} with psi = pi + delta2. The overall sign -1 of each iteration is recorded as a global phase of pi. The input state (uniform superposition |s>, eq_1) is prepared by the runner, and the success rate (eq_3) is obtained by the runner's measurement of the data register. The example instance is the N=4, k=1, matched-error case of eq_6.",
+    "source_python": "\"\"\"Grover-type search iteration with systematic phase-inversion errors.\n\nImplements eq_2 of the specification:\n    I_t^{phi} = I - (1 - e^{i phi}) |t><t|      (marked-state inversion, phi = pi + delta1)\n    I_s^{psi} = I - (1 - e^{i psi}) |s><s|      (mean-state inversion,   psi = pi + delta2)\n    G_{phi,psi} = - I_s^{psi} I_t^{phi}          (one erroneous iteration)\nThe circuit applies G_{phi,psi}^k on n data qubits (N = 2^n items). The input\nstate |s> (eq_1) is prepared by the runner; no measurement is included (eq_3 is\nevaluated by the runner).\n\nQubit layout: data qubits 0..n-1, qubit i holds bit i of the item index\n(Qiskit little-endian: qubit 0 is the least significant bit).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _as_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(f\"{name} must be an integer\")\n    return value\n\n\ndef _as_real(value, name):\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(f\"{name} must be a real number\")\n    out = float(value)\n    if not math.isfinite(out):\n        raise ValueError(f\"{name} must be finite\")\n    return out\n\n\ndef _parse_instance(instance):\n    \"\"\"Validate the instance dictionary and return (n, marked, k, delta1, delta2).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object / dict\")\n    n = _as_int(instance.get(\"n_qubits\"), \"n_qubits\")\n    if n < 1 or n > MAX_QUBITS:\n        raise ValueError(f\"n_qubits must be between 1 and {MAX_QUBITS}\")\n    marked = _as_int(instance.get(\"marked\"), \"marked\")\n    if marked < 0 or marked >= (1 << n):\n        raise ValueError(\"marked must satisfy 0 <= marked < 2**n_qubits\")\n    k = _as_int(instance.get(\"iterations\"), \"iterations\")\n    if k < 0:\n        raise ValueError(\"iterations must be non-negative\")\n    if \"delta1\" in instance or \"delta2\" in instance:\n        if \"delta1\" not in instance or \"delta2\" not in instance:\n            raise ValueError(\"provide both delta1 and delta2, or a single matched delta\")\n        delta1 = _as_real(instance.get(\"delta1\"), \"delta1\")\n        delta2 = _as_real(instance.get(\"delta2\"), \"delta2\")\n    elif \"delta\" in instance:\n        delta1 = _as_real(instance.get(\"delta\"), \"delta\")\n        delta2 = delta1\n    else:\n        raise ValueError(\"instance must contain delta1 and delta2 (or matched delta)\")\n    return n, marked, k, delta1, delta2\n\n\ndef _phase_on_all_ones(qc, qubits, angle):\n    \"\"\"Multiply the basis state |1...1> of `qubits` by exp(i*angle).\"\"\"\n    if len(qubits) == 1:\n        qc.p(angle, qubits[0])\n    else:\n        qc.mcp(angle, qubits[:-1], qubits[-1])\n\n\ndef _marked_inversion(qc, qubits, marked, phi):\n    \"\"\"eq_2: I_t^{phi} = I - (1 - e^{i phi}) |t><t|, i.e. phase e^{i phi} on |t>.\"\"\"\n    flipped = [q for i, q in enumerate(qubits) if ((marked >> i) & 1) == 0]\n    for q in flipped:\n        qc.x(q)\n    _phase_on_all_ones(qc, qubits, phi)\n    for q in flipped:\n        qc.x(q)\n\n\ndef _mean_inversion(qc, qubits, psi):\n    \"\"\"eq_2: I_s^{psi} = I - (1 - e^{i psi}) |s><s| = H^n (I - (1-e^{i psi})|0><0|) H^n.\"\"\"\n    for q in qubits:\n        qc.h(q)\n    for q in qubits:\n        qc.x(q)\n    _phase_on_all_ones(qc, qubits, psi)\n    for q in qubits:\n        qc.x(q)\n    for q in qubits:\n        qc.h(q)\n\n\ndef build_circuit(instance):\n    \"\"\"Return the operation G_{phi,psi}^k (eq_2) on an n-qubit data register.\n\n    instance keys:\n        n_qubits   : int, number of data qubits (N = 2**n_qubits), 1..12\n        marked     : int, marked item index t in [0, N)\n        iterations : int, number k of erroneous iterations (>= 0)\n        delta1     : real, phase error of the marked-state inversion (phi = pi + delta1)\n        delta2     : real, phase error of the mean-state inversion (psi = pi + delta2)\n        (alternatively a single key 'delta' for matched errors delta1 = delta2)\n    \"\"\"\n    n, marked, k, delta1, delta2 = _parse_instance(instance)\n    phi = math.pi + delta1\n    psi = math.pi + delta2\n    data = QuantumRegister(n, \"data\")\n    qc = QuantumCircuit(data, name=\"G_phi_psi^k\")\n    qubits = list(range(n))\n    for _ in range(k):\n        # eq_2: one erroneous iteration G_{phi,psi} = - I_s^{psi} I_t^{phi}\n        _marked_inversion(qc, qubits, marked, phi)\n        _mean_inversion(qc, qubits, psi)\n        qc.global_phase += math.pi  # overall sign -1 of G_{phi,psi}\n    return qc",
+    "example_instance_json": "{\"n_qubits\": 2, \"marked\": 3, \"iterations\": 1, \"delta1\": 0.3, \"delta2\": 0.3}",
+    "register_layout": [
+      "data register: qubits 0..n-1 (n = n_qubits = 2 in the example), N = 2^n = 4 database items",
+      "qubit i encodes bit i of the item index x (Qiskit little-endian: qubit 0 = least significant bit)",
+      "marked item t = 3 = |11> in the example; the oracle phase e^{i(pi+delta1)} is applied to this basis state",
+      "no coin register and no ancilla; the runner prepares |s> = H^(x)n |0...0> on the data register and measures it after the circuit"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Initial uniform superposition |s> and the two-dimensional decomposition; the input state is prepared by the runner (no state preparation is allowed in the returned operation). The decomposition itself is analytic background."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit (loop body), _marked_inversion, _mean_inversion, _phase_on_all_ones",
+        "explanation": "I_t^{phi} is realized as X-conjugated multi-controlled phase with angle phi = pi + delta1 on the marked basis state; I_s^{psi} as H^n X^n MCP(psi) X^n H^n with psi = pi + delta2; the product with sign -1 (global_phase += pi) is repeated k times."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Success rate |<t|G^k|s>|^2 is a measurement statistic computed by the runner from the data register; measurements are excluded from the operation."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Effective rotation angle for matched errors is an analytic consequence of the implemented operator; no code is needed."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Closed-form success probability for matched errors; a prediction to be compared with runner results, not part of the circuit."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Predicted P_1(4, delta) for the tiny instance; the example_instance_json (n_qubits=2, marked=3, iterations=1, delta1=delta2) realizes exactly this instance, but the formula itself is a validation target, not an operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "State preparation (Hadamards producing |s>) is omitted from the returned circuit.",
+        "reason": "The task requires an operation only; the runner prepares the input state."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The mean-state inversion I - (1-e^{i psi})|s><s| is implemented as H^n (X^n MCP(psi) X^n) H^n, which is exactly equal for N = 2^n; the overall factor -1 of G_{phi,psi} is recorded as a circuit global phase of pi per iteration rather than as a gate.",
+        "reason": "Standard exact decomposition using allowed standard gates; the global phase is physically irrelevant but kept so the circuit unitary equals eq_2 exactly."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Scope narrowed to the generic two-phase-inversion (Grover-type) iteration in the two-dimensional model; the coin/shift structure of the optimized quantum random-walk search algorithm is not implemented and no coin register is allocated.",
+        "reason": "The abstract gives no definition of the random-walk algorithm's operators; only the geometric two-inversion model was reconstructed."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Database size restricted to N = 2^n with 1 <= n <= 12 and exactly one marked item.",
+        "reason": "Qubit cap of 12 and the single-marked-item assumption of the specification."
+      }
+    ],
+    "assumptions": [
+      "Phase errors are systematic: the same delta1, delta2 are used in every iteration.",
+      "The marked item index is encoded little-endian on the data register (qubit 0 = least significant bit of t).",
+      "The runner prepares the uniform superposition |s> on the data register before applying the circuit and measures the data register afterwards.",
+      "mcp (multi-controlled phase) and p are standard Qiskit gates; the decomposition into basis gates is left to the transpiler."
+    ],
+    "unresolved_issues": [
+      "The actual optimized quantum random-walk search algorithm (graph, coin, shift, optimization) is unknown from the abstract; the implemented operation is the geometric two-inversion model only.",
+      "Whether the paper's phase error enters one or both inversions (matched or unmatched) is unknown; both deltas are exposed as parameters.",
+      "The paper's own success-rate and iteration-count formulas and its robustness comparison with Grover's algorithm are not reproduced."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 18,
+    "depth": 13,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

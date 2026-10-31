@@ -1,0 +1,135 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "206ea887-2504-43b6-bf9f-99358df345d3",
+  "parent_run_id": "f88d136e-ba6c-4d65-8b79-2136be4b06e5",
+  "created_at": "2026-10-31T17:16:08.117084+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "337c5e9d23b6d23decafc50218afe1dd1ec00ddec20f990dc03ce16aecf9a8b3",
+  "source_specification_sha256": "d050e88c5ee62ebafeb74fa4639cfc79108d5dc5c9a6e8782e8cb1b0bb2dbc79",
+  "source_python_sha256": "8e9713cc1313c966d1fca64b27e3618e251cbf9004b38bebdf1c16d8b8128e43",
+  "elapsed_seconds": 79.541,
+  "usage": {
+    "input_tokens": 7858,
+    "output_tokens": 6894,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the circuit-level unit of the trivial Grover-based APSP baseline: for one fixed entry (i,j) of a (min,+) squaring step and a classical threshold t, the circuit applies r Grover iterates G_t = Diffusion * O_t^{(i,j)} on an index register over intermediate vertices k plus one flag qubit. The threshold oracle marks k with D[i][k] + D[k][j] < t (eq_3), realized from the classical matrix data as multi-controlled X gates onto the flag qubit (phase kickback when the runner prepares the flag in |->); the diffusion operator 2|psi><psi| - I (eq_4) is realized with H, X and a multi-controlled Z. The classical outer loops (Durr-Hoyer threshold updates, repeated squaring) are out of circuit scope.",
+    "source_python": "'''Grover threshold-search iterate for one (min,+) matrix entry (trivial quantum APSP baseline).\n\nbuild_circuit(instance) -> QuantumCircuit\n\ninstance keys:\n  matrix     : n x n list of nonnegative numbers; null or 'inf' denotes INF (non-edge)\n  i, j       : fixed entry whose minimum over k of matrix[i][k] + matrix[k][j] is searched\n  threshold  : number or null (= +infinity); index k is marked iff matrix[i][k] + matrix[k][j] < threshold\n  iterations : number r >= 0 of Grover iterates G_t = Diffusion * Oracle to apply\n\nRegisters (Qiskit little-endian):\n  idx[q], q = 0..m-1 with m = ceil(log2 n): bit q of the search index k (qubit 0 = least significant bit)\n  flag (qubit m): oracle output qubit; runner should prepare |-> for phase-kickback Grover search.\nThe runner is expected to prepare idx in the uniform superposition and flag in |->.\nThe circuit itself contains no state preparation or measurement.\n'''\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _parse_entry(x):\n    if x is None:\n        return math.inf\n    if isinstance(x, str):\n        if x.strip().lower() in ('inf', '+inf', 'infinity'):\n            return math.inf\n        raise ValueError('matrix entries must be numbers, null, or \"inf\"')\n    if isinstance(x, bool) or not isinstance(x, (int, float)):\n        raise ValueError('matrix entries must be numbers, null, or \"inf\"')\n    v = float(x)\n    if math.isnan(v) or v < 0.0:\n        raise ValueError('matrix entries must be nonnegative (no negative weights)')\n    return v\n\n\ndef _parse_matrix(mat):\n    if not isinstance(mat, list) or len(mat) < 2:\n        raise ValueError('matrix must be a list of at least 2 rows')\n    n = len(mat)\n    parsed = []\n    for row in mat:\n        if not isinstance(row, list) or len(row) != n:\n            raise ValueError('matrix must be square')\n        parsed.append([_parse_entry(x) for x in row])\n    return parsed\n\n\ndef _parse_index(value, n, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(name + ' must be an integer')\n    if value < 0 or value >= n:\n        raise ValueError(name + ' out of range')\n    return value\n\n\ndef _parse_threshold(t):\n    if t is None:\n        return math.inf\n    if isinstance(t, str):\n        if t.strip().lower() in ('inf', '+inf', 'infinity'):\n            return math.inf\n        raise ValueError('threshold must be a number, null, or \"inf\"')\n    if isinstance(t, bool) or not isinstance(t, (int, float)):\n        raise ValueError('threshold must be a number, null, or \"inf\"')\n    v = float(t)\n    if math.isnan(v):\n        raise ValueError('threshold must not be NaN')\n    return v\n\n\ndef _marked_indices(matrix, i, j, t):\n    # eq_3: f_t(k) = 1 iff D_ik + D_kj < t (INF + x = INF, never marked).\n    # The (min,+) candidate values D_ik + D_kj of eq_2 are evaluated classically here.\n    n = len(matrix)\n    marked = []\n    for k in range(n):\n        s = matrix[i][k] + matrix[k][j]\n        if s < t:\n            marked.append(k)\n    return marked\n\n\ndef _apply_oracle(qc, idx, flag, marked, m):\n    # eq_3: O_t |k>|b> = |k>|b xor f_t(k)>, one multi-controlled X per marked k.\n    # Padding indices k >= n are never marked.\n    for k in marked:\n        zero_bits = [idx[q] for q in range(m) if not ((k >> q) & 1)]\n        for q in zero_bits:\n            qc.x(q)\n        if m == 1:\n            qc.cx(idx[0], flag)\n        else:\n            qc.mcx(list(idx), flag)\n        for q in zero_bits:\n            qc.x(q)\n\n\ndef _apply_diffusion(qc, idx, m):\n    # eq_4: 2|psi><psi| - I on the index register (implemented up to a global phase of -1),\n    # psi = uniform superposition over all 2^m basis states of idx.\n    for q in idx:\n        qc.h(q)\n    for q in idx:\n        qc.x(q)\n    if m == 1:\n        qc.z(idx[0])\n    else:\n        qc.h(idx[m - 1])\n        qc.mcx(list(idx[: m - 1]), idx[m - 1])\n        qc.h(idx[m - 1])\n    for q in idx:\n        qc.x(q)\n    for q in idx:\n        qc.h(q)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    for key in ('matrix', 'i', 'j', 'threshold', 'iterations'):\n        if key not in instance:\n            raise ValueError('missing instance key: ' + key)\n    matrix = _parse_matrix(instance['matrix'])\n    n = len(matrix)\n    i = _parse_index(instance['i'], n, 'i')\n    j = _parse_index(instance['j'], n, 'j')\n    t = _parse_threshold(instance['threshold'])\n    r = instance['iterations']\n    if isinstance(r, bool) or not isinstance(r, int) or r < 0:\n        raise ValueError('iterations must be a nonnegative integer')\n    m = int(math.ceil(math.log2(n)))\n    if (1 << m) < n:\n        m += 1\n    if m < 1:\n        m = 1\n    if m + 1 > MAX_QUBITS:\n        raise ValueError('instance requires more than %d qubits' % MAX_QUBITS)\n    marked = _marked_indices(matrix, i, j, t)\n    idx = QuantumRegister(m, 'idx')\n    flag_reg = QuantumRegister(1, 'flag')\n    qc = QuantumCircuit(idx, flag_reg, name='grover_threshold_minplus')\n    flag = flag_reg[0]\n    # eq_4: G_t = (2|psi><psi| - I) O_t applied r times.\n    for _ in range(r):\n        _apply_oracle(qc, idx, flag, marked, m)\n        _apply_diffusion(qc, idx, m)\n    return qc",
+    "example_instance_json": "{\"matrix\": [[0, 1, 3, null], [1, 0, 1, 5], [3, 1, 0, 1], [null, 5, 1, 0]], \"i\": 0, \"j\": 3, \"threshold\": 5, \"iterations\": 1}",
+    "register_layout": [
+      "qubits 0-1: idx register (m = ceil(log2 4) = 2); qubit q holds bit q of the intermediate-vertex index k (qubit 0 = least significant bit, Qiskit little-endian)",
+      "qubit 2: flag qubit (oracle output); runner should prepare it in |-> so the oracle acts as the phase oracle (-1)^{f_t(k)}",
+      "example: candidates D[0][k]+D[k][3] = [INF, 6, 4, INF]; with threshold 5 only k=2 (|idx>=|10>, qubit1=1, qubit0=0) is marked; one Grover iterate on the uniform superposition over 4 indices maps it to the marked state"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Definition of shortest-path distance; motivates the (min,+) squaring but is not itself a circuit operation."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The repeated (min,+) squaring is the classical outer loop; the circuit handles one entry (i,j) of one product. The candidate values D_ik + D_kj are evaluated classically in _marked_indices as input to the oracle, but the min and the squaring recursion are outside the circuit."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_marked_indices and _apply_oracle (comments '# eq_3')",
+        "explanation": "Threshold oracle |k>|b> -> |k>|b xor f_t(k)> with f_t(k)=1 iff D_ik + D_kj < t, built from classical matrix data as multi-controlled X gates onto the flag qubit; padding indices unmarked."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_apply_diffusion and the iteration loop in build_circuit (comments '# eq_4')",
+        "explanation": "Grover iterate G_t = (2|psi><psi| - I) O_t applied r = instance['iterations'] times; diffusion implemented up to global phase -1. The iteration count r is supplied by the instance rather than computed from the unknown M_t."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Durr-Hoyer threshold-update loop, measurement and classical verification, and the O(n^{2.5}) cost accounting are classical/experimental control flow outside a single unitary operation."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The paper's O(n^{2.5-eps}) algorithms are not described in the abstract and cannot be reconstructed."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The oracle is realized directly from classical matrix data as a sum of multi-controlled X gates (one per marked index), instead of a reversible adder/comparator with QRAM access and ancilla uncomputation; the anc register of the specification is therefore empty.",
+        "reason": "The matrix is a classical instance parameter, so the marked set can be computed classically; this gives an exact, ancilla-free realization of the same unitary on (idx, flag) within the 12-qubit cap."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Index encoding changed from big-endian to Qiskit little-endian: idx qubit q holds bit q of k. The diffusion operator is implemented up to a global phase of -1. The Grover iteration count r is an explicit instance parameter rather than derived from M_t or an exponential-search schedule.",
+        "reason": "Qiskit qubit 0 is the least significant bit; global phase is unobservable; M_t is unknown in the algorithm and the random schedule is classical control flow outside a fixed unitary circuit."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The circuit contains no preparation of |psi>|-> and no measurement; the runner prepares idx in the uniform superposition and flag in |-> and measures idx.",
+        "reason": "Required operation-only contract (no state preparation or measurement in the generated circuit)."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to a single Grover threshold search for one fixed entry (i,j) and one fixed threshold t of one (min,+) squaring step.",
+        "reason": "The outer loops over entries, threshold updates, and squarings are classical and not a single unitary operation."
+      }
+    ],
+    "assumptions": [
+      "Non-edges are given as null or the string 'inf' and obey INF + x = INF, so such k are never marked.",
+      "Edge weights are nonnegative; a null threshold means +infinity (every finite candidate is marked).",
+      "If n is not a power of two, the index register is padded to 2^m basis states and padding indices are unmarked (eq_4 assumption); the uniform superposition prepared by the runner is then over all 2^m indices.",
+      "mcx with up to 11 controls is considered a standard gate available for synthesis by Qiskit.",
+      "Iteration count r is chosen by the user/runner (e.g. r=1 for exactly one marked index among four)."
+    ],
+    "unresolved_issues": [
+      "The paper's actual O(n^{2.5-eps}) algorithms for structured APSP variants are not reconstructable from the abstract and are not implemented.",
+      "Success probability of a fixed-r Grover search depends on the number of marked indices M_t, which the runner must account for (exponential-search schedule) when using the circuit inside Durr-Hoyer minimum finding."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 28,
+    "depth": 18,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

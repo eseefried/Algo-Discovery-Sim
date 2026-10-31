@@ -1,0 +1,137 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "e20bf450-3eff-42b3-a2aa-45f6b2461a35",
+  "parent_run_id": "7d7abeec-f8bf-4040-bc6b-874df61f60d5",
+  "created_at": "2026-10-31T17:29:27.058456+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "f6e75c494e2c59a4da1a0a145955adf535560c7fb0e32d2952093d0cdee8a27e",
+  "source_specification_sha256": "7d230da5c438b1424742a53a605fde6756e4925e2508dcdb2805cccb63f561fa",
+  "source_python_sha256": "04af59b509554347460dfc70ad718ec65df179da83a758ce01a6b9bfa61031cc",
+  "elapsed_seconds": 74.904,
+  "usage": {
+    "input_tokens": 8116,
+    "output_tokens": 6843,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Level-one (p=1) QAOA unitary U(gamma,beta) = exp(-i beta B) exp(-i gamma C) for an explicit bounded-occurrence Max E3LIN2 instance (eq_2, eq_3), with C = sum_e (1 + d_e Z_a Z_b Z_c)/2 realized exactly (including the global phase from the constant m/2) via CX-ladder + Rz(gamma*d_e) three-body rotations and the mixer via Rx(2 beta) on every qubit. The circuit is an operation acting on a runner-prepared input (nominally |+>^n); an optional flag can prepend the H layer. Example: the n=4, m=2, D=2 instance of eq_6. The paper's performance bounds (eq_4, eq_5) are not reconstructed.",
+    "source_python": "\"\"\"Level-one QAOA cost+mixer unitary for bounded-occurrence Max E3LIN2.\n\nInstance (JSON object):\n  n          : number of boolean variables / qubits (1..12)\n  equations  : list of [a, b, c, r]; a,b,c distinct 1-indexed variables, r in {0,1}\n               meaning x_a + x_b + x_c = r (mod 2), sign d_e = (-1)^r (eq_1)\n  gamma      : cost angle (real)\n  beta       : mixer angle (real)\n  D          : optional max-occurrence bound to enforce (positive int)\n  prepare_plus_state : optional bool (default False). If True a Hadamard layer is\n               prepended so the circuit maps |0>^n to the full QAOA state of eq_3;\n               by default the runner is expected to supply |+>^n.\n\nQubit layout: variable x_j (j = 1..n) lives on Qiskit qubit j-1. Qiskit qubit 0 is\nthe least significant bit, so a measured bitstring reads x_n ... x_2 x_1 left to right.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _as_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(f\"{name} must be an integer, got {value!r}\")\n    return value\n\n\ndef _as_angle(value, name):\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(f\"{name} must be a real number, got {value!r}\")\n    angle = float(value)\n    if not math.isfinite(angle):\n        raise ValueError(f\"{name} must be finite\")\n    return angle\n\n\ndef _parse_equations(raw, n):\n    \"\"\"Validate equations and return list of (a, b, c, d) with 0-indexed qubits.\n\n    Implements the sign convention d_e = (-1)^{r_e} of eq_1.\n    \"\"\"\n    if not isinstance(raw, (list, tuple)) or len(raw) == 0:\n        raise ValueError(\"equations must be a non-empty list\")\n    parsed = []\n    for idx, eq in enumerate(raw):\n        if not isinstance(eq, (list, tuple)) or len(eq) != 4:\n            raise ValueError(f\"equation {idx} must be [a, b, c, r]\")\n        a = _as_int(eq[0], f\"equation {idx} variable a\")\n        b = _as_int(eq[1], f\"equation {idx} variable b\")\n        c = _as_int(eq[2], f\"equation {idx} variable c\")\n        r = _as_int(eq[3], f\"equation {idx} parity r\")\n        for v in (a, b, c):\n            if v < 1 or v > n:\n                raise ValueError(f\"equation {idx}: variable {v} out of range 1..{n}\")\n        if len({a, b, c}) != 3:\n            raise ValueError(f\"equation {idx}: variables must be distinct (E3LIN2)\")\n        if r not in (0, 1):\n            raise ValueError(f\"equation {idx}: parity r must be 0 or 1\")\n        d = 1 - 2 * r  # d_e = (-1)^{r_e}\n        parsed.append((a - 1, b - 1, c - 1, d))\n    return parsed\n\n\ndef _check_occurrence(parsed, n, bound):\n    counts = [0] * n\n    for a, b, c, _d in parsed:\n        counts[a] += 1\n        counts[b] += 1\n        counts[c] += 1\n    if bound is not None and max(counts) > bound:\n        raise ValueError(\n            f\"a variable occurs in {max(counts)} equations, exceeding D={bound}\"\n        )\n\n\ndef _apply_cost_unitary(qc, qubits, parsed, gamma):\n    \"\"\"exp(-i gamma C) with C = sum_e (1 + d_e Z_a Z_b Z_c)/2  (eq_2, eq_3).\n\n    Each term exp(-i (gamma/2) d_e Z_a Z_b Z_c) is realized by computing the parity\n    onto qubit c with a CX ladder, applying Rz(gamma*d_e) = exp(-i gamma d_e Z/2),\n    and uncomputing. The constant m/2 is kept as an exact global phase.\n    \"\"\"\n    m = len(parsed)\n    qc.global_phase -= gamma * m / 2.0\n    for a, b, c, d in parsed:\n        qc.cx(qubits[a], qubits[c])\n        qc.cx(qubits[b], qubits[c])\n        qc.rz(gamma * d, qubits[c])\n        qc.cx(qubits[b], qubits[c])\n        qc.cx(qubits[a], qubits[c])\n\n\ndef _apply_mixer_unitary(qc, qubits, beta):\n    \"\"\"exp(-i beta B) with B = sum_j X_j, i.e. Rx(2 beta) on every qubit (eq_3).\"\"\"\n    for q in qubits:\n        qc.rx(2.0 * beta, q)\n\n\ndef build_circuit(instance):\n    \"\"\"Return the level-one QAOA unitary exp(-i beta B) exp(-i gamma C) (eq_3).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object / dict\")\n    if \"n\" not in instance or \"equations\" not in instance:\n        raise ValueError(\"instance requires keys 'n' and 'equations'\")\n    if \"gamma\" not in instance or \"beta\" not in instance:\n        raise ValueError(\"instance requires keys 'gamma' and 'beta'\")\n    n = _as_int(instance[\"n\"], \"n\")\n    if n < 1 or n > MAX_QUBITS:\n        raise ValueError(f\"n must be in 1..{MAX_QUBITS}, got {n}\")\n    gamma = _as_angle(instance[\"gamma\"], \"gamma\")\n    beta = _as_angle(instance[\"beta\"], \"beta\")\n    parsed = _parse_equations(instance[\"equations\"], n)\n    bound = None\n    if \"D\" in instance and instance[\"D\"] is not None:\n        bound = _as_int(instance[\"D\"], \"D\")\n        if bound < 1:\n            raise ValueError(\"D must be a positive integer\")\n    _check_occurrence(parsed, n, bound)\n    prepare = False\n    if \"prepare_plus_state\" in instance:\n        prepare = instance[\"prepare_plus_state\"]\n        if not isinstance(prepare, bool):\n            raise ValueError(\"prepare_plus_state must be a boolean\")\n\n    qreg = QuantumRegister(n, \"q\")\n    qc = QuantumCircuit(qreg, name=\"qaoa_p1_e3lin2\")\n    qubits = [qreg[i] for i in range(n)]\n    if prepare:\n        # Optional |+>^n layer of eq_3; off by default (runner prepares input).\n        for q in qubits:\n            qc.h(q)\n    _apply_cost_unitary(qc, qubits, parsed, gamma)\n    _apply_mixer_unitary(qc, qubits, beta)\n    return qc",
+    "example_instance_json": "{\"n\": 4, \"equations\": [[1, 2, 3, 0], [2, 3, 4, 1]], \"gamma\": 0.7853981633974483, \"beta\": 0.39269908169872414, \"D\": 2, \"prepare_plus_state\": false}",
+    "register_layout": [
+      "q[0] (Qiskit qubit 0, least significant bit) = variable x_1, |0> <-> x_1 = 0",
+      "q[1] = variable x_2",
+      "q[2] = variable x_3",
+      "q[3] (most significant bit) = variable x_4",
+      "Measured bitstrings (if the runner measures) read x_4 x_3 x_2 x_1 left to right; the spec's 'qubit 1 leftmost' convention is reversed relative to Qiskit's little-endian printing, but each qubit still holds exactly one variable."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": "_parse_equations (d = 1 - 2*r implements d_e = (-1)^{r_e}); classical evaluation of C(x) is postprocessing outside the circuit",
+        "explanation": "The classical objective is not a circuit operation; only its sign convention d_e=(-1)^{r_e} is used to parametrize the ZZZ rotations. Evaluating C(x) on samples is the runner's classical postprocessing."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_apply_cost_unitary",
+        "explanation": "exp(-i gamma C) with C = sum_e (1 + d_e Z_a Z_b Z_c)/2 is realized exactly: CX ladder onto qubit c, Rz(gamma*d_e) = exp(-i gamma d_e Z/2) giving exp(-i(gamma/2) d_e ZZZ), uncompute; the constant m/2 is kept as global_phase -= gamma*m/2."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit, _apply_cost_unitary, _apply_mixer_unitary (optional H layer under prepare_plus_state)",
+        "explanation": "The p=1 QAOA unitary exp(-i beta B) exp(-i gamma C) is built; exp(-i beta X_j) is Rx(2 beta). The |+>^n preparation is excluded by default because the module returns an operation and the runner prepares inputs; it can be enabled with prepare_plus_state=true."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The worst-case guarantee 1/2 + 1/(101 D^{1/2} ln D) is a theorem about the expectation F_1 at angles not available from the abstract; the circuit can be used to estimate F_1 but the bound itself is not reconstructed."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The typical-case value 1/2 + 1/(2 sqrt(3e) D^{1/2}) depends on an undefined instance ensemble and an analytic argument not available here."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "example_instance_json (n=4, equations [[1,2,3,0],[2,3,4,1]], D=2)",
+        "explanation": "The tiny instance x1+x2+x3=0 (d_1=+1), x2+x3+x4=1 (d_2=-1) is encoded as the example instance; _apply_cost_unitary produces C = 1 + Z1Z2Z3/2 - Z2Z3Z4/2 in the exponent."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The initial H^{\\otimes n} layer preparing |+>^n is omitted by default; the returned circuit is the unitary exp(-i beta B) exp(-i gamma C) only. An optional instance flag prepare_plus_state=true re-inserts the Hadamard layer.",
+        "reason": "The implementation contract requires an operation without input-state preparation; the runner supplies the input state."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_6"
+        ],
+        "change": "Variable x_j is mapped to Qiskit qubit index j-1, so x_1 is the least significant bit of Qiskit bitstrings (printed rightmost) rather than the leftmost tensor factor as in the specification.",
+        "reason": "Qiskit's little-endian convention; the spec's 'qubit 1 leftmost' phrasing was resolved to a consistent per-variable layout. Since each equation is a symmetric function of its three variables, no cost term changes meaning."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The constant m/2 in C, described in the spec as a droppable global phase, is retained as an exact global_phase shift of -gamma*m/2.",
+        "reason": "Makes the circuit unitary equal to exp(-i gamma C) exactly rather than up to phase, at zero gate cost."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to the circuit construction for a given (gamma, beta); the performance bounds and angle selection are not implemented.",
+        "reason": "The angles and proof techniques are not available from the abstract, and classical optimization/grid search is outside a measurement-free operation."
+      }
+    ],
+    "assumptions": [
+      "Variables in equations are 1-indexed in the instance JSON and must be distinct within an equation (E3LIN2).",
+      "Rz(theta) = exp(-i theta Z/2) and Rx(theta) = exp(-i theta X/2) (Qiskit conventions), so Rz(gamma*d_e) on the parity qubit gives exp(-i (gamma/2) d_e ZZZ) and Rx(2 beta) gives exp(-i beta X).",
+      "Duplicate equations on the same variable triple are allowed and simply contribute additively, as in eq_2.",
+      "The optional D key enforces the bounded-occurrence constraint; if absent, no occurrence bound is checked.",
+      "The example angles gamma=pi/4, beta=pi/8 are arbitrary placeholders, not the paper's angles."
+    ],
+    "unresolved_issues": [
+      "The (gamma, beta) values used in the paper's proofs are unknown; the example angles are not optimized.",
+      "The 'typical case' ensemble and the constants in eq_4/eq_5 cannot be validated with the n=4, D=2 example, which is far outside the asymptotic regime."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 14,
+    "depth": 10,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,142 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "c604e885-df39-4030-b7ea-a842d4f74e45",
+  "parent_run_id": "da57fddc-1c33-47fb-93c8-cdd0d4a48bb4",
+  "created_at": "2026-10-31T17:56:35.276947+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "b9fb272f171c978755db4597ebc67bfeaeef9b57744ab625de2f9c84fd9aaacb",
+  "source_specification_sha256": "f604b506360a1b843b5be163924b55ddd348fe11e6d9dcdd95ea6797c2e1114d",
+  "source_python_sha256": "dec44d97f788d7d4e59fab16eb345fb7611c78e92c80efc5eeb85deb03f85278",
+  "elapsed_seconds": 127.271,
+  "usage": {
+    "input_tokens": 7125,
+    "output_tokens": 10968,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing t steps of the barrier-hindered discrete-time coined quantum-walk search operator U_eps = S_eps (I x C) Q on the complete graph K_N (N a power of two, self-loop coin directions retained). The oracle Q is a multi-controlled phase flip on the position register, the Grover coin C is H^n X^n MCZ X^n H^n with a tracked global phase, and the barrier shift S_eps = eps I + i sqrt(1-eps^2) S = exp(i*theta*S), theta = arccos(eps), is realised ancilla-free by diagonalising each qubit-pair SWAP to a CZ and applying the parity phase via an inclusion-exclusion family of multi-controlled phase gates. No state preparation or measurement is included; the runner supplies |s>|s> and measures the position register.",
+    "source_python": "\"\"\"Barrier-hindered coined quantum-walk search on the complete graph K_N.\n\nImplements U_eps^t with U_eps = S_eps (I x C) Q  (eq_3, eq_4), where\n  Q      = (I - 2|w><w|) x I            (eq_2, oracle on position register)\n  C      = 2|s><s| - I                   (eq_2, Grover coin on coin register)\n  S      = flip-flop shift |u>|v> -> |v>|u>  (eq_3)\n  S_eps  = eps I + i sqrt(1-eps^2) S = exp(i theta S), cos theta = eps (eq_4)\n\nQubit layout: position register = qubits 0..n-1 (qubit k = bit k of u,\nleast significant first), coin register = qubits n..2n-1 (qubit n+k = bit k\nof v). n = log2(N). Initial state |s>|s> (eq_1) and the position measurement\n(eq_5) are supplied by the runner, not by this module.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object / dict\")\n    big_n = instance.get(\"N\")\n    if isinstance(big_n, bool) or not isinstance(big_n, int):\n        raise ValueError(\"N must be an integer\")\n    if big_n < 2 or (big_n & (big_n - 1)) != 0:\n        raise ValueError(\"N must be a power of two >= 2\")\n    n = big_n.bit_length() - 1\n    if 2 * n > MAX_QUBITS:\n        raise ValueError(\"2*log2(N) exceeds the qubit cap of %d\" % MAX_QUBITS)\n    w = instance.get(\"marked\")\n    if isinstance(w, bool) or not isinstance(w, int) or w < 0 or w >= big_n:\n        raise ValueError(\"marked must be an integer in [0, N)\")\n    eps = instance.get(\"epsilon\")\n    if isinstance(eps, bool) or not isinstance(eps, (int, float)):\n        raise ValueError(\"epsilon must be a real number\")\n    eps = float(eps)\n    if not math.isfinite(eps) or eps < 0.0 or eps > 1.0:\n        raise ValueError(\"epsilon must lie in [0, 1]\")\n    steps = instance.get(\"steps\")\n    if isinstance(steps, bool) or not isinstance(steps, int) or steps < 0:\n        raise ValueError(\"steps must be a non-negative integer\")\n    return big_n, n, w, eps, steps\n\n\ndef _oracle(qc, pos, w, n):\n    \"\"\"eq_2: Q = (I_N - 2|w><w|) x I_N, phase flip when position == w.\"\"\"\n    for k in range(n):\n        if not (w >> k) & 1:\n            qc.x(pos[k])\n    if n == 1:\n        qc.z(pos[0])\n    else:\n        qc.mcp(math.pi, pos[:-1], pos[-1])\n    for k in range(n):\n        if not (w >> k) & 1:\n            qc.x(pos[k])\n\n\ndef _coin(qc, coin, n):\n    \"\"\"eq_2: Grover coin C = 2|s><s| - I = -(H^n X^n MCZ X^n H^n) on the coin register.\"\"\"\n    qc.h(coin)\n    qc.x(coin)\n    if n == 1:\n        qc.z(coin[0])\n    else:\n        qc.mcp(math.pi, coin[:-1], coin[-1])\n    qc.x(coin)\n    qc.h(coin)\n    qc.global_phase += math.pi  # overall minus sign of C\n\n\ndef _barrier_shift(qc, pos, coin, n, theta):\n    \"\"\"eq_4 (and eq_3 at theta = pi/2): S_eps = exp(i theta S) = cos(theta) I + i sin(theta) S.\n\n    S = prod_k SWAP(pos[k], coin[k]). Each SWAP = V_k^dag CZ_k V_k with\n    V_k = H(pos[k]) * CX(pos[k] -> coin[k]), so S = V^dag (prod_k CZ_k) V and\n    prod_k CZ_k = (-1)^{XOR_k (a_k b_k)}. Hence\n      exp(i theta prod CZ_k) = e^{i theta} * exp(-2 i theta * XOR_k y_k),  y_k = a_k b_k,\n    and XOR_k y_k = sum_{S nonempty} (-2)^{|S|-1} prod_{k in S} y_k, each term\n    being a multi-controlled phase on the 2|S| qubits of the pairs in S.\n    \"\"\"\n    # basis change V\n    for k in range(n):\n        qc.cx(pos[k], coin[k])\n        qc.h(pos[k])\n    # diagonal phase exp(i theta prod_k CZ_k)\n    qc.global_phase += theta\n    for mask in range(1, 1 << n):\n        qubits = []\n        size = 0\n        for k in range(n):\n            if (mask >> k) & 1:\n                qubits.append(pos[k])\n                qubits.append(coin[k])\n                size += 1\n        angle = -2.0 * theta * ((-2.0) ** (size - 1))\n        qc.mcp(angle, qubits[:-1], qubits[-1])\n    # undo basis change V^dag\n    for k in range(n):\n        qc.h(pos[k])\n        qc.cx(pos[k], coin[k])\n\n\ndef build_circuit(instance):\n    \"\"\"Return the unitary U_eps^t (eq_3/eq_4) on 2*log2(N) qubits, no prep, no measurement.\"\"\"\n    big_n, n, w, eps, steps = _validate(instance)\n    pos_reg = QuantumRegister(n, \"pos\")\n    coin_reg = QuantumRegister(n, \"coin\")\n    qc = QuantumCircuit(pos_reg, coin_reg, name=\"barrier_walk_search_N%d\" % big_n)\n    pos = list(range(n))\n    coin = list(range(n, 2 * n))\n    theta = math.acos(eps)  # eq_4: cos(theta) = eps, sin(theta) = sqrt(1 - eps^2)\n    for _ in range(steps):\n        _oracle(qc, pos, w, n)          # Q   (eq_2)\n        _coin(qc, coin, n)              # I x C (eq_2)\n        _barrier_shift(qc, pos, coin, n, theta)  # S_eps (eq_4); S when eps = 0 (eq_3)\n    return qc",
+    "example_instance_json": "{\"N\": 4, \"marked\": 0, \"epsilon\": 0.1, \"steps\": 2}",
+    "register_layout": [
+      "Total qubits for the example: 4 (2 per register); general: 2*log2(N) <= 12, so N <= 64.",
+      "Qubits 0..n-1 (n = log2 N): position register |u>, qubit k holds bit k of u (qubit 0 = least significant bit).",
+      "Qubits n..2n-1: coin register |v>, qubit n+k holds bit k of v (qubit n = least significant bit).",
+      "Shift pairs: position qubit k is swapped (hindered) with coin qubit n+k.",
+      "Example (N=4): qubits 0,1 = position u; qubits 2,3 = coin v; marked vertex w=0 corresponds to position bits 00.",
+      "Expected runner input: uniform superposition |s>|s> on all 2n qubits (Hadamard on every qubit); output quantity: probability that position qubits read w after measurement."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Initial state |s>|s> is input-state preparation, excluded from the returned operation; module docstring documents that the runner must prepare it (Hadamards on all 2n qubits)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_oracle (Q) and _coin (C)",
+        "explanation": "Q is X-conjugated multi-controlled Z on the position register flipping the phase of |w>; C = 2|s><s| - I is implemented exactly as -(H^n X^n MCZ X^n H^n) with the minus sign tracked in global_phase."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop (operator order Q, then I x C, then shift) and _barrier_shift with theta = pi/2 when epsilon = 0",
+        "explanation": "The flip-flop shift S is the product of qubit-pair SWAPs between position and coin registers; at epsilon = 0, exp(i*pi/2*S) = iS, i.e. S up to a global phase i, and the step ordering U = S (I x C) Q is realised by the loop."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_barrier_shift (theta = acos(epsilon) computed in build_circuit)",
+        "explanation": "S_eps = eps I + i sqrt(1-eps^2) S = exp(i theta S) is implemented exactly (no Trotterisation) by diagonalising each pair SWAP to a CZ and applying the parity phase exp(i theta prod CZ_k) with an inclusion-exclusion family of multi-controlled phase gates."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Success probability and runtime t* require measurement of the position register and classical post-processing over a sweep of steps, which are performed by the runner, not the operation."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The threshold scaling claim is a theoretical statement to be tested by the runner by comparing peak times across N and epsilon; it is not an operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Scope narrowed to N a power of two with 2*log2(N) <= 12 (N in {2,4,8,16,32,64}); non-power-of-two N and larger N raise ValueError.",
+        "reason": "Each register must be exactly log2(N) qubits for the self-loop-inclusive tensor-product Hilbert space, and the 12-qubit cap applies."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_5"
+        ],
+        "change": "Initial-state preparation and the position measurement are removed from the generated circuit; build_circuit returns only U_eps^t.",
+        "reason": "Contract requires a measurement-free operation with inputs prepared by the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "S_eps is implemented as exp(i*theta*S) with theta = arccos(epsilon); at epsilon = 0 this equals i*S rather than S, i.e. the ideal shift is reproduced up to a global phase i per step (tracked via qc.global_phase).",
+        "reason": "The identity eps I + i sqrt(1-eps^2) S = exp(i theta S) holds exactly because S^2 = I; using it gives an exact ancilla-free circuit and the global phase is physically irrelevant to p_eps(t)."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The Grover coin's overall sign (C = -H^n X^n MCZ X^n H^n) and the e^{i theta} prefactor of the shift are recorded in the circuit global_phase instead of being dropped.",
+        "reason": "Keeps the implemented unitary equal to the specified operator rather than merely equal up to phase."
+      }
+    ],
+    "assumptions": [
+      "Barrier model eq_4 (stay amplitude eps, hop amplitude i sqrt(1-eps^2), uniform over all edges, acting only on the shift) is taken as given from the math stage; the paper's exact model may differ.",
+      "Self-loop coin directions |u,u> are kept so that the coin register is a full log2(N)-qubit register.",
+      "Instance keys are N (int), marked (int in [0,N)), epsilon (real in [0,1]), steps (non-negative int); steps = 0 yields the identity circuit on 2n qubits.",
+      "The runner prepares |s>|s> by Hadamards on all 2n qubits and measures only the position qubits 0..n-1 to estimate p_eps(t) (eq_5).",
+      "qc.mcp with up to 11 controls (N = 64) is assumed available in Qiskit 2.6.1; gate count grows as 2^n multi-controlled phases per step, acceptable for n <= 6."
+    ],
+    "unresolved_issues": [
+      "The exact barrier/failure-amplitude model, phase conventions, and treatment of the coin in the original paper are not available from the abstract; eq_6's threshold can only be tested for the assumed model.",
+      "No reference numerical values for p_eps(t) or t* are available, so the threshold scaling must be inferred from sweeps over N in {2,...,64} and epsilon, a small range for asymptotic claims.",
+      "The continuous-time version of the result is not implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 178,
+    "depth": 110,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

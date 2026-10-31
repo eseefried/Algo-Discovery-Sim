@@ -1,0 +1,159 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "128ceea5-7908-4efb-81dd-584e258cdfaf",
+  "parent_run_id": "b9c0518c-46a2-4945-b467-9fa1610dcec8",
+  "created_at": "2026-10-31T17:24:07.285597+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "c71b21564543ad28a8126cbc0e44e8708d015307383b0ecd4064060fbe86dc53",
+  "source_specification_sha256": "3a7787921abf9d20ff6b2ef873202f5799c41e7ff522c8e5612bf265474ab92c",
+  "source_python_sha256": "8c85d4b2d88f486f18b2293a110d8fbc66fb483f194ac51f06689110d08f942b",
+  "elapsed_seconds": 140.388,
+  "usage": {
+    "input_tokens": 7122,
+    "output_tokens": 13503,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing the first-order Trotterized, fast-signal-assisted linear-interpolation adiabatic evolution for an EC3 instance: U = prod_{k=M..1} exp(-i f(t_k) V dt) exp(-i s_k dt H_P) exp(-i (1-s_k) dt H_B), with the transverse-field H_B (eq_2), the EC3 quadratic clause-penalty Hamiltonian H_P expanded exactly into Z/ZZ rotations (eq_3), and a placeholder fast signal f(t_k) (regular alternating, seeded random telegraph, custom, or none) coupled to a global single-qubit Pauli V (eq_4). No state preparation or measurement is included; the runner prepares |+>^n.",
+    "source_python": "'''Fast-signal assisted adiabatic quantum evolution for the 3-bit exact cover\nproblem (EC3), discretized with a first-order Trotter product formula.\n\nbuild_circuit(instance) returns the unitary operation (eq_5)\n    U = prod_{k=M}^{1} exp(-i f(t_k) V dt) exp(-i s_k dt H_P) exp(-i (1-s_k) dt H_B)\n(k = M applied last), with H_B = sum_i (1 - X_i)/2 (eq_2), H_P the EC3\nclause-penalty Hamiltonian (eq_3), s_k = k/M (eq_1), and V = sum_i P_i a\nglobal single-qubit Pauli to which the fast signal f(t_k) couples (eq_4).\nInput-state preparation (|+>^n) and measurement are NOT included.\n\nQubit layout: qubit index i-1 holds EC3 bit x_i (|0> <-> x_i = 0).\n'''\nfrom __future__ import annotations\n\nimport math\n\nimport numpy as np\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nMAX_STEPS = 2000\nSIGNAL_TYPES = ('none', 'regular', 'random', 'custom')\nPAULIS = ('X', 'Y', 'Z')\n\n\ndef _check_int(value, name, lo, hi):\n    if isinstance(value, bool) or not isinstance(value, (int, np.integer)):\n        raise ValueError(f'{name} must be an integer')\n    value = int(value)\n    if value < lo or value > hi:\n        raise ValueError(f'{name} must be in [{lo}, {hi}], got {value}')\n    return value\n\n\ndef _check_float(value, name):\n    if isinstance(value, bool) or not isinstance(value, (int, float, np.integer, np.floating)):\n        raise ValueError(f'{name} must be a real number')\n    value = float(value)\n    if not math.isfinite(value):\n        raise ValueError(f'{name} must be finite')\n    return value\n\n\ndef _parse_clauses(raw, n):\n    '''EC3 clauses as triples of distinct 1-based bit indices; returned 0-based.'''\n    if not isinstance(raw, (list, tuple)) or len(raw) == 0:\n        raise ValueError('clauses must be a non-empty list of triples')\n    clauses = []\n    for clause in raw:\n        if not isinstance(clause, (list, tuple)) or len(clause) != 3:\n            raise ValueError('each EC3 clause must be a triple of bit indices')\n        idx = tuple(_check_int(v, 'clause index', 1, n) - 1 for v in clause)\n        if len(set(idx)) != 3:\n            raise ValueError('clause indices must be distinct')\n        clauses.append(idx)\n    return clauses\n\n\ndef _ising_coefficients(clauses, n):\n    '''eq_3: H_P = sum_{(a,b,c)} (x_a + x_b + x_c - 1)^2 with x_i = (1 - Z_i)/2.\n\n    Expanding each clause gives\n        1 - (Z_a + Z_b + Z_c)/2 + (Z_a Z_b + Z_a Z_c + Z_b Z_c)/2,\n    so H_P = const + sum_i h_i Z_i + sum_{i<j} J_ij Z_i Z_j.\n    '''\n    const = 0.0\n    h = [0.0] * n\n    couplings = {}\n    for a, b, c in clauses:\n        const += 1.0\n        for i in (a, b, c):\n            h[i] -= 0.5\n        for i, j in ((a, b), (a, c), (b, c)):\n            key = (min(i, j), max(i, j))\n            couplings[key] = couplings.get(key, 0.0) + 0.5\n    return const, h, couplings\n\n\ndef _signal_values(signal, m):\n    '''eq_4: sampled fast-signal amplitudes f(t_k), k = 1..M (placeholder forms).'''\n    if signal is None:\n        return [0.0] * m, 'X'\n    if not isinstance(signal, dict):\n        raise ValueError('signal must be a dict or null')\n    kind = signal.get('type', 'none')\n    if kind not in SIGNAL_TYPES:\n        raise ValueError(f'signal type must be one of {SIGNAL_TYPES}')\n    pauli = signal.get('pauli', 'X')\n    if pauli not in PAULIS:\n        raise ValueError(f'signal pauli must be one of {PAULIS}')\n    if kind == 'none':\n        return [0.0] * m, pauli\n    if kind == 'custom':\n        values = signal.get('values')\n        if not isinstance(values, (list, tuple)) or len(values) != m:\n            raise ValueError('custom signal requires values with exactly M entries')\n        return [_check_float(v, 'signal value') for v in values], pauli\n    amplitude = _check_float(signal.get('amplitude', 0.0), 'signal amplitude')\n    if kind == 'regular':\n        # Regular alternating-sign sequence f(t_k) = A (-1)^k.\n        return [amplitude * (1.0 if k % 2 == 0 else -1.0) for k in range(1, m + 1)], pauli\n    # Random telegraph sequence f(t_k) = A r_k, r_k uniform in {-1, +1}, seeded.\n    seed = _check_int(signal.get('seed', 0), 'signal seed', 0, 2 ** 32 - 1)\n    rng = np.random.default_rng(seed)\n    bits = rng.integers(0, 2, size=m)\n    return [amplitude * (2.0 * float(b) - 1.0) for b in bits], pauli\n\n\ndef _apply_hb(qc, theta, n):\n    '''eq_2: exp(-i theta H_B), H_B = sum_i (1 - X_i)/2.\n\n    exp(-i theta (1 - X_i)/2) = exp(-i theta/2) * exp(+i theta X_i/2) = phase * RX(-theta).\n    '''\n    if theta == 0.0:\n        return\n    for i in range(n):\n        qc.rx(-theta, i)\n    qc.global_phase -= 0.5 * theta * n\n\n\ndef _apply_hp(qc, theta, const, h, couplings):\n    '''eq_3: exp(-i theta H_P) exactly (all terms are diagonal and commute).\n\n    exp(-i theta h Z) = RZ(2 theta h); exp(-i theta J ZZ) = RZZ(2 theta J).\n    '''\n    if theta == 0.0:\n        return\n    qc.global_phase -= theta * const\n    for i, hi in enumerate(h):\n        if hi != 0.0:\n            qc.rz(2.0 * theta * hi, i)\n    for (i, j), jij in sorted(couplings.items()):\n        if jij != 0.0:\n            qc.rzz(2.0 * theta * jij, i, j)\n\n\ndef _apply_signal(qc, phi, pauli, n):\n    '''eq_4: exp(-i phi V), V = sum_i P_i, as RP(2 phi) on every qubit.'''\n    if phi == 0.0:\n        return\n    for i in range(n):\n        if pauli == 'X':\n            qc.rx(2.0 * phi, i)\n        elif pauli == 'Y':\n            qc.ry(2.0 * phi, i)\n        else:\n            qc.rz(2.0 * phi, i)\n\n\ndef build_circuit(instance):\n    '''Build the Trotterized fast-signal-assisted adiabatic evolution (eq_5).'''\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _check_int(instance.get('n'), 'n', 1, MAX_QUBITS)\n    clauses = _parse_clauses(instance.get('clauses'), n)\n    total_time = _check_float(instance.get('T'), 'T')\n    if total_time <= 0.0:\n        raise ValueError('T must be positive')\n    m = _check_int(instance.get('M'), 'M', 1, MAX_STEPS)\n    dt = total_time / m\n    f_values, pauli = _signal_values(instance.get('signal'), m)\n    const, h, couplings = _ising_coefficients(clauses, n)\n\n    reg = QuantumRegister(n, 'q')\n    qc = QuantumCircuit(reg, name='fast_signal_aqc_ec3')\n    # eq_5 / eq_1: k = 1..M in time order, s_k = t_k / T = k / M,\n    # H(s_k) = (1 - s_k) H_B + s_k H_P; each step is split H_B -> H_P -> signal.\n    for k in range(1, m + 1):\n        s_k = k / m\n        _apply_hb(qc, (1.0 - s_k) * dt, n)\n        _apply_hp(qc, s_k * dt, const, h, couplings)\n        _apply_signal(qc, f_values[k - 1] * dt, pauli, n)\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"clauses\": [[1, 2, 3]], \"T\": 10.0, \"M\": 20, \"signal\": {\"type\": \"regular\", \"amplitude\": 0.5, \"pauli\": \"X\"}}",
+    "register_layout": [
+      "Register q, n=3 qubits total (example); qubit index i-1 holds EC3 bit x_i with |0> <-> x_i=0, |1> <-> x_i=1 (Z_i|x_i> = (-1)^{x_i}|x_i>).",
+      "q[0] = x_1, q[1] = x_2, q[2] = x_3 for the example single-clause instance (1,2,3).",
+      "Qiskit bitstrings print qubit 0 rightmost, so a measured string reads x_3 x_2 x_1; the specification's x_1 x_2 x_3 convention is reversed.",
+      "Expected input state (prepared by the runner, not by this module): |+>^{\\otimes n}, the ground state of H_B.",
+      "Solutions of the example instance in the spec's x_1x_2x_3 order: 100, 010, 001 (Qiskit order: 001, 010, 100 respectively)."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop computing s_k = k/m and the step angles (1-s_k)*dt for H_B and s_k*dt for H_P (comment 'eq_5 / eq_1')",
+        "explanation": "Linear interpolation H(s)=(1-s)H_B+sH_P is realized by weighting the H_B and H_P exponentials with (1-s_k) and s_k at each Trotter step, s_k = t_k/T = k/M."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_apply_hb (docstring 'eq_2')",
+        "explanation": "exp(-i theta H_B) with H_B = sum_i (1-X_i)/2 implemented exactly as RX(-theta) on each qubit plus tracked global phase -theta*n/2. The ground-state preparation |+>^n part of eq_2 is intentionally not included because the runner prepares inputs."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_ising_coefficients and _apply_hp (docstrings 'eq_3')",
+        "explanation": "Each clause penalty (x_a+x_b+x_c-1)^2 is expanded exactly to 1 - (Z_a+Z_b+Z_c)/2 + (Z_aZ_b+Z_aZ_c+Z_bZ_c)/2; coefficients are accumulated over clauses and exp(-i theta H_P) is applied exactly via RZ/RZZ rotations and a global phase."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_signal_values and _apply_signal (docstrings 'eq_4')",
+        "explanation": "The additive fast-signal term f(t)V is implemented as exp(-i f(t_k) dt V) with V = sum_i P_i (P in {X,Y,Z}) and f(t_k) a placeholder regular alternating, seeded random telegraph, user-supplied, or zero sequence; this is the generic stand-in from the specification, not the paper's actual signal."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit main loop (comment 'eq_5 / eq_1') and module docstring",
+        "explanation": "Time-ordered first-order product over k=1..M: per step exp(-i(1-s_k)dt H_B), exp(-i s_k dt H_P), then exp(-i f(t_k) dt V); k=M is appended last. The H(s_k) exponential is itself split into its H_B and H_P parts (additional first-order Trotter approximation)."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "example_instance_json (n=3, clauses=[[1,2,3]]) processed by _parse_clauses/_ising_coefficients",
+        "explanation": "The single-clause 3-qubit EC3 instance is the example instance; its H_P diagonal (E=1,0,0,0,1,1,1,4 pattern) follows from the exact Z/ZZ expansion in _ising_coefficients."
+      },
+      {
+        "equation_id": "eq_7",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Success probability requires final measurement and classical post-processing, which are excluded from the returned operation; the runner may evaluate it on the output state."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Within each Trotter step the exponential exp(-i H(s_k) dt) is further split as exp(-i s_k dt H_P) exp(-i (1-s_k) dt H_B) (H_B part applied first), so the circuit uses a first-order splitting of H_B and H_P rather than exponentiating the full H(s_k) directly.",
+        "reason": "H_B and H_P do not commute; exponentiating their sum exactly would require an opaque dense unitary, which is disallowed. Each factor is implemented exactly with standard rotation gates, introducing an additional O(dt^2) error per step."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The unspecified fast signal f(t)V is concretized as V = sum_i P_i (P chosen among X, Y, Z; default X) and f(t_k) in {A(-1)^k (regular), A r_k with r_k uniform in {-1,+1} from a seeded NumPy generator (random), user-supplied values (custom), or zero (none)}, sampled once per Trotter step.",
+        "reason": "The abstract gives neither the signal statistics nor the coupling operator; these are explicit placeholder choices needed to produce a concrete circuit, and are disclosed as not being the paper's construction."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Preparation of the initial state |+>^n is not performed by the module; only the H_B exponential is implemented.",
+        "reason": "The task requires an operation without input-state preparation; the runner prepares inputs."
+      },
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "Bit-to-qubit mapping is x_i -> qubit i-1; Qiskit's little-endian bitstring printing therefore shows x_n...x_1, the reverse of the specification's x_1x_2x_3 notation.",
+        "reason": "Resolution of the specification's left-to-right ordering with Qiskit's qubit-0-least-significant convention."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_5"
+        ],
+        "change": "The schedule is sampled at the end of each step, s_k = k/M (so the first step uses s_1 = 1/M rather than s=0 and the last uses s_M = 1).",
+        "reason": "Direct transcription of the specification's t_k = k dt; a midpoint rule would be an alternative not chosen here."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Identity (constant) terms of H_B and H_P are tracked as a global phase on the circuit rather than dropped.",
+        "reason": "Preserves the exact unitary of the specified Hamiltonians, including relative phases between signal-free and signal steps in principle; harmless for measurement statistics."
+      }
+    ],
+    "assumptions": [
+      "Closed-system unitary dynamics only; the system-bath decoherence discussed in the abstract is not modeled.",
+      "Deterministic first-order Trotter formula stands in for the paper's randomized Trotter formula, whose randomization rule is unknown.",
+      "Clause indices are 1-based in the instance JSON, following the specification's x_1..x_n notation; clauses are triples of distinct indices and at least one clause is required.",
+      "Total qubits are capped at MAX_QUBITS = 12 and Trotter steps at MAX_STEPS = 2000; all parameters are validated before the register is allocated.",
+      "The random signal uses numpy.random.default_rng(seed) with an integer seed from the instance so the circuit is reproducible and fully bound.",
+      "Expected input state is |+>^n (ground state of H_B); the returned circuit is the evolution operator only."
+    ],
+    "unresolved_issues": [
+      "The paper's actual fast-signal sequence, its coupling operator, and the randomized Trotter formula are not recoverable from the abstract; the implemented signal is a placeholder.",
+      "The claimed runtime reduction and coherence protection cannot be assessed with this closed-system construction.",
+      "Trapped-ion native-gate compilation of H_B, H_P, and the signals is out of scope."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 357,
+    "depth": 239,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

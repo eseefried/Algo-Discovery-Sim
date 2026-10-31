@@ -1,0 +1,145 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "b06364cc-a4b7-4fe9-9ffb-73923741f5d1",
+  "parent_run_id": "702fa4f1-994b-4dcc-8221-a63337bdc81e",
+  "created_at": "2026-10-31T17:20:12.017085+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "0751c1d84a145f0f2a31fe3370f9e64186b60eb7da80a80bcaff4145042b5ca3",
+  "source_specification_sha256": "4e073efb45c21eef9352cda76ffd50fc54223ea837423bee35445c76b6ab0e26",
+  "source_python_sha256": "c0eb2bec05bad1fde916743f4683ba2b66d323aa32b5987330be79d9543b8688",
+  "elapsed_seconds": 83.011,
+  "usage": {
+    "input_tokens": 7815,
+    "output_tokens": 7144,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the first-order Trotterized time-evolution operator of the N-level pairing Hamiltonian in its Anderson pseudospin (qubit) form: single-qubit Z rotations for the level energies and nearest-neighbor XY (flip-flop) gates for the pair-scattering couplings (eq_2-eq_4). Optionally the whole evolution is made controlled on one ancilla qubit, which is the unitary core of the ancilla-based energy-spectrum extraction scheme (eq_5). State preparation, ancilla measurements, Fourier post-processing and fidelity evaluation are left to the runner/classical side.",
+    "source_python": "\"\"\"Trotterized pairing-Hamiltonian evolution in pseudospin (XY) form, optionally ancilla-controlled.\n\nSystem qubit (m-1) encodes pair mode m (|1> = Cooper pair present).  The circuit implements\n    U_Trotter(t) = [ prod_m RZ_m(eps_m*dt) * prod_m U_XY^{(m,m+1)}(V_{m,m+1}*dt) ]^{n_T},  dt = t/n_T,\nwhich approximates exp(-i H_P t) with H_P from eq_2 (constant term dropped).\nIf instance[\"controlled\"] is true, one extra ancilla qubit (highest index) controls every Trotter\nfactor, giving controlled-U_Trotter(t) as used in the spectrum-extraction scheme (eq_5).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _as_float_list(values, name):\n    \"\"\"Validate a list of finite real numbers and return it as floats.\"\"\"\n    if not isinstance(values, (list, tuple)):\n        raise ValueError(f\"'{name}' must be a list of real numbers\")\n    out = []\n    for v in values:\n        if isinstance(v, bool) or not isinstance(v, (int, float)):\n            raise ValueError(f\"'{name}' entries must be real numbers\")\n        f = float(v)\n        if not math.isfinite(f):\n            raise ValueError(f\"'{name}' entries must be finite\")\n        out.append(f)\n    return out\n\n\ndef _zz_core(qc, a, b, theta, anc):\n    \"\"\"exp(-i theta/2 Z_a Z_b) via CX - RZ - CX; controlled on anc if anc is not None.\"\"\"\n    qc.cx(a, b)\n    if anc is None:\n        qc.rz(theta, b)\n    else:\n        qc.crz(theta, anc, b)\n    qc.cx(a, b)\n\n\ndef _xy_gate(qc, a, b, theta, anc):\n    \"\"\"eq_4: U_XY(theta) = exp(-i theta/2 (X_a X_b + Y_a Y_b)) = RXX(theta) RYY(theta).\n\n    XX and YY commute, so the product is exact.  Each factor is a ZZ rotation conjugated by\n    single-qubit basis changes; only the central RZ carries the angle, so controlling it on the\n    ancilla yields the controlled XY gate (all other gates cancel when the RZ is the identity).\n    \"\"\"\n    # XX part: X = H Z H\n    qc.h(a)\n    qc.h(b)\n    _zz_core(qc, a, b, theta, anc)\n    qc.h(a)\n    qc.h(b)\n    # YY part: Y = S H Z H S^dagger\n    qc.sdg(a)\n    qc.sdg(b)\n    qc.h(a)\n    qc.h(b)\n    _zz_core(qc, a, b, theta, anc)\n    qc.h(a)\n    qc.h(b)\n    qc.s(a)\n    qc.s(b)\n\n\ndef build_circuit(instance):\n    \"\"\"Build the (optionally ancilla-controlled) Trotterized pairing evolution operator.\n\n    instance keys:\n      levels        : list of N real single-particle energies eps_m (N >= 2)\n      couplings     : list of N-1 real nearest-neighbor pairing couplings V_{m,m+1}\n      time          : simulated time t >= 0\n      trotter_steps : positive integer n_T\n      controlled    : bool; if true an ancilla qubit (index N) controls the evolution (eq_5)\n    Qubit layout: system qubits 0..N-1 (qubit m-1 <-> pair mode m), ancilla at index N if used.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    for key in (\"levels\", \"couplings\", \"time\", \"trotter_steps\", \"controlled\"):\n        if key not in instance:\n            raise ValueError(f\"missing instance key '{key}'\")\n\n    levels = _as_float_list(instance[\"levels\"], \"levels\")\n    couplings = _as_float_list(instance[\"couplings\"], \"couplings\")\n    n_sys = len(levels)\n    if n_sys < 2:\n        raise ValueError(\"at least two levels (system qubits) are required\")\n    if len(couplings) != n_sys - 1:\n        raise ValueError(\"'couplings' must have length len(levels)-1 (nearest-neighbor chain)\")\n\n    t = instance[\"time\"]\n    if isinstance(t, bool) or not isinstance(t, (int, float)):\n        raise ValueError(\"'time' must be a real number\")\n    t = float(t)\n    if not math.isfinite(t) or t < 0.0:\n        raise ValueError(\"'time' must be finite and nonnegative\")\n\n    n_steps = instance[\"trotter_steps\"]\n    if isinstance(n_steps, bool) or not isinstance(n_steps, int) or n_steps < 1:\n        raise ValueError(\"'trotter_steps' must be a positive integer\")\n\n    controlled = instance[\"controlled\"]\n    if not isinstance(controlled, bool):\n        raise ValueError(\"'controlled' must be a boolean\")\n\n    n_total = n_sys + (1 if controlled else 0)\n    if n_total > MAX_QUBITS:\n        raise ValueError(f\"total qubits {n_total} exceeds cap of {MAX_QUBITS}\")\n\n    sys_reg = QuantumRegister(n_sys, \"sys\")\n    if controlled:\n        anc_reg = QuantumRegister(1, \"anc\")\n        qc = QuantumCircuit(sys_reg, anc_reg, name=\"pairing_trotter_ctrl\")\n        anc = n_sys\n    else:\n        qc = QuantumCircuit(sys_reg, name=\"pairing_trotter\")\n        anc = None\n\n    dt = t / n_steps  # eq_3: Delta t = t / n_T\n\n    for _ in range(n_steps):\n        # eq_2/eq_3 single-qubit terms: exp(-i eps_m/2 sigma_z dt) = RZ(eps_m * dt)\n        for m in range(n_sys):\n            angle = levels[m] * dt\n            if anc is None:\n                qc.rz(angle, m)\n            else:\n                qc.crz(angle, anc, m)\n        # eq_3/eq_4 two-qubit nearest-neighbor XY factors with theta = V_{m,m+1} dt\n        for m in range(n_sys - 1):\n            _xy_gate(qc, m, m + 1, couplings[m] * dt, anc)\n\n    return qc",
+    "example_instance_json": "{\"levels\": [-1.0, 1.0], \"couplings\": [0.5], \"time\": 1.0, \"trotter_steps\": 4, \"controlled\": true}",
+    "register_layout": [
+      "qubit 0: system qubit for pair mode m=1 (|1> = Cooper pair occupies level 1), energy eps_1 = -1.0",
+      "qubit 1: system qubit for pair mode m=2 (|1> = pair occupies level 2), energy eps_2 = 1.0; coupled to qubit 0 by XY gate with V_12 = 0.5",
+      "qubit 2: ancilla control qubit for the spectrum-extraction scheme (runner prepares |+>, measures X and Y); present only because controlled=true",
+      "Little-endian: qubit 0 is the least significant bit of the computational basis label"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Fermionic pairing Hamiltonian; only its qubit image (eq_2) is used to define gates."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: 'eq_2/eq_3 single-qubit terms' loop (rz/crz) and _xy_gate for the XY couplings",
+        "explanation": "Pseudospin form defines the Z and XY generators exponentiated in each Trotter step; the constant term is dropped (global phase in the uncontrolled case)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: dt = t/n_steps and the outer 'for _ in range(n_steps)' loop",
+        "explanation": "First-order Trotter product with uniform step; Z rotations then nearest-neighbor XY gates, repeated n_T times."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_xy_gate and _zz_core",
+        "explanation": "exp(-i theta/2 (XX+YY)) built exactly as RXX(theta)RYY(theta) via basis-changed CX-RZ-CX cores; controlled variant replaces RZ by CRZ."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: controlled=True branch (ancilla register, crz in Z terms and _zz_core)",
+        "explanation": "Only the unitary controlled-U_Trotter(t) is implemented; ancilla |+> preparation, X/Y measurement, time sweep and Fourier transform are excluded (runner/classical post-processing)."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Fidelity is a classical numerical benchmark comparing with exact evolution; not part of the circuit operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Constant term of H_P dropped. In the ancilla-controlled circuit this is not a global phase but a uniform shift of all extracted energies E_k by the dropped constant.",
+        "reason": "The abstract/specification does not fix the constant; a uniform spectral offset is irrelevant for level spacings and can be added classically."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Generalized from the N=2 instance to any N>=2 (N+ancilla<=12) but restricted the coupling matrix to nearest-neighbor pairs V_{m,m+1} only; non-adjacent V_{ml} are not accepted (no SWAP routing).",
+        "reason": "Matches the 'nearest-neighbor interaction' device model of the abstract while keeping the construction parameterizable; routing strategy is listed as missing information."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "XY gate realized as RXX(theta)*RYY(theta) decomposed into H/S/CX/RZ(CRZ) gates rather than a native device coupling.",
+        "reason": "Qiskit has no native tunable XY interaction primitive; XX and YY commute so the decomposition is exact."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Scope narrowed to the controlled-evolution unitary; ancilla preparation, measurements, time sampling and Fourier analysis omitted.",
+        "reason": "Task requires a measurement-free unitary operation; these parts belong to the runner and classical post-processing."
+      },
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "Not implemented.",
+        "reason": "Fidelity is a classical figure of merit, not a circuit operation."
+      }
+    ],
+    "assumptions": [
+      "hbar = 1; RZ(phi) = exp(-i phi Z/2), so exp(-i eps_m/2 Z dt) = RZ(eps_m*dt) and the XY factor has theta = V_{m,m+1} dt.",
+      "Anderson pseudospin encoding: qubit m-1 in |1> means pair mode m is occupied; no Jordan-Wigner strings are needed.",
+      "Within each Trotter step the single-qubit Z rotations are applied before the two-qubit XY gates (first-order formula; order affects only O(dt^2) error).",
+      "Ideal noiseless gates; device-specific native interaction types are not modeled.",
+      "Initial states (|10> system, |+> ancilla) are prepared by the runner, not inside build_circuit."
+    ],
+    "unresolved_issues": [
+      "The paper's actual Hamiltonian conventions, interaction types (Heisenberg/Ising/XXZ), Trotter order and measurement scheme are unknown; the XY/ancilla construction is a plausible stand-in.",
+      "Long-range pairing couplings V_{ml} with |m-l|>1 are rejected rather than routed via SWAP networks.",
+      "Controlled Trotter evolution extracts eigenvalues up to the dropped constant offset; absolute energies require adding it classically."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 128,
+    "depth": 100,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

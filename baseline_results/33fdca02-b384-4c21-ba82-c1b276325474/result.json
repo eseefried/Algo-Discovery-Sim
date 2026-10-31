@@ -1,0 +1,137 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "33fdca02-b384-4c21-ba82-c1b276325474",
+  "parent_run_id": "24e3f6e3-848b-4cd6-b82a-13e66f05a95e",
+  "created_at": "2026-10-31T17:08:31.587197+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "12c57012063fa82a7646fdeb52083c5e78a82549b64bd400ce98f1e06fa16465",
+  "source_specification_sha256": "ec7f9c224ee1105e1fd355920a6e0833d95beb32882a3d5434173a5d7eeda0c6",
+  "source_python_sha256": "7cbe20215646dce7aec9277ee885e7476450679478068d69da9a25fc1f179bf8",
+  "elapsed_seconds": 78.834,
+  "usage": {
+    "input_tokens": 8454,
+    "output_tokens": 6842,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the Bernstein-Vazirani operation of the specification for an arbitrary n-variable Boolean function f supplied as a truth table (or a named function). The circuit acts on n input qubits (qubit j-1 carries x_j / output bit y_j) plus one ancilla qubit (index n) which the runner must prepare in |1>. Sequence: H on all n+1 qubits, bit-flip oracle U_f built from the algebraic normal form (Reed-Muller/Mobius transform) of f as a product of multi-controlled X gates onto the ancilla, then H on the n input qubits. The output state on the input register is sum_y fhat(y)|y>, so a computational-basis measurement (done by the runner) gives y_i=1 with probability Inf_i(f). Example instance is n=2, f=AND (truth table [0,0,0,1]) whose oracle reduces to a single Toffoli gate.",
+    "source_python": "\"\"\"Bernstein-Vazirani circuit for an arbitrary Boolean function f.\n\nOperation implemented (specification eq_1, eq_2, eq_6):\n    (H^{(x)n} (x) I) . U_f . (H^{(x)n} (x) H)   acting on |0^n>_in |1>_anc\n\nThe runner prepares |0^n>_in |1>_anc.  After this circuit the input register\nholds sum_y fhat(y) |y> with fhat(y) = 2^{-n} sum_x (-1)^{f(x) + x.y}, so\nmeasuring input qubit (i-1) yields 1 with probability Inf_i(f) (eq_3/eq_4).\n\nQubit layout: input qubit index j-1 stores x_j and yields y_j (j = 1..n);\nqubit index n is the oracle ancilla.  Truth tables are indexed by\nk = sum_j x_j 2^{j-1}, i.e. x_1 is the least significant bit of k, which\nmatches Qiskit's little-endian convention (qubit 0 = least significant).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nKNOWN_FUNCTIONS = (\"and\", \"or\", \"parity\", \"majority\", \"constant0\", \"constant1\")\n\n\ndef _validate_n(instance: dict) -> int:\n    if \"n\" not in instance:\n        raise ValueError(\"instance must contain 'n' (number of input variables)\")\n    n = instance[\"n\"]\n    if isinstance(n, bool) or not isinstance(n, int):\n        raise ValueError(\"'n' must be an integer\")\n    if n < 1:\n        raise ValueError(\"'n' must be at least 1\")\n    if n + 1 > MAX_QUBITS:\n        raise ValueError(\n            \"n + 1 ancilla exceeds the qubit cap of %d (n <= %d)\" % (MAX_QUBITS, MAX_QUBITS - 1)\n        )\n    return n\n\n\ndef _named_truth_table(name: str, n: int) -> list:\n    \"\"\"Truth table of a named Boolean function; index k has x_j = (k >> (j-1)) & 1.\"\"\"\n    if name not in KNOWN_FUNCTIONS:\n        raise ValueError(\"unknown function name %r; known: %s\" % (name, list(KNOWN_FUNCTIONS)))\n    table = []\n    for k in range(2 ** n):\n        weight = 0\n        for j in range(n):\n            weight += (k >> j) & 1\n        if name == \"and\":\n            value = 1 if weight == n else 0\n        elif name == \"or\":\n            value = 1 if weight > 0 else 0\n        elif name == \"parity\":\n            value = weight % 2\n        elif name == \"majority\":\n            value = 1 if 2 * weight > n else 0\n        elif name == \"constant0\":\n            value = 0\n        else:\n            value = 1\n        table.append(value)\n    return table\n\n\ndef _truth_table_from_instance(instance: dict, n: int) -> list:\n    has_table = \"truth_table\" in instance\n    has_name = \"function\" in instance\n    if has_table == has_name:\n        raise ValueError(\"instance must contain exactly one of 'truth_table' or 'function'\")\n    if has_name:\n        name = instance[\"function\"]\n        if not isinstance(name, str):\n            raise ValueError(\"'function' must be a string\")\n        return _named_truth_table(name.lower(), n)\n    raw = instance[\"truth_table\"]\n    if not isinstance(raw, (list, tuple)):\n        raise ValueError(\"'truth_table' must be a list of 0/1 entries\")\n    if len(raw) != 2 ** n:\n        raise ValueError(\"'truth_table' must have length 2**n = %d, got %d\" % (2 ** n, len(raw)))\n    table = []\n    for entry in raw:\n        if isinstance(entry, bool):\n            table.append(1 if entry else 0)\n            continue\n        if not isinstance(entry, int) or entry not in (0, 1):\n            raise ValueError(\"'truth_table' entries must be 0 or 1\")\n        table.append(int(entry))\n    return table\n\n\ndef _anf_monomials(table: list, n: int) -> list:\n    \"\"\"Mobius transform: returns the set of monomials (as bitmasks) in the\n    algebraic normal form f(x) = XOR_{m in monomials} prod_{j in m} x_j.\"\"\"\n    coeffs = list(table)\n    for j in range(n):\n        bit = 1 << j\n        for k in range(2 ** n):\n            if k & bit:\n                coeffs[k] ^= coeffs[k ^ bit]\n    return [k for k in range(2 ** n) if coeffs[k] == 1]\n\n\ndef _append_oracle(qc: QuantumCircuit, inputs: QuantumRegister, anc, monomials: list, n: int) -> None:\n    \"\"\"eq_1: bit-flip oracle U_f |x>|b> = |x>|b xor f(x)>, realised as one\n    multi-controlled X per ANF monomial (empty monomial -> plain X).\"\"\"\n    for mask in monomials:\n        controls = [inputs[j] for j in range(n) if (mask >> j) & 1]\n        if len(controls) == 0:\n            qc.x(anc)\n        elif len(controls) == 1:\n            qc.cx(controls[0], anc)\n        else:\n            qc.mcx(controls, anc)\n\n\ndef build_circuit(instance: dict) -> QuantumCircuit:\n    \"\"\"Bernstein-Vazirani operation for a general Boolean function (eq_2).\n\n    instance keys:\n        n            : int, number of input variables (1 <= n <= 11)\n        truth_table  : list of 2**n bits, index k = sum_j x_j 2**(j-1)\n        function     : alternatively a name in KNOWN_FUNCTIONS\n    Returns a circuit on n+1 qubits: qubits 0..n-1 = input (x_j on qubit j-1),\n    qubit n = ancilla (runner prepares it in |1>).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = _validate_n(instance)\n    table = _truth_table_from_instance(instance, n)\n    monomials = _anf_monomials(table, n)\n\n    inputs = QuantumRegister(n, \"x\")\n    anc_reg = QuantumRegister(1, \"anc\")\n    qc = QuantumCircuit(inputs, anc_reg, name=\"bernstein_vazirani_influence\")\n    anc = anc_reg[0]\n\n    # eq_2 step 1: H on every qubit (input -> uniform superposition, |1>_anc -> |->)\n    for j in range(n):\n        qc.h(inputs[j])\n    qc.h(anc)\n\n    # eq_2 step 2 / eq_1: oracle query with phase kickback (-1)^{f(x)}\n    _append_oracle(qc, inputs, anc, monomials, n)\n\n    # eq_2 step 3: H on the input register -> sum_y fhat(y) |y> |->\n    for j in range(n):\n        qc.h(inputs[j])\n\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"truth_table\": [0, 0, 0, 1]}",
+    "register_layout": [
+      "qubit 0: input x_1 (output bit y_1), register 'x'[0]",
+      "qubit 1: input x_2 (output bit y_2), register 'x'[1]",
+      "qubit 2: oracle ancilla 'anc'[0]; runner must prepare it in |1> (turned into |-> by the first Hadamard layer)",
+      "Truth table index k = x_1 + 2*x_2 (little-endian, x_1 on qubit 0); [0,0,0,1] is f = x_1 AND x_2, whose ANF has the single monomial x_1 x_2 so the oracle is one Toffoli (mcx) with controls qubits 0,1 and target qubit 2",
+      "Expected after the operation on |00>|1>: input register in (1/2)(|00>+|01>+|10>-|11>), each y_i = 1 with probability 1/2 = Inf_i(AND)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_append_oracle and _anf_monomials: U_f realised as X / CX / MCX gates onto the ancilla, one per monomial of the algebraic normal form of f",
+        "explanation": "Bit-flip oracle |x>|b> -> |x>|b xor f(x)>; with the ancilla in |-> this gives the (-1)^{f(x)} kickback."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: Hadamard layer on all n+1 qubits, oracle, Hadamard layer on the n input qubits (comments 'eq_2 step 1/2/3')",
+        "explanation": "Produces sum_y fhat(y)|y>|-> on the registers when the runner supplies |0^n>|1>."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Born-rule output distribution Pr[y] = fhat(y)^2 and the marginal Pr[y_i=1] = Inf_i(f); this is the property of the state produced by build_circuit, verified by the runner's measurement, not a gate sequence."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Classical combinatorial definition of influence; used only to interpret the measurement statistics."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Repetition over T runs and the frequency estimator with Hoeffding bound are classical post-processing/experiment control, not part of the unitary operation."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "example_instance_json {n: 2, truth_table: [0,0,0,1]}; _anf_monomials yields the single mask 0b11 so _append_oracle emits one mcx (Toffoli)",
+        "explanation": "Tiny AND instance: Toffoli oracle, uniform output distribution, Pr[y_1=1] = Pr[y_2=1] = 1/2."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_6"
+        ],
+        "change": "The initial state |0^n>|1> (including the ancilla |1>) is not prepared inside the circuit; the runner must supply it. The circuit begins with the Hadamard layer that turns |1>_anc into |->.",
+        "reason": "The generated module must be an operation without input-state preparation."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_5"
+        ],
+        "change": "No measurement or repetition is included; the circuit stops after the final Hadamard layer on the input register.",
+        "reason": "Measurement-free unitary operation is required; sampling and estimation are performed by the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The abstract oracle U_f is concretely realised as the XOR of multi-controlled Toffoli gates following the algebraic normal form (Mobius transform) of the user-supplied truth table.",
+        "reason": "Opaque dense unitaries are disallowed; the ANF decomposition gives an exact gate-level bit-flip oracle for any f."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Index convention fixed: specification position j (x_j, y_j) is Qiskit qubit j-1, and truth tables are indexed with x_1 as the least significant bit.",
+        "reason": "Qiskit qubit 0 is the least significant bit; a convention had to be chosen and is disclosed."
+      }
+    ],
+    "assumptions": [
+      "f is supplied classically as a full truth table of length 2^n (or as one of the named functions and/or/parity/majority/constant0/constant1); the oracle is the standard bit-flip oracle.",
+      "Runner prepares the ancilla (qubit n) in |1> and the input register in |0^n>; if the ancilla is left in |0> there is no phase kickback and the input register returns to |0^n>.",
+      "Multi-controlled X gates (qc.mcx) are acceptable standard-library gates; their decomposition is left to the transpiler.",
+      "Qubit cap 12 implies 1 <= n <= 11.",
+      "The paper's 'dependence degree' is identified with the standard influence Inf_i(f) = Pr_x[f(x) != f(x xor e_i)]."
+    ],
+    "unresolved_issues": [
+      "The paper's exact approximation algorithm, error guarantee and query complexity are unknown; only the single-run circuit whose output marginals equal the influences is implemented.",
+      "Junta analysis and probabilistic learning algorithms from the paper are not implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 20,
+    "depth": 13,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

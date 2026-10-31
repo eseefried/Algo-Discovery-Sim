@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "1679aa8c-1472-4fb1-aa08-7afff8d25530",
+  "parent_run_id": "de0d57fa-4b1d-4f15-82e9-c6027d3582dc",
+  "created_at": "2026-10-31T17:45:10.197366+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "3f087b4c2a1bb51fe921e28a44941ad76b9da1a698bf0c4e68de7c33327c0d14",
+  "source_specification_sha256": "8d45f6663210dd7a481e4a69ef23cc6f16dba634c87054de353ba75f918ad8d1",
+  "source_python_sha256": "810538af08a7665401f6a13c1106d3f7c218359d2b3116ccac9183ea2a0d61cf",
+  "elapsed_seconds": 169.091,
+  "usage": {
+    "input_tokens": 8202,
+    "output_tokens": 14736,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing t steps of the Szegedy-type unitary quantum walk U = S R_A (eq_3) built from the Kraus isometry A (eq_2) of a finite-graph open quantum walk. The Kraus operators are restricted to the explicitly synthesisable family B_i^j = sqrt(p_ij) V_i^j with V_i^j a tensor product of single-qubit gates from {I,X,Y,Z,H,S,T}; the Kraus/trace-preservation constraint of eq_1 (sum_i p_ij = 1) is validated. The isometry is realised as a controlled Stinespring dilation U_A (controlled amplitude tree of RY rotations on node2 plus doubly-controlled internal gates), the reflection R_A = U_A (I x I x (2|0><0|-I)) U_A^dagger is built by uncompute/reflect/recompute, and S is a qubit-wise swap of the two node registers. The example instance is the 2-node, one-internal-qubit OQW of eq_6 (3 qubits). Probabilities and mean probabilities (eq_4, eq_5) are measurement/post-processing and are out of scope for the returned operation.",
+    "source_python": "'''Szegedy-type unitary quantization of a finite-graph open quantum walk (OQW).\n\nRegisters (tensor order internal x node1 x node2; Qiskit little-endian inside\neach register, qubit 0 of the circuit is the least significant internal bit):\n  internal : m qubits, the OQW internal (coin-like) space, d = 2**m\n  node1    : nb = ceil(log2 n) qubits, source node j (basis state |j>)\n  node2    : nb qubits, destination node i (basis state |i>)\n\nScope restriction (reported in specification_changes): the Kraus operators\nare B_i^j = sqrt(p_ij) * V_i^j with V_i^j a tensor product of single-qubit\ngates from {I, X, Y, Z, H, S, T}, one letter per internal qubit.  The Kraus\nconstraint of eq_1, sum_i B_i^j^dag B_i^j = I, then reads sum_i p_ij = 1 for\nevery source node j and is validated.\n\nThe returned circuit is U**steps with (eq_3)\n    U   = S R_A,\n    R_A = U_A (I x I x (2|0><0| - I)) U_A^dagger,\nwhere U_A is the controlled Stinespring dilation realising the isometry A of\neq_2:  U_A |xi>|j>|0> = sum_i (B_i^j|xi>) |j>|i> = A(|xi>|j>).\nOptionally (key \"prepend_isometry\") U_A itself is prepended so that the\nrunner-supplied |xi_0>|j_0>|0> is mapped to |Psi_0> = A(|xi_0>|j_0>) (eq_6).\n'''\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import HGate, RYGate, SGate, TGate, XGate, YGate, ZGate\n\n_TOL = 1e-9\n_SUM_TOL = 1e-6\n_MAX_QUBITS = 12\n_MAX_STEPS = 1000\n_ALLOWED = 'IXYZHST'\n\n\ndef _check_int(value, name, low, high):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(name + ' must be an integer')\n    if value < low or value > high:\n        raise ValueError(name + ' out of range [' + str(low) + ', ' + str(high) + ']')\n    return value\n\n\ndef _check_prob(value, name):\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(name + ' must be a real number')\n    p = float(value)\n    if math.isnan(p) or p < -_TOL or p > 1.0 + _TOL:\n        raise ValueError(name + ' must lie in [0, 1]')\n    return min(max(p, 0.0), 1.0)\n\n\ndef _single_gate(label):\n    '''Single-qubit factor of the unitary part V_i^j of a Kraus operator.'''\n    if label == 'X':\n        return XGate()\n    if label == 'Y':\n        return YGate()\n    if label == 'Z':\n        return ZGate()\n    if label == 'H':\n        return HGate()\n    if label == 'S':\n        return SGate()\n    if label == 'T':\n        return TGate()\n    raise ValueError('unsupported gate label ' + str(label))\n\n\ndef _parse(instance):\n    '''Validate the instance and return (n, nb, m, steps, prepend, probs, labels).\n\n    probs[j][i]  = p_ij  (so that B_i^j = sqrt(p_ij) V_i^j),\n    labels[j][i] = string of m letters describing V_i^j.\n    The node-wise Kraus constraint of eq_1 is enforced as sum_i p_ij = 1.\n    '''\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a JSON object / dict')\n    n = _check_int(instance.get('nodes'), 'nodes', 2, 2 ** 5)\n    m = _check_int(instance.get('internal_qubits'), 'internal_qubits', 1, _MAX_QUBITS)\n    steps = _check_int(instance.get('steps'), 'steps', 0, _MAX_STEPS)\n    prepend = instance.get('prepend_isometry', False)\n    if not isinstance(prepend, bool):\n        raise ValueError('prepend_isometry must be a boolean')\n    nb = (n - 1).bit_length()\n    if m + 2 * nb > _MAX_QUBITS:\n        raise ValueError('total qubits ' + str(m + 2 * nb) + ' exceeds cap ' + str(_MAX_QUBITS))\n    kraus = instance.get('kraus')\n    if not isinstance(kraus, list) or len(kraus) != n:\n        raise ValueError('kraus must be a list with one row per source node')\n    probs = []\n    labels = []\n    for j in range(n):\n        row = kraus[j]\n        if not isinstance(row, list) or len(row) != n:\n            raise ValueError('kraus[' + str(j) + '] must list one entry per destination node')\n        pj = []\n        lj = []\n        for i in range(n):\n            entry = row[i]\n            if not isinstance(entry, dict):\n                raise ValueError('kraus entries must be objects with prob and unitary')\n            p = _check_prob(entry.get('prob'), 'kraus[' + str(j) + '][' + str(i) + '].prob')\n            u = entry.get('unitary')\n            if not isinstance(u, str) or len(u) != m:\n                raise ValueError('unitary label must be a string of length internal_qubits')\n            for c in u:\n                if c not in _ALLOWED:\n                    raise ValueError('unitary label letters must be from ' + _ALLOWED)\n            pj.append(p)\n            lj.append(u)\n        if abs(sum(pj) - 1.0) > _SUM_TOL:\n            raise ValueError('Kraus constraint violated at source node ' + str(j))\n        probs.append(pj)\n        labels.append(lj)\n    return n, nb, m, steps, prepend, probs, labels\n\n\ndef _append_dilation(ua, internal, node1, node2, n, nb, m, probs, labels):\n    '''Controlled Stinespring dilation U_A of the Kraus isometry A (eq_2).\n\n    For every source node j (controlled on node1 == j):\n      1. prepare sum_i sqrt(p_ij) |i> on node2 (binary tree of controlled RY),\n      2. for every i apply V_i^j to the internal register controlled on\n         node1 == j and node2 == i.\n    Hence U_A |xi>|j>|0> = sum_i sqrt(p_ij) (V_i^j |xi>) |j>|i> = A(|xi>|j>).\n    '''\n    for j in range(n):\n        pj = probs[j]\n        ctrl_j = [node1[k] for k in range(nb)]\n        for q in range(nb - 1, -1, -1):\n            high = nb - 1 - q\n            for pre in range(2 ** high):\n                mass0 = 0.0\n                mass1 = 0.0\n                for i in range(n):\n                    if (i >> (q + 1)) == pre:\n                        if (i >> q) & 1:\n                            mass1 += pj[i]\n                        else:\n                            mass0 += pj[i]\n                if mass0 + mass1 <= _TOL:\n                    continue\n                theta = 2.0 * math.atan2(math.sqrt(mass1), math.sqrt(mass0))\n                if abs(theta) <= _TOL:\n                    continue\n                ctrls = ctrl_j + [node2[k] for k in range(q + 1, nb)]\n                cs = j | (pre << nb)\n                ua.append(RYGate(theta).control(len(ctrls), ctrl_state=cs), ctrls + [node2[q]])\n        for i in range(n):\n            if pj[i] <= _TOL:\n                continue\n            ctrls = ctrl_j + [node2[k] for k in range(nb)]\n            cs = j | (i << nb)\n            for k in range(m):\n                c = labels[j][i][k]\n                if c == 'I':\n                    continue\n                ua.append(_single_gate(c).control(2 * nb, ctrl_state=cs), ctrls + [internal[k]])\n\n\ndef _append_zero_reflection(qc, node2, nb):\n    '''Apply (2|0><0| - I) on the node2 register, exactly including sign.'''\n    if nb == 1:\n        qc.z(node2[0])\n        return\n    for k in range(nb):\n        qc.x(node2[k])\n    qc.append(ZGate().control(nb - 1), [node2[k] for k in range(nb)])\n    for k in range(nb):\n        qc.x(node2[k])\n    qc.global_phase = qc.global_phase + math.pi\n\n\ndef build_circuit(instance):\n    '''Return the unitary U**steps (eq_3) for the OQW described by instance.'''\n    n, nb, m, steps, prepend, probs, labels = _parse(instance)\n    internal = QuantumRegister(m, 'internal')\n    node1 = QuantumRegister(nb, 'node1')\n    node2 = QuantumRegister(nb, 'node2')\n    qc = QuantumCircuit(internal, node1, node2)\n    ua = QuantumCircuit(internal, node1, node2)\n    _append_dilation(ua, internal, node1, node2, n, nb, m, probs, labels)\n    ua_dag = ua.inverse()\n    if prepend:\n        qc.compose(ua, inplace=True)\n    for _step in range(steps):\n        # R_A = U_A (I x I x (2|0><0| - I)) U_A^dagger  (eq_3)\n        qc.compose(ua_dag, inplace=True)\n        _append_zero_reflection(qc, node2, nb)\n        qc.compose(ua, inplace=True)\n        # S: swap the two node registers  (eq_3)\n        for k in range(nb):\n            qc.swap(node1[k], node2[k])\n    return qc",
+    "example_instance_json": "{\"nodes\": 2, \"internal_qubits\": 1, \"steps\": 1, \"prepend_isometry\": false, \"kraus\": [[{\"prob\": 0.5, \"unitary\": \"I\"}, {\"prob\": 0.5, \"unitary\": \"X\"}], [{\"prob\": 0.5, \"unitary\": \"H\"}, {\"prob\": 0.5, \"unitary\": \"I\"}]]}",
+    "register_layout": [
+      "qubit 0: internal[0] - internal (coin-like) qubit of the OQW, d=2; Kraus unitaries V_i^j act here",
+      "qubit 1: node1[0] - source/current node register j (|0>=node 0, |1>=node 1)",
+      "qubit 2: node2[0] - destination node register i, the register whose computational-basis measurement defines p_t(i) in eq_4 (not included in the circuit)",
+      "Tensor order internal x node1 x node2; qubit 0 is least significant. For general instances: internal = qubits 0..m-1, node1 = m..m+nb-1, node2 = m+nb..m+2nb-1 with nb = ceil(log2 nodes), little-endian within each register; total m+2nb <= 12.",
+      "kraus[j][i] encodes B_i^j = sqrt(prob) * unitary; the example is eq_6: B_0^0=I/sqrt2, B_1^0=X/sqrt2, B_0^1=H/sqrt2, B_1^1=I/sqrt2."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": "_parse (Kraus constraint check sum_i p_ij = 1)",
+        "explanation": "The OQW map itself is not implemented; only its node-wise Kraus (trace-preservation) constraint is validated, which for the restricted family B_i^j = sqrt(p_ij) V_i^j reduces to sum_i p_ij = 1."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_append_dilation",
+        "explanation": "Controlled Stinespring dilation U_A with U_A|xi>|j>|0> = sum_i (B_i^j|xi>)|j>|i> = A(|xi>|j>): controlled RY amplitude tree prepares sqrt(p_ij) on node2, then V_i^j is applied to internal controlled on node1=j, node2=i."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit (step loop) and _append_zero_reflection",
+        "explanation": "R_A = U_A (I x I x (2|0><0|-I)) U_A^dagger built as compose(U_A^dagger), exact zero-reflection on node2 (Z for one qubit, X-MCZ-X with global phase pi otherwise), compose(U_A); S realised as qubit-wise swaps of node1 and node2; repeated steps times to give U^t."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Probability p_t(i) requires measuring node2 after U^t; measurements are excluded from the returned operation and left to the runner."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Mean and asymptotic mean probability are classical post-processing / spectral analysis of the 8x8 unitary, not part of the circuit."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "example_instance_json; optional prepend_isometry branch in build_circuit",
+        "explanation": "The example instance encodes exactly the four Kraus operators of eq_6; with prepend_isometry=true the circuit maps the runner-prepared |0>|0>|0> to |Psi_0> = A(|0>|0>) = (|000>+|101>)/sqrt2 before the walk steps."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Kraus operators restricted to B_i^j = sqrt(p_ij) V_i^j with V_i^j a tensor product of single-qubit gates from {I,X,Y,Z,H,S,T} and p_ij a stochastic matrix column (sum_i p_ij = 1).",
+        "reason": "A general isometry A would require opaque dense-unitary synthesis, which is disallowed; this family admits an explicit standard-gate Stinespring dilation and contains the eq_6 instance and classical Szegedy walks."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "For nb > 1 node qubits the reflection 2|0><0| - I is realised as -(X^{(x)nb} MCZ X^{(x)nb}) with the sign absorbed into qc.global_phase (+pi per step); for nb = 1 it is exactly Z.",
+        "reason": "Standard gates give I - 2|0><0|; the global phase keeps the circuit exactly equal to U = S R_A rather than up to a sign."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The elementary step is taken to be U = S R_A; the two-reflection form W = R_B R_A is obtained by setting steps to an even number.",
+        "reason": "The paper's normalization of the unit step is unknown; U is the finer operation from which W = U^2 follows."
+      },
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "Input-state preparation of |Psi_0> is not part of the default operation; an optional boolean prepend_isometry applies U_A first so the runner may supply |xi_0>|j_0>|0> instead.",
+        "reason": "The task requires an operation without input-state preparation; the isometry itself is a unitary operation on the walk space and is offered as an opt-in."
+      }
+    ],
+    "assumptions": [
+      "Node labels are encoded in binary in each node register (little-endian), node count n need not be a power of two; unused basis states of node1 are acted on trivially by U_A, which keeps every circuit element unitary.",
+      "The Kraus constraint tolerance is 1e-6 on sum_i p_ij; probabilities are clipped to [0,1] within 1e-9.",
+      "Internal space dimension d = 2**m with m >= 1; the classical (d=1) Szegedy case is not exposed.",
+      "ctrl_state integers follow Qiskit's convention that bit k of ctrl_state refers to the k-th qubit in the control list (node1 bits first, then the relevant node2 bits)."
+    ],
+    "unresolved_issues": [
+      "The paper's actual unitary construction (register layout, one- vs two-reflection step, which register defines the node position) is not available; the implemented U = S R_A is the reconstruction from the Szegedy analogy.",
+      "General Kraus operators outside the scaled single-qubit-gate tensor-product family are not supported.",
+      "Probability, mean probability and asymptotic mean probability (eq_4, eq_5) must be evaluated by the runner via measurement of node2 and classical post-processing."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 104,
+    "depth": 68,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

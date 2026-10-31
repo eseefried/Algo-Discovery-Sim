@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "7ffd0179-0d2a-4a0c-936e-c7fdc7cad1fe",
+  "parent_run_id": "726b1fe5-abf6-4c08-a925-103b33aa611b",
+  "created_at": "2026-10-31T17:26:32.767416+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "dc5b73358fd9ecc41d072c737506bdc5470da1c8a68b3a3778000e3010052ac2",
+  "source_specification_sha256": "fa99114cdb99ff6fd0b76e761925b7279164d8f04a75e07b23738f0e3a699bea",
+  "source_python_sha256": "1732cfc52aec6ffc3bbab2da530723083e1a5b36ed4dfdaefd148ce9cb282984",
+  "elapsed_seconds": 68.228,
+  "usage": {
+    "input_tokens": 7203,
+    "output_tokens": 6050,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing the unitary core of the Trugenberger-style Hamming-distance classifier from the specification: CNOTs from input to memory qubits (eq_2), the ancilla-controlled distance-to-phase unitary U = exp(-i pi/(2n) Z_c (x) sum_j (I-Z_j)/2) decomposed into single-qubit phase and controlled-phase gates (eq_3), and the final Hadamard on the ancilla (eq_4). The training-superposition input state (eq_1) is supplied by the runner; measurements, postselection and the classical vote (eq_5) are outside the returned operation. Register layout: input qubits 0..n-1, memory qubits n..2n-1, class qubits 2n..2n+m-1, ancilla qubit 2n+m.",
+    "source_python": "\"\"\"Trugenberger-style Hamming-distance classifier core (eq_2, eq_3, eq_4).\n\nThe returned circuit is the unitary part of the classifier only. The runner\nprepares the input state of eq_1:\n    (1/sqrt N) sum_k |x>_I |x^k>_M |y^k>_Y (|0>+|1>)_c / sqrt 2\nand performs the measurements / postselection of eq_4 and eq_5 afterwards.\n\nQubit layout (Qiskit index 0 = least significant bit):\n    inp[0..n-1]      input register I, pattern bit j (j=1..n) in inp[j-1]\n    mem[0..n-1]      memory register M, training bit j in mem[j-1]\n    cls[0..m-1]      class register Y (m = num_class_qubits, idle here)\n    anc[0]           ancilla c (control qubit of Trugenberger's routine)\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _read_int(instance, key, lower, upper):\n    \"\"\"Read a required integer instance parameter in [lower, upper].\"\"\"\n    if key not in instance:\n        raise ValueError(\"missing instance key '%s'\" % key)\n    value = instance[key]\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(\"instance key '%s' must be an integer\" % key)\n    if value < lower or value > upper:\n        raise ValueError(\n            \"instance key '%s' must lie in [%d, %d], got %d\" % (key, lower, upper, value)\n        )\n    return value\n\n\ndef build_circuit(instance):\n    \"\"\"Build the Hamming-distance classifier operation for a given instance.\n\n    instance keys:\n        n                 number of bits per pattern (>= 1)\n        num_class_qubits  size of the class register (>= 1; 1 = binary labels)\n    Total qubits 2*n + num_class_qubits + 1 must not exceed 12.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object / dict\")\n    allowed = {\"n\", \"num_class_qubits\"}\n    for key in instance:\n        if key not in allowed:\n            raise ValueError(\"unknown instance key '%s'\" % key)\n\n    n = _read_int(instance, \"n\", 1, MAX_QUBITS)\n    m = _read_int(instance, \"num_class_qubits\", 1, MAX_QUBITS)\n    total = 2 * n + m + 1\n    if total > MAX_QUBITS:\n        raise ValueError(\n            \"2*n + num_class_qubits + 1 = %d exceeds the cap of %d qubits\" % (total, MAX_QUBITS)\n        )\n\n    inp = QuantumRegister(n, \"inp\")\n    mem = QuantumRegister(n, \"mem\")\n    cls = QuantumRegister(m, \"cls\")\n    anc = QuantumRegister(1, \"anc\")\n    qc = QuantumCircuit(inp, mem, cls, anc, name=\"hamming_classifier\")\n\n    # eq_2: CNOT_{I_j -> M_j} for every j, so mem holds x XOR x^k and its\n    # Hamming weight equals the Hamming distance d_k.\n    for j in range(n):\n        qc.cx(inp[j], mem[j])\n\n    # eq_3: U = exp(-i theta Z_c (x) sum_j |1><1|_j), theta = pi/(2n).\n    # For each memory qubit j, the factor exp(-i theta Z_c (x) |1><1|_j) acts\n    # as diag(e^{-i theta}, e^{+i theta}) on the ancilla when mem[j] = 1 and as\n    # identity otherwise.  This equals  P(-theta) on mem[j]  followed by\n    # CP(2 theta) with control mem[j] and target anc[0]:\n    #   mem=1, c=0 : e^{-i theta}            mem=1, c=1 : e^{-i theta} e^{2 i theta} = e^{i theta}\n    # All factors commute, so the product over j realises U exactly.\n    theta = math.pi / (2.0 * n)\n    for j in range(n):\n        qc.p(-theta, mem[j])\n        qc.cp(2.0 * theta, mem[j], anc[0])\n\n    # eq_4: Hadamard on the ancilla, turning the relative phase\n    # e^{-/+ i theta_k} into amplitudes cos(theta_k)|0>_c - i sin(theta_k)|1>_c.\n    # The measurement / postselection on c = 0 is done by the runner.\n    qc.h(anc[0])\n\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"num_class_qubits\": 1}",
+    "register_layout": [
+      "qubit 0: inp[0] = input bit x_1 (register I, unchanged by the circuit)",
+      "qubit 1: inp[1] = input bit x_2",
+      "qubit 2: mem[0] = training bit x^k_1 (register M), overwritten with x_1 XOR x^k_1",
+      "qubit 3: mem[1] = training bit x^k_2, overwritten with x_2 XOR x^k_2",
+      "qubit 4: cls[0] = class label y^k (register Y, binary class; idle in the operation, measured by the runner on postselected runs)",
+      "qubit 5: anc[0] = ancilla c, expected in |+> at input, H applied at the end, postselect outcome 0",
+      "Encoding: computational basis, qubit index 0 is the least significant bit; pattern bit j (j=1..n) of a register sits in that register's qubit j-1",
+      "Expected input state for eq_6: (1/sqrt2)(|00>_I|00>_M|0>_Y + |00>_I|01>_M|1>_Y)(|0>+|1>)_c/sqrt2, where |01>_M means x^2_1 = 0 in mem[0] and x^2_2 = 1 in mem[1]"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The training superposition with input pattern and |+> ancilla is the input state of the operation; the runner prepares it (no state preparation is allowed in the returned circuit). Documented in the module docstring and register_layout."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit, loop commented '# eq_2' (qc.cx(inp[j], mem[j]))",
+        "explanation": "One CNOT from input qubit j to memory qubit j for all j, leaving mem in |x XOR x^k> with Hamming weight d_k."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit, block commented '# eq_3' (qc.p(-theta, mem[j]); qc.cp(2*theta, mem[j], anc[0]))",
+        "explanation": "U = exp(-i pi/(2n) Z_c (x) sum_j |1><1|_j) is factorised into commuting terms; each term equals a phase gate P(-theta) on mem[j] followed by a controlled-phase CP(2 theta) from mem[j] to the ancilla, giving diag(e^{-i theta}, e^{i theta}) on c exactly when mem[j]=1."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit, line commented '# eq_4' (qc.h(anc[0]))",
+        "explanation": "The Hadamard on the ancilla is implemented; the subsequent computational-basis measurement and postselection on c=0 are performed by the runner and are not part of the operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Class-register measurement, postselection and the argmax vote are measurement/classical post-processing steps, excluded from the measurement-free unitary operation."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "example_instance_json ({\"n\": 2, \"num_class_qubits\": 1}) and register_layout",
+        "explanation": "The example instance realises the 6-qubit circuit (2 input + 2 memory + 1 class + 1 ancilla) of the tiny explicit instance; the specific training patterns/input of eq_6 are encoded in the runner-prepared input state, not in the circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to the unitary core (eq_2, eq_3, eq_4 Hadamard). State preparation of eq_1 and the measurements/postselection/classical vote of eq_4-eq_5 are delegated to the runner.",
+        "reason": "The task requires an operation without input-state preparation, measurement or classical processing."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The exponential of the Hamiltonian is realised gate-by-gate as P(-pi/(2n)) on each memory qubit plus CP(pi/n) from each memory qubit to the ancilla, rather than as a dense unitary.",
+        "reason": "Opaque dense unitaries are disallowed; the factorisation is exact because all terms commute and each term acts as diag(e^{-i theta}, e^{i theta}) on the ancilla conditioned on the memory qubit being 1."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_6"
+        ],
+        "change": "The construction is parametrised by n (bits per pattern) and num_class_qubits (class register size, 1 for binary labels), with total qubits 2n + num_class_qubits + 1 capped at 12; the class register is idle in the operation.",
+        "reason": "Generalises the fixed n=2, binary instance to varying valid instance parameters as required, while keeping the specified register order I, M, Y, c."
+      }
+    ],
+    "assumptions": [
+      "Pattern bit j (1-indexed) of each register is stored in that register's qubit j-1; Qiskit index 0 is the least significant bit.",
+      "The ancilla is supplied in |+> and the memory register holds the uniform superposition of training patterns entangled with class labels, as in eq_1.",
+      "Phase scale theta = pi/(2n) as in the specification, so d_k = n yields zero amplitude for ancilla outcome 0.",
+      "The sign convention diag(e^{-i theta}, e^{+i theta}) for the ancilla branches follows eq_3; outcome probabilities are convention independent.",
+      "Class register qubits are untouched by the operation and only serve as entangled labels read out by the runner."
+    ],
+    "unresolved_issues": [
+      "The paper's exact circuit (phase scale, ancilla handling, decision rule, multi-class label encoding) is not known from the abstract; the implementation follows the reconstructed Trugenberger routine.",
+      "The storage algorithm for the training superposition and the MNIST binarisation are not implemented; the runner must supply the eq_1 input state."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 15,
+    "depth": 12,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

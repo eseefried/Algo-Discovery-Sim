@@ -1,0 +1,138 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "1311a53d-2726-4f3c-9acf-95fa7bedee9a",
+  "parent_run_id": "16a653bb-85a1-464d-9af4-8c9c156bafd5",
+  "created_at": "2026-10-31T17:37:28.974766+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "583e8a2b3685e5cb2b6b97c0c02a23075a6aec0b18e7e03e9438f0086224153d",
+  "source_specification_sha256": "b5d597e7ad4b2fc4e480e0c514cc2c926044a3f639bef5ba36f14bab2b64e1bf",
+  "source_python_sha256": "d8f909860ada3a1dd1fd1852e94d7eb80067ee69c208cd321f066530d8316180",
+  "elapsed_seconds": 58.13,
+  "usage": {
+    "input_tokens": 8080,
+    "output_tokens": 5078,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the ideal Toffoli (CCNOT) target unitary of eq_1/eq_2 as a Qiskit operation on a register of 3..12 qubits with user-selected control_1, control_2 and target indices. Two equivalent realisations are offered: a single CCX gate ('single_shot', mirroring the abstract's single-shot gate at the logical level) or the standard H/T/CX decomposition ('decomposed', the sequential baseline the abstract contrasts against). The pulse-level control problem (eq_3-eq_6) cannot be reconstructed from the abstract and is out of scope.",
+    "source_python": "\"\"\"Ideal Toffoli (CCNOT) operation on three qubits of a register.\n\nImplements eq_1 / eq_2 of the specification: the target qubit is flipped iff\nboth control qubits are 1.  Register convention (eq_1): c_1 is the most\nsignificant bit, t the least significant, x = 4*c_1 + 2*c_2 + t.  Because\nQiskit qubit 0 is the least significant bit, the default layout is\nt -> qubit 0, c_2 -> qubit 1, c_1 -> qubit 2.\n\nScope: logical (ideal) target gate only.  The transmon Hamiltonian,\npropagator, fidelity functional and Differential-Evolution optimisation\n(eq_3 - eq_6) are not reconstructible from the abstract and are not\nimplemented here.\n\"\"\"\nfrom __future__ import annotations\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _get_int(instance, key, low, high):\n    \"\"\"Fetch a required integer field and check it lies in [low, high].\"\"\"\n    if key not in instance:\n        raise ValueError(\"missing required key: \" + key)\n    value = instance[key]\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(key + \" must be an integer\")\n    if value < low or value > high:\n        raise ValueError(key + \" must lie in [\" + str(low) + \", \" + str(high) + \"]\")\n    return value\n\n\ndef _toffoli_single_shot(qc, c1, c2, t):\n    \"\"\"eq_1 / eq_2: one Toffoli gate, |c1 c2 t> -> |c1, c2, t XOR (c1 AND c2)>.\"\"\"\n    qc.ccx(c1, c2, t)\n\n\ndef _toffoli_decomposed(qc, a, b, c):\n    \"\"\"eq_2 realised by the standard sequential H/T/CX decomposition.\n\n    This is the conventional 'decomposed into single- and two-qubit gates'\n    baseline that the abstract contrasts with a single-shot implementation.\n    Controls a, b; target c.  Exactly equal to CCX (no relative phases).\n    \"\"\"\n    qc.h(c)\n    qc.cx(b, c)\n    qc.tdg(c)\n    qc.cx(a, c)\n    qc.t(c)\n    qc.cx(b, c)\n    qc.tdg(c)\n    qc.cx(a, c)\n    qc.t(b)\n    qc.t(c)\n    qc.h(c)\n    qc.cx(a, b)\n    qc.t(a)\n    qc.tdg(b)\n    qc.cx(a, b)\n\n\ndef build_circuit(instance):\n    \"\"\"Build the ideal Toffoli operation described by `instance`.\n\n    instance keys:\n      num_qubits   : int in [3, 12], total register size\n      control_1    : int, qubit index of c_1 (spec: most significant logical bit)\n      control_2    : int, qubit index of c_2\n      target       : int, qubit index of t (spec: least significant logical bit)\n      implementation (optional): 'single_shot' (one CCX, default) or\n                                 'decomposed' (H/T/CX sequence)\n    All three indices must be distinct.  Qubits not listed are left idle.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object / dict\")\n    n = _get_int(instance, \"num_qubits\", 3, MAX_QUBITS)\n    c1 = _get_int(instance, \"control_1\", 0, n - 1)\n    c2 = _get_int(instance, \"control_2\", 0, n - 1)\n    t = _get_int(instance, \"target\", 0, n - 1)\n    if len({c1, c2, t}) != 3:\n        raise ValueError(\"control_1, control_2 and target must be distinct qubits\")\n\n    mode = \"single_shot\"\n    if \"implementation\" in instance:\n        mode = instance[\"implementation\"]\n        if mode not in (\"single_shot\", \"decomposed\"):\n            raise ValueError(\"implementation must be 'single_shot' or 'decomposed'\")\n\n    qreg = QuantumRegister(n, \"q\")\n    qc = QuantumCircuit(qreg, name=\"toffoli\")\n    if mode == \"single_shot\":\n        _toffoli_single_shot(qc, c1, c2, t)\n    else:\n        _toffoli_decomposed(qc, c1, c2, t)\n    return qc",
+    "example_instance_json": "{\"num_qubits\": 3, \"control_1\": 2, \"control_2\": 1, \"target\": 0, \"implementation\": \"single_shot\"}",
+    "register_layout": [
+      "qubit 0: t (target), least significant bit of x = 4*c_1 + 2*c_2 + t",
+      "qubit 1: c_2 (second control)",
+      "qubit 2: c_1 (first control), most significant bit of x",
+      "Computational basis label x = sum_k b_k 2^k with Qiskit qubit k holding bit b_k; the gate swaps x=6 (|110>) and x=7 (|111>) and fixes x=0..5",
+      "For num_qubits > 3 the remaining qubits are idle spectators (identity)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_toffoli_single_shot (qc.ccx) and module/function docstrings; layout t->q0, c_2->q1, c_1->q2 in example",
+        "explanation": "The CCX gate realises |c1 c2 t> -> |c1, c2, t XOR (c1 AND c2)> exactly; with c_1 on the highest-index qubit and t on qubit 0 the integer encoding x = 4c_1 + 2c_2 + t of the spec is reproduced."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_toffoli_decomposed (H/T/Tdg/CX sequence) and _toffoli_single_shot; selected by instance['implementation']",
+        "explanation": "The operator I - |11><11| (x) (I - X) is realised either as a single CCX or as the standard phase-exact Clifford+T decomposition, which equals CCX as a unitary (no relative phases)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Time-ordered propagator of a pulse-level transmon Hamiltonian; requires the unknown Hamiltonian and controls and is not a gate-level Qiskit operation."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Assumed Duffing-transmon chain Hamiltonian; parameter values and drives are unknown and multi-level dynamics cannot be built from standard qubit gates without dense unitaries."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Gate-fidelity functional is a classical post-processing/verification quantity, not part of the returned operation; the module must not include reference or test code."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Differential-Evolution control optimisation is a classical search over unknown pulse parameters; not reconstructible from the abstract and not a circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Scope narrowed to the ideal logical Toffoli unitary only; the 'single_shot' option is a single CCX gate at the gate level, not a pulse-level single-shot implementation.",
+        "reason": "The abstract provides no Hamiltonian, pulse parametrisation, or optimiser details, so only the target gate (eq_1/eq_2) can be implemented faithfully."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Mapped the spec's bit-string convention (c_1 most significant, x = 4c_1 + 2c_2 + t) onto Qiskit's little-endian indexing by placing t on qubit 0, c_2 on qubit 1, c_1 on qubit 2 in the example instance; indices are user-configurable.",
+        "reason": "Qiskit qubit 0 is the least significant computational-basis bit, so the spec's ordering must be reversed in physical index to preserve the integer labels x=6 and x=7 as the swapped states."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Added an optional 'decomposed' realisation using the standard 15-gate H/T/Tdg/CX Toffoli decomposition as a sequential baseline.",
+        "reason": "The abstract contrasts single-shot with decomposed implementations; the decomposition is exactly equal to CCX as a unitary and uses only standard gates."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4",
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Not implemented.",
+        "reason": "Essential details (Hamiltonian parameters, controls, fidelity definition, optimiser) are missing from the abstract; implementing them would require fabrication or dense unitaries."
+      }
+    ],
+    "assumptions": [
+      "Register convention: c_1 most significant, t least significant, so the example places t on qubit 0, c_2 on qubit 1, c_1 on qubit 2.",
+      "Total register size may exceed 3 (up to 12); additional qubits are idle spectators to allow embedding the gate in a larger register.",
+      "The 'single_shot' implementation is the logical CCX gate; no claim is made about pulse-level realisation.",
+      "The decomposed variant is the standard Nielsen-Chuang Clifford+T Toffoli circuit, exactly equal to CCX including phases."
+    ],
+    "unresolved_issues": [
+      "The paper's actual transmon Hamiltonian, control pulses, gate time, fidelity definition and Differential-Evolution enhancements remain unknown and are not represented in the circuit.",
+      "Truth-table verification of the eight basis states checks only the permutation action, not relative phases or the 99.9% process-level fidelity claimed in the abstract."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 15,
+    "depth": 11,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

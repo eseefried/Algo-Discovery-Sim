@@ -1,0 +1,147 @@
+# Abstract to equations
+
+Status: **partial**
+
+Model: `claude-fable-5-1`
+
+Mathematics has not been independently verified.
+
+Simon's problem for n=2: given black-box access to f:\{0,1\}^2\to\{0,1\}^2 with the promise that f(x)=f(y) iff y\in\{x, x\oplus s\} for a hidden string s, determine s using O(n) quantum queries. The abstract reports a one-way (measurement-based) optical implementation on a five-qubit cluster state; this specification reconstructs the logical two-qubit algorithm in the circuit model with one explicit oracle instance.
+
+Scope: Scope (chosen by the agent, no experiment_scope supplied): the gate-model logical two-qubit Simon algorithm (2 input qubits + 2 output qubits), a single explicit oracle instance with s=11, f(x1,x2)=(0, x1\oplus x2), the resulting measurement distribution, and the classical linear-algebra postprocessing. Outside scope: the specific five-qubit cluster-state graph, the single-qubit measurement-basis choices that encode each black box, the set of 'key representative functions' queried in the experiment, the optical setup, the experimental data, and the n-qubit resource analysis.
+
+## Symbols
+
+- $n$: number of input bits of the black-box function (n=2 in scope); domain: positive integer
+- $x, y, z$: n-bit strings; x is the oracle input, y the output register content, z the measured input-register outcome; domain: \{0,1\}^n
+- $s$: hidden period (XOR mask) of Simon's problem; domain: \{0,1\}^n, s\neq 0^n in the 2-to-1 case
+- $f$: black-box function satisfying Simon's promise; domain: \{0,1\}^n \to \{0,1\}^n
+- $U_f$: standard reversible oracle unitary implementing f; domain: unitary on (\mathbb{C}^2)^{\otimes 2n}
+- $x\cdot z$: bitwise inner product \sum_i x_i z_i mod 2; domain: \{0,1\}
+- $\oplus$: bitwise XOR (addition mod 2); domain: \{0,1\}^n\times\{0,1\}^n\to\{0,1\}^n
+- $H$: Hadamard gate; domain: 2\times 2 unitary
+- $\mathrm{CNOT}_{c,t}$: controlled-NOT with control qubit c and target qubit t; domain: 4\times 4 unitary
+
+## eq_1: Simon's promise
+
+$$
+\forall x,y\in\{0,1\}^n:\quad f(x)=f(y) \iff y\in\{x,\;x\oplus s\}
+$$
+
+Defines the black-box period-finding problem: f is 2-to-1 with XOR period s (or 1-to-1 if s=0^n); the task is to find s.
+
+Provenance: `abstract_inferred`. The abstract names Simon's problem as a black-box period-finding problem; this is the standard statement of its promise, recalled from background knowledge.
+
+Abstract evidence: Simon’s Problem - a black box period-finding problem
+
+Equation assumptions:
+
+- The experiment uses the standard formulation of Simon's problem.
+
+## eq_2: Oracle unitary
+
+$$
+U_f\,|x\rangle_{\mathrm{in}}|y\rangle_{\mathrm{out}} = |x\rangle_{\mathrm{in}}|y\oplus f(x)\rangle_{\mathrm{out}}
+$$
+
+Standard reversible black box acting on an n-qubit input register and an n-qubit output register.
+
+Provenance: `standard_background`. Textbook oracle model for Simon's algorithm; the abstract does not specify how the black box is realized beyond 'modifying the bases of single-qubit measurements'.
+
+Equation assumptions:
+
+- Register ordering |x\rangle|y\rangle with x_1 (leftmost) the most significant bit.
+
+## eq_3: State after H, U_f, H
+
+$$
+(H^{\otimes n}\otimes I)\,U_f\,(H^{\otimes n}\otimes I)\,|0^n\rangle|0^n\rangle = \frac{1}{2^n}\sum_{x\in\{0,1\}^n}\sum_{z\in\{0,1\}^n}(-1)^{x\cdot z}\,|z\rangle|f(x)\rangle
+$$
+
+Exact state of the 2n-qubit system before measurement in the circuit-model Simon algorithm.
+
+Provenance: `standard_background`. Direct algebraic consequence of eq_2 and H|x_i\rangle = \frac{1}{\sqrt2}\sum_{z_i}(-1)^{x_i z_i}|z_i\rangle.
+
+Equation assumptions:
+
+- Initial state |0^n\rangle|0^n\rangle.
+
+## eq_4: Output distribution on the input register
+
+$$
+\Pr(z) = \begin{cases}2^{-(n-1)} & z\cdot s \equiv 0 \pmod 2\\ 0 & \text{otherwise}\end{cases}\qquad (s\neq 0^n)
+$$
+
+Measuring the input register in the computational basis yields a uniformly random z orthogonal (mod 2) to s; the output register need not be measured.
+
+Provenance: `standard_background`. Follows from eq_3 and eq_1: terms x and x\oplus s share |f(x)\rangle and their amplitudes (-1)^{x\cdot z}(1+(-1)^{s\cdot z}) cancel unless s\cdot z=0. For s=0^n the distribution is uniform over all z.
+
+## eq_5: Explicit n=2 oracle instance
+
+$$
+s=11,\quad f(x_1,x_2)=(0,\;x_1\oplus x_2),\quad U_f=\mathrm{CNOT}_{x_1,y_2}\,\mathrm{CNOT}_{x_2,y_2},\quad \Pr(z=00)=\Pr(z=11)=\tfrac12
+$$
+
+One tiny concrete black box satisfying eq_1 with s=11, realized by two CNOTs onto output qubit y_2; the resulting outcome distribution is on z\in\{00,11\}.
+
+Provenance: `assumption`. Chosen as the smallest explicit instance; the abstract mentions 'key representative functions' but does not list them, so this instance is not claimed to be one actually used in the experiment.
+
+Equation assumptions:
+
+- This instance is the agent's choice, not taken from the abstract.
+- Output qubit y_1 is left in |0\rangle and could be omitted for this instance.
+
+## eq_6: Classical postprocessing for n=2
+
+$$
+\text{given measured } z\neq 00:\quad s = \text{the unique } s'\in\{01,10,11\}\text{ with } z\cdot s'\equiv 0 \pmod 2;\qquad \text{for } n=2:\; z=11\Rightarrow s=11,\; z=01\Rightarrow s=10,\; z=10\Rightarrow s=01
+$$
+
+For n=2 a single nonzero outcome determines s (under the promise s\neq 0); in general one collects n-1 linearly independent z and solves the homogeneous system over GF(2). The outcome z=00 is uninformative and the run is repeated.
+
+Provenance: `standard_background`. Standard Gaussian elimination over GF(2) on the constraints z^{(k)}\cdot s = 0; for n=2 the nullspace of a single nonzero z has exactly one nonzero element.
+
+Equation assumptions:
+
+- Promise s\neq 00 (2-to-1 case); otherwise s=00 is concluded only statistically after observing outcomes spanning all of \{0,1\}^2.
+
+## Registers
+
+- input (query) register: 2 qubits; holds x; Hadamard-transformed before and after the oracle; measured in computational basis to obtain z
+- output (function) register: 2 qubits; holds y\oplus f(x); entangled with the input register by U_f; not measured (or its result discarded)
+
+## Initial state
+
+|0\rangle_{x_1}|0\rangle_{x_2}|0\rangle_{y_1}|0\rangle_{y_2} = |00\rangle_{\mathrm{in}}|00\rangle_{\mathrm{out}}, ordering |x_1 x_2\rangle|y_1 y_2\rangle with x_1 the most significant input bit
+
+## Measurement
+
+Computational-basis (Z) measurement of the two input-register qubits after the final Hadamards; outcome z\in\{0,1\}^2 distributed per eq_4. The output register is not measured. Runs are repeated to obtain a nonzero z and to estimate the outcome histogram for comparison with the ideal distribution.
+
+## Classical postprocessing
+
+Solve z\cdot s \equiv 0 (mod 2) over GF(2) for the nonzero s (eq_6); for n=2 one nonzero outcome suffices. Experimentally, compare the measured outcome frequencies with the ideal probabilities 1/2 on the two allowed outcomes and 0 on the forbidden ones (eq_4, eq_5).
+
+## Algorithm steps
+
+1. Prepare all four qubits in |0\rangle. (no equation reference)
+2. Apply H to each input qubit to create the uniform superposition \frac12\sum_x |x\rangle|00\rangle. (eq_3)
+3. Apply the oracle U_f (for the explicit instance: CNOT from x_1 to y_2 then CNOT from x_2 to y_2). (eq_2, eq_5)
+4. Apply H to each input qubit again, yielding the state of eq_3. (eq_3)
+5. Measure the input register in the computational basis; outcome z satisfies z\cdot s = 0 mod 2 with the distribution of eq_4 (eq_5 for the instance). Repeat until a nonzero z is obtained. (eq_4, eq_5)
+6. Classically infer s from the nonzero outcome(s) by solving the GF(2) linear system. (eq_6)
+
+## Assumptions
+
+- No experiment_scope was supplied; the agent chose the gate-model logical two-qubit Simon algorithm with the single oracle instance s=11, f(x)=(0,x_1\oplus x_2) as the smallest useful construction.
+- The paper's one-way implementation is assumed to be logically equivalent to the circuit of eq_3 (the abstract says the black box is selected by 'modifying the bases of single-qubit measurements on a five-qubit cluster state'), but the actual cluster graph and measurement pattern are not reconstructed.
+- Standard oracle model U_f|x\rangle|y\rangle=|x\rangle|y\oplus f(x)\rangle and standard Simon promise are assumed.
+
+## Missing information
+
+- The five-qubit cluster-state graph (which qubits are connected) and how a 4-logical-qubit algorithm is compressed onto five physical qubits.
+- The specific single-qubit measurement bases (angles) that implement each black-box function and the feed-forward/byproduct corrections, if any.
+- The list of 'key representative functions' (which values of s and which f) actually queried in the experiment.
+- The theoretical model used for comparison (noise/visibility parameters) and the reported experimental fidelities or success probabilities.
+- The resource analysis for the n-qubit one-way version (number of cluster qubits, measurement rounds).
+- Details of the optical setup (photon source, encoding of qubits, detection).

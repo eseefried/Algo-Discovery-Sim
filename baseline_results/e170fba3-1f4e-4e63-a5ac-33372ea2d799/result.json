@@ -1,0 +1,143 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "e170fba3-1f4e-4e63-a5ac-33372ea2d799",
+  "parent_run_id": "9963132b-7925-4b62-91b7-92f843822295",
+  "created_at": "2026-10-31T17:11:37.670422+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "569cf02ff002e1711833bc98fb703bdd7db71f1c415b6da0903b5a09a80c79c4",
+  "source_specification_sha256": "181348337f03b8b9829fc1ce0ae2ac4dc102c2906e6ccd406438691bd0ad8552",
+  "source_python_sha256": "b618cd49250a053a8042edf5eaca99adf9c730fb398bb1242d420cf99b2f097f",
+  "elapsed_seconds": 140.443,
+  "usage": {
+    "input_tokens": 7929,
+    "output_tokens": 12821,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing fixed-point amplitude amplification (eq_1-eq_3, eq_6) as one unitary operation: A = H^{\\otimes n} state preparation followed by l=(L-1)/2 generalized Grover iterations G(alpha_j,beta_j) = S_s(alpha_j) S_t(beta_j) with the Chebyshev phase schedule alpha_j = -beta_{l-j+1} = 2 acot(tan(2 pi j/L) sqrt(1-gamma^2)), 1/gamma = cosh(acosh(1/delta)/L). The partial-phase oracle S_t and the reflection S_s = A S_0 A^dagger are realised with X-conjugated multi-controlled phase gates (no ancilla). The scoped example is n=2, target |11>, L=3, delta=1/2. One sign-convention correction to eq_2 (S_t must carry e^{+i beta}) was required for eq_3's schedule to produce the fixed-point response and is reported.",
+    "source_python": "\"\"\"Fixed-point amplitude amplification (Chebyshev phase schedule) as a Qiskit operation.\n\nOperation built by build_circuit(instance) on n system qubits:\n\n    U = S_L * A,     A = H^{(x) n}            (state preparation, eq_1 / eq_6)\n    S_L = G(alpha_l, beta_l) ... G(alpha_1, beta_1),  L = 2 l + 1 oracle queries\n    G(alpha, beta) = S_s(alpha) S_t(beta)     (global sign of eq_2 dropped)\n    S_t(beta)  = I - (1 - e^{+i beta}) |t><t|   (phase e^{+i beta} on every target state)\n    S_s(alpha) = A S_0(alpha) A^dag,  S_0(alpha) = I - (1 - e^{-i alpha}) |0..0><0..0|\n\nPhase schedule (eq_3):\n    1/gamma  = T_{1/L}(1/delta) = cosh( acosh(1/delta) / L )\n    alpha_j  = -beta_{l-j+1} = 2 acot( tan(2 pi j / L) * sqrt(1 - gamma^2) ),  j = 1..l\n\nNOTE on conventions: the specification's eq_2 wrote S_t(beta) with e^{-i beta}. Combined\nwith alpha_j = -beta_{l-j+1} that does NOT give the fixed-point response (hand check,\nL=3, lambda=1/4: P ~ 0.24 instead of ~ 0.91). The published convention carries e^{+i beta}\nin S_t, which is what is implemented here; equivalently the oracle applies e^{-i alpha_{l-j+1}}.\n\nQubit k of the register 'sys' is bit k (little-endian) of the integer basis-state label.\nThe circuit contains no measurements, resets, or input-state initialisation other than A.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _as_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(f\"{name} must be an integer, got {value!r}\")\n    return value\n\n\ndef _fixed_point_phases(num_queries, delta):\n    \"\"\"eq_3: Chebyshev fixed-point phase schedule for L = num_queries (odd) and failure bound delta.\n\n    Returns (alphas, betas) with alphas[j-1] = alpha_j, betas[j-1] = beta_j = -alpha_{l-j+1}.\n    \"\"\"\n    l = (num_queries - 1) // 2\n    inv_gamma = math.cosh(math.acosh(1.0 / delta) / num_queries)  # 1/gamma = T_{1/L}(1/delta)\n    gamma_sq = 1.0 / (inv_gamma * inv_gamma)\n    root = math.sqrt(max(0.0, 1.0 - gamma_sq))  # sqrt(1 - gamma^2) = sqrt(w)\n    alphas = []\n    for j in range(1, l + 1):\n        x = math.tan(2.0 * math.pi * j / num_queries) * root\n        # acot(x) taken on the branch (0, pi): acot(x) = atan2(1, x); 2*acot is defined mod 2 pi\n        alphas.append(2.0 * math.atan2(1.0, x))\n    betas = [-alphas[l - j] for j in range(1, l + 1)]  # beta_j = -alpha_{l-j+1}\n    return alphas, betas\n\n\ndef _parse_targets(raw, n):\n    \"\"\"Target states given as integers in [0, 2^n) or as n-character bitstrings (leftmost = qubit n-1).\"\"\"\n    if not isinstance(raw, (list, tuple)) or len(raw) == 0:\n        raise ValueError(\"targets must be a non-empty list\")\n    dim = 1 << n\n    out = []\n    for item in raw:\n        if isinstance(item, str):\n            if len(item) != n or any(ch not in \"01\" for ch in item):\n                raise ValueError(f\"target bitstring {item!r} must have length {n} over {{0,1}}\")\n            value = int(item, 2)\n        else:\n            value = _as_int(item, \"target\")\n        if value < 0 or value >= dim:\n            raise ValueError(f\"target {value} outside [0, {dim})\")\n        out.append(value)\n    if len(set(out)) != len(out):\n        raise ValueError(\"targets must be distinct\")\n    return out\n\n\ndef _apply_basis_state_phase(qc, n, basis_state, angle):\n    \"\"\"Multiply the amplitude of |basis_state> by exp(i*angle), identity on all other basis states.\"\"\"\n    flipped = [k for k in range(n) if ((basis_state >> k) & 1) == 0]\n    for k in flipped:\n        qc.x(k)\n    if n == 1:\n        qc.p(angle, 0)\n    else:\n        qc.mcp(angle, list(range(n - 1)), n - 1)\n    for k in flipped:\n        qc.x(k)\n\n\ndef _target_phase_oracle(qc, n, targets, beta):\n    \"\"\"eq_2: S_t(beta) = I - (1 - e^{+i beta}) |t><t|, one oracle query (phase e^{i beta} on each target).\"\"\"\n    for t in targets:\n        _apply_basis_state_phase(qc, n, t, beta)\n\n\ndef _reflection_about_s(qc, n, alpha):\n    \"\"\"eq_2: S_s(alpha) = A S_0(alpha) A^dag with A = H^{(x) n}; S_0 puts e^{-i alpha} on |0..0>.\"\"\"\n    qc.h(list(range(n)))  # A^dag = A for Hadamards\n    _apply_basis_state_phase(qc, n, 0, -alpha)\n    qc.h(list(range(n)))  # A\n\n\ndef build_circuit(instance):\n    \"\"\"Build the fixed-point amplitude-amplification unitary S_L * A for the given instance.\n\n    instance keys:\n      n        : number of system qubits (1..12)\n      targets  : list of marked basis states (ints or bitstrings)\n      L        : odd number of oracle queries, L = 2 l + 1 >= 1\n      delta    : failure-probability bound parameter, 0 < delta < 1 (failure <= delta^2 for lambda >= 1-gamma^2)\n      apply_state_preparation (optional bool, default True): prepend A = H^{(x) n} to |0..0>\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    for key in (\"n\", \"targets\", \"L\", \"delta\"):\n        if key not in instance:\n            raise ValueError(f\"missing instance key {key!r}\")\n    n = _as_int(instance[\"n\"], \"n\")\n    if n < 1 or n > MAX_QUBITS:\n        raise ValueError(f\"n must be in [1, {MAX_QUBITS}], got {n}\")\n    num_queries = _as_int(instance[\"L\"], \"L\")\n    if num_queries < 1 or num_queries % 2 == 0:\n        raise ValueError(f\"L must be an odd positive integer, got {num_queries}\")\n    delta = instance[\"delta\"]\n    if isinstance(delta, bool) or not isinstance(delta, (int, float)) or not (0.0 < float(delta) < 1.0):\n        raise ValueError(f\"delta must be a real number in (0, 1), got {delta!r}\")\n    delta = float(delta)\n    prep = instance.get(\"apply_state_preparation\", True)\n    if not isinstance(prep, bool):\n        raise ValueError(\"apply_state_preparation must be a bool\")\n    targets = _parse_targets(instance[\"targets\"], n)\n\n    alphas, betas = _fixed_point_phases(num_queries, delta)  # eq_3 / eq_6\n\n    sys = QuantumRegister(n, \"sys\")\n    qc = QuantumCircuit(sys, name=f\"fixed_point_AA_L{num_queries}\")\n\n    if prep:\n        # eq_1: |s> = A|0..0> with A = H^{(x) n}, lambda = |targets| / 2^n\n        qc.h(list(range(n)))\n\n    # eq_3: S_L = G(alpha_l, beta_l) ... G(alpha_1, beta_1); G(alpha, beta) = S_s(alpha) S_t(beta)\n    for j in range(len(alphas)):\n        _target_phase_oracle(qc, n, targets, betas[j])\n        _reflection_about_s(qc, n, alphas[j])\n\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"targets\": [3], \"L\": 3, \"delta\": 0.5, \"apply_state_preparation\": true}",
+    "register_layout": [
+      "sys[0] = qubit 0: least-significant bit of the computational-basis label (Qiskit little-endian)",
+      "sys[1] = qubit 1: most-significant bit for the n=2 example; target integer 3 = |11> = both qubits 1",
+      "No ancilla qubits; multi-controlled phases are synthesised by Qiskit without extra qubits. Total qubits = n <= 12.",
+      "Example: input |00> -> A=H⊗H gives lambda=1/4 -> one iteration G(alpha_1,beta_1) with L=3, delta=1/2 -> target weight P_3(1/4) ≈ 0.914 expected (eq_4, unverified here)."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: block 'eq_1: |s> = A|0..0>' (qc.h on all qubits when apply_state_preparation is True)",
+        "explanation": "A = H^{⊗n} prepares the uniform superposition; lambda = |targets|/2^n is implicit in the target list."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_target_phase_oracle (S_t), _reflection_about_s (S_s = A S_0 A†), _apply_basis_state_phase",
+        "explanation": "Partial-phase oracle and partial-phase reflection about |s> realised via X-conjugated mcp gates; overall minus sign of G dropped as global phase; S_t sign convention corrected to e^{+i beta}."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_fixed_point_phases and the iteration loop in build_circuit",
+        "explanation": "Computes 1/gamma = cosh(acosh(1/delta)/L), alpha_j = 2 acot(tan(2 pi j/L) sqrt(1-gamma^2)), beta_j = -alpha_{l-j+1}, and applies G(alpha_1,beta_1) first through G(alpha_l,beta_l) last."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Closed-form success probability is a property of the output state, not a circuit element; it is only quoted in docstrings/notes as the expected value."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The fixed-point guarantee and query-complexity scaling are analytical consequences; the code only exposes L and delta as inputs and does not pick L from w."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "example_instance_json / build_circuit with n=2, targets=[3], L=3, delta=0.5",
+        "explanation": "The scoped tiny instance is exactly the example instance; the module also accepts other valid (n, targets, L, delta)."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Sign convention of the oracle changed from S_t(beta) = I - (1 - e^{-i beta})|t><t| to S_t(beta) = I - (1 - e^{+i beta})|t><t| (the published convention), while keeping alpha_j = -beta_{l-j+1} from eq_3. Equivalently the oracle in iteration j applies phase e^{-i alpha_{l-j+1}} to targets.",
+        "reason": "A hand evaluation of the 2D amplitude for L=3, delta=1/2, lambda=1/4 showed the specification's e^{-i beta} convention gives target probability ≈0.24 (< lambda), whereas e^{+i beta} gives ≈0.915, matching eq_4's prediction 1 - delta^2 T_3(T_{1/3}(2) sqrt(3/4))^2 ≈ 0.914."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The overall factor -1 in G(alpha,beta) = -S_s S_t is omitted.",
+        "reason": "It is a global phase with no effect on measurement statistics; omitting it keeps the circuit in standard gates."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "acot is evaluated on the branch (0, pi) via atan2(1, x); L = 1 (l = 0, no iterations) is accepted and yields just A.",
+        "reason": "2*acot(x) is only defined modulo 2 pi, so the branch choice is immaterial; L=1 is a degenerate but valid odd query count."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_6"
+        ],
+        "change": "The state-preparation unitary A = H^{⊗n} is included in the operation (optional via apply_state_preparation flag, default True) rather than supplied externally; A is fixed to Hadamards, so lambda = |targets|/2^n only.",
+        "reason": "A is part of the algorithm's definition (also used inside S_s); the runner prepares |0...0>. General A is outside the scoped construction."
+      },
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "Scope generalised slightly beyond the single tiny instance: arbitrary n <= 12, arbitrary distinct target sets, any odd L and delta in (0,1); no measurement is included.",
+        "reason": "The task requires an operation valid for varying instance parameters and measurement-free output."
+      }
+    ],
+    "assumptions": [
+      "The Chebyshev phase schedule (eq_3) and success probability (eq_4) are recalled from the published fixed-point amplitude amplification method, not derived from the abstract; only the L=3 case was hand-checked for consistency.",
+      "Each S_t application counts as one oracle query; the cost of A, A† and the multi-controlled phase synthesis is not counted.",
+      "Target states are listed as integers (little-endian, qubit k = bit k) or as n-bit strings with leftmost character = qubit n-1.",
+      "qc.mcp (MCPhaseGate) is available in Qiskit 2.6.1 and synthesises to standard gates without ancilla."
+    ],
+    "unresolved_issues": [
+      "eq_3/eq_4 have not been checked against the paper for L > 3 (the implemented ordering yields the palindromic phase sequence alpha_l, ..., alpha_1, alpha_1, ..., alpha_l, which is the expected structure, but this is unverified).",
+      "No simulation was run; the quoted expected value P_3(1/4) ≈ 0.914 is a hand computation.",
+      "Whether the paper's construction requires an ancilla for the general-phase oracle is not resolved; here mcp is used directly on the system register."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 20,
+    "depth": 14,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

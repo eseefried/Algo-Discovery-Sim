@@ -1,0 +1,152 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "b1000691-3c18-452d-b95d-546ae3d83932",
+  "parent_run_id": "33fa8cde-dfa8-48ba-9597-555d895a8412",
+  "created_at": "2026-10-31T17:46:48.424489+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "dbaba02dd782df95da1c4c252cc26012ad5dc4975979e4cf9fd9c27ad235c282",
+  "source_specification_sha256": "4eb761d7d3bd454b687b3a5a5e5320ab5b280f456e39a99a47766327e1c1f514",
+  "source_python_sha256": "b7d053611a183c3cd2aa4b26a262a1133faf9cf2b4e2dbecae5518d69a752bb9",
+  "elapsed_seconds": 95.651,
+  "usage": {
+    "input_tokens": 7097,
+    "output_tokens": 8292,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the first-order (Lie-Trotter) product-formula circuit U_n(t) = (e^{-iAt/n} e^{-iBt/n})^n for a transverse-field Ising chain H = A + B with A = J sum_i X_i X_{i+1}, B = h sum_i Z_i (eq_1), on 2..12 qubits (default/spec instance: 2 qubits, J = h = t = 1). The Trotter number n is either supplied directly or chosen classically from the closed-form tradeoff optimum n* = sqrt(c_1/c_2) (eq_6) when a per-gate error strength epsilon is supplied. The noisy channel, trace distance and the D(n) scan (eq_3, eq_4, eq_5) are experiment/analysis steps, not part of the unitary operation, and are left to the runner.",
+    "source_python": "\"\"\"First-order Trotter (Lie-Trotter) circuit for a transverse-field Ising chain.\n\nH = A + B,  A = J * sum_{k} X_k X_{k+1}  (open chain),  B = h * sum_k Z_k.\nThe operation returned is the ideal (noise-free) Trotterized unitary\n    U_n(t) = ( e^{-i A t/n} e^{-i B t/n} )^n                      (eq_1)\nThe Trotter number n is either given in the instance or chosen from the\nclosed-form optimum of the error-tradeoff bound                   (eq_6).\n\nQubit convention: specification qubit k (1-indexed, k = 1 is the most\nsignificant bit of |q_1 q_2 ... q_N>) is mapped to Qiskit qubit index N - k,\nbecause Qiskit index 0 is the least significant bit.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nMAX_TROTTER_NUMBER = 2000\n\n\ndef _as_real(value, name):\n    \"\"\"Validate that value is a finite real number and return it as float.\"\"\"\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(f\"{name} must be a real number, got {value!r}\")\n    out = float(value)\n    if not math.isfinite(out):\n        raise ValueError(f\"{name} must be finite, got {value!r}\")\n    return out\n\n\ndef _as_positive_int(value, name, upper):\n    \"\"\"Validate that value is an integer in [1, upper] and return it.\"\"\"\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(f\"{name} must be an integer, got {value!r}\")\n    if value < 1 or value > upper:\n        raise ValueError(f\"{name} must be in [1, {upper}], got {value}\")\n    return int(value)\n\n\ndef optimal_trotter_number(coupling_j, field_h, time_t, epsilon, num_qubits):\n    \"\"\"eq_6: n* = sqrt(c_1 / c_2), rounded to the neighbouring integer that\n    minimises the bound D(n) <= c_1/n + c_2 n (eq_5).\n\n    c_1 = (t^2 / 2) * ||[A, B]||,  c_2 = 2 * epsilon.\n    For the open TFIM chain, [A, B] = -2 i J h sum_k (Y_k X_{k+1} + X_k Y_{k+1}),\n    so ||[A, B]|| <= 4 |J h| (N - 1), with equality for N = 2 (the two\n    commuting Pauli strings Y X and X Y give spectral norm 2).\n    \"\"\"\n    if epsilon <= 0.0:\n        raise ValueError(\"epsilon must be strictly positive to define n*\")\n    comm_norm = 4.0 * abs(coupling_j * field_h) * (num_qubits - 1)\n    c_1 = 0.5 * time_t * time_t * comm_norm  # Trotter-error coefficient (eq_2)\n    c_2 = 2.0 * epsilon  # accumulated gate-error coefficient (eq_4)\n    if c_1 == 0.0:\n        # A and B commute (or t = 0): a single Trotter step is exact.\n        return 1\n    n_real = math.sqrt(c_1 / c_2)  # continuous optimum (eq_6)\n    n_lo = max(1, int(math.floor(n_real)))\n    n_hi = max(1, int(math.ceil(n_real)))\n    d_lo = c_1 / n_lo + c_2 * n_lo\n    d_hi = c_1 / n_hi + c_2 * n_hi\n    n_star = n_lo if d_lo <= d_hi else n_hi\n    if n_star > MAX_TROTTER_NUMBER:\n        raise ValueError(\n            f\"optimal Trotter number {n_star} exceeds cap {MAX_TROTTER_NUMBER}; \"\n            \"increase epsilon or reduce t\"\n        )\n    return n_star\n\n\ndef build_circuit(instance):\n    \"\"\"Return the first-order Trotter circuit U_n(t) (eq_1) for the TFIM chain.\n\n    instance keys:\n      num_qubits : int in [2, 12]      (optional, default 2)\n      J          : real coupling of A = J sum X_k X_{k+1}\n      h          : real field of    B = h sum Z_k\n      t          : real evolution time\n      n          : positive int Trotter number   (either n or epsilon required)\n      epsilon    : positive real per-gate error; if given and n is absent,\n                   n is set to the eq_6 optimum n*.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n\n    num_qubits = instance.get(\"num_qubits\", 2)\n    num_qubits = _as_positive_int(num_qubits, \"num_qubits\", MAX_QUBITS)\n    if num_qubits < 2:\n        raise ValueError(\"num_qubits must be at least 2 so that A = J X X exists\")\n\n    if \"J\" not in instance or \"h\" not in instance or \"t\" not in instance:\n        raise ValueError(\"instance must contain 'J', 'h' and 't'\")\n    coupling_j = _as_real(instance[\"J\"], \"J\")\n    field_h = _as_real(instance[\"h\"], \"h\")\n    time_t = _as_real(instance[\"t\"], \"t\")\n\n    if \"n\" in instance and instance[\"n\"] is not None:\n        n_steps = _as_positive_int(instance[\"n\"], \"n\", MAX_TROTTER_NUMBER)\n    elif \"epsilon\" in instance and instance[\"epsilon\"] is not None:\n        epsilon = _as_real(instance[\"epsilon\"], \"epsilon\")\n        n_steps = optimal_trotter_number(coupling_j, field_h, time_t, epsilon, num_qubits)\n    else:\n        raise ValueError(\"instance must provide either 'n' or 'epsilon'\")\n\n    tau = time_t / n_steps  # elementary time slice t/n\n\n    sys_reg = QuantumRegister(num_qubits, \"sys\")\n    qc = QuantumCircuit(sys_reg, name=f\"trotter1_tfim_n{n_steps}\")\n\n    # eq_1: U_n(t) = (e^{-iA tau} e^{-iB tau})^n.  In the operator product the\n    # rightmost factor e^{-iB tau} acts first on the state, so each Trotter\n    # step applies the B-layer before the A-layer in circuit (time) order.\n    for _ in range(n_steps):\n        # B-layer: e^{-i h tau Z_k} = RZ(2 h tau) on every qubit\n        for q in range(num_qubits):\n            qc.rz(2.0 * field_h * tau, sys_reg[q])\n        # A-layer: e^{-i J tau X_k X_{k+1}} = RXX(2 J tau) on each chain bond.\n        # Spec qubit k -> Qiskit index num_qubits - k; the bond set is unchanged.\n        for q in range(num_qubits - 1):\n            qc.rxx(2.0 * coupling_j * tau, sys_reg[q], sys_reg[q + 1])\n\n    return qc",
+    "example_instance_json": "{\"num_qubits\": 2, \"J\": 1.0, \"h\": 1.0, \"t\": 1.0, \"n\": 4}",
+    "register_layout": [
+      "Register 'sys' has num_qubits = 2 qubits (cap 12).",
+      "Qiskit qubit 0 (least significant bit) = specification qubit q_2.",
+      "Qiskit qubit 1 (most significant bit) = specification qubit q_1 (the spec writes basis labels |q_1 q_2> with q_1 most significant).",
+      "No ancillas; the circuit is the bare unitary U_n(t). The runner supplies the initial state |00> and any noise/measurement."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: the `for _ in range(n_steps)` loop with the comment '# eq_1'; RZ(2 h tau) layer realises e^{-iB tau}, RXX(2 J tau) layer realises e^{-iA tau}",
+        "explanation": "First-order Lie-Trotter product (e^{-iA t/n} e^{-iB t/n})^n built from standard RZ and RXX rotations (RZ(phi) = e^{-i phi Z/2}, RXX(theta) = e^{-i theta XX/2}). The B-layer is placed before the A-layer within each step because the rightmost operator factor acts first."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": "optimal_trotter_number: line computing c_1 (comment 'Trotter-error coefficient (eq_2)')",
+        "explanation": "The operator-norm Trotter error bound is not an operation; only its coefficient c_1 = (t^2/2)||[A,B]|| enters classically, using the closed-form chain commutator norm bound 4|Jh|(N-1), exact for N = 2."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The trace distance is a post-processing figure of merit computed by the runner from output states; it is not part of the unitary circuit."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The imperfect-gate channel and its accumulated trace-distance bound describe noisy execution and analysis, which the runner performs; only its coefficient c_2 = 2 epsilon is used classically in optimal_trotter_number."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": "optimal_trotter_number: d_lo / d_hi evaluate the bound c_1/n + c_2 n for the two integer candidates",
+        "explanation": "The total tradeoff bound is evaluated only classically to pick between floor and ceiling of n*; the actual distance D(n) must be obtained by the runner's simulation."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "optimal_trotter_number (docstring cites eq_6; `n_real = math.sqrt(c_1 / c_2)`), invoked from build_circuit when 'epsilon' is supplied instead of 'n'",
+        "explanation": "Closed-form continuous optimum n* = sqrt(c_1/c_2) = t sqrt(||[A,B]||/(4 epsilon)), rounded to the integer neighbour minimising the eq_5 bound, then used as the Trotter number of the emitted circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Generalised the 2-qubit instance A = X_1 X_2, B = Z_1 + Z_2 to an open transverse-field Ising chain A = J sum_k X_k X_{k+1}, B = h sum_k Z_k on 2..12 qubits with arbitrary real J, h, t; the spec instance is the default num_qubits = 2, J = h = t = 1.",
+        "reason": "The task requires the operation to work for varying valid instance parameters; the 2-qubit TFIM is recovered exactly at num_qubits = 2."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Within each Trotter step the circuit applies the e^{-iB t/n} layer before the e^{-iA t/n} layer in time order.",
+        "reason": "In the operator product (e^{-iA t/n} e^{-iB t/n})^n the rightmost factor acts first on the state; circuit order must be the reverse of the written matrix order."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Specification qubit k (MSB-first labelling |q_1 q_2 ... q_N>) is mapped to Qiskit index N - k.",
+        "reason": "Qiskit index 0 is the least significant bit; for the symmetric chain this only relabels the bonds and does not change the unitary's action in the stated basis convention."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_6"
+        ],
+        "change": "The commutator norm ||[A,B]|| is replaced by the closed-form value 4|Jh|(N-1), which is exact for N = 2 (two commuting Pauli strings Y X + X Y have norm 2) and an upper bound (triangle inequality) for N > 2.",
+        "reason": "Operator construction is disallowed inside the module; a closed form is needed for the classical n* selection. For N > 2 the resulting n* minimises a slightly looser bound."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Noisy gate channels, trace-distance evaluation and the D(n) scan are excluded from the generated module; only the ideal unitary U_n(t) is emitted.",
+        "reason": "The deliverable is a measurement-free, unitary QuantumCircuit; noise injection, state comparison and minimisation over n are experiment steps for the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "When c_1 = 0 (J = 0, h = 0 or t = 0) the module returns n = 1 instead of n* = 0.",
+        "reason": "The continuous optimum degenerates; one exact Trotter step is the minimal valid circuit."
+      }
+    ],
+    "assumptions": [
+      "First-order product formula with two elementary evolutions (B-layer, A-layer) per Trotter step.",
+      "Gate imperfection enters only through the scalar epsilon used to choose n*; the emitted circuit itself is noise-free, and the runner is expected to apply any noise model.",
+      "'Statistical distance' is interpreted as the trace distance, as in the specification.",
+      "Trotter number is capped at 2000 to keep circuit size bounded; total qubits capped at 12.",
+      "The example instance uses n = 4 explicitly; supplying {\"epsilon\": 0.01} instead of \"n\" for the same J = h = t = 1, N = 2 yields n* = sqrt(2/0.02) = 10."
+    ],
+    "unresolved_issues": [
+      "The paper's actual gate-error model, distance measure, Trotter order and many-body Hamiltonian are unknown; the eq_6 optimum implemented here minimises an upper bound for the assumed additive per-gate trace-distance model and may differ from the paper's n*.",
+      "For num_qubits > 2 the commutator-norm formula used in n* selection is an upper bound rather than the exact spectral norm.",
+      "The integer rounding of n* is done on the bound, not on the exact D(n); the runner's scan over neighbouring n may select a different integer."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 36,
+    "depth": 24,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

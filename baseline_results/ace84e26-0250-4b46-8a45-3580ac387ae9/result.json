@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "ace84e26-0250-4b46-8a45-3580ac387ae9",
+  "parent_run_id": "3e35e113-7103-4198-8f48-c43e124dea2c",
+  "created_at": "2026-10-31T17:39:56.880376+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "4da6fa7ec59caaf94421967c0e3489fd59c32b78d404775ae6db60f1f0496825",
+  "source_specification_sha256": "c60cda284eb950c92c5547d72245e7fd88d4cfabb7cb4230fbc45b9ca2f01482",
+  "source_python_sha256": "d88e89419a879b2b5a0da5b3a9a361fe74d4f8debd1e2484259a5c5487221d94",
+  "elapsed_seconds": 80.661,
+  "usage": {
+    "input_tokens": 6007,
+    "output_tokens": 6946,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing the single-qudit (Gedik-type) permutation-class algorithm F^dagger U_sigma F for a ququart (d=4 encoded in 2 qubits), generalized to d=2^n with n<=12. The circuit is the operation only: QFT on the register, the dihedral permutation oracle (cyclic shift k->k+m or reflection k->m-k, built from X gates and multi-controlled-X incrementers), then the inverse QFT. Fed with |1>, the ideal output is |1> for shifts and |d-1> (=|3> for d=4) for reflections, up to a global phase.",
+    "source_python": "\"\"\"Single-qudit permutation-class ('parity') algorithm for a ququart.\n\nImplements the operation  F^dagger . U_sigma . F  (eq_5) on one qudit of\ndimension d = 2**n, encoded in n qubits.  For the paper's ququart, d = 4 and\nn = 2.  U_sigma is one of the 2d dihedral permutations (eq_3):\n    shift      sigma^+_m(k) = k + m  (mod d)\n    reflection sigma^-_m(k) = m - k  (mod d)\nThe runner prepares the input |1> and measures; ideal outcome is 1 for the\nshift class and d-1 for the reflection class (eq_5).\n\nRegister layout (eq_1): computational label k = sum_i 2**i * bit_i, with Qiskit\nqubit 0 the least significant bit.  For d = 4 this means q[0] = polarization\nbit p (H=0, V=1) and q[1] = spatial-mode bit s, so k = 2*s + p.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\n\nMAX_QUBITS = 12\n\n\ndef _validate(instance):\n    \"\"\"Validate the instance dictionary and return (d, n, m, perm_class).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object (dict)\")\n    if \"d\" not in instance or \"m\" not in instance or \"perm_class\" not in instance:\n        raise ValueError(\"instance must contain keys 'd', 'm' and 'perm_class'\")\n    d = instance[\"d\"]\n    if isinstance(d, bool) or not isinstance(d, int):\n        raise ValueError(\"d must be an integer\")\n    if d < 2 or (d & (d - 1)) != 0:\n        raise ValueError(\"d must be a power of two >= 2 (ququart: d=4)\")\n    n = d.bit_length() - 1\n    if n > MAX_QUBITS:\n        raise ValueError(\"d = 2**n requires n <= %d qubits\" % MAX_QUBITS)\n    m = instance[\"m\"]\n    if isinstance(m, bool) or not isinstance(m, int):\n        raise ValueError(\"m must be an integer\")\n    if m < 0 or m >= d:\n        raise ValueError(\"m must satisfy 0 <= m < d\")\n    cls = instance[\"perm_class\"]\n    if not isinstance(cls, str):\n        raise ValueError(\"perm_class must be a string\")\n    cls_l = cls.strip().lower()\n    if cls_l in (\"shift\", \"+\", \"even\", \"cyclic\"):\n        perm_class = \"shift\"\n    elif cls_l in (\"reflection\", \"-\", \"odd\", \"anticyclic\"):\n        perm_class = \"reflection\"\n    else:\n        raise ValueError(\"perm_class must be 'shift' ('+') or 'reflection' ('-')\")\n    return d, n, m, perm_class\n\n\ndef _add_power_of_two(qc, qubits, i):\n    \"\"\"Apply |x> -> |x + 2**i mod 2**n> via an incrementer on qubits[i:].\"\"\"\n    sub = qubits[i:]\n    r = len(sub)\n    for j in range(r - 1, 0, -1):\n        qc.mcx(sub[:j], sub[j])\n    qc.x(sub[0])\n\n\ndef _add_constant(qc, qubits, c, d):\n    \"\"\"Apply |x> -> |x + c mod d> (d = 2**n) using incrementers (eq_3, shifts).\"\"\"\n    c = c % d\n    n = len(qubits)\n    for i in range(n):\n        if (c >> i) & 1:\n            _add_power_of_two(qc, qubits, i)\n\n\ndef _permutation_oracle(qc, qubits, perm_class, m, d):\n    \"\"\"Black-box permutation unitary U_sigma |k> = |sigma(k)>  (eq_3).\n\n    shift:      k -> k + m (mod d)\n    reflection: k -> m - k (mod d), realized as bitwise complement\n                k -> d-1-k followed by addition of (m+1) mod d.\n    \"\"\"\n    if perm_class == \"reflection\":\n        for q in qubits:\n            qc.x(q)\n        _add_constant(qc, qubits, m + 1, d)\n    else:\n        _add_constant(qc, qubits, m, d)\n\n\ndef build_circuit(instance):\n    \"\"\"Return the unitary F^dagger U_sigma F on n = log2(d) qubits (eq_5).\n\n    instance keys:\n        d          : qudit dimension, power of two (4 for the ququart)\n        perm_class : 'shift' ('+') or 'reflection' ('-')\n        m          : permutation parameter in Z_d\n    \"\"\"\n    d, n, m, perm_class = _validate(instance)\n    q = QuantumRegister(n, \"q\")\n    qc = QuantumCircuit(q, name=\"perm_parity_d%d_%s_m%d\" % (d, perm_class, m))\n    qubits = list(range(n))\n    # eq_2: Fourier transform F|j> = d^{-1/2} sum_k omega^{jk}|k>, omega = exp(2 pi i / d).\n    # QFTGate(n) uses exactly this convention with qubit 0 as the least significant bit.\n    qc.append(QFTGate(n), qubits)\n    # eq_3 / eq_4: single query of the permutation black box.\n    _permutation_oracle(qc, qubits, perm_class, m, d)\n    # eq_5: inverse Fourier transform maps |psi_1> -> |1> and |psi_{d-1}> -> |d-1>.\n    qc.append(QFTGate(n).inverse(), qubits)\n    return qc",
+    "example_instance_json": "{\"d\": 4, \"perm_class\": \"reflection\", \"m\": 0}",
+    "register_layout": [
+      "q[0]: least significant bit of the ququart label k; polarization bit p (H=0, V=1) in the photonic encoding",
+      "q[1]: most significant bit of k; spatial-mode bit s, so k = 2*s + p (eq_1)",
+      "Total qubits for the example: 2 (d=4). General instance: n = log2(d) qubits, n <= 12",
+      "Runner input: |k=1> = |q1=0, q0=1>; ideal output |1> (shift class) or |3> = |q1=1, q0=1> (reflection class), up to global phase"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "module docstring and register layout comment in build_circuit; QuantumRegister(n, 'q') with q[0]=p (LSB), q[1]=s (MSB)",
+        "explanation": "Ququart label k = 2s + p is realized by the two-qubit register with Qiskit little-endian ordering, so q[0] carries the polarization bit and q[1] the spatial-mode bit."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: qc.append(QFTGate(n), qubits)",
+        "explanation": "QFTGate implements |j> -> d^{-1/2} sum_k exp(2 pi i jk/d)|k>, exactly the single-qudit Fourier transform F of eq_2 for d=2^n (omega=i for d=4)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_permutation_oracle, _add_constant, _add_power_of_two",
+        "explanation": "Cyclic shift k->k+m mod d built from multi-controlled-X incrementers; reflection k->m-k mod d built as bitwise complement (X on all qubits, k->d-1-k) followed by addition of m+1 mod d."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Eigen/mapping identity of the permutation acting on the Fourier state; it is a derived property of the composed circuit, not a separate gate."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: full sequence QFTGate(n), _permutation_oracle, QFTGate(n).inverse()",
+        "explanation": "The returned operation is F^dagger U_sigma F; applied to |1> it yields |1> (shift) or |d-1> (reflection) up to global phase. The computational-basis measurement itself is left to the runner."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Physical qubit order fixed to Qiskit little-endian: q[0] = polarization bit p (LSB), q[1] = spatial bit s (MSB), consistent with k = 2s + p.",
+        "reason": "Qiskit index 0 is the least significant bit; QFTGate's convention requires this ordering for eq_2 to hold as written."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_5"
+        ],
+        "change": "Generalized from d=4 to any d = 2^n with n <= 12 qubits; the ququart instance is d=4 (n=2).",
+        "reason": "Allows the operation to be built for varying valid parameters as required; the d=4 case is the paper's instance."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Reflection sigma^-_m realized as X on all qubits (k -> d-1-k) followed by addition of (m+1) mod d, instead of a direct 4x4 permutation matrix.",
+        "reason": "Dense unitaries are disallowed; the decomposition is exactly equal to the permutation k -> m-k mod d."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Input-state preparation of |1> and the computational-basis measurement are excluded from the module; only the unitary F^dagger U_sigma F is returned.",
+        "reason": "Task requires an operation, not an experiment; the runner supplies inputs and measurements."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Permutation set restricted to the 8-element dihedral family (shifts and reflections), not all 24 elements of S_4.",
+        "reason": "The single-qudit Fourier-probe algorithm is only deterministic on this family; follows the math-stage scope."
+      }
+    ],
+    "assumptions": [
+      "The experiment's 'parity' means shift class vs reflection class of the dihedral permutations, as in the Gedik-type algorithm.",
+      "Ideal noiseless gates; the linear-optical implementation (wave plates, beam splitters) is out of scope.",
+      "Global phases omega^{-m} / omega^{m} in eq_5 are irrelevant to the measured outcome.",
+      "Multi-controlled X gates (mcx) are synthesized by Qiskit without ancillas; for the d=4 example only cx and x gates occur."
+    ],
+    "unresolved_issues": [
+      "The abstract does not state which permutations were actually tested experimentally; the example instance uses the reflection sigma^-_0 (k -> -k mod 4).",
+      "Whether the experiment prepared |psi_1> directly or via an explicit QFT stage is unknown; the module includes an explicit QFT stage so the runner can input |1>."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 24,
+    "depth": 21,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

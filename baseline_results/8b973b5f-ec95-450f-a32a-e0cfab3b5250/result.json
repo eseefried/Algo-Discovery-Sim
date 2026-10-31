@@ -1,0 +1,135 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "8b973b5f-ec95-450f-a32a-e0cfab3b5250",
+  "parent_run_id": "c1c957e7-9405-4028-93cd-d67c2bd08553",
+  "created_at": "2026-10-31T17:50:14.180928+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "f7ad4d3a01987e1b32629a79ecf8c4ef1a27327714cfd9d5ce752ad50e585fc7",
+  "source_specification_sha256": "91c18e1dfee171575336d55c3e504bbbf833d3e7852e61962bcf377ecfd14650",
+  "source_python_sha256": "8a120b26434235f0fbf62d4e503923a385e91245495ec7b570a1a484c7d2f27c",
+  "elapsed_seconds": 109.854,
+  "usage": {
+    "input_tokens": 6705,
+    "output_tokens": 9215,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module building a palindromic reversible circuit G=(g_1,...,g_m, T, g_m,...,g_1) over the involutive gate library {X, CX, multi-controlled X}. Two instance modes: 'transposition' automatically synthesizes the conjugating half for f=(a b) (a single transposition of basis states, t(f)=1) using a Toffoli with n-1 controls as the middle gate, reproducing eq_6 for n=3, a=0, b=7; 'explicit' takes a user-supplied half gate list and middle gate and assembles the palindrome. The returned circuit is measurement-free and unitary (a permutation of basis states) and is literally equal to its own reverse gate list.",
+    "source_python": "\"\"\"Palindromic reversible circuits (self-inverse functions as conjugates of one Toffoli gate).\n\nGate library: NOT (X), CNOT (CX), multiple-controlled Toffoli (MCX); all are involutions.\nA palindrome G = (g_1, ..., g_m, T, g_m, ..., g_1) with g_1 applied first realizes\nf = H^{-1} o T o H with H = g_m o ... o g_1 (eq_2, eq_3).\nQubit index q (0-based, Qiskit little-endian) is circuit line q+1 of the specification;\nbasis state x = sum_q x_q 2^q (eq_1 encoding).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _check_int(value, name, low, high):\n    \"\"\"Validate that value is a plain int within [low, high].\"\"\"\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(f\"{name} must be an integer\")\n    if value < low or value > high:\n        raise ValueError(f\"{name}={value} out of range [{low}, {high}]\")\n    return value\n\n\ndef _normalize_gate(gate, n):\n    \"\"\"Validate a gate dict {'controls': [...], 'target': q} and return (tuple(controls), target).\"\"\"\n    if not isinstance(gate, dict):\n        raise ValueError(\"gate must be a dict with keys 'controls' and 'target'\")\n    if \"target\" not in gate or \"controls\" not in gate:\n        raise ValueError(\"gate must have keys 'controls' and 'target'\")\n    target = _check_int(gate[\"target\"], \"target\", 0, n - 1)\n    controls_raw = gate[\"controls\"]\n    if not isinstance(controls_raw, list):\n        raise ValueError(\"controls must be a list\")\n    controls = []\n    for c in controls_raw:\n        controls.append(_check_int(c, \"control\", 0, n - 1))\n    if len(set(controls)) != len(controls):\n        raise ValueError(\"controls must be distinct\")\n    if target in controls:\n        raise ValueError(\"target must not be a control\")\n    return (tuple(controls), target)\n\n\ndef _apply_toffoli(qc, controls, target):\n    \"\"\"Apply T_c (eq_4): c=0 -> X, c=1 -> CX, c=2 -> CCX, c>=3 -> MCX. All involutive.\"\"\"\n    c = len(controls)\n    if c == 0:\n        qc.x(target)\n    elif c == 1:\n        qc.cx(controls[0], target)\n    elif c == 2:\n        qc.ccx(controls[0], controls[1], target)\n    else:\n        qc.mcx(list(controls), target)\n\n\ndef _synthesize_transposition(n, a, b):\n    \"\"\"Build (half, middle) so that the palindrome realizes the transposition (a b) (eq_6).\n\n    d = a xor b; target p = highest differing bit; middle gate = Toffoli with all other\n    lines as positive controls (swaps 2^n-1 and 2^n-1-2^p, t=1, eq_4).\n    half (applied first, g_1 ... g_m): an X layer followed by CNOTs from p into the other\n    bits of d, mapping {a, b} onto the two states swapped by the middle gate.\n    \"\"\"\n    d = a ^ b\n    p = d.bit_length() - 1\n    half = []\n    for q in range(n):\n        if q == p:\n            continue\n        a_q = (a >> q) & 1\n        a_p = (a >> p) & 1\n        in_d = (d >> q) & 1\n        # after the CNOT layer bit q of the image of a equals a_q ^ m_q ^ (a_p if in_d);\n        # choose m_q so that this bit is 1.\n        m_q = 1 ^ a_q ^ (a_p if in_d else 0)\n        if m_q:\n            half.append(((), q))\n    for q in range(n):\n        if q != p and ((d >> q) & 1):\n            half.append(((p,), q))\n    controls = tuple(q for q in range(n) if q != p)\n    middle = (controls, p)\n    return half, middle\n\n\ndef build_circuit(instance):\n    \"\"\"Return the palindromic circuit for the given instance.\n\n    instance keys:\n      'n'    : number of lines (1..12)\n      'mode' : 'transposition' (keys 'a', 'b': basis states to swap, a != b)\n               or 'explicit' (keys 'half': list of gate dicts g_1..g_m, 'middle': gate dict)\n    Gate dicts are {'controls': [qubits], 'target': qubit} with 0-based qubit indices.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    if \"n\" not in instance or \"mode\" not in instance:\n        raise ValueError(\"instance requires keys 'n' and 'mode'\")\n    n = _check_int(instance[\"n\"], \"n\", 1, MAX_QUBITS)\n    mode = instance[\"mode\"]\n    if mode == \"transposition\":\n        if \"a\" not in instance or \"b\" not in instance:\n            raise ValueError(\"transposition mode requires keys 'a' and 'b'\")\n        a = _check_int(instance[\"a\"], \"a\", 0, 2 ** n - 1)\n        b = _check_int(instance[\"b\"], \"b\", 0, 2 ** n - 1)\n        if a == b:\n            raise ValueError(\"a and b must differ (f must be a genuine transposition)\")\n        half, middle = _synthesize_transposition(n, a, b)\n    elif mode == \"explicit\":\n        if \"half\" not in instance or \"middle\" not in instance:\n            raise ValueError(\"explicit mode requires keys 'half' and 'middle'\")\n        half_raw = instance[\"half\"]\n        if not isinstance(half_raw, list):\n            raise ValueError(\"half must be a list of gate dicts\")\n        half = [_normalize_gate(g, n) for g in half_raw]\n        middle = _normalize_gate(instance[\"middle\"], n)\n    else:\n        raise ValueError(\"mode must be 'transposition' or 'explicit'\")\n\n    lines = QuantumRegister(n, \"lines\")\n    qc = QuantumCircuit(lines, name=\"palindrome\")\n    # eq_2 / eq_3: first half g_1..g_m (applied first), middle gate, mirrored half g_m..g_1.\n    for controls, target in half:\n        _apply_toffoli(qc, controls, target)\n    _apply_toffoli(qc, middle[0], middle[1])\n    for controls, target in reversed(half):\n        _apply_toffoli(qc, controls, target)\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"mode\": \"transposition\", \"a\": 0, \"b\": 7}",
+    "register_layout": [
+      "lines[0] = qubit 0 = specification line 1 (least significant bit x_1)",
+      "lines[1] = qubit 1 = specification line 2 (bit x_2)",
+      "lines[2] = qubit 2 = specification line 3 (most significant bit x_3)",
+      "Basis state integer x = x_1 + 2 x_2 + 4 x_3; example swaps |000> (x=0) and |111> (x=7), fixing all other states",
+      "Example gate sequence (applied left to right): X q0, X q1, CX q2->q0, CX q2->q1, CCX (q0,q1)->q2, CX q2->q1, CX q2->q0, X q1, X q0 (9 gates, equal to its reverse)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Identification of self-inverse functions with involutions of S_{2^n} and the integer encoding of basis states; used to interpret the instance keys a, b (basis-state integers) and the qubit layout, but no code computes cycle decompositions."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: the three loops (half, middle, reversed(half)) emit a gate list equal to its own reverse over involutive gates; comment 'eq_2 / eq_3'",
+        "explanation": "The emitted gate list satisfies g_i = g_{k+1-i}; all gates are from the involutive X/CX/CCX/MCX library so the circuit realizes a self-inverse function."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit (odd-length palindrome assembly) and _synthesize_transposition (construction of the conjugating half)",
+        "explanation": "The circuit realizes H^{-1} o T o H with H the product of the first half; the labeling correction (H vs C) is reported in specification_changes."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_apply_toffoli (dispatch X/CX/CCX/MCX by number of controls) and _synthesize_transposition (middle gate with n-1 controls, t=1)",
+        "explanation": "The middle Toffoli with n-1 positive controls is a single transposition of 2^n-1 and 2^n-1-2^p, i.e. t(T_{n-1}) = 2^{n-1-(n-1)} = 1, matching t(f)=1 of the target transposition."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The derived cycle-type criterion is not checked in code: transposition mode only handles t(f)=1 (always realizable), and explicit mode accepts any half/middle, whose realized function automatically has the cycle type of the middle gate. No general involution-to-palindrome synthesizer is implemented."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "_synthesize_transposition with the example instance n=3, a=0, b=7; target p chosen as highest differing bit so the output equals the 9-gate list of eq_6",
+        "explanation": "Produces X_1, X_2, CNOT_{3->1}, CNOT_{3->2}, T_{1,2->3}, CNOT_{3->2}, CNOT_{3->1}, X_2, X_1 in Qiskit indices q0,q1,q2."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "With C = g_m o ... o g_1 (g_1 applied first) the palindrome realizes C^{-1} o g_{m+1} o C, not C o g_{m+1} o C^{-1}; the code applies the first half first, then the middle gate, then the mirrored half. The two statements agree after renaming C <-> C^{-1} and the realized function is unchanged in the example.",
+        "reason": "Composition-order bookkeeping; the specification's labeling of C was inverted relative to its definition."
+      },
+      {
+        "equation_ids": [
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Scope narrowed: automatic synthesis is implemented only for single transpositions f=(a b) (t(f)=1, middle gate with n-1 controls). Involutions with t(f)=2^j, j>=1, are supported only through the 'explicit' mode where the user supplies the half gate list and middle gate; no realizability test of the eq_5 criterion is performed.",
+        "reason": "A general conjugator-synthesis algorithm (finding and decomposing C for arbitrary cycle type) is not specified by the abstract and would exceed the compact-module scope."
+      },
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "Target line for the middle gate is fixed as the highest bit in which a and b differ, and the conjugating half is an X layer followed by CNOTs from the target into the other differing bits (X layer chosen so the images of a and b have all non-target bits equal to 1).",
+        "reason": "Makes the construction deterministic for all n and all a != b while reproducing the exact gate order of eq_6 for the n=3 example."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Instance gate dicts and the states a, b use 0-based Qiskit qubit indices (qubit q = specification line q+1, little-endian).",
+        "reason": "Alignment with Qiskit's physical qubit ordering; disclosed to avoid index-order confusion."
+      }
+    ],
+    "assumptions": [
+      "Gate library is restricted to X, CX, CCX and multi-controlled X with positive controls; all are involutive permutation gates, so the reverse circuit computes the inverse and palindromes realize self-inverse functions.",
+      "The 'explicit' mode trusts the user to provide a meaningful half/middle; any such input yields a valid palindrome realizing some involution conjugate to the middle gate.",
+      "Total qubit count n is capped at 12 and validated before register allocation; mcx with up to 11 controls is left to Qiskit's standard decomposition (no ancilla lines are added).",
+      "No extra-line or quantum-gate constructions for non-realizable involutions are implemented."
+    ],
+    "unresolved_issues": [
+      "The paper's precise realizability theorem (eq_5 is a derived candidate) is not available, so no criterion check is implemented and the general synthesis for t(f)=2^j, j>=1, is left to explicit user input.",
+      "Constructions with one extra circuit line or with non-permutation quantum gates for non-realizable involutions are out of scope."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 23,
+    "depth": 17,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

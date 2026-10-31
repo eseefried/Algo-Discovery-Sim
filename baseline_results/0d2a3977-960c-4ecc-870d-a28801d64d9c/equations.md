@@ -1,0 +1,156 @@
+# Abstract to equations
+
+Status: **partial**
+
+Model: `claude-fable-5-1`
+
+Mathematics has not been independently verified.
+
+Spatial search for a single marked vertex w on an undirected graph G=(V,E) with N=|V| vertices by (i) a discrete-time coined quantum walk that may take k walk steps per oracle query, and (ii) a continuous-time quantum walk whose cost is counted as oracle (query) time; compare the number of oracle queries to the hitting/runtime of the corresponding classical random walk, with the abstract claiming quadratic speedups for both standard variants and a cubic speedup when the discrete-time walk takes multiple walk steps per query.
+
+Scope: Finite scope chosen because no experiment_scope was supplied: a discrete-time coined quantum walk search operator with k walk steps per oracle query, U_k = W^k Q_w, on a tiny explicit instance (the 2-dimensional hypercube, i.e. the 4-cycle, N=4, degree d=2, one marked vertex w=00, k=2 steps per query, Grover coin), plus the corresponding continuous-time search Hamiltonian written only as background for comparison. Outside scope: the paper's specific graph family on which the cubic speedup is proven, its asymptotic runtime analysis, the choice of k as a function of N, the continuous-time jumping rate gamma and its optimality, the formal query-time model for the continuous-time walk, and any proof that continuous-time walks outperform discrete-time ones.
+
+## Symbols
+
+- $G=(V,E)$: Undirected graph being searched; N=|V| vertices, regular of degree d in the chosen instance; domain: finite simple graph
+- $N$: Number of vertices; domain: positive integer; N=4 in the tiny instance
+- $d$: Vertex degree (coin dimension); domain: positive integer; d=2 in the tiny instance
+- $w$: Marked vertex to be found; domain: w \in V; w=00 in the tiny instance
+- $|x\rangle$: Computational-basis state of the vertex register labelling vertex x; domain: x \in \{0,1\}^{n}, n=\lceil \log_2 N \rceil
+- $|c\rangle$: Coin (direction) basis state; domain: c \in \{0,\dots,d-1\}
+- $S$: Flip-flop or hypercube shift operator moving the walker along direction c; domain: unitary on \mathbb{C}^{N}\otimes\mathbb{C}^{d}
+- $C$: Grover (diffusion) coin operator; domain: unitary on \mathbb{C}^{d}
+- $W$: One (unmarked) quantum walk step; domain: unitary on \mathbb{C}^{N}\otimes\mathbb{C}^{d}
+- $Q_w$: Oracle marking vertex w by a phase flip; domain: unitary on \mathbb{C}^{N}\otimes\mathbb{C}^{d}
+- $k$: Number of walk steps applied per oracle query; domain: positive integer; k=1 is the standard discrete-time walk, k=2 in the tiny instance
+- $q$: Number of oracle queries (the counted cost of the discrete-time algorithm); domain: non-negative integer
+- $A$: Adjacency matrix of G; domain: N\times N symmetric 0/1 matrix
+- $\gamma$: Jumping rate (hopping strength) of the continuous-time walk; domain: \gamma>0
+- $t$: Evolution time of the continuous-time walk, counted as query time; domain: t\ge 0
+- $T_{c}$: Runtime (hitting time) of the corresponding classical random walk search; domain: positive real / integer number of classical steps
+- $p(q)$: Success probability of measuring the marked vertex after q queries; domain: [0,1]
+
+## eq_1: Oracle (marked-vertex phase flip)
+
+$$
+Q_w = \left(I_N - 2|w\rangle\langle w|\right)\otimes I_d
+$$
+
+One oracle query flips the sign of all coin states located at the marked vertex and acts trivially elsewhere.
+
+Provenance: `standard_background`. Standard Grover-type marking oracle used in coined quantum walk search; the abstract names the oracle query as the cost unit but does not define it.
+
+Equation assumptions:
+
+- Single marked vertex
+- Oracle acts as a phase flip independent of the coin state
+
+## eq_2: One quantum walk step (Grover coin and shift)
+
+$$
+W = S\,(I_N\otimes C),\quad C = 2|s_c\rangle\langle s_c| - I_d,\quad |s_c\rangle=\frac{1}{\sqrt{d}}\sum_{c=0}^{d-1}|c\rangle,\quad S|x,c\rangle = |x\oplus e_c, c\rangle
+$$
+
+A coined walk step applies the Grover coin to the coin register, then shifts the walker along the chosen direction. The shift S|x,c> = |x xor e_c, c> is the hypercube shift used in the tiny instance (flip bit c of the vertex label); on a general graph S is the flip-flop shift to the c-th neighbour.
+
+Provenance: `standard_background`. Standard discrete-time coined quantum walk; required to give meaning to 'walk step' in the abstract, which does not specify coin or graph.
+
+Equation assumptions:
+
+- Regular graph of degree d
+- Grover coin
+- Hypercube (bit-flip) shift for the chosen instance; the paper's graph and shift are unknown
+
+## eq_3: Discrete-time search with k walk steps per query
+
+$$
+U_k = W^{k} Q_w,\qquad |\psi_q\rangle = U_k^{\,q}\,|\psi_0\rangle,\qquad |\psi_0\rangle = \frac{1}{\sqrt{Nd}}\sum_{x\in V}\sum_{c=0}^{d-1}|x,c\rangle
+$$
+
+Each counted oracle query is followed by k unmarked walk steps; the cost of the algorithm is the number of queries q, not the number q·k of walk steps. k=1 recovers the usual one-step-per-query discrete-time search.
+
+Provenance: `abstract_inferred`. The abstract states that the discrete-time walk is allowed to take multiple walk steps per query with only queries counted; interleaving W^k with Q_w is the direct formalization. The uniform initial state is the standard choice and is an assumption.
+
+Abstract evidence: we allow the discrete-time quantum walk to also take multiple walk steps per oracle query while only counting queries
+
+Equation assumptions:
+
+- Walk steps are grouped as exactly k consecutive steps after each query
+- Uniform initial superposition over vertices and coin directions
+- The paper's choice of k (possibly N-dependent) is unknown
+
+## eq_4: Continuous-time search Hamiltonian and its multi-step interpretation
+
+$$
+H = -\gamma A - |w\rangle\langle w|,\qquad |\psi(t)\rangle = e^{-iHt}|\psi_0\rangle,\qquad e^{-iHt}\approx\left(e^{i\gamma A\,\Delta t}\,e^{i|w\rangle\langle w|\,\Delta t}\right)^{t/\Delta t}
+$$
+
+Childs-Goldstone continuous-time spatial search on N vertices (no coin register). The approximate Trotter factorization shows that evolution for query time t interleaves oracle phases with walk evolutions whose number is not counted separately, which is the abstract's point that a continuous-time walk 'effectively performs multiple walk steps per query'. The equality on the left is exact; the factorization is an approximation that becomes exact as Delta t -> 0.
+
+Provenance: `abstract_inferred`. The Hamiltonian form is standard background (Childs-Goldstone); the Trotter reading is inferred from the abstract's claim about multiple effective walk steps per query. The abstract does not give H, gamma, or a formal query-time model.
+
+Abstract evidence: a continuous-time walk can effectively perform multiple walk steps per query while only counting query time
+
+Equation assumptions:
+
+- Adjacency-matrix (or, for regular graphs, equivalently Laplacian) walk Hamiltonian
+- gamma set to the critical value for the graph, which is not given in the abstract
+- Query time t is the cost measure for the continuous-time algorithm
+
+## eq_5: Success probability and query-count speedup definitions
+
+$$
+p(q) = \left\| \left(\langle w|\otimes I_d\right)|\psi_q\rangle \right\|^{2},\qquad q_{\ast} = \min\{q : p(q)=\Theta(1)\},\qquad \text{quadratic: } q_{\ast}=\Theta\!\left(T_c^{1/2}\right),\quad \text{cubic: } q_{\ast}=\Theta\!\left(T_c^{1/3}\right)
+$$
+
+Success probability of measuring the marked vertex after q queries; the algorithm's query complexity q* is the number of queries needed to reach constant success probability. A quadratic (cubic) speedup over the classical random walk means q* scales as the square (cube) root of the classical random-walk runtime T_c. These are asymptotic (Theta) relations, not exact equalities.
+
+Provenance: `abstract_inferred`. The abstract asserts quadratic speedups for both standard walks and a cubic speedup for the multi-step discrete-time walk; the definitions of p(q), q*, and the power-law comparison to T_c are the standard formalization of those claims. The specific scalings of q* and T_c with N for the paper's graph are not given in the abstract.
+
+Abstract evidence: it is a cubic speedup over its corresponding classical random walk
+
+Equation assumptions:
+
+- Speedup is measured as the exponent relating quantum query count to classical random-walk runtime
+- Constant success probability (possibly after amplitude amplification) is the stopping criterion
+
+## Registers
+
+- vertex: n = \lceil \log_2 N \rceil (2 qubits in the tiny instance) qubits; Holds the walker's position x in binary; qubit j stores bit j of the vertex label, with w=00 the marked vertex
+- coin: \lceil \log_2 d \rceil (1 qubit in the tiny instance) qubits; Holds the direction c; for the 2-dimensional hypercube, c selects which vertex-label bit the shift flips
+
+## Initial state
+
+|\psi_0\rangle = \frac{1}{\sqrt{Nd}}\sum_{x}\sum_{c}|x\rangle|c\rangle, prepared by Hadamards on all vertex and coin qubits (N=4, d=2: H^{\otimes 3}|000\rangle).
+
+## Measurement
+
+Measure the vertex register in the computational basis (coin register may be discarded); the outcome is a vertex label x. Estimate p(q) from the fraction of shots with x = w.
+
+## Classical postprocessing
+
+Compare the measured outcome with the marked vertex w (equivalently one classical oracle check). Record p(q) versus the number of queries q, identify the first q with high success probability, and compare with the classical random-walk hitting time T_c of the same graph to extract the empirical speedup exponent (eq_5). The abstract's asymptotic claims cannot be verified on an N=4 instance; the instance is only a correctness check of the circuit assembly.
+
+## Algorithm steps
+
+1. Prepare the uniform superposition over all vertex and coin basis states (eq_3 initial state). (eq_3)
+2. Apply the oracle Q_w, a phase flip on the marked vertex w controlled only by the vertex register (one counted query). (eq_1)
+3. Apply k=2 consecutive walk steps W = S (I ⊗ C): Grover coin on the coin register (Pauli X for d=2), then the controlled shift flipping vertex bit c; these steps are not counted as queries. (eq_2, eq_3)
+4. Repeat the query-plus-k-steps block for q iterations, giving |ψ_q⟩ = (W^k Q_w)^q |ψ_0⟩; for the tiny instance sweep q = 0,1,2,3 to record p(q). (eq_3, eq_5)
+5. (Comparison only, not in circuit scope) The continuous-time counterpart evolves under H = -γA - |w⟩⟨w| for query time t with the multi-step Trotter interpretation. (eq_4)
+
+## Assumptions
+
+- No experiment_scope was provided, so the tiny instance (2-dimensional hypercube, N=4, d=2, w=00, k=2, Grover coin, hypercube bit-flip shift) is a reconstruction choice, not the paper's graph.
+- The discrete-time multi-step algorithm is formalized as alternating one oracle application with exactly k walk steps; the paper may order or group operations differently.
+- The continuous-time Hamiltonian is taken as the standard Childs-Goldstone adjacency-matrix form with an unspecified jumping rate gamma.
+- Speedups are interpreted as power-law relations between quantum query count and classical random-walk runtime, with Theta notation (asymptotic, not exact).
+
+## Missing information
+
+- The specific graph family on which the paper demonstrates that continuous-time search outperforms one-step-per-query discrete-time search and on which the multi-step discrete-time walk achieves a cubic speedup.
+- The value of k (number of walk steps per query), including any dependence on N, used in the paper.
+- The explicit runtime scalings: classical random-walk hitting time T_c(N), discrete-time query counts for k=1 and for the multi-step variant, and the continuous-time query time, as functions of N.
+- The critical jumping rate gamma and the formal definition of 'query time' for the continuous-time walk.
+- Whether amplitude amplification or repeated runs are included in the counted query complexity.
+- Any theorems, proofs, or numerical results; none are available from the abstract and none have been verified here.
