@@ -300,6 +300,47 @@ The pipeline stops at the first unsuccessful stage. It records `equations`
 for input/provider failures. Exit codes match the stage CLIs: 0 on success, 1 for
 input or provider errors, and 2 when a stage abstains or fails.
 
+## Black-box code generation and simulation (any spec source)
+
+`run-code-sim` runs stages 2–3 only (equations to Qiskit, Docker validation, Aer
+simulation) on a math specification from any producer, such as a multi-agent swarm.
+Different stage-one methods then share an identical code stage and can be compared
+directly.
+
+The input is one JSON file per paper:
+
+```json
+{
+  "source": "swarm",
+  "arxiv_id": "1406.2040",
+  "specification": {"status": "partial", "problem": "...", "equations": [...], "...": "..."}
+}
+```
+
+`specification` uses exactly the block-one schema (`uv run run-code-sim --print-schema`
+prints the full JSON schema). `arxiv_id` selects the dataset abstract; alternatively
+supply `"abstract": "..."` (and optionally `"experiment_scope"`). Block-one rules apply
+unchanged: `status` must be `specified` or `partial` to continue, equation IDs must be
+unique, and any `abstract_quote` must appear verbatim in the abstract. A spec that
+fails these checks is recorded as `invalid_spec` at the equations stage (exit 2), like
+invalid model output. A block-one `result.json` is also accepted directly.
+
+```bash
+# One spec:
+uv run run-code-sim --spec swarm_specs/1406.2040.json
+
+# A folder of <arxiv_id>.json specs, resumable, scored at the end:
+scripts/run_code_sim.sh swarm_specs swarm_results 4
+
+# The single agent's specs, in the same format, through the same path:
+uv run python scripts/export_specs.py baseline_results single_agent_specs
+scripts/run_code_sim.sh single_agent_specs single_agent_results 4
+```
+
+Each spec is saved as an equation run with `model` set to `external:<source>` and zero
+usage, so the existing hashes, artifacts, `pipeline.json`, and `evaluate-baseline`
+work unchanged. Model and token counts of the external producer are not recorded here.
+
 
 `data/circuit_dataset_300_v1/` holds 300 arXiv quantum-algorithm papers (abstracts, full text, extracted equations), Qiskit textbook chapters, and a `manifest.jsonl` catalog. See its [README](data/circuit_dataset_300_v1/README.md).
 
