@@ -41,3 +41,5 @@ ls data/circuit_dataset_300_v1/abstracts | sed 's/^arxiv-//; s/\.txt$//' |
   xargs -P "$PARALLEL" -I{} bash -c 'run_one "$1"' _ {}
 
 echo "Done. Rerun the same command to retry papers that ended in an error."
+echo "Scoring equations against the papers (no model calls)..."
+.venv/bin/evaluate-baseline --results "$OUT" | tail -n 3
