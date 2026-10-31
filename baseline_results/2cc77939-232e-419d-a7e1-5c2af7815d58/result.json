@@ -1,0 +1,128 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "2cc77939-232e-419d-a7e1-5c2af7815d58",
+  "parent_run_id": "4225f4fe-c4d9-4c72-ab35-92ade22b8a76",
+  "created_at": "2026-10-31T16:43:57.949919+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "a23c076476f3105e32fdf1ec4182b2d825a094cb07871fcae05fbff46ecf0de8",
+  "source_specification_sha256": "11329b7c4a8dc7eb0627fdd824cc710309fe2c4b585138a04e9ab82c84fd7cd6",
+  "source_python_sha256": "c8d611c72b979b105c68bc152280b133aed7b3c8dbbc46f721c62a6e6dce9c1a",
+  "elapsed_seconds": 80.496,
+  "usage": {
+    "input_tokens": 7768,
+    "output_tokens": 7034,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements, as a single-qubit Qiskit operation, the piecewise-constant singlet-triplet (S-T_0) control propagator of the specification: for a user-supplied exchange sequence {J_k, tau_k} with fixed Overhauser gradient h, each segment exp[-i tau_k/2 ((J_k+delta J_k) sigma_z + (h+delta h) sigma_x)] is compiled exactly into standard gates ry(-a_k) rz(Omega_k tau_k) ry(a_k) with a_k = atan2(h+delta h, J_k+delta J_k) and Omega_k the Rabi frequency. Optional quasi-static error parameters delta_h (nuclear-bath gradient shift) and epsilon_J (multiplicative voltage noise, delta J_k = epsilon_J J_k) let the runner build the noisy propagator U(T) of eq_1/eq_2 for any fixed noise realization, so DCG candidates can be compared against uncorrected gates externally. The classical numerical synthesis (eq_4, eq_5) that finds the DCG sequence is not performed inside the module.",
+    "source_python": "\"\"\"Singlet-triplet (S-T_0) piecewise-constant control propagator as a Qiskit circuit.\n\nImplements eq_1 (segment Hamiltonian H_k = (J_k+dJ_k)/2 sigma_z + (h+dh)/2 sigma_x, with\nquasi-static error terms dJ_k = epsilon_J * J_k and dh = delta_h) and eq_2 (ordered\nproduct of segment unitaries exp[-i tau_k H_k], segment 1 acting first).\n\nEach segment is an SU(2) rotation about the axis n_k = (h+dh, 0, J_k+dJ_k)/Omega_k by\nangle Omega_k * tau_k, with Omega_k = sqrt((J_k+dJ_k)^2 + (h+dh)^2).  Writing\nn_k = (sin a_k, 0, cos a_k) with a_k = atan2(h+dh, J_k+dJ_k), the exact identity\n    exp(-i theta/2 n_k.sigma) = R_y(a_k) R_z(theta) R_y(-a_k)\nis used, which in circuit (time) order is ry(-a_k), rz(theta), ry(a_k).\n\nThe module compiles a given sequence; it does not search for one (eq_4/eq_5 are classical\npost-processing outside this operation).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nNUM_QUBITS = 1\n\n\ndef _as_real(value, name):\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(f\"{name} must be a real number\")\n    x = float(value)\n    if not math.isfinite(x):\n        raise ValueError(f\"{name} must be finite\")\n    return x\n\n\ndef _as_real_list(values, name):\n    if not isinstance(values, (list, tuple)) or len(values) == 0:\n        raise ValueError(f\"{name} must be a non-empty list of real numbers\")\n    return [_as_real(v, f\"{name}[{i}]\") for i, v in enumerate(values)]\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object (dict)\")\n    allowed = {\"h\", \"J\", \"tau\", \"delta_h\", \"epsilon_J\", \"J_min\", \"J_max\"}\n    unknown = set(instance.keys()) - allowed\n    if unknown:\n        raise ValueError(f\"unknown instance keys: {sorted(unknown)}\")\n    for key in (\"h\", \"J\", \"tau\"):\n        if key not in instance:\n            raise ValueError(f\"instance is missing required key '{key}'\")\n    h = _as_real(instance[\"h\"], \"h\")\n    j_list = _as_real_list(instance[\"J\"], \"J\")\n    tau_list = _as_real_list(instance[\"tau\"], \"tau\")\n    if len(j_list) != len(tau_list):\n        raise ValueError(\"J and tau must have the same number of segments N\")\n    for i, t in enumerate(tau_list):\n        if t <= 0.0:\n            raise ValueError(f\"tau[{i}] must be strictly positive\")\n    delta_h = _as_real(instance.get(\"delta_h\", 0.0), \"delta_h\")\n    epsilon_j = _as_real(instance.get(\"epsilon_J\", 0.0), \"epsilon_J\")\n    j_min = _as_real(instance.get(\"J_min\", 0.0), \"J_min\")\n    j_max = instance.get(\"J_max\", None)\n    if j_max is not None:\n        j_max = _as_real(j_max, \"J_max\")\n        if j_max < j_min:\n            raise ValueError(\"J_max must be >= J_min\")\n    for i, jk in enumerate(j_list):\n        if jk < j_min:\n            raise ValueError(f\"J[{i}] violates the lower control bound J_min={j_min}\")\n        if j_max is not None and jk > j_max:\n            raise ValueError(f\"J[{i}] violates the upper control bound J_max={j_max}\")\n    if NUM_QUBITS > MAX_QUBITS:\n        raise ValueError(\"qubit budget exceeded\")\n    return h, j_list, tau_list, delta_h, epsilon_j\n\n\ndef _append_segment(qc, qubit, jz, hx, tau):\n    \"\"\"eq_2 segment: exp[-i tau/2 (jz sigma_z + hx sigma_x)] via ry(-a) rz(theta) ry(a).\"\"\"\n    omega = math.hypot(jz, hx)\n    if omega == 0.0:\n        return\n    theta = omega * tau\n    a = math.atan2(hx, jz)\n    qc.ry(-a, qubit)\n    qc.rz(theta, qubit)\n    qc.ry(a, qubit)\n\n\ndef build_circuit(instance):\n    \"\"\"Return the (ideal or fixed-noise-realization) S-T_0 propagator U(T) as a circuit.\n\n    instance keys:\n      h        : Overhauser gradient (sigma_x coefficient, fixed during the gate)\n      J        : list of N exchange values J_k (sigma_z coefficients)\n      tau      : list of N segment durations tau_k > 0\n      delta_h  : optional quasi-static nuclear-bath shift of h (default 0)\n      epsilon_J: optional relative voltage-noise amplitude, dJ_k = epsilon_J*J_k (default 0)\n      J_min    : optional lower control bound (default 0, exchange non-negative)\n      J_max    : optional upper control bound (default: unbounded)\n    \"\"\"\n    h, j_list, tau_list, delta_h, epsilon_j = _validate(instance)\n    qreg = QuantumRegister(NUM_QUBITS, \"q\")\n    qc = QuantumCircuit(qreg, name=\"st0_dcg_sequence\")\n    # eq_1: effective per-segment coefficients including the quasi-static error terms.\n    hx = h + delta_h\n    for jk, tk in zip(j_list, tau_list):\n        jz = jk * (1.0 + epsilon_j)\n        # eq_2: ordered product, segment k=1 applied first (rightmost factor).\n        _append_segment(qc, qreg[0], jz, hx, tk)\n    return qc",
+    "example_instance_json": "{\"h\": 1.0, \"J\": [0.5, 3.0, 1.2, 3.0, 0.5], \"tau\": [0.9, 0.7, 1.1, 0.7, 0.9], \"delta_h\": 0.0, \"epsilon_J\": 0.0, \"J_min\": 0.0, \"J_max\": 10.0}",
+    "register_layout": [
+      "q[0]: the single logical singlet-triplet qubit; computational |0> = |S> (singlet), |1> = |T_0> (triplet-zero). Exchange J acts as sigma_z, Overhauser gradient h as sigma_x."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: lines computing hx = h + delta_h and jz = jk*(1+epsilon_J) (comment 'eq_1'); _append_segment realizes exp[-i tau/2 (jz sigma_z + hx sigma_x)]",
+        "explanation": "The S-T_0 Hamiltonian with J on sigma_z and h on sigma_x is realized segment by segment; the error Hamiltonian is included as quasi-static (constant over the gate) shifts delta_h and delta J_k = epsilon_J J_k supplied in the instance (zero gives the ideal Hamiltonian)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_append_segment and the loop in build_circuit (comment 'eq_2')",
+        "explanation": "Piecewise-constant control with bounds J_min <= J_k <= J_max is validated in _validate; the ordered product of segment unitaries is built with segment 1 first, each segment compiled exactly into ry(-a) rz(Omega*tau) ry(a)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The first-order Magnus/toggling-frame expansion is the analytic motivation; the circuit implements the full (non-perturbative) propagator for a given quasi-static noise realization rather than the truncated expansion."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The DCG cancellation conditions Phi_1^(h)=Phi_1^(J)=0 and U_0(T)=G are classical constraints evaluated during synthesis; the module compiles a given sequence and does not test or enforce them."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Numerical minimization of the cost function is classical post-processing not representable as a unitary circuit operation and is excluded (no optimizer or operator construction inside the module)."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed from DCG synthesis (numerical search for J_k, tau_k) to compilation of a user-supplied piecewise-constant sequence into a circuit.",
+        "reason": "Synthesis is a classical optimization; the deliverable is a measurement-free unitary operation with no simulation or operator construction."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "Noise is represented as fixed quasi-static instance parameters delta_h and epsilon_J (constant across all segments) and included exactly in each segment's rotation, instead of as the truncated first-order error operator Phi_1.",
+        "reason": "A circuit must be unitary and bound; a fixed noise realization yields a unitary U(T) that an external runner can compare against the ideal gate to probe leading-order cancellation."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Each segment exp[-i tau_k/2 (J_k sigma_z + h sigma_x)] is decomposed as ry(-a_k) rz(Omega_k tau_k) ry(a_k), a_k = atan2(h, J_k), Omega_k = sqrt(J_k^2+h^2).",
+        "reason": "Exact SU(2) identity using standard gates (no dense unitaries); global phase is preserved exactly."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Default lower bound J_min = 0 enforced; J_max optional (enforced only if supplied).",
+        "reason": "The abstract gives no explicit constraint set; non-negative exchange is the assumed realistic constraint."
+      }
+    ],
+    "assumptions": [
+      "Basis |0>=|S>, |1>=|T_0> with J along sigma_z and h along sigma_x; sign conventions may differ from the paper.",
+      "Nuclear-bath dephasing is modelled at leading order as a quasi-static c-number shift delta_h constant over the gate; voltage noise as multiplicative epsilon_J on every J_k, also constant over the gate.",
+      "The example sequence (h=1, N=5, J in [0,10]) is a generic bounded piecewise-constant sequence illustrating the ansatz; it is NOT claimed to be an optimized DCG satisfying eq_4.",
+      "Units are such that hbar=1 and h sets the frequency scale; tau_k are in units of 1/h.",
+      "Only one logical qubit; leakage to |T_+>,|T_-> and two-qubit gates are ignored."
+    ],
+    "unresolved_issues": [
+      "No optimized DCG sequence is available from the abstract, so the example instance does not implement a verified error-cancelling gate; an external optimizer (eq_5) must supply J_k, tau_k satisfying eq_4.",
+      "The paper's actual perturbative non-Markovian framework, cost function, constraint set and device parameters are unknown; only the quasi-static leading-order model is represented.",
+      "Global phase of the target gate and the paper's axis conventions cannot be confirmed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 1,
+    "gate_count": 15,
+    "depth": 15,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

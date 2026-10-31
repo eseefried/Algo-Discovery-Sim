@@ -1,0 +1,154 @@
+# Abstract to equations
+
+Status: **partial**
+
+Model: `claude-fable-5-1`
+
+Mathematics has not been independently verified.
+
+Exact quantum learning of an unknown multilinear polynomial p of degree d in n variables over F_q, given black-box (oracle) query access to p; determine all coefficients using O(n^{d-1}) queries for constant d (vs. Omega(n^d) classically). For q = 2 this is identifying a codeword of the binary Reed-Muller code RM(d, n).
+
+Scope: Since no experiment_scope was supplied, one smallest useful construction is chosen: a Bernstein-Vazirani-type algorithm applied to order-(d-1) finite differences (derivatives) of p, which are affine functions whose linear coefficients are the degree-d coefficients of p; degree-d coefficients are learned first and the procedure recurses on p minus its known top-degree part. Tiny explicit instance: q = 2, d = 2, n = 3 (RM(2,3) codeword), input register of 3 qubits plus one target qubit, using 2 queries per derivative set S = {k}, k = 1,2,3, one further Bernstein-Vazirani query for the linear part and one classical query for the constant. Outside scope: the paper's actual algorithm and constants, the quantum lower bound establishing optimality, the classical Omega(n^d) lower-bound proof, the treatment of non-prime q (trace-based characters), and any Reed-Muller-specific coding results beyond the identification of RM(d,n) codewords with degree-d multilinear polynomials over F_2.
+
+## Symbols
+
+- $n$: number of variables; domain: positive integer
+- $d$: degree of the multilinear polynomial (treated as a constant); domain: integer, 0 \le d \le n
+- $q$: size of the finite field F_q (assumed prime in this reconstruction so that \omega^{a} is a well-defined additive character); domain: prime (abstract allows any prime power)
+- $p(x)$: unknown multilinear polynomial to be identified; domain: F_q^n \to F_q
+- $c_M$: coefficient of the monomial \prod_{i\in M} x_i; domain: F_q, for M \subseteq [n], |M| \le d
+- $S$: subset of variable indices of size d-1 defining a finite difference (derivative); domain: S \subseteq [n], |S| = d-1
+- $1_A$: indicator vector of A \subseteq [n] (entry 1 on A, 0 elsewhere); domain: F_q^n
+- $y$: input vector supported on the complement of S; domain: F_q^{[n]\setminus S} (embedded in F_q^n with zeros on S)
+- $\omega$: primitive q-th root of unity e^{2\pi i/q}; domain: complex unit circle
+- $O_p$: standard additive query oracle for p; domain: unitary on (\mathbb{C}^q)^{\otimes n} \otimes \mathbb{C}^q
+- $|\psi_k\rangle$: Fourier basis state of the target qudit used for phase kickback with multiplier k; domain: unit vector in \mathbb{C}^q, k \in F_q
+- $F_q$: quantum Fourier transform over Z_q on one qudit; domain: q \times q unitary
+- $Q(n,d)$: number of oracle queries used by the reconstructed algorithm; domain: non-negative integer
+
+## eq_1: Multilinear polynomial of degree d
+
+$$
+p(x) = \sum_{M \subseteq [n],\, |M| \le d} c_M \prod_{i \in M} x_i, \qquad c_M \in F_q,\; x \in F_q^n
+$$
+
+Parametrisation of the unknown function: each variable appears with exponent at most 1, so p is determined by the \sum_{k \le d} \binom{n}{k} = \Theta(n^d) coefficients c_M. For q = 2, these functions are exactly the codewords of the binary Reed-Muller code RM(d,n).
+
+Provenance: `abstract_inferred`. Direct formalisation of the phrase 'multilinear polynomial of degree d in n variables over F_q'; the Reed-Muller remark in the abstract is consistent with this standard identification.
+
+Abstract evidence: an unknown multilinear polynomial of degree d in n variables over a finite field Fq
+
+Equation assumptions:
+
+- The 'degree' is total degree; all monomials of degree \le d may be present.
+
+## eq_2: Query oracle and phase kickback
+
+$$
+O_p |x\rangle |b\rangle = |x\rangle |b + p(x) \bmod q\rangle, \qquad |\psi_k\rangle = \frac{1}{\sqrt{q}} \sum_{b \in F_q} \omega^{-k b} |b\rangle, \qquad O_p |x\rangle |\psi_k\rangle = \omega^{k\, p(x)} |x\rangle |\psi_k\rangle
+$$
+
+Standard additive oracle over F_q and the Fourier eigenstates of the target qudit; querying with target |\psi_{\pm 1}\rangle imprints the phase \omega^{\pm p(x)} on the input register. For q = 2, |\psi_1\rangle = |-\rangle and the phase is (-1)^{p(x)}.
+
+Provenance: `standard_background`. Standard query model for functions into Z_q and the usual phase-kickback identity; the abstract only says 'queries to the polynomial' without specifying the oracle.
+
+Equation assumptions:
+
+- q is prime so that b \mapsto \omega^{b} is an additive character of F_q; for prime powers a trace map would be required.
+
+## eq_3: Order-(d-1) finite difference of p is affine
+
+$$
+D_S p(y) := \sum_{A \subseteq S} (-1)^{|S| - |A|}\, p(1_A + y) = c_S + \sum_{i \notin S} c_{S \cup \{i\}}\, y_i, \qquad |S| = d-1,\; \mathrm{supp}(y) \subseteq [n] \setminus S
+$$
+
+Exact identity (Mobius inversion over subsets of S): monomials c_M survive the alternating sum only if M \supseteq S, and since |M| \le d = |S|+1, only M = S or M = S \cup \{i\} remain. Hence D_S p is an affine function of y whose linear coefficients are exactly the degree-d coefficients of p containing S. It requires 2^{d-1} evaluations of p, a constant for constant d.
+
+Provenance: `standard_background`. Elementary finite-difference identity for multilinear polynomials; its use as the core of the learning algorithm is this reconstruction's proposal (see global assumptions), not an abstract statement.
+
+Equation assumptions:
+
+- Variables in S are set to 0 or 1 by the shifts 1_A; y has zeros on S.
+- Signs (-1)^{|S|-|A|} are interpreted in F_q (for q = 2 all signs are +).
+
+## eq_4: Exact Bernstein-Vazirani step over F_q for an affine function
+
+$$
+\left(F_q^{-1}\right)^{\otimes m} \frac{1}{\sqrt{q^m}} \sum_{y \in F_q^m} \omega^{c + a \cdot y} |y\rangle = \omega^{c} |a\rangle, \qquad F_q^{-1}|y\rangle = \frac{1}{\sqrt{q}} \sum_{a \in F_q} \omega^{-a y} |a\rangle
+$$
+
+With m = n - d + 1 variables, one phase query to the affine function \ell(y) = c + a \cdot y followed by the inverse QFT on each qudit yields the coefficient vector a \in F_q^m exactly (with certainty); the constant c only produces a global phase. Applied with \ell = D_S p this returns a_i = c_{S \cup \{i\}} for all i \notin S simultaneously.
+
+Provenance: `standard_background`. Standard generalisation of the Bernstein-Vazirani algorithm to Z_q; the equality is exact (not approximate), which is what makes the overall algorithm exact.
+
+Equation assumptions:
+
+- q prime (character \omega^{a y} well defined).
+- Register ordering: the m input qudits indexed by [n]\setminus S in increasing index order; the d-1 qudits in S are held in |0\rangle during the step.
+
+## eq_5: Stated query complexities
+
+$$
+Q_{\mathrm{classical}}(n,d) = \Omega(n^d), \qquad Q_{\mathrm{quantum,exact}}(n,d) = O(n^{d-1}) \text{ for constant } d
+$$
+
+Bounded-error classical algorithms need \Omega(n^d) queries, while the paper's exact quantum algorithm uses O(n^{d-1}) queries, claimed optimal (hence a matching quantum lower bound \Omega(n^{d-1}) is implied but not given here).
+
+Provenance: `abstract_explicit`. Both bounds are stated verbatim in the abstract (the classical bound in the preceding sentence 'requires Ω(nd ) queries'); the constants hidden in O(\cdot) and the lower-bound proofs are not available.
+
+Abstract evidence: We give an exact quantum algorithm that uses O(nd-1 ) queries for constant d, which is optimal.
+
+## eq_6: Query count of the reconstructed derivative-based algorithm
+
+$$
+Q(n,d) \le 1 + \sum_{k=1}^{d} 2^{k-1} \binom{n}{k-1} = O\!\left(2^{d} n^{d-1}\right), \qquad Q(3,2) \le 1 + 1 + 2 \cdot 3 = 8
+$$
+
+Learning all degree-k coefficients uses one Bernstein-Vazirani step (eq_4) per set S with |S| = k-1, each costing 2^{k-1} oracle calls (eq_3); recursing from k = d down to k = 1 on p minus its already-known higher-degree part, plus one classical query p(0) for c_\emptyset. For constant d this is O(n^{d-1}), matching eq_5; fewer sets S (a covering design) would reduce constants but is not needed.
+
+Provenance: `assumption`. Counting the steps of the proposed construction; this is the reconstruction's bound, not the paper's, and it only matches the abstract's O(n^{d-1}) scaling, not necessarily its constant.
+
+Equation assumptions:
+
+- All \binom{n}{k-1} sets S are used at level k (redundant but simple).
+- Queries to p - p_{>k} are simulated by querying p and applying the classically computable phase \omega^{-p_{>k}(x)} in superposition, costing no extra oracle calls.
+
+## Registers
+
+- input (variable) register: n qudits of dimension q (3 qubits in the instance q=2, n=3) qubits; holds x \in F_q^n; qudit i encodes variable x_i, ordered i = 1..n; the d-1 qudits in S are set to |0\rangle and shifted classically by 1_A between queries
+- target register: 1 qudit of dimension q (1 qubit in the instance) qubits; prepared in the Fourier eigenstate |\psi_{\pm 1}\rangle so that each oracle call imprints the phase \omega^{\pm p(x)} (phase kickback)
+
+## Initial state
+
+|0\rangle^{\otimes n} \otimes |0\rangle; before each derivative step for a set S: apply F_q to each input qudit in [n]\setminus S (Hadamards for q=2), leave qudits in S at |0\rangle, and prepare the target in |\psi_1\rangle = q^{-1/2}\sum_b \omega^{-b}|b\rangle (|-\rangle for q=2).
+
+## Measurement
+
+Computational-basis measurement of the m = n-|S| input qudits after the inverse QFT in each derivative step; the outcome is exact (probability 1) and equals the coefficient vector (c_{S\cup\{i\}})_{i\notin S} \in F_q^m. No measurement of the target qudit is needed.
+
+## Classical postprocessing
+
+Collect the measured coefficient vectors into the table {c_M}; for each lower level, use the known higher-degree coefficients to compute the phase correction \omega^{-p_{>k}(x)} applied in superposition; read c_\emptyset from the classical query p(0). Output the full coefficient list, which identifies p (equivalently the RM(d,n) codeword for q = 2). Redundantly measured coefficients (a d-set contains d different (d-1)-subsets S) can be used as consistency checks but are not required.
+
+## Algorithm steps
+
+1. Set current degree k = d and current polynomial p^{(k)} = p (queries to p^{(k)} for k < d are implemented as queries to p followed by the classically computed phase correction \omega^{-p_{>k}(x)} using already-learned higher-degree coefficients). (eq_1, eq_2)
+2. For each S \subseteq [n] with |S| = k-1: prepare the uniform superposition over y \in F_q^{[n]\setminus S} on the input register (qudits in S in |0\rangle) and the target in |\psi_1\rangle. (eq_2, eq_4)
+3. For each A \subseteq S, in sequence: add 1_A to the input register (classical shift gates on the qudits in S), apply O_{p^{(k)}} with the target in |\psi_{\sigma_A}\rangle where \sigma_A = (-1)^{|S|-|A|} (switch between |\psi_{+1}\rangle and |\psi_{-1}\rangle by a classical relabelling of the target), then subtract 1_A. The accumulated phase on |y\rangle is \omega^{D_S p^{(k)}(y)} = \omega^{c_S + \sum_{i\notin S} c_{S\cup\{i\}} y_i}. (eq_3, eq_2)
+4. Apply F_q^{-1} to every input qudit in [n]\setminus S and measure them in the computational basis; the outcome is deterministically the vector (c_{S\cup\{i\}})_{i \notin S}, i.e. all degree-k coefficients of p whose monomial contains S. (eq_4)
+5. After all sets S at level k are processed, all degree-k coefficients are known; set p^{(k-1)} = p^{(k)} - p_k and decrement k. Repeat steps 2-4 down to k = 1 (at k = 1, S = \emptyset and a single Bernstein-Vazirani query learns all linear coefficients). Finally obtain c_\emptyset from one classical query p(0). Total queries as in eq_6; for the instance q=2, d=2, n=3: 3 sets S={k} with 2 queries each, 1 query for the linear part, 1 classical query, 8 in total. (eq_6, eq_5)
+
+## Assumptions
+
+- The specific algorithm (finite differences of order d-1 turned into affine functions, then exact Bernstein-Vazirani over F_q, recursing on degree) is this reconstruction's proposal consistent with the abstract's O(n^{d-1}) exact-query claim; the paper's actual method and constants are not known from the abstract.
+- q is taken prime so that \omega^{a}, a \in F_q, is an additive character; the abstract allows general prime powers, which would require the trace form \omega^{\mathrm{Tr}(a)}.
+- Query model: standard additive oracle |x\rangle|b\rangle \mapsto |x\rangle|b+p(x)\rangle; the abstract does not specify the oracle.
+- Tiny instance chosen for concreteness: q = 2, d = 2, n = 3 (binary RM(2,3)), 3 input qubits plus 1 target qubit, 8 queries in total.
+- All \binom{n}{d-1} sets S are used; a smaller covering family would reduce constants without changing the O(n^{d-1}) scaling.
+
+## Missing information
+
+- The paper's actual algorithm, its exact query count and dependence on d (the abstract gives only O(n^{d-1}) for constant d).
+- The proof that O(n^{d-1}) is optimal (the implied quantum lower bound \Omega(n^{d-1})) and the classical \Omega(n^d) lower-bound argument.
+- How the paper handles non-prime q (characters/trace) and whether its algorithm is also exact for general prime powers.
+- Any additional Reed-Muller-code results beyond the identification of RM(d,n) codewords with degree-d multilinear polynomials over F_2.

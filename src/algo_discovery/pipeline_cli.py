@@ -31,13 +31,26 @@ def read_abstract(args) -> str:
     return args.abstract
 
 
+def model_failure(summary: dict, stage: str, exc: GenerationError) -> int:
+    """Bad model output is a stage result to count, not an error to retry."""
+    if not exc.model_output_failure:
+        raise exc
+    summary[stage] = {"status": exc.reason, "error": str(exc)}
+    summary["stopped_at"] = stage
+    log(f"      {exc.reason}: {exc}")
+    return 2
+
+
 def run(args, settings: Settings, summary: dict) -> int:
     """Fill in summary as stages finish, so a crash still records the earlier ones."""
     summary["stopped_at"] = None
     request = EquationRequest(abstract=read_abstract(args), experiment_scope=args.scope)
 
     log("[1/3] abstract -> equations")
-    equations = generate_equations(request, settings)
+    try:
+        equations = generate_equations(request, settings)
+    except GenerationError as exc:
+        return model_failure(summary, "equations", exc)
     equations_dir = settings.artifact_dir / equations.run_id
     summary["equations"] = {
         "run_id": equations.run_id,
@@ -57,7 +70,10 @@ def run(args, settings: Settings, summary: dict) -> int:
         validate_circuit=True,
         reference=args.reference,
     )
-    code = generate_code(code_request, settings)
+    try:
+        code = generate_code(code_request, settings)
+    except GenerationError as exc:
+        return model_failure(summary, "code", exc)
     code_dir = settings.artifact_dir / code.run_id
     summary["code"] = {
         "run_id": code.run_id,
@@ -117,6 +133,7 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     summary = {}
+    error = None
     try:
         settings = Settings.from_env()
         settings = replace(
@@ -126,24 +143,26 @@ def main() -> int:
         )
         code = run(args, settings, summary)
     except (ConfigurationError, GenerationError) as exc:
-        log(str(exc))
-        code = 1
+        error = str(exc)
     except ValidationError:
-        log("Invalid input: check the abstract length, scope, instance JSON, and source run.")
-        code = 1
+        error = "Invalid input: check the abstract length, scope, instance JSON, and source run."
     except (ValueError, SyntaxError, TypeError, KeyError, RecursionError) as exc:
-        log("Pipeline input/static check failed: " + str(exc)[:300])
-        code = 1
+        error = "Pipeline input/static check failed: " + str(exc)[:300]
     except OSError:
-        log("Could not read input or write artifacts; check paths and permissions.")
+        error = "Could not read input or write artifacts; check paths and permissions."
+    if error:
+        log(error)
         code = 1
+        if summary:
+            summary |= {"stopped_at": "error", "error": error}
     if summary:
-        if code == 1:
-            summary["stopped_at"] = "error"
         output = json.dumps(summary, indent=2) + "\n"
         print(output, end="")
-        if "code" in summary:
-            Path(summary["code"]["artifacts"], "pipeline.json").write_text(output, encoding="utf-8")
+        directory = summary.get("code", {}).get("artifacts") or summary.get("equations", {}).get(
+            "artifacts"
+        )
+        if directory:
+            Path(directory, "pipeline.json").write_text(output, encoding="utf-8")
     return code
 
 

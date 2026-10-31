@@ -1,0 +1,149 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "73473acb-2779-47c4-bb81-1cac39f425e9",
+  "parent_run_id": "623b2686-aff9-4256-9a46-2ddda149674a",
+  "created_at": "2026-10-31T16:47:46.862786+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "5fa3ba0eb1c02612d74c53d82d61ce5678cbcbc9f5825f3457729ce4e6831ab3",
+  "source_specification_sha256": "ae842dd7a9f59ed3a8dd93abf4c5c72663bedb3f0363504d395fec8cf871f67d",
+  "source_python_sha256": "1dc1255561e5a2fcb969db04212138961b45ad7da7824227913d6ced8258f91f",
+  "elapsed_seconds": 137.084,
+  "usage": {
+    "input_tokens": 10197,
+    "output_tokens": 12529,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": false,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the two-qubit Repeat-Until-Success unitary W of eq_W_construction for a user-supplied exact solution (z, y, L) of the norm equation |z|^2 + y^2 = 2^L with z in Z[omega] and y in Z[sqrt2]. W = |0><0|_t (x) M_0 + |1><1|_t (x) M_1 with M_1 = 2^{-L/2}[[z,-y],[y,z*]] and M_0 = conj(M_1); on ancilla outcome 0 the target receives diag(z*,z)/|z| = R_z(2 arg z), on outcome 1 it receives the identity. Using z = |z| e^{i phi}, cos(th) = |z|/sqrt(2^L), sin(th) = y/sqrt(2^L) the controlled pair of single-qubit unitaries factorizes exactly as W = RZZ(phi) . RY(2 th)_ancilla . RZZ(phi), which is emitted with standard gates (3 gates, 2 qubits). The norm equation is checked exactly in integer arithmetic; invalid instances raise ValueError. Measurement, ancilla reset and repetition (the RUS loop) are left to the runner; exact Clifford+T synthesis of W and the paper's classical search for (z, y, L) are out of scope.",
+    "source_python": "\"\"\"Repeat-Until-Success (RUS) two-qubit unitary W for an exact Z-rotation primitive.\n\nImplements eq_W_construction of the specification:\n    W   = |0><0|_t (x) M_0 + |1><1|_t (x) M_1,\n    M_1 = 2^{-L/2} [[z, -y], [y, z*]],   M_0 = conj(M_1),\nwith z in Z[omega] (omega = exp(i pi/4)), y in Z[sqrt2] and |z|^2 + y^2 = 2^L\n(eq_norm_equation).  Then the ancilla-0 block is A = diag(z*, z)/2^{L/2}\n(success: target gets R_z(2 arg z)) and the ancilla-1 block is C = y I / 2^{L/2}\n(failure: identity on the target), as required by eq_rus_structure.\n\nExact gate factorization used here.  Write z = |z| e^{i phi},\ncos(th) = |z|/sqrt(2^L), sin(th) = y/sqrt(2^L).  Then\n    M_1 = Rz(-phi) Ry(2 th) Rz(-phi),   M_0 = Rz(+phi) Ry(2 th) Rz(+phi),\nwhere Rz(alpha) = diag(e^{-i alpha/2}, e^{+i alpha/2}).  The target-conditioned\npair of Z-rotations on the ancilla is exactly exp(-i phi/2 Z_a Z_t) = RZZ(phi), so\n    W = RZZ(phi) . RY(2 th)_ancilla . RZZ(phi).\n\nQubit layout (Qiskit little-endian): ancilla a = qubit `ancilla_index` (default 1,\nthe most significant qubit so that the joint basis index is 2a + t as in the\nspecification), target t = the other qubit.  The ancilla is expected in |0>; it\nis not prepared or measured here.\n\nInstance format:\n    {\"z\": [a, b, c, d],       # z = a + b omega + c omega^2 + d omega^3, integers\n     \"y\": [e, f],             # y = e + f sqrt(2), integers\n     \"L\": L,                  # nonnegative integer, 2^L = |z|^2 + y^2\n     \"ancilla_index\": 1}      # optional, 0 or 1\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nSQRT2 = math.sqrt(2.0)\nMAX_L = 60\nNUM_QUBITS = 2\nMAX_QUBITS = 12\n\n\ndef _int_list(value, length, name):\n    \"\"\"Validate that `value` is a list/tuple of `length` Python integers.\"\"\"\n    if not isinstance(value, (list, tuple)) or len(value) != length:\n        raise ValueError(name + ' must be a list of ' + str(length) + ' integers')\n    out = []\n    for v in value:\n        if isinstance(v, bool) or not isinstance(v, int):\n            raise ValueError(name + ' entries must be integers')\n        out.append(int(v))\n    return out\n\n\ndef _parse_instance(instance):\n    \"\"\"Extract and validate (z, y, L, ancilla_index) from the instance dict.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    for key in instance:\n        if key not in ('z', 'y', 'L', 'ancilla_index'):\n            raise ValueError('unknown instance key: ' + str(key))\n    for key in ('z', 'y', 'L'):\n        if key not in instance:\n            raise ValueError('instance requires key ' + key)\n    z = _int_list(instance['z'], 4, 'z')\n    y = _int_list(instance['y'], 2, 'y')\n    big_l = instance['L']\n    if isinstance(big_l, bool) or not isinstance(big_l, int):\n        raise ValueError('L must be an integer')\n    if big_l < 0 or big_l > MAX_L:\n        raise ValueError('L must satisfy 0 <= L <= ' + str(MAX_L))\n    anc = instance.get('ancilla_index', 1)\n    if isinstance(anc, bool) or not isinstance(anc, int) or anc not in (0, 1):\n        raise ValueError('ancilla_index must be 0 or 1')\n    return z, y, int(big_l), int(anc)\n\n\ndef _check_norm_equation(z, y, big_l):\n    \"\"\"eq_norm_equation: exact check of |z|^2 + y^2 = 2^L in Z[sqrt2].\n\n    For z = a + b w + c w^2 + d w^3 (w = exp(i pi/4)):\n        |z|^2 = (a^2+b^2+c^2+d^2) + sqrt2 (ab - ad + bc + cd),\n    and for y = e + f sqrt2:\n        y^2 = (e^2 + 2 f^2) + sqrt2 (2 e f).\n    Both the rational and the sqrt2 coefficient must match 2^L + 0 sqrt2.\n    \"\"\"\n    a, b, c, d = z\n    e, f = y\n    if a == 0 and b == 0 and c == 0 and d == 0:\n        raise ValueError('z must be nonzero (success branch undefined for z = 0)')\n    rational = a * a + b * b + c * c + d * d + e * e + 2 * f * f\n    irrational = a * b - a * d + b * c + c * d + 2 * e * f\n    if irrational != 0:\n        raise ValueError('norm equation violated: sqrt2 coefficient of |z|^2 + y^2 is nonzero')\n    if rational != 2 ** big_l:\n        raise ValueError('norm equation violated: |z|^2 + y^2 != 2^L')\n\n\ndef _angles(z, y):\n    \"\"\"Rotation angles for the exact factorization of M_0 and M_1.\n\n    Returns (phi, 2*th) with phi = arg z and\n    cos(th) = |z|/sqrt(2^L), sin(th) = y/sqrt(2^L)  (sqrt(2^L) = hypot(|z|, y)).\n    \"\"\"\n    a, b, c, d = z\n    e, f = y\n    re_z = a + (b - d) / SQRT2\n    im_z = c + (b + d) / SQRT2\n    phi = math.atan2(im_z, re_z)\n    y_val = e + f * SQRT2\n    mod_z = math.hypot(re_z, im_z)\n    th = math.atan2(y_val, mod_z)\n    return phi, 2.0 * th\n\n\ndef build_circuit(instance):\n    \"\"\"Return the 2-qubit RUS unitary W (eq_W_construction) as a QuantumCircuit.\n\n    The circuit is unitary and measurement-free.  The runner is expected to\n    prepare the ancilla (qubit `ancilla_index`) in |0> and, after W, measure it:\n    outcome 0 -> target received R_z(2 arg z); outcome 1 -> target unchanged\n    (eq_rus_structure); repetition/reset is outside this operation.\n    \"\"\"\n    z, y, big_l, anc = _parse_instance(instance)\n    _check_norm_equation(z, y, big_l)  # eq_norm_equation (exact integer check)\n    if NUM_QUBITS > MAX_QUBITS:\n        raise ValueError('qubit cap exceeded')\n    phi, ry_angle = _angles(z, y)\n    tgt = 1 - anc\n\n    q = QuantumRegister(NUM_QUBITS, 'q')\n    qc = QuantumCircuit(q, name='rus_W')\n\n    # eq_W_construction / eq_rus_structure:\n    # W = |0><0|_t (x) M_0 + |1><1|_t (x) M_1\n    #   = RZZ(phi)_{a,t} . RY(2 th)_a . RZZ(phi)_{a,t}\n    # RZZ(phi) = exp(-i phi/2 Z_a Z_t) applies Rz(+phi) to the ancilla when t=0\n    # and Rz(-phi) when t=1, which is exactly the target-controlled choice between\n    # M_0 = Rz(phi) Ry(2th) Rz(phi) and M_1 = Rz(-phi) Ry(2th) Rz(-phi).\n    qc.rzz(phi, q[anc], q[tgt])\n    qc.ry(ry_angle, q[anc])\n    qc.rzz(phi, q[anc], q[tgt])\n    return qc",
+    "example_instance_json": "{\"z\": [2, 1, 0, 0], \"y\": [-1, 1], \"L\": 3, \"ancilla_index\": 1}",
+    "register_layout": [
+      "q[1] = RUS ancilla a (ancilla_index=1, most significant bit so the joint computational-basis index is 2a+t as in the specification); runner prepares |0>, measures after W: outcome 0 = success, outcome 1 = failure (identity on target)",
+      "q[0] = target/data qubit t carrying |psi>; receives R_z(2 arg z) = R_z(2 arg(2+omega)) ~ R_z(0.5110) on success for the example instance (success probability (5+2 sqrt2)/8 ~ 0.9786)",
+      "Instance encoding: z = a + b omega + c omega^2 + d omega^3 given as [a,b,c,d]; y = e + f sqrt2 given as [e,f]; L with 2^L = |z|^2 + y^2 (checked exactly)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_rus_structure",
+        "disposition": "implemented",
+        "code_location": "build_circuit (comment block before qc.rzz) and module docstring: W's ancilla-0 block A = diag(z*,z)/2^{L/2} and ancilla-1 block C = y I/2^{L/2}",
+        "explanation": "The unitary part of the RUS block (W acting on |0>_a (x) |psi>_t with success block proportional to R_z(2 arg z) and failure block proportional to the identity) is realized by the emitted circuit. The ancilla measurement, probability p and geometric repetition are semantics executed by the runner, not part of the returned operation."
+      },
+      {
+        "equation_id": "eq_distance",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The approximation metric is only needed to select z for a target angle theta; the module takes an already-chosen exact (z, y, L) and implements R_z(2 arg z) exactly on success, so no distance is computed."
+      },
+      {
+        "equation_id": "eq_norm_equation",
+        "disposition": "implemented",
+        "code_location": "_check_norm_equation (exact Z[sqrt2] integer check of |z|^2 + y^2 = 2^L) and _angles (p = |z|^2/2^L enters via cos th = |z|/sqrt(2^L))",
+        "explanation": "The cyclotomic parametrization is enforced exactly: both the rational and sqrt2 coefficients of |z|^2 + y^2 - 2^L must vanish, y is real by construction (Z[sqrt2]), and the success branch is diag(z*,z)/sqrt(2^L)."
+      },
+      {
+        "equation_id": "eq_W_construction",
+        "disposition": "implemented",
+        "code_location": "build_circuit: qc.rzz(phi, a, t); qc.ry(2*th, a); qc.rzz(phi, a, t)",
+        "explanation": "W = |0><0|_t (x) M_0 + |1><1|_t (x) M_1 with M_1 = 2^{-L/2}[[z,-y],[y,z*]], M_0 = conj(M_1) is factorized exactly as RZZ(phi) RY(2 th)_a RZZ(phi) with phi = arg z, cos th = |z|/sqrt(2^L), sin th = y/sqrt(2^L)."
+      },
+      {
+        "equation_id": "eq_exact_synthesis",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "W has entries in Z[omega, 1/sqrt2] and is therefore exactly Clifford+T synthesizable, but the module emits W with continuous RZZ/RY rotations rather than an exact Clifford+T gate sequence; implementing an exact synthesis algorithm (Kliuchnikov-Maslov-Mosca / Giles-Selinger) is beyond this scope."
+      },
+      {
+        "equation_id": "eq_euler",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Only a single axial Z-rotation RUS block is implemented; the Euler-angle assembly of three blocks with Hadamards for a general single-qubit unitary is not included."
+      },
+      {
+        "equation_id": "eq_tcount_claim",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Expected T-count T(W)/p and the paper's numerical 2.5x claim are cost statements about an exact Clifford+T realization and are not computed or reproduced by the module."
+      },
+      {
+        "equation_id": "eq_toy_instance",
+        "disposition": "implemented",
+        "code_location": "example_instance_json: {\"z\": [2,1,0,0], \"y\": [-1,1], \"L\": 3} i.e. z = 2 + omega, y = sqrt2 - 1, 2^3 = 8",
+        "explanation": "The example instance is exactly the toy solution; _check_norm_equation verifies 5 + 3 = 8 and sqrt2 part 2 - 2 = 0, and build_circuit produces W implementing R_z(2 arg(2+omega)) on success with p = (5+2 sqrt2)/8."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_W_construction",
+          "eq_rus_structure"
+        ],
+        "change": "Qubit index mapping: the specification labels the ancilla 'qubit 0 (most significant, joint index 2a+t)'. In Qiskit qubit 0 is the least significant bit, so the ancilla is placed on Qiskit qubit 1 (default ancilla_index = 1) and the target on qubit 0; this preserves the matrix of W as written (basis index 2a+t). ancilla_index = 0 is accepted as an option for the swapped layout.",
+        "reason": "Resolve the big-endian labeling in the specification against Qiskit's little-endian convention while keeping the specified matrix form of W."
+      },
+      {
+        "equation_ids": [
+          "eq_W_construction",
+          "eq_exact_synthesis"
+        ],
+        "change": "W is realized exactly by three continuous-angle standard gates (RZZ(phi), RY(2 th), RZZ(phi)) instead of an exact Clifford+T gate sequence; eq_exact_synthesis is therefore marked out of scope and no T-count is reported.",
+        "reason": "Exact Clifford+T synthesis algorithms are a separate, substantial construction not reconstructible from the abstract; the gate-level factorization reproduces the same unitary W exactly (up to floating-point angle rounding)."
+      },
+      {
+        "equation_ids": [
+          "eq_rus_structure",
+          "eq_tcount_claim"
+        ],
+        "change": "The ancilla measurement, feed-forward, reset and repeat-until-success loop are not part of the returned circuit; only the unitary W is emitted.",
+        "reason": "The task requires a measurement-free unitary operation; the RUS control flow is an experiment-level procedure executed by the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_norm_equation"
+        ],
+        "change": "Instances with y = 0 (p = 1, W reduces to a target-controlled Z-rotation pair) and negative y are accepted; z = 0 is rejected.",
+        "reason": "y = 0 and y < 0 are valid solutions of the norm equation with the identity failure branch; z = 0 leaves the success-branch rotation undefined."
+      }
+    ],
+    "assumptions": [
+      "The instance supplies an exact solution (z, y, L) of |z|^2 + y^2 = 2^L; the paper's probabilistically polynomial classical search for such solutions given (theta, epsilon) is not implemented.",
+      "The failure branch is restricted to the identity (y real in Z[sqrt2]), as in the specification.",
+      "The runner prepares the ancilla (default Qiskit qubit 1) in |0> and the target (qubit 0) in an arbitrary |psi>, and performs the ancilla measurement/repetition externally.",
+      "Rotation angles phi = arg z and 2 th = 2 atan2(y, |z|) are computed in double precision; the unitary is exact up to floating-point rounding of these angles.",
+      "L is capped at 60 only to keep 2^L an ordinary integer comparison; the circuit always uses exactly 2 qubits."
+    ],
+    "unresolved_issues": [
+      "The paper's actual two-qubit RUS circuit template and its T-count as a function of L are unknown; the emitted W is the specification's proposed realization, not necessarily the paper's.",
+      "No exact Clifford+T decomposition of W is produced, so the T-count claims of the abstract cannot be checked with this module.",
+      "The specification's distance metric is assumed but unused here since the module implements exact rotations for a supplied z."
+    ]
+  },
+  "validation": {
+    "status": "failed",
+    "detail": "Generated source was not executed: ValueError: Module constants must be literals or small numeric expressions.",
+    "reference": "none",
+    "worker_image_id": null,
+    "qiskit_version": null,
+    "num_qubits": null,
+    "gate_count": null,
+    "depth": null,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from algo_discovery import pipeline_cli
+from algo_discovery.equations import GenerationError
 from algo_discovery.simulation import SimulationReport
 
 ABSTRACT = "A quantum circuit adds a weighted sum of data bits into an accumulator register."
@@ -19,6 +20,8 @@ def stages(tmp_path, monkeypatch):
 
     def equations(request, settings):
         calls.append("equations")
+        if state.get("equation_error"):
+            raise GenerationError(*state["equation_error"])
         (settings.artifact_dir / "eq1").mkdir()
         spec = SimpleNamespace(status=state["equation_status"])
         return SimpleNamespace(run_id="eq1", specification=spec)
@@ -85,3 +88,18 @@ def test_pipeline_reports_failed_simulation(stages, monkeypatch, capsys):
     stages.state["simulation_status"] = "failed"
     assert run_cli(monkeypatch) == 2
     assert json.loads(capsys.readouterr().out)["stopped_at"] == "simulation"
+
+
+def test_bad_model_output_is_a_stage_stop_not_a_retryable_error(stages, monkeypatch, capsys):
+    stages.state["equation_error"] = ("Model did not complete.", "truncated")
+    assert run_cli(monkeypatch) == 2
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["stopped_at"] == "equations"
+    assert summary["equations"]["status"] == "truncated"
+
+
+def test_provider_error_is_retryable_and_recorded(stages, monkeypatch, capsys):
+    stages.state["equation_error"] = ("Claude API returned HTTP 529.", "provider_error")
+    assert run_cli(monkeypatch) == 1
+    summary = json.loads(capsys.readouterr().out)
+    assert summary == {"stopped_at": "error", "error": "Claude API returned HTTP 529."}

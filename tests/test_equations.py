@@ -155,15 +155,21 @@ def test_provider_errors_do_not_echo_secrets(spec, tmp_path):
     assert "test-token" not in repr(settings)
 
 
-@pytest.mark.parametrize("stop_reason", ["max_tokens", "refusal"])
-def test_incomplete_or_refused_output_is_rejected(spec, tmp_path, stop_reason):
-    with mock_client(spec, stop_reason=stop_reason) as client, pytest.raises(GenerationError):
+@pytest.mark.parametrize(
+    ("stop_reason", "reason"), [("max_tokens", "truncated"), ("refusal", "refused")]
+)
+def test_incomplete_or_refused_output_is_rejected(spec, tmp_path, stop_reason, reason):
+    with (
+        mock_client(spec, stop_reason=stop_reason) as client,
+        pytest.raises(GenerationError) as caught,
+    ):
         generate_equations(
             EquationRequest(abstract=ABSTRACT),
             Settings(api_key="test", artifact_dir=tmp_path),
             client=client,
         )
     assert not list(tmp_path.iterdir())
+    assert caught.value.reason == reason and caught.value.model_output_failure
 
 
 def test_request_rejects_short_abstract_and_unexpected_fields():

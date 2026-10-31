@@ -17,6 +17,22 @@ from .schemas import EquationRequest, EquationResult, GenerationParameters, Math
 class GenerationError(RuntimeError):
     """Safe diagnostic that never contains provider bodies or credentials."""
 
+    def __init__(self, message: str, reason: str = "provider_error"):
+        super().__init__(message)
+        self.reason = reason
+
+    @property
+    def model_output_failure(self) -> bool:
+        """True when the model answered badly, as opposed to the API being unreachable."""
+        return self.reason in MODEL_OUTPUT_FAILURES
+
+
+MODEL_OUTPUT_FAILURES = {"truncated", "refused", "incomplete", "no_output", "invalid_output"}
+
+
+def stop_failure(stop_reason: str | None) -> str:
+    return {"max_tokens": "truncated", "refusal": "refused"}.get(stop_reason, "incomplete")
+
 
 def sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -48,10 +64,13 @@ def generate_equations(
         if response.stop_reason != "end_turn":
             raise GenerationError(
                 "Model did not complete the structured response (truncation or refusal). "
-                "Check the token budget; no partial result was accepted."
+                "Check the token budget; no partial result was accepted.",
+                stop_failure(response.stop_reason),
             )
         if response.parsed_output is None:
-            raise GenerationError("Model returned no structured mathematical specification.")
+            raise GenerationError(
+                "Model returned no structured mathematical specification.", "no_output"
+            )
         # Validate even injected clients, and independently check quoted evidence.
         spec = MathSpecification.model_validate(response.parsed_output)
         spec.validate_evidence(request.abstract)
@@ -65,7 +84,8 @@ def generate_equations(
     except (ValidationError, ValueError):
         raise GenerationError(
             "Model output failed schema, consistency, or exact-quote validation. "
-            "No valid mathematical specification was accepted."
+            "No valid mathematical specification was accepted.",
+            "invalid_output",
         ) from None
 
     result = EquationResult(

@@ -1,0 +1,135 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "9fcaadf6-dea9-467c-824c-42b605b78322",
+  "parent_run_id": "719f206b-a595-4c48-a0df-5c0a1586dad6",
+  "created_at": "2026-10-31T17:01:06.486426+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "11be42ecf32a99063537aaab701e17364e32683b109beff775d2e122b96b51f4",
+  "source_specification_sha256": "fbfb860d907f4923f7e28b4a68140bec40312064025b849e8841a2b81d7b062d",
+  "source_python_sha256": "d1aa61e5eea157dcf4740425f6e593427a1482f9a498795a9437bf2b631c9d3b",
+  "elapsed_seconds": 70.979,
+  "usage": {
+    "input_tokens": 7170,
+    "output_tokens": 5890,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Discrete-time quantum walk on a circle of N = 2^n sites with one coin qubit, driven by a chosen coin (identity for the in-scope instance) for t steps, followed by a state-independent final coin operator C_f. The conditional shift (coin |0> -> x-1, coin |1> -> x+1 mod N) is realised as a QFT-based controlled increment/decrement; because the coin acts on a different register than the QFT, a single QFT / inverse-QFT pair encloses all steps. The example instance (N=4, t=2, C=I, C_f=I) transfers the coin state from site 0 to site 2 (eq_5). Input state preparation (eq_3) and periodicity checks (eq_6) are left to the runner.",
+    "source_python": "\"\"\"Discrete-time quantum walk on a cycle of N = 2^n sites with a final coin operator.\n\nImplements eq_1 (conditional shift), eq_2 (U = S (C x I), t steps), eq_4 (final coin C_f)\nand the identity-coin perfect-state-transfer instance eq_5. The unknown coin state\n(eq_3) is prepared by the runner on qubit 0; the walker position is encoded as an\nn-bit integer on qubits 1..n (qubit 1 = least significant bit).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\n\n\ndef _apply_coin(qc, coin_qubit, name):\n    \"\"\"Apply a named coin operator to the coin qubit (C in eq_2 or C_f in eq_4).\"\"\"\n    if name == \"identity\":\n        return\n    if name == \"flip\":\n        qc.x(coin_qubit)\n        return\n    if name == \"hadamard\":\n        qc.h(coin_qubit)\n        return\n    raise ValueError(\"coin must be one of 'identity', 'flip', 'hadamard'\")\n\n\ndef _check_int(value, name, minimum):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(name + \" must be an integer\")\n    if value < minimum:\n        raise ValueError(name + \" must be >= \" + str(minimum))\n    return value\n\n\ndef build_circuit(instance):\n    \"\"\"Return the walk operation (C_f x I) U^t on 1 + log2(N) qubits.\n\n    instance keys:\n      N          : number of sites on the circle, a power of two >= 2\n      steps      : number of walk steps t >= 1\n      coin       : driving coin C, 'identity' | 'flip' | 'hadamard'\n      final_coin : final coin C_f, 'identity' | 'flip' | 'hadamard'\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    for key in (\"N\", \"steps\", \"coin\", \"final_coin\"):\n        if key not in instance:\n            raise ValueError(\"missing instance key: \" + key)\n    n_sites = _check_int(instance[\"N\"], \"N\", 2)\n    if n_sites & (n_sites - 1) != 0:\n        raise ValueError(\"N must be a power of two (binary position encoding)\")\n    steps = _check_int(instance[\"steps\"], \"steps\", 1)\n    if steps > 1024:\n        raise ValueError(\"steps must be <= 1024\")\n    coin_name = instance[\"coin\"]\n    final_name = instance[\"final_coin\"]\n    for name in (coin_name, final_name):\n        if name not in (\"identity\", \"flip\", \"hadamard\"):\n            raise ValueError(\"coin operators must be 'identity', 'flip' or 'hadamard'\")\n    n_pos = n_sites.bit_length() - 1\n    if 1 + n_pos > 12:\n        raise ValueError(\"total qubits (1 + log2 N) must not exceed 12\")\n\n    coin = QuantumRegister(1, \"coin\")\n    pos = QuantumRegister(n_pos, \"pos\")\n    qc = QuantumCircuit(coin, pos, name=\"dtqw_pst\")\n    pos_idx = list(range(1, 1 + n_pos))\n\n    # eq_1 / eq_2: shift S realised in the Fourier basis. The coin C acts on a\n    # different register than the QFT, so one QFT / inverse-QFT pair encloses all\n    # t steps. In the Fourier basis, adding a to x multiplies qubit m by\n    # exp(i * a * 2*pi*2^m / N). Coin |1> -> +1 (angle +theta_m), coin |0> -> -1\n    # (angle -theta_m): implemented as p(-theta_m) followed by cp(2 theta_m).\n    qc.append(QFTGate(n_pos), pos_idx)\n    for _step in range(steps):\n        _apply_coin(qc, coin[0], coin_name)  # eq_2: coin C before the shift\n        for m in range(n_pos):\n            theta = math.pi * float(2 ** (m + 1)) / float(n_sites)\n            qc.p(-theta, pos[m])\n            qc.cp(2.0 * theta, coin[0], pos[m])\n    qc.append(QFTGate(n_pos).inverse(), pos_idx)\n\n    # eq_4 / eq_5: state-independent final coin operator C_f (identity for the\n    # identity-coin antipodal-transfer instance).\n    _apply_coin(qc, coin[0], final_name)\n    return qc",
+    "example_instance_json": "{\"N\": 4, \"steps\": 2, \"coin\": \"identity\", \"final_coin\": \"identity\"}",
+    "register_layout": [
+      "qubit 0: coin register (carries the unknown state alpha|0> + beta|1>; |0> moves walker to x-1, |1> to x+1)",
+      "qubits 1..log2(N): position register, x = sum_m x_m 2^m with qubit 1 = x_0 (least significant bit); example N=4 uses qubits 1 (LSB) and 2 (MSB)",
+      "example: input (alpha|0>+beta|1>) x |x=0> on 3 qubits is mapped to (alpha|0>+beta|1>) x |x=2> = coin x |10> (qubit 2 = 1, qubit 1 = 0)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: QFTGate / p / cp / inverse QFTGate block (comment 'eq_1 / eq_2: shift S realised in the Fourier basis')",
+        "explanation": "Conditional shift: coin |0> decrements and coin |1> increments the position modulo N via Fourier-basis phases."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: for _step in range(steps) loop with _apply_coin then controlled phases",
+        "explanation": "Each step applies coin C then the shift; repeated t times (QFT pair factored outside the loop since it commutes with the coin)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Initial state (alpha|0>+beta|1>) x |x_0> is prepared by the runner; the module returns only the operation."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: final _apply_coin(qc, coin[0], final_name) (comment 'eq_4 / eq_5')",
+        "explanation": "State-independent final coin C_f applied once after the t-step walk."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit with example instance N=4, steps=2, coin='identity', final_coin='identity'",
+        "explanation": "Identity-coin walk on the 4-cycle for t = N/2 = 2 steps with trivial C_f, transferring the coin state to the antipodal site."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Periodicity is a property to be checked by the runner (e.g. steps=N with identity coin returns the input); not a separate operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Circle size restricted to N = 2^n so positions are encoded as an n-bit integer and the mod-N shift equals the natural 2^n wrap-around of the Fourier-basis adder.",
+        "reason": "Binary position register; non-power-of-two cycles would require a different modular adder outside the minimal scope."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The QFT and inverse QFT are applied once around all t steps instead of once per step.",
+        "reason": "Coin operators act only on qubit 0 and commute with the QFT on the position register, so the circuit is exactly equal to the per-step construction with fewer gates."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "Driving coin and final coin are restricted to the named set {identity, flip, hadamard}; general biased coins are not parameterised.",
+        "reason": "Only the identity-coin instance is in scope; the two other named coins are offered for exploration without claiming perfect transfer for them."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_6"
+        ],
+        "change": "Input preparation and periodicity verification are not part of the returned operation.",
+        "reason": "Runner prepares inputs and performs checks; the module must return a pure unitary operation."
+      }
+    ],
+    "assumptions": [
+      "Shift convention: coin |0> moves the walker to x-1 and coin |1> to x+1 (mod N); the paper's convention may be the label-flipped equivalent.",
+      "Coin is applied before the shift in each step.",
+      "Perfect transfer is understood up to a global phase; the identity-coin instance produces no extra phase.",
+      "The angle 2*pi*2^m/N on position qubit m (qubit 1 = LSB) is consistent with QFTGate's convention |j> -> sum_k exp(2 pi i j k / 2^n)|k> with the same index ordering."
+    ],
+    "unresolved_issues": [
+      "Explicit final coin C_f for Hadamard/biased coins and the finite distances at which they allow perfect transfer are not reconstructed; selecting coin='hadamard' yields a valid walk but no transfer guarantee.",
+      "Flip coin with the standard shift used here gives a period-2 walk without transfer; the paper's setting for the flip-coin arbitrary-distance claim is unknown.",
+      "Infinite-line case is not implemented (circle only)."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 44,
+    "depth": 35,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "72ab8650-db1a-48d1-934c-cfdb09cce847",
+  "parent_run_id": "7bbf4242-830e-4a14-aa2b-9673b31f5842",
+  "created_at": "2026-10-31T16:49:58.862193+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "7d3da61a44a04bdfe024c63ecff5c0acaff5877861e8703c9d004369a7f67be5",
+  "source_specification_sha256": "0f1099a0fc2e91a203c315722fb7a760d5b0324b7ff2a47600cd745e5f8e5871",
+  "source_python_sha256": "b277c4eacdd033dd36a0a29c9040fd78dde6f26fbf9d8b3b828ab75d564a6743",
+  "elapsed_seconds": 66.194,
+  "usage": {
+    "input_tokens": 6821,
+    "output_tokens": 5625,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the generalized Kitaev phase-estimation probe operation on M product-state qubits: qubit j (Qiskit index j-1) receives n_j explicit applications of the phase gate P(phi)=diag(1,e^{i phi}) (sum n_j = N), followed by the local measurement phase shift P(theta_j) and a Hadamard, so that a subsequent computational-basis measurement by the runner reproduces the likelihood of eq_2. The |+>^M input is expected from the runner (an optional 'prepare_plus' flag can add the Hadamards). Bayesian postprocessing (eq_3) and asymptotic claims (eq_4, eq_5) are classical/analytic and not part of the circuit.",
+    "source_python": "\"\"\"Generalized Kitaev phase estimation: product-state probe with N phase gates\ndistributed arbitrarily over M qubits (eq_1), followed by the local\nmeasurement-basis rotation P(theta_j) then H (eq_2).\n\nThe returned circuit is the unitary operation only: no state preparation\n(unless the optional flag 'prepare_plus' is set), no measurements.\nThe runner is expected to feed |+>^{\\\\otimes M} and measure in the\ncomputational basis to sample the outcome string x of eq_2.\n\nQubit layout: spec qubit j (1-indexed) -> Qiskit qubit index j-1.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nMAX_TOTAL_GATES = 4096\n\n\ndef _as_int(value, name):\n    \"\"\"Validate a JSON integer (bool is rejected).\"\"\"\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(f\"{name} must be an integer, got {value!r}\")\n    return value\n\n\ndef _as_real(value, name):\n    \"\"\"Validate a finite real number (bool is rejected).\"\"\"\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(f\"{name} must be a real number, got {value!r}\")\n    v = float(value)\n    if not math.isfinite(v):\n        raise ValueError(f\"{name} must be finite, got {value!r}\")\n    return v\n\n\ndef _parse_instance(instance):\n    \"\"\"Extract and validate (phi, n_list, theta_list, prepare_plus).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object (dict)\")\n    if \"phi\" not in instance:\n        raise ValueError(\"instance must contain 'phi'\")\n    if \"n\" not in instance:\n        raise ValueError(\"instance must contain 'n' (list of per-qubit gate counts)\")\n    phi = _as_real(instance[\"phi\"], \"phi\")\n\n    n_raw = instance[\"n\"]\n    if not isinstance(n_raw, list) or len(n_raw) == 0:\n        raise ValueError(\"'n' must be a non-empty list of non-negative integers\")\n    m = len(n_raw)\n    if m > MAX_QUBITS:\n        raise ValueError(f\"M={m} qubits exceeds the cap of {MAX_QUBITS}\")\n    n_list = []\n    for j, nj in enumerate(n_raw):\n        nj = _as_int(nj, f\"n[{j}]\")\n        if nj < 0:\n            raise ValueError(f\"n[{j}] must be non-negative, got {nj}\")\n        n_list.append(nj)\n    total = sum(n_list)\n    if total <= 0:\n        raise ValueError(\"total number of phase gates N = sum(n) must be positive\")\n    if total > MAX_TOTAL_GATES:\n        raise ValueError(f\"N={total} exceeds the cap of {MAX_TOTAL_GATES} phase gates\")\n    if \"N\" in instance:\n        n_total = _as_int(instance[\"N\"], \"N\")\n        if n_total != total:\n            raise ValueError(f\"N={n_total} inconsistent with sum(n)={total} (eq_1 constraint)\")\n\n    if \"theta\" in instance:\n        th_raw = instance[\"theta\"]\n        if not isinstance(th_raw, list) or len(th_raw) != m:\n            raise ValueError(\"'theta' must be a list with the same length as 'n'\")\n        theta_list = [_as_real(t, f\"theta[{j}]\") for j, t in enumerate(th_raw)]\n    else:\n        theta_list = [0.0] * m\n\n    prepare_plus = False\n    if \"prepare_plus\" in instance:\n        flag = instance[\"prepare_plus\"]\n        if not isinstance(flag, bool):\n            raise ValueError(\"'prepare_plus' must be a boolean\")\n        prepare_plus = flag\n\n    return phi, n_list, theta_list, prepare_plus\n\n\ndef build_circuit(instance):\n    \"\"\"Build the generalized Kitaev probe-and-rotate operation.\n\n    instance keys:\n      phi   : float, the unknown phase of U_phi = diag(1, e^{i phi})\n      n     : list[int], n_j >= 0, number of U_phi applications on qubit j\n      theta : list[float] (optional, default zeros), local measurement phase\n      N     : int (optional), must equal sum(n)\n      prepare_plus : bool (optional, default False); if True, Hadamards are\n                     prepended to turn |0>^M into |+>^M (eq_1 initial state).\n    \"\"\"\n    phi, n_list, theta_list, prepare_plus = _parse_instance(instance)\n    m = len(n_list)\n\n    q = QuantumRegister(m, \"q\")\n    qc = QuantumCircuit(q, name=\"gen_kitaev_probe\")\n\n    if prepare_plus:\n        # eq_1 initial product state |+>^{\\otimes M} (optional; runner normally prepares it)\n        for j in range(m):\n            qc.h(q[j])\n\n    # eq_1: qubit j accumulates phase n_j*phi via n_j explicit applications of U_phi.\n    # Each qc.p(phi) call is one use of the resource (sum over j equals N).\n    for j in range(m):\n        for _ in range(n_list[j]):\n            qc.p(phi, q[j])\n\n    # eq_2: local measurement basis rotation diag(1, e^{i theta_j}) followed by H,\n    # so that a computational-basis measurement yields\n    # p(x_j|phi) = [1 + (-1)^{x_j} cos(n_j phi + theta_j)]/2.\n    for j in range(m):\n        if theta_list[j] != 0.0:\n            qc.p(theta_list[j], q[j])\n        qc.h(q[j])\n\n    return qc",
+    "example_instance_json": "{\"phi\": 0.7, \"n\": [1, 2], \"theta\": [0.0, 1.5707963267948966], \"N\": 3, \"prepare_plus\": false}",
+    "register_layout": [
+      "q[0] (Qiskit index 0, least significant bit): spec qubit j=1, receives n_1=1 application of P(phi), then P(theta_1=0) (omitted as identity) and H; its measured bit is x_1",
+      "q[1] (Qiskit index 1): spec qubit j=2, receives n_2=2 applications of P(phi), then P(theta_2=pi/2) and H; its measured bit is x_2",
+      "Input expected from runner: |+>^{\\otimes 2} = H^{\\otimes 2}|00> (or set prepare_plus=true to prepend the Hadamards)",
+      "Output bitstring (Qiskit little-endian) 'x_2 x_1' has probability (1/4)[1+(-1)^{x_1} cos phi][1-(-1)^{x_2} sin 2phi] (eq_6)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop commented '# eq_1: qubit j accumulates phase n_j*phi' (qc.p(phi) repeated n_j times); optional '# eq_1 initial product state' Hadamard block",
+        "explanation": "Each qubit j receives n_j explicit applications of diag(1,e^{i phi}); _parse_instance enforces sum n_j = N > 0. The |+> initial state is left to the runner by default (operation-only), with an optional prepare_plus flag."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop commented '# eq_2: local measurement basis rotation'",
+        "explanation": "Applies P(theta_j) then H on each qubit, so that a computational-basis measurement by the runner has the Born-rule statistics p(x_j|phi) = [1+(-1)^{x_j} cos(n_j phi+theta_j)]/2 with independent qubits. The measurement itself is not included (measurement-free operation)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Flat-prior Bayesian posterior, estimator and average cost are classical postprocessing over sampled outcomes and prior integration; not part of a unitary circuit."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Asymptotic 1/N vs 1/N^2 scaling claims are analytic results about optimized distributions; the module only builds the probe for a given {n_j}."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Fundamental Bayesian bound pi^2/N^2 is a reference asymptotic result, not something a finite circuit implements."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "example_instance_json and build_circuit with n=[1,2], theta=[0, pi/2]",
+        "explanation": "The tiny instance M=2, N=3, (n_1,n_2)=(1,2), (theta_1,theta_2)=(0,pi/2) is the provided example; the circuit realizes exactly the likelihood stated in eq_6 when fed |+>^{⊗2} and measured."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The Hadamard preparation of |+>^{⊗M} from |0>^{⊗M} is NOT included by default; the circuit is the operation acting on a runner-prepared |+>^{⊗M}. An optional boolean 'prepare_plus' adds the Hadamards.",
+        "reason": "Task requires an operation without input-state preparation; inputs are prepared by the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Computational-basis measurement and Bayesian postprocessing are excluded from the module.",
+        "reason": "Measurement-free unitary circuit required; estimation is classical postprocessing."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Added practical caps: M <= 12 qubits and N = sum n_j <= 4096 phase-gate applications; N must be positive.",
+        "reason": "Qubit cap mandated by the task; gate cap avoids unbounded circuit sizes."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Spec qubit j (1-indexed) is mapped to Qiskit index j-1; theta_j = 0 phase gates are omitted as identities.",
+        "reason": "Explicit physical qubit ordering with Qiskit little-endian convention; identity gates have no effect."
+      }
+    ],
+    "assumptions": [
+      "Phase gate is U_phi = diag(1, e^{i phi}) realised as Qiskit p(phi); it is applied n_j times explicitly so the circuit's gate count equals the resource N.",
+      "Initial state |+>^{⊗M} is supplied by the runner (or via prepare_plus=true).",
+      "Measurements are local, non-adaptive, with fixed phases theta_j given in the instance (default 0 = X basis).",
+      "Lossless, noiseless setting; no error model included.",
+      "Instance values are plain JSON numbers/lists (ints, floats, lists, bools)."
+    ],
+    "unresolved_issues": [
+      "The optimal distribution {n_j} and {theta_j} achieving the 1/N^2 scaling (eq_4) is not known from the abstract; the module accepts any user-supplied distribution.",
+      "Whether the paper uses adaptive measurements or the periodic cost function cannot be determined; the circuit implements the non-adaptive fixed-theta variant.",
+      "Loss model and alternative resource quantification are not represented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 6,
+    "depth": 4,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

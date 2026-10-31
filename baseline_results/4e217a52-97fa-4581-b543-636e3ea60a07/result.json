@@ -1,0 +1,141 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "4e217a52-97fa-4581-b543-636e3ea60a07",
+  "parent_run_id": "b0854ca1-c24e-4b75-ab63-d24eb2b32bb0",
+  "created_at": "2026-10-31T16:54:26.979112+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "b0b3ce1636d1612703246966d1c36a05db120aa4ca7cb60cf938237e03581edf",
+  "source_specification_sha256": "e64e39903d7aaf3c13235cfce20a357c506dff4cea6fe2c7c15e880047be9a6a",
+  "source_python_sha256": "59119fc4ec813364953f792b8e9d2c9ac9d797887ddf134914455a5aea6c3b38",
+  "elapsed_seconds": 114.123,
+  "usage": {
+    "input_tokens": 7212,
+    "output_tokens": 9878,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing the scoped single-walker discrete-time quantum walk (DTQW) perfect state transfer of one unknown coin qubit from site x=0 to site x=d on a line, using a position/time-dependent coin schedule drawn from {I, X}. The shift S is realised as a QFT-basis conditional incrementer/decrementer, the site-selective coin flips as multi-controlled X gates on the coin, and the known correction V^dagger = X is applied at the end (optional). The schedule's final flip site was corrected from x=T-2 to x=T-1=d+1 so that the two components actually recombine at x=d.",
+    "source_python": "'''Discrete-time quantum walk (DTQW) perfect state transfer of ONE unknown coin qubit\non a one-dimensional line, from site x = 0 to site x = d (scoped reconstruction).\n\nQubit layout (Qiskit little-endian, qubit 0 = least significant bit):\n  qubits 0 .. n_p-1 : position register P storing y = x + 1 as an unsigned integer,\n                      qubit m holds bit m of y, n_p = (d + 2).bit_length()\n  qubit  n_p        : coin register C, which initially carries the unknown qubit |phi>\nSender site x = 0 is y = 1 (basis state 0...01 on P); receiver site x = d is y = d + 1.\nThe circuit is the bare operation U = X_C . U_T ... U_1 (T = d + 2); no state preparation\nor measurement is included.\n'''\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\n\nMAX_QUBITS = 12\n\n\ndef _validate(instance):\n    '''Validate the instance dict and return (d, apply_correction, n_p).'''\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a JSON object (dict)')\n    if 'd' not in instance:\n        raise ValueError('instance must contain the integer target site d')\n    d = instance['d']\n    if isinstance(d, bool) or not isinstance(d, int):\n        raise ValueError('d must be an integer')\n    if d < 1:\n        raise ValueError('d must be >= 1')\n    apply_correction = True\n    if 'apply_correction' in instance:\n        apply_correction = instance['apply_correction']\n        if not isinstance(apply_correction, bool):\n            raise ValueError('apply_correction must be a boolean')\n    # eq_1 register sizing: positions x in [-1, d+1] -> y in [0, d+2]\n    n_p = (d + 2).bit_length()\n    if n_p + 1 > MAX_QUBITS:\n        raise ValueError('instance needs %d qubits, exceeding the cap of %d' % (n_p + 1, MAX_QUBITS))\n    return d, apply_correction, n_p\n\n\ndef _shift(qc, pos, coin):\n    '''eq_2: coin-conditioned shift S: y -> y + 1 if coin = 0, y -> y - 1 if coin = 1.\n\n    QFT-basis adder: after QFTGate(n) the Fourier amplitude of |k> must acquire\n    exp(2 pi i s k / 2^n) with s = 1 - 2c.  This is split into an unconditional +1\n    phase p(2 pi 2^m / 2^n) on Fourier qubit m and a coin-controlled -2 phase\n    cp(-4 pi 2^m / 2^n), followed by the inverse QFT on the same qubits.\n    '''\n    n = len(pos)\n    qubits = [pos[m] for m in range(n)]\n    qc.append(QFTGate(n), qubits)\n    for m in range(n):\n        ang = 2.0 * math.pi * float(2 ** m) / float(2 ** n)\n        qc.p(ang, pos[m])\n        qc.cp(-2.0 * ang, coin, pos[m])\n    qc.append(QFTGate(n).inverse(), qubits)\n\n\ndef _flip_coin_at(qc, pos, coin, y):\n    '''eq_3 / eq_5 coin operator: C_t(x) = X at the single site with label y, I elsewhere.'''\n    n = len(pos)\n    zero_bits = [pos[m] for m in range(n) if ((y >> m) & 1) == 0]\n    for q in zero_bits:\n        qc.x(q)\n    qc.mcx([pos[m] for m in range(n)], coin)\n    for q in zero_bits:\n        qc.x(q)\n\n\ndef _walk_step(qc, pos, coin, flip_site_y):\n    '''eq_3: U_t = S (sum_x |x><x| (x) C_t(x)); flip_site_y None means C_t(x) = I for all x.'''\n    if flip_site_y is not None:\n        _flip_coin_at(qc, pos, coin, flip_site_y)\n    _shift(qc, pos, coin)\n\n\ndef build_circuit(instance):\n    '''Build the DTQW perfect-state-transfer operation for the given instance.\n\n    instance keys:\n      d                : int >= 1, receiver site (transfer distance)\n      apply_correction : optional bool (default True), apply V^dagger = X on the coin at the end\n    '''\n    d, apply_correction, n_p = _validate(instance)\n    pos = QuantumRegister(n_p, 'pos')\n    coin = QuantumRegister(1, 'coin')\n    qc = QuantumCircuit(pos, coin, name='dtqw_pst_d%d' % d)\n    c = coin[0]\n    total_steps = d + 2  # T = d + 2\n    # eq_5 coin schedule (with corrected final flip site):\n    #   t = 1      : C = I everywhere\n    #   t = 2      : C = X at x = -1 (y = 0)\n    #   3..T-1     : C = I everywhere\n    #   t = T      : C = X at x = T - 1 = d + 1 (y = d + 2)   [spec eq_5 wrote x = T - 2]\n    for t in range(1, total_steps + 1):\n        flip_y = None\n        if t == 2:\n            flip_y = 0\n        elif t == total_steps:\n            flip_y = d + 2\n        _walk_step(qc, pos, c, flip_y)\n    if apply_correction:\n        # eq_4 / eq_6: transfer delivers X|phi>, so V = X; apply V^dagger = X to recover |phi>\n        qc.x(c)\n    return qc",
+    "example_instance_json": "{\"d\": 2, \"apply_correction\": true}",
+    "register_layout": [
+      "Example d=2: n_p=3 position qubits + 1 coin qubit = 4 qubits total.",
+      "qubits 0,1,2 : position register 'pos', y = x + 1 stored as unsigned integer with qubit m = bit m of y (qubit 0 least significant).",
+      "qubit 3 : coin register 'coin'; carries the unknown qubit |phi> at input and (after the final X correction) |phi> at output.",
+      "Expected input: pos = |y=1> = |001> (x = 0), coin = |phi>. Expected output: pos = |y=3> = |011> (x = d = 2), coin = |phi> (or X|phi> if apply_correction=false)."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "module docstring and build_circuit register allocation; sizing in _validate (n_p = (d+2).bit_length())",
+        "explanation": "Position register P tensored with a one-qubit coin register C; positions x in [-1, d+1] are encoded as y = x+1 on n_p qubits."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_shift",
+        "explanation": "Coin-conditioned shift implemented as a QFT-basis adder: unconditional +1 phases plus coin-controlled -2 phases between QFTGate(n) and its inverse, giving y -> y+1 for coin 0 and y -> y-1 for coin 1."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_walk_step and _flip_coin_at",
+        "explanation": "One walk step applies the site-dependent coin (X at one selected site via a multi-controlled X with X-conjugated zero controls, I elsewhere) followed by the shift."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit (product of walk steps followed by the V^dagger = X correction)",
+        "explanation": "The returned circuit is the full operator U_T...U_1 (optionally followed by X on the coin), which is the operation whose action on |0>_P|phi>_C is asserted by eq_4; the transfer property itself is left to external validation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit main loop (comment block 'eq_5 coin schedule')",
+        "explanation": "Flip at x=-1 (y=0) in step 2, identity coins in steps 1 and 3..T-1, final flip in step T; final flip site corrected to x = T-1 = d+1 (y = d+2), see specification_changes."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Derived trajectory/result; it is not an operation but fixes V = X, which motivates the final qc.x(coin) correction in build_circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "The final coin flip in step T is applied at x = T-1 = d+1 (y = d+2), not at x = T-2 as written in eq_5.",
+        "reason": "By eq_6, after step T-1 the components sit at x = T-1 and x = T-3; flipping at x = T-2 would act on no amplitude. Flipping the leading component at x = T-1 and shifting brings both components to x = T-2 = d with coin a|1>+b|0>, as eq_6 states."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Position register uses Qiskit little-endian ordering (qubit m holds bit m of y) instead of the 'big-endian' wording in the registers description; the sender basis state is |y=1> = qubit 0 set, all others clear.",
+        "reason": "Qiskit qubit index 0 is the least significant bit; the QFT-based adder and the multi-controlled flips are written consistently with this convention."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The known correction V^dagger = X on the coin is included inside the returned circuit (toggle via instance key apply_correction, default true).",
+        "reason": "The specification's final step says the correction may be applied or absorbed by the receiver; including it makes the circuit map |0>_P|phi>_C directly to |d>_P|phi>_C for validation."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Scope narrowed to a single walker on a line transferring one coin qubit with coins in {I, X}; the paper's two-qubit encoding, multi-dimensional network, multi-qubit entangled-state distribution, and routing are not implemented.",
+        "reason": "The abstract gives no equations or encodings for those parts; the single-qubit line transfer is the smallest explicit construction consistent with the specification."
+      }
+    ],
+    "assumptions": [
+      "Shift convention: coin 0 moves x -> x+1, coin 1 moves x -> x-1.",
+      "Coin operators restricted to {I, X}; the coin schedule of eq_5 (as corrected) is an assumption of this reconstruction, not the paper's protocol.",
+      "The position register is sized so that no wrap-around occurs (max y = d+2 < 2^n_p); modular arithmetic of the QFT adder is therefore never exercised.",
+      "Input state is prepared externally as |y=1>_P (x = 0) tensored with the unknown coin qubit; no preparation is included in the circuit.",
+      "Qubit cap of 12 limits d to at most 2045 (n_p <= 11); large d produce deep circuits (T = d+2 steps, each with two QFTs)."
+    ],
+    "unresolved_issues": [
+      "The paper's actual encoding of an arbitrary two-qubit state in the walk and its specific coin-flipping settings remain unknown; this module implements a single-qubit analogue.",
+      "Multi-dimensional network distribution between every pair of sites and the routing architecture are out of scope and would need additional structural information.",
+      "Correctness of the transfer (unit fidelity, V = X) is asserted from the derivation in eq_6 and has not been simulated here."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 313,
+    "depth": 239,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

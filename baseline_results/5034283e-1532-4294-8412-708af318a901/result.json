@@ -1,0 +1,144 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "5034283e-1532-4294-8412-708af318a901",
+  "parent_run_id": "b19fb3b5-3034-4ec6-9534-a9d8300ae632",
+  "created_at": "2026-10-31T16:42:33.355356+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "cecfe72c9e9bc7d3003a24b1e9f5581f0ff997520f11904a944c5378a72da3b5",
+  "source_specification_sha256": "2d3686d06f17540147847f18b77fc0fca0c49d18519872dec5b69f6bf100fc8e",
+  "source_python_sha256": "4a74baf5fccde7b9db9287950c354357ce87ead2228401b1fa20ccfd7b188840",
+  "elapsed_seconds": 81.62,
+  "usage": {
+    "input_tokens": 6754,
+    "output_tokens": 6856,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing t steps of the coined discrete-time quantum walk U = S (I ⊗ C) on the cycle C_N for N a power of two (N = 2^n, 4 <= N <= 2048), with the degree-2 Grover coin C = X (or optionally the Hadamard coin) and the flip-flop (arc-reversing) shift. The position register (n qubits, binary node label) and a single coin qubit are laid out so that the basis index is 2v + c (position most significant, as in the specification). The circuit is the pure walk operator U^t: no state preparation or measurement. The default example is the baseline C4 instance with t = 2, for which the specification predicts perfect antipodal transfer 0 -> 2.",
+    "source_python": "\"\"\"Coined discrete-time quantum walk U^t on the cycle C_N (N = 2^n).\n\nOperation only: implements U = S (I_N (x) C) repeated ``steps`` times, where\nC is the degree-2 Grover coin (= Pauli X) or, optionally, the Hadamard coin,\nand S is the flip-flop shift S|v>|c> = |v + (-1)^c mod N>|c xor 1>.\n\nQubit layout (Qiskit qubit 0 = least significant bit):\n    qubit 0           : coin c (0 -> toward v+1, 1 -> toward v-1)\n    qubits 1 .. n     : position v in binary, qubit 1 = v_0 (LSB of v)\nso that the computational-basis index of |v>|c> is 2*v + c.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nMAX_STEPS = 1024\nALLOWED_COINS = (\"grover\", \"hadamard\")\n\n\ndef _require_int(instance, key):\n    \"\"\"Fetch a non-boolean integer entry from the instance dict or raise.\"\"\"\n    if key not in instance:\n        raise ValueError(\"instance is missing required key '%s'\" % key)\n    value = instance[key]\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(\"instance['%s'] must be an integer\" % key)\n    return value\n\n\ndef _controlled_increment(qc, controls, position):\n    \"\"\"Add 1 mod 2^n to ``position`` (position[0] = LSB) when all ``controls`` are 1.\n\n    Standard cascade of multi-controlled X gates, most significant target first.\n    \"\"\"\n    n = len(position)\n    for i in range(n - 1, -1, -1):\n        ctrls = list(controls) + [position[j] for j in range(i)]\n        target = position[i]\n        if len(ctrls) == 0:\n            qc.x(target)\n        elif len(ctrls) == 1:\n            qc.cx(ctrls[0], target)\n        else:\n            qc.mcx(ctrls, target)\n\n\ndef _apply_coin(qc, coin, coin_name):\n    \"\"\"eq_2: coin operator on the coin qubit at every node (node independent).\n\n    'grover'   : G_2 = (2/2) J_2 - I_2 = X\n    'hadamard' : H (degree-2 Fourier coin), optional extension\n    \"\"\"\n    if coin_name == \"grover\":\n        qc.x(coin)\n    elif coin_name == \"hadamard\":\n        qc.h(coin)\n    else:\n        raise ValueError(\"unknown coin '%s'\" % coin_name)\n\n\ndef _flip_flop_shift(qc, coin, position):\n    \"\"\"eq_3: S|v>|c> = |v + (-1)^c mod N>|c xor 1> with N = 2^n.\n\n    c = 0 : increment v mod N (coin control conjugated by X to act on |0>)\n    c = 1 : decrement v mod N, realised as X^(x)n . increment . X^(x)n\n    then flip the coin so it points back along the traversed edge.\n    \"\"\"\n    # c = 0 branch: increment\n    qc.x(coin)\n    _controlled_increment(qc, [coin], position)\n    qc.x(coin)\n    # c = 1 branch: decrement (bitwise complement conjugation of increment)\n    for q in position:\n        qc.x(q)\n    _controlled_increment(qc, [coin], position)\n    for q in position:\n        qc.x(q)\n    # arc reversal: c -> c xor 1\n    qc.x(coin)\n\n\ndef build_circuit(instance):\n    \"\"\"Return the DTQW operator U^steps on C_N as a QuantumCircuit.\n\n    instance keys:\n        'N'     : number of cycle nodes, a power of two with 4 <= N <= 2048\n        'steps' : number of walk steps t, 0 <= t <= 1024\n        'coin'  : 'grover' (Pauli X, the degree-2 Grover coin) or 'hadamard'\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n_nodes = _require_int(instance, \"N\")\n    steps = _require_int(instance, \"steps\")\n    if \"coin\" not in instance:\n        raise ValueError(\"instance is missing required key 'coin'\")\n    coin_name = instance[\"coin\"]\n    if not isinstance(coin_name, str) or coin_name not in ALLOWED_COINS:\n        raise ValueError(\"instance['coin'] must be one of %s\" % (ALLOWED_COINS,))\n    if n_nodes < 4:\n        raise ValueError(\"N must be at least 4\")\n    if n_nodes & (n_nodes - 1) != 0:\n        raise ValueError(\"N must be a power of two (binary modular increment)\")\n    if steps < 0 or steps > MAX_STEPS:\n        raise ValueError(\"steps must satisfy 0 <= steps <= %d\" % MAX_STEPS)\n    n_pos = int(round(math.log2(n_nodes)))\n    if (1 << n_pos) != n_nodes:\n        raise ValueError(\"N must be a power of two\")\n    total_qubits = n_pos + 1\n    if total_qubits > MAX_QUBITS:\n        raise ValueError(\"instance needs %d qubits, cap is %d\" % (total_qubits, MAX_QUBITS))\n\n    # eq_1: |v>|c> with coin as least significant qubit, position above it\n    coin_reg = QuantumRegister(1, \"coin\")\n    pos_reg = QuantumRegister(n_pos, \"pos\")\n    qc = QuantumCircuit(coin_reg, pos_reg, name=\"dtqw_C%d_t%d\" % (n_nodes, steps))\n    coin = coin_reg[0]\n    position = [pos_reg[i] for i in range(n_pos)]\n\n    # eq_4: U = S (I (x) C), applied ``steps`` times\n    for _ in range(steps):\n        _apply_coin(qc, coin, coin_name)\n        _flip_flop_shift(qc, coin, position)\n    return qc",
+    "example_instance_json": "{\"N\": 4, \"steps\": 2, \"coin\": \"grover\"}",
+    "register_layout": [
+      "qubit 0: coin register c (c=0 -> move toward v+1, c=1 -> move toward v-1 mod N)",
+      "qubit 1: position bit v_0 (LSB of node label v)",
+      "qubit 2: position bit v_1 (MSB of node label v for N=4)",
+      "Basis index = 2*v + c, i.e. |v>|c> with position most significant as in the specification; node 0 = index 0 or 1, antipodal node 2 = index 4 or 5 (binary 10c)",
+      "Total qubits for the example: 3 (general: log2(N) + 1, capped at 12)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: QuantumRegister allocation (coin_reg, pos_reg) and module docstring layout comment",
+        "explanation": "Position-coin Hilbert space realised as an n-qubit binary position register plus one coin qubit, ordered so the basis index is 2v + c (position most significant)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_apply_coin",
+        "explanation": "Degree-2 Grover coin G_2 = X applied to the coin qubit; 'hadamard' offered as an optional alternative coin."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_flip_flop_shift, _controlled_increment",
+        "explanation": "Flip-flop shift: coin-controlled modular increment (c=0) and decrement (c=1) of the position register, followed by X on the coin for arc reversal. Modular arithmetic is mod 2^n, hence N restricted to powers of two."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: for-loop over steps applying _apply_coin then _flip_flop_shift",
+        "explanation": "U = S (I ⊗ C) composed t times to give U^t; the circuit is the bare operator with no state preparation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The antipodal fidelity F(t) is a measurement/post-processing quantity to be estimated by the runner from position outcomes; the module returns only the unitary operator."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Predicted behaviour of the C4/X instance (PST at t=2, period 4). It is a consequence of the implemented operator, not an additional construction, and no verification is claimed here."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Cycle size restricted to N = 2^n (4 <= N <= 2048, 12-qubit cap) instead of arbitrary even N.",
+        "reason": "The shift is implemented as a binary modular increment/decrement with multi-controlled X cascades, which is exact only mod 2^n; general-N modular increments (e.g. C6) would need a different arithmetic construction and are excluded."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Added an optional 'hadamard' coin choice alongside the specified Grover (= X) coin; the example uses 'grover'.",
+        "reason": "The abstract mentions three unnamed coins; Hadamard is the natural degree-2 alternative and costs nothing to expose, but it is an assumption beyond the specification."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Physical qubit ordering fixed as coin = qubit 0 (least significant), position bits = qubits 1..n.",
+        "reason": "Qiskit qubit 0 is the LSB; this layout reproduces the specification's |v>|c> ordering with position most significant (basis index 2v + c)."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Step count capped at 1024 and must be a non-negative integer; steps = 0 returns the identity circuit.",
+        "reason": "Bounded resource usage and explicit instance validation required by the implementation contract."
+      },
+      {
+        "equation_ids": [
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "No initial state preparation or measurement is included; the predicted PST of eq_6 is not asserted by the code.",
+        "reason": "The module must return only the operation; input preparation and fidelity estimation are the runner's responsibility."
+      }
+    ],
+    "assumptions": [
+      "Node-independent coin (valid for the regular cycle; the paper's modified cycles are not reconstructed).",
+      "Flip-flop (arc-reversing) shift convention with c=0 meaning 'toward v+1' and c=1 meaning 'toward v-1'.",
+      "Grover coin at degree 2 equals Pauli X; the Hadamard option is an extension not fixed by the specification.",
+      "mcx gates are used in no-ancilla mode; circuit depth grows with log2(N) and steps but qubit count stays at log2(N)+1.",
+      "For the example (C4, X coin, t=2) the specification predicts the walker starting at node 0 (any coin state) is found at node 2 with probability 1; this is a prediction, not a verified result."
+    ],
+    "unresolved_issues": [
+      "Cycles with N not a power of two (C6 in the abstract) are not supported by the binary modular shift.",
+      "The paper's actual graph modifications, the three coin operators, generalised families, continuous-time results, interpolation and decoherence studies remain unreconstructed and out of scope.",
+      "Whether the paper's PST definition requires coin-state transfer or only vertex occupation is unknown; the runner's fidelity should trace out the coin qubit per eq_5."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 80,
+    "depth": 49,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from .code_prompt import PROMPT_VERSION, SYSTEM_PROMPT, code_messages
 from .code_schemas import CircuitArtifact, CircuitValidation, CodeRequest, CodeResult
 from .config import Settings
-from .equations import GenerationError, sha256
+from .equations import GenerationError, sha256, stop_failure
 from .sandbox import validate_in_docker
 from .schemas import EquationRequest, EquationResult, GenerationParameters, Usage
 from .source_checks import check_source
@@ -69,9 +69,15 @@ def generate_code(request: CodeRequest, settings: Settings, *, client=None) -> C
             output_format=CircuitArtifact,
             output_config={"effort": settings.effort},
         )
-        if response.stop_reason != "end_turn" or response.parsed_output is None:
+        if response.stop_reason != "end_turn":
             raise GenerationError(
-                "Model did not complete a structured code artifact; no code accepted."
+                "Model did not complete a structured code artifact; no code accepted.",
+                stop_failure(response.stop_reason),
+            )
+        if response.parsed_output is None:
+            raise GenerationError(
+                "Model did not complete a structured code artifact; no code accepted.",
+                "no_output",
             )
         artifact = CircuitArtifact.model_validate(response.parsed_output)
         check_mapping(artifact, request)
@@ -84,7 +90,7 @@ def generate_code(request: CodeRequest, settings: Settings, *, client=None) -> C
         raise GenerationError("Claude API connection failed or timed out.") from None
     except (ValidationError, ValueError):
         raise GenerationError(
-            "Code artifact failed schema or equation-mapping validation."
+            "Code artifact failed schema or equation-mapping validation.", "invalid_output"
         ) from None
 
     validation = CircuitValidation(
