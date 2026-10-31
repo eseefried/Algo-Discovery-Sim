@@ -1,0 +1,135 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "14887a09-afe8-44d1-a06a-5cc3a5883a19",
+  "parent_run_id": "f35c9dfb-cf30-4e37-8a8f-dcef118867cb",
+  "created_at": "2026-10-31T17:20:35.587096+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "21d49f5bff42e4629ae077a3b34989ed17644e47a5a7b4472ff6a06cd3e514b7",
+  "source_specification_sha256": "8125ec792088227fbe05c0383a95526c095a5ae6c0a9ec64b877e4a10477a9a6",
+  "source_python_sha256": "d68cedaccbb4fb37721ef73307bb59212388b3a4a4cc2e17c52ce5eccd82427f",
+  "elapsed_seconds": 71.271,
+  "usage": {
+    "input_tokens": 7289,
+    "output_tokens": 6252,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing the QFT-domain controlled weighted sum (eq_3): an n-qubit accumulator is moved to the Fourier basis with QFTGate(n), each single-qubit input x_j controls a Draper phase-addition block Phi(w_j) built from cp gates with angles 2*pi*w_j*2^k/2^n on accumulator qubit k (eq_2), and QFTGate(n).inverse() returns the accumulator to |(a0 + sum_j w_j x_j) mod 2^n>. Classical integer weights are compiled into the angles; the operation acts on arbitrary input/accumulator basis states supplied by the runner (linearity gives superposition behaviour). The weighted-average rescaling variant (eq_5) is out of scope.",
+    "source_python": "\"\"\"QFT-domain controlled weighted sum (inner product of a quantum bit vector with classical weights).\n\nOperation implemented (spec eq_3, built from eq_1 and eq_2):\n    |x_1 ... x_m>_inp (x) |a>_acc  ->  |x_1 ... x_m>_inp (x) |(a + sum_j w_j x_j) mod 2^n>_acc\n\nRegister layout (Qiskit index 0 = least significant bit):\n    qubits 0 .. n-1      : accumulator 'acc', acc[k] has weight 2^k (acc[0] is the LSB)\n    qubits n .. n+m-1    : inputs 'inp', inp[j] holds bit x_{j+1} (weight w_{j+1} = weights[j])\n\nConvention note: the specification writes the Fourier factor index l big-endian with phase\n2*pi*a/2^l. Under Qiskit's QFTGate convention the qubit with weight 2^k carries phase\n2*pi*a*2^k/2^n = 2*pi*a/2^(n-k), i.e. l = n - k. Angles below use the Qiskit form.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\n\nMAX_QUBITS = 12\n\n\ndef _validate(instance):\n    \"\"\"Validate the instance dict and return (n, weights).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object / dict\")\n    allowed = {\"n\", \"weights\"}\n    extra = set(instance.keys()) - allowed\n    if extra:\n        raise ValueError(\"unknown instance keys: \" + \", \".join(sorted(str(k) for k in extra)))\n    if \"n\" not in instance or \"weights\" not in instance:\n        raise ValueError(\"instance must contain 'n' (accumulator size) and 'weights' (list of ints)\")\n    n = instance[\"n\"]\n    weights = instance[\"weights\"]\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1:\n        raise ValueError(\"'n' must be a positive integer\")\n    if not isinstance(weights, (list, tuple)) or len(weights) < 1:\n        raise ValueError(\"'weights' must be a non-empty list of integers\")\n    ws = []\n    for w in weights:\n        if isinstance(w, bool) or not isinstance(w, int):\n            raise ValueError(\"each weight must be an integer\")\n        ws.append(int(w))\n    m = len(ws)\n    if n + m > MAX_QUBITS:\n        raise ValueError(\n            \"total qubits n + m = %d exceeds the cap of %d\" % (n + m, MAX_QUBITS)\n        )\n    return n, ws\n\n\ndef _controlled_phase_add(qc, control, acc, weight, n):\n    \"\"\"eq_2 (controlled): add classical 'weight' to the Fourier-encoded accumulator\n    when 'control' is |1>.  Phi(w) = (x)_k diag(1, exp(2*pi*i*w*2^k/2^n)) on acc[k];\n    controlling every factor on the same qubit gives C[Phi(w)].  Rotations whose\n    angle is a multiple of 2*pi are dropped (exact, since the phase is 2^n-periodic).\"\"\"\n    modulus = 1 << n\n    wm = weight % modulus  # negative weights act as subtraction mod 2^n\n    if wm == 0:\n        return\n    for k in range(n):\n        num = (wm * (1 << k)) % modulus\n        if num == 0:\n            continue\n        angle = 2.0 * math.pi * num / modulus\n        qc.cp(angle, control, acc[k])\n\n\ndef build_circuit(instance):\n    \"\"\"Return the controlled-weighted-sum operation as a unitary QuantumCircuit.\n\n    instance = {\"n\": <accumulator qubits>, \"weights\": [w_1, ..., w_m]}\n    \"\"\"\n    n, weights = _validate(instance)\n    m = len(weights)\n    acc = QuantumRegister(n, \"acc\")\n    inp = QuantumRegister(m, \"inp\")\n    qc = QuantumCircuit(acc, inp, name=\"ctrl_weighted_sum\")\n    acc_idx = list(range(n))\n\n    # eq_1: move the accumulator to the Fourier basis (QFT|a>).\n    qc.append(QFTGate(n), acc_idx)\n\n    # eq_3: product over inputs j of C_{x_j}[Phi(w_j)]; the blocks are diagonal and\n    # commute, so the accumulator receives sum_j w_j x_j (mod 2^n).\n    for j in range(m):\n        _controlled_phase_add(qc, inp[j], acc, weights[j], n)\n\n    # eq_1 (inverse): back to the computational basis |(a + S) mod 2^n>.\n    qc.append(QFTGate(n).inverse(), acc_idx)\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"weights\": [1, 2]}",
+    "register_layout": [
+      "qubit 0: acc[0] - accumulator least significant bit (weight 2^0)",
+      "qubit 1: acc[1] - accumulator bit of weight 2^1",
+      "qubit 2: acc[2] - accumulator most significant bit (weight 2^2); arithmetic is modulo 2^3 = 8",
+      "qubit 3: inp[0] - input bit x_1, weight w_1 = 1",
+      "qubit 4: inp[1] - input bit x_2, weight w_2 = 2",
+      "Expected action for the example: runner prepares inp = |x_2 x_1> = |11> (qubits 4,3) and acc = |000>; the operation maps acc to |011> (integer 3 = 1*1 + 2*1), inputs unchanged. Bitstring read with qubit 0 as the LSB."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: qc.append(QFTGate(n), acc_idx) and qc.append(QFTGate(n).inverse(), acc_idx) (comments '# eq_1')",
+        "explanation": "QFT and inverse QFT on the accumulator realised with QFTGate under Qiskit's convention; the spec's big-endian factor index l is mapped to Qiskit qubit k = n - l (see module docstring)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_controlled_phase_add (docstring 'eq_2 (controlled)')",
+        "explanation": "Draper constant addition Phi(c) as a tensor product of phase rotations, implemented in controlled form with cp(2*pi*c*2^k/2^n, control, acc[k]); zero-angle rotations are dropped exactly."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop 'for j in range(m)' (comment '# eq_3')",
+        "explanation": "Each input qubit controls its weight's phase-addition block; the product over inputs yields the weighted sum modulo 2^n on the accumulator."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Inner-product interpretation and the chosen check instance; it motivates the example_instance_json (n=3, w=(1,2)) but no reference results or test code are included in the module."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Weighted-average phase rescaling (angles w_j/W) is not implemented; it is only exact when W divides S and its paper construction is unknown."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Qubit ordering: the specification indexes Fourier factors big-endian (l = 1 is the MSB with phase 2*pi*a/2^l). The implementation uses Qiskit's little-endian convention (acc[0] = LSB) and QFTGate's definition, under which acc[k] carries phase 2*pi*a*2^k/2^n; the phase-addition angle on acc[k] is therefore 2*pi*w*2^k/2^n (l = n - k).",
+        "reason": "Required to match QFTGate's documented action and Qiskit's physical qubit order; the mathematical content (modular addition of w_j x_j) is unchanged."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The module returns only the operation: no X-gate preparation of x, no initialisation of a_0, no measurement. The input bit values x and a_0 are not instance parameters; the runner supplies the input state. The instance only carries n and the classical weight vector.",
+        "reason": "Task requires an operation, not an experiment; the operation is valid for all basis (and superposed) inputs by linearity."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Weights may be any Python integers, including negative or >= 2^n; they are reduced modulo 2^n, so negative weights act as subtraction mod 2^n.",
+        "reason": "Follows directly from the 2^n-periodicity of the Fourier phases; it is a harmless generalisation and does not implement the paper's signed-integer handling, which remains out of scope."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Scope narrowed to the controlled weighted sum; the weighted-average variant is excluded.",
+        "reason": "Its exact construction is unknown and the rescaled version is only exact when W divides S."
+      }
+    ],
+    "assumptions": [
+      "Inputs are single qubits (bits) and weights are classical integers compiled into controlled-phase angles.",
+      "Arithmetic is modular (mod 2^n) with no overflow qubit; non-modular and signed-integer variants of the paper are not reconstructed.",
+      "Exact QFT (no truncation of small rotations); all angles are reduced modulo 2*pi exactly via integer arithmetic before conversion to float.",
+      "Qubit cap of 12 total (n + m) enforced before register allocation.",
+      "The example instance (n=3, w=(1,2)) and its expected output (acc |000> with inputs |11> -> acc |011>) are chosen by this reconstruction, not taken from the paper."
+    ],
+    "unresolved_issues": [
+      "The paper's exact gate arrangement for the controlled weighted sum, and whether both data vectors may be quantum registers, are unknown; a classical-weight version was implemented.",
+      "The construction of the transform-domain weighted average (division by total weight, rounding convention) could not be resolved and is not implemented.",
+      "Multi-bit integer inputs (controlled-Phi(w_j 2^t) per input bit) are a straightforward extension not exposed in the instance format."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 5,
+    "gate_count": 67,
+    "depth": 46,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,161 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "16594073-9c55-4101-a29d-5bce1dc08022",
+  "parent_run_id": "85ea3acb-0fb2-4a8f-a4b1-1c19a18abc8f",
+  "created_at": "2026-10-31T17:53:03.782241+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "658dfb23e8e7deca5724511f75d89365fdf187de2f60a3ac14d24047666bb8c1",
+  "source_specification_sha256": "be90df5483e02bc54a610d2e08a04f768339abf14dc46a1ca8fee703972a3151",
+  "source_python_sha256": "2429f4cacb2336ac6a50e59e21bd4eade40f7a147288a513b6d79c8350bfae1a",
+  "elapsed_seconds": 180.278,
+  "usage": {
+    "input_tokens": 7525,
+    "output_tokens": 15995,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing the explicitly scoped baseline construction of the specification (eq_5): an amplitude-amplified hypercube edge tester. The search register holds a hypercube vertex x (n qubits) and an edge direction i (ceil(log2 n) qubits); H gates prepare the uniform superposition over edges, a phase oracle S_{V_f} marks violated edges using four applications of the bit-flip query oracle O_f (two to compute f(x), f(x xor e_i) and two to uncompute), and the standard Grover diffusion -A S_0 A^dagger is applied; the iterate is repeated a user-chosen number of times. The example instance is n=4, f(x)=1-x_1, one iteration (8 qubits). This is the O(sqrt(n/eps)) stand-in, not the paper's O~(n^{1/4} eps^{-1/2}) algorithm, which cannot be reconstructed from the abstract.",
+    "source_python": "'''Baseline amplitude-amplified hypercube edge tester for Boolean monotonicity (eq_5).\n\nSearch register = x (n qubits, x_{j+1} on qubit j) + i (k = ceil(log2 n) qubits, little-endian\ninteger i meaning direction i+1, i.e. flip qubit x[i]).  A = H on all search qubits prepares the\nuniform superposition over (padded) hypercube edges.  S_{V_f} (eq_3) marks violated edges using\nthe bit-flip query oracle O_f on two answer qubits a0, a1 and a CZ between them; everything is\nuncomputed.  The Grover iterate G = -A S_0 A^dagger S_{V_f} is repeated instance['iterations']\ntimes.  This realises the O(sqrt(n/eps)) baseline, NOT the paper's O~(n^{1/4} eps^{-1/2}) bound.\nNo input preparation beyond A and no measurement are included.\n'''\nfrom __future__ import annotations\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nANSWER_QUBITS = 2\n\n\ndef _check_int(value, name, minimum):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(name + ' must be an integer')\n    if value < minimum:\n        raise ValueError(name + ' must be >= ' + str(minimum))\n    return value\n\n\ndef _parse_function(instance, n):\n    '''Return ('coordinate', j) for f(x) = 1 - x_{j+1}, or ('table', bits) for a truth table.\n\n    Truth-table index convention: bit j (LSB = bit 0) of the index equals x_{j+1}, i.e. the\n    bit carried by qubit j of the x register (Qiskit little-endian).\n    '''\n    spec = instance.get('f')\n    if not isinstance(spec, dict):\n        raise ValueError('instance[f] must be a dict describing the Boolean function')\n    kind = spec.get('type')\n    if kind == 'negated_coordinate':\n        j = _check_int(spec.get('index'), 'f.index', 1)\n        if j > n:\n            raise ValueError('f.index must lie in 1..n')\n        return 'coordinate', j - 1\n    if kind == 'truth_table':\n        values = spec.get('values')\n        if not isinstance(values, list) or len(values) != 2 ** n:\n            raise ValueError('f.values must be a list of length 2**n')\n        bits = []\n        for v in values:\n            if isinstance(v, bool) or v not in (0, 1):\n                raise ValueError('f.values entries must be 0 or 1')\n            bits.append(int(v))\n        return 'table', bits\n    raise ValueError('f.type must be negated_coordinate or truth_table')\n\n\ndef _mcx(qc, controls, target):\n    if len(controls) == 0:\n        qc.x(target)\n    elif len(controls) == 1:\n        qc.cx(controls[0], target)\n    else:\n        qc.mcx(controls, target)\n\n\ndef _apply_oracle(qc, x_qubits, target, kind, data):\n    '''Bit-flip query oracle O_f: |x>|b> -> |x>|b xor f(x)>   (eq_3).'''\n    n = len(x_qubits)\n    if kind == 'coordinate':\n        qc.x(target)\n        qc.cx(x_qubits[data], target)\n        return\n    for idx in range(2 ** n):\n        if data[idx] != 1:\n            continue\n        zeros = [x_qubits[j] for j in range(n) if not (idx >> j) & 1]\n        for q in zeros:\n            qc.x(q)\n        _mcx(qc, list(x_qubits), target)\n        for q in zeros:\n            qc.x(q)\n\n\ndef _direction_pattern(qc, i_qubits, i):\n    '''X gates mapping direction value i to the all-ones pattern on the i register.'''\n    for b, q in enumerate(i_qubits):\n        if not (i >> b) & 1:\n            qc.x(q)\n\n\ndef _apply_direction_flip(qc, x_qubits, i_qubits, n):\n    '''Controlled x -> x xor e_i for i in 0..n-1; padded directions i >= n do nothing.'''\n    for i in range(n):\n        _direction_pattern(qc, i_qubits, i)\n        _mcx(qc, list(i_qubits), x_qubits[i])\n        _direction_pattern(qc, i_qubits, i)\n\n\ndef _apply_xi_into(qc, x_qubits, i_qubits, target, n):\n    '''target -> target xor x_i, controlled on the direction register.'''\n    for i in range(n):\n        _direction_pattern(qc, i_qubits, i)\n        _mcx(qc, list(i_qubits) + [x_qubits[i]], target)\n        _direction_pattern(qc, i_qubits, i)\n\n\ndef _apply_marking(qc, x_qubits, i_qubits, a0, a1, n, kind, data):\n    '''Phase oracle S_{V_f} of eq_5: phase -1 exactly on violated edges (eq_3).\n\n    After the forward computation a0 = f(x) xor x_i and a1 = f(x) xor f(x xor e_i).\n    The edge (x, x xor e_i) is violated iff a0 = a1 = 1 (lower endpoint has value 1,\n    upper endpoint value 0), so a CZ(a0, a1) realises S_{V_f}; all work is uncomputed.\n    Uses four applications of O_f per iteration (two forward, two uncompute).\n    '''\n    _apply_oracle(qc, x_qubits, a0, kind, data)\n    _apply_direction_flip(qc, x_qubits, i_qubits, n)\n    _apply_oracle(qc, x_qubits, a1, kind, data)\n    _apply_direction_flip(qc, x_qubits, i_qubits, n)\n    qc.cx(a0, a1)\n    _apply_xi_into(qc, x_qubits, i_qubits, a0, n)\n    qc.cz(a0, a1)\n    _apply_xi_into(qc, x_qubits, i_qubits, a0, n)\n    qc.cx(a0, a1)\n    _apply_direction_flip(qc, x_qubits, i_qubits, n)\n    _apply_oracle(qc, x_qubits, a1, kind, data)\n    _apply_direction_flip(qc, x_qubits, i_qubits, n)\n    _apply_oracle(qc, x_qubits, a0, kind, data)\n\n\ndef _apply_diffusion(qc, qubits):\n    '''Grover diffusion -A S_0 A^dagger with A = H^{(n+k)} on the search register (eq_5).'''\n    for q in qubits:\n        qc.h(q)\n    for q in qubits:\n        qc.x(q)\n    last = qubits[-1]\n    qc.h(last)\n    _mcx(qc, list(qubits[:-1]), last)\n    qc.h(last)\n    for q in qubits:\n        qc.x(q)\n    for q in qubits:\n        qc.h(q)\n\n\ndef build_circuit(instance):\n    '''Build the amplitude-amplified edge-tester operation (eq_5) for a given instance.\n\n    instance = {'n': int >= 1, 'iterations': int >= 0,\n                'f': {'type': 'negated_coordinate', 'index': j}  (f(x) = 1 - x_j, 1-based)\n                  or {'type': 'truth_table', 'values': [2**n bits]}}\n    '''\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _check_int(instance.get('n'), 'n', 1)\n    iterations = _check_int(instance.get('iterations'), 'iterations', 0)\n    k = (n - 1).bit_length()\n    total = n + k + ANSWER_QUBITS\n    if total > MAX_QUBITS:\n        raise ValueError('instance needs ' + str(total) + ' qubits, cap is ' + str(MAX_QUBITS))\n    kind, data = _parse_function(instance, n)\n    x_reg = QuantumRegister(n, 'x')\n    a_reg = QuantumRegister(ANSWER_QUBITS, 'a')\n    if k > 0:\n        i_reg = QuantumRegister(k, 'i')\n        qc = QuantumCircuit(x_reg, i_reg, a_reg, name='edge_tester_aa')\n        i_qubits = list(i_reg)\n    else:\n        qc = QuantumCircuit(x_reg, a_reg, name='edge_tester_aa')\n        i_qubits = []\n    x_qubits = list(x_reg)\n    a0 = a_reg[0]\n    a1 = a_reg[1]\n    search = x_qubits + i_qubits\n    # A: uniform superposition over (padded) hypercube edges |x>|i>  (eq_5)\n    for q in search:\n        qc.h(q)\n    # Grover iterate G = -A S_0 A^dagger S_{V_f}, repeated T times  (eq_5)\n    for _ in range(iterations):\n        _apply_marking(qc, x_qubits, i_qubits, a0, a1, n, kind, data)\n        _apply_diffusion(qc, search)\n    return qc",
+    "example_instance_json": "{\"n\": 4, \"iterations\": 1, \"f\": {\"type\": \"negated_coordinate\", \"index\": 1}}",
+    "register_layout": [
+      "qubits 0-3: register x, hypercube vertex; qubit j holds bit x_{j+1} (little-endian, x_1 on qubit 0)",
+      "qubits 4-5: register i, edge direction as little-endian integer i in {0,1,2,3}; direction i flips qubit x[i] (i.e. coordinate x_{i+1}); for non-power-of-2 n values i >= n are padding and are never marked",
+      "qubit 6: a[0], answer qubit receiving f(x) via O_f (temporarily f(x) xor x_i); returned to |0>",
+      "qubit 7: a[1], answer qubit receiving f(x xor e_i) via O_f (temporarily f(x) xor f(x xor e_i)); returned to |0>",
+      "total 8 qubits for the example (general: n + ceil(log2 n) + 2 <= 12, so n <= 7); all qubits start in |0>, no measurement"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Definition of monotonicity; it motivates the violated-edge predicate but is not itself a circuit element."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Definition of eps-farness and the rejection condition; only enters the iteration-count heuristic, which is left as the instance parameter 'iterations'."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_apply_oracle (bit-flip query oracle O_f) and _apply_marking (violated-edge predicate V_f realised as a CZ on the two answer qubits)",
+        "explanation": "O_f is implemented either as X+CX for f(x)=1-x_j or as a truth-table of multi-controlled X gates; V_f is detected via a0 = f(x) xor x_i and a1 = f(x) xor f(x xor e_i), which are both 1 exactly for violated edges."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Classical detection-probability lower bound p >= eps/n; it justifies the O(sqrt(n/eps)) iteration count but no gate depends on it (iterations is a user-supplied integer)."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit (A = H on search register, loop over Grover iterates), _apply_marking (S_{V_f}), _apply_diffusion (-A S_0 A^dagger)",
+        "explanation": "The baseline amplitude-amplified edge tester; the number of iterations T is taken from the instance instead of a fixed schedule."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The paper's O~(n^{1/4} eps^{-1/2}) query bound and its comparison with the classical bound describe an algorithm whose mechanism is not available from the abstract; the implemented baseline only achieves O(sqrt(n/eps))."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Scope narrowed to the baseline amplitude-amplified edge tester; the paper's n^{1/4} eps^{-1/2} algorithm is not implemented.",
+        "reason": "The abstract gives no construction; only the baseline from the math stage is explicitly specified."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_5"
+        ],
+        "change": "The dedicated marker qubit m from the register list is removed; the violated-edge predicate is written as a conjunction of two answer-qubit values (a0 = f(x) xor x_i, a1 = f(x) xor f(x xor e_i)) and the phase is applied with CZ(a0, a1).",
+        "reason": "Both orientations of a violated edge are captured by this symmetric reformulation, saving one qubit under the 12-qubit cap while realising the same S_{V_f}."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The direction register has k = ceil(log2 n) qubits and the superposition is uniform over all 2^k direction values; values i >= n are padding directions that are never marked.",
+        "reason": "Exact uniform superposition over n non-power-of-2 directions would need a non-standard state preparation; padding changes the marked fraction by at most a factor 2, i.e. constant overhead in T."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Bit ordering follows Qiskit little-endian: x_1 sits on qubit 0 (least significant), truth-table index bit j equals x_{j+1}; the specification's 'x_1 most significant' convention is replaced.",
+        "reason": "Required to match the physical qubit order of Qiskit; disclosed so truth tables are interpreted consistently."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_5"
+        ],
+        "change": "Each Grover iteration uses four applications of O_f (compute f(x), f(x xor e_i), then uncompute both) rather than the two counted in the specification.",
+        "reason": "Clean uncomputation of the answer qubits is needed to keep the search register unentangled; query count differs only by a constant factor."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The iteration count T is an instance parameter instead of an exponential-guess schedule over unknown p.",
+        "reason": "A schedule with random restarts is an experiment-level procedure; the module returns a single unitary operation."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Measurement of (x, i) and the classical verification/accept-reject step are omitted.",
+        "reason": "The deliverable is a measurement-free unitary operation; measurement and post-processing belong to the runner."
+      }
+    ],
+    "assumptions": [
+      "Instance format: {'n': int>=1, 'iterations': int>=0, 'f': {'type': 'negated_coordinate', 'index': j (1-based)} or {'type': 'truth_table', 'values': list of 2**n bits}}; total qubits n + ceil(log2 n) + 2 must be <= 12 (so n <= 7).",
+      "For the example (n=4, f(x)=1-x_1, 4 directions) exactly 1/4 of the 64 basis states |x>|i> are marked (all x with i=0), so analytically a single Grover iteration should concentrate the amplitude on direction i=0; this is an expectation, not a verified result.",
+      "Multi-controlled X gates are left to Qiskit's mcx (no ancilla); the circuit is unitary but not depth-optimised.",
+      "Global phase of the diffusion operator (H X MCZ X H = I - 2|s><s|) differs from -A S_0 A^dagger by -1, which is irrelevant."
+    ],
+    "unresolved_issues": [
+      "The paper's actual quantum algorithm achieving O~(n^{1/4} eps^{-1/2}) queries (underlying classical tester and quantum primitive) is unknown from the abstract and is not implemented.",
+      "The truth-table oracle uses up to 2^n multi-controlled gates and is exponentially deep in n; acceptable only for the small n allowed here.",
+      "No adaptive or exponential-guess iteration schedule is provided; the caller must choose 'iterations'."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 8,
+    "gate_count": 655,
+    "depth": 468,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

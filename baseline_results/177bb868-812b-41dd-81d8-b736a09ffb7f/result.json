@@ -1,0 +1,135 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "177bb868-812b-41dd-81d8-b736a09ffb7f",
+  "parent_run_id": "b5c40532-a26f-41e3-b42e-ef99d139c3c2",
+  "created_at": "2026-10-31T17:22:08.614223+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "76d18a8ed5e7fb577b930eac2967a225b8f33c38366bb85a4be9194522036c44",
+  "source_specification_sha256": "f845923f0de6e164cc6090b46f8d53f56079912069203e6e17b1eda767f06a99",
+  "source_python_sha256": "a8c9457bc699f55bcf0f540d4eb6a8676593232c2a11ca014cf29e81eab337ae",
+  "elapsed_seconds": 124.883,
+  "usage": {
+    "input_tokens": 6762,
+    "output_tokens": 10487,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing t steps of a coined discrete-time quantum walk on the N-cycle, U^t with U = S (I ⊗ C), where the memory-dependent coin C(λ) (unknown explicit form) is represented by a generic single-qubit U(2) gate u(theta, phi, lam) supplied in the instance, and S is a coin-controlled modular ±1 shift on an n = ceil(log2 N)-qubit little-endian position register (general N ≥ 3, including non-powers of two, via an exact basis-state permutation). Measurement, time averaging and the uniformity diagnostic are left to the runner.",
+    "source_python": "\"\"\"Coined quantum walk on the N-cycle with a parameterised (placeholder) coin.\n\nRegisters (Qiskit little-endian, qubit 0 least significant):\n  position : qubits 0 .. n-1, n = ceil(log2 N), vertex x in Z_N as unsigned binary (eq_1)\n  coin     : qubit n (eq_1)\n\nOne step (eq_3): U = S (I_N (x) C) with C = u(theta, phi, lam) on the coin qubit and\nS the conditional shift (eq_2): coin=0 -> x+1 mod N, coin=1 -> x-1 mod N.\nThe circuit returned is U^steps (no state preparation, no measurement).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nMAX_STEPS = 1024\nALLOWED_KEYS = (\"N\", \"steps\", \"coin\")\nCOIN_KEYS = (\"theta\", \"phi\", \"lam\")\n\n\ndef _as_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(f\"{name} must be an integer\")\n    return value\n\n\ndef _as_angle(value, name):\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(f\"{name} must be a real number\")\n    val = float(value)\n    if not math.isfinite(val):\n        raise ValueError(f\"{name} must be finite\")\n    return val\n\n\ndef _controlled_increment_mod_n(n_pos, cycle_size):\n    \"\"\"eq_2: controlled |x> -> |(x+1) mod N> on qubits 0..n_pos-1, control = qubit n_pos.\n\n    Step A: binary increment mod 2^n (MCX ladder), active only when the control is 1.\n    Step B (only if N is not a power of two): swap the basis states |N> and |0> on the\n    position register (controlled), so that N-1 -> N -> 0 realises the modular wrap.\n    The unused states x >= N are permuted among themselves, so the map stays unitary.\n    \"\"\"\n    qc = QuantumCircuit(n_pos + 1, name=\"inc_mod_N\")\n    pos = list(range(n_pos))\n    ctrl = n_pos\n    # Step A: controlled increment modulo 2^n\n    for i in range(n_pos - 1, 0, -1):\n        qc.mcx([ctrl] + pos[:i], pos[i])\n    qc.cx(ctrl, pos[0])\n    # Step B: controlled swap of |N> and |0> for non-power-of-two N\n    if cycle_size != (1 << n_pos):\n        ones = [b for b in range(n_pos) if (cycle_size >> b) & 1]\n        zeros = [b for b in range(n_pos) if not ((cycle_size >> b) & 1)]\n        head = ones[0]\n        others = ones[1:]\n        for b in others:\n            qc.cx(pos[head], pos[b])\n        open_ctrls = others + zeros\n        for b in open_ctrls:\n            qc.x(pos[b])\n        qc.mcx([ctrl] + [pos[b] for b in open_ctrls], pos[head])\n        for b in open_ctrls:\n            qc.x(pos[b])\n        for b in reversed(others):\n            qc.cx(pos[head], pos[b])\n    return qc\n\n\ndef build_circuit(instance):\n    \"\"\"Return the unitary U^steps of the coined walk on the N-cycle (eq_3).\n\n    instance = {\"N\": int >= 3, \"steps\": int >= 0,\n                \"coin\": {\"theta\": float, \"phi\": float, \"lam\": float}}\n    The coin dict gives the Euler angles of the generic U(2) coin gate u(theta, phi, lam),\n    standing in for the unknown memory-dependent coin C(lambda).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    for key in instance:\n        if key not in ALLOWED_KEYS:\n            raise ValueError(f\"unknown instance key: {key}\")\n    for key in ALLOWED_KEYS:\n        if key not in instance:\n            raise ValueError(f\"missing instance key: {key}\")\n    cycle_size = _as_int(instance[\"N\"], \"N\")\n    if cycle_size < 3:\n        raise ValueError(\"N must be at least 3\")\n    steps = _as_int(instance[\"steps\"], \"steps\")\n    if steps < 0 or steps > MAX_STEPS:\n        raise ValueError(f\"steps must be in [0, {MAX_STEPS}]\")\n    coin = instance[\"coin\"]\n    if not isinstance(coin, dict):\n        raise ValueError(\"coin must be a dict with keys theta, phi, lam\")\n    for key in coin:\n        if key not in COIN_KEYS:\n            raise ValueError(f\"unknown coin key: {key}\")\n    for key in COIN_KEYS:\n        if key not in coin:\n            raise ValueError(f\"missing coin key: {key}\")\n    theta = _as_angle(coin[\"theta\"], \"theta\")\n    phi = _as_angle(coin[\"phi\"], \"phi\")\n    lam = _as_angle(coin[\"lam\"], \"lam\")\n\n    n_pos = (cycle_size - 1).bit_length()  # n = ceil(log2 N), eq_1\n    if n_pos + 1 > MAX_QUBITS:\n        raise ValueError(f\"N={cycle_size} needs {n_pos + 1} qubits, exceeds cap {MAX_QUBITS}\")\n\n    # eq_1: position register (little-endian vertex label) then coin register\n    position = QuantumRegister(n_pos, \"position\")\n    coin_reg = QuantumRegister(1, \"coin\")\n    qc = QuantumCircuit(position, coin_reg, name=f\"cycle_walk_N{cycle_size}_t{steps}\")\n\n    inc = _controlled_increment_mod_n(n_pos, cycle_size)  # eq_2, +1 when control = 1\n    dec = inc.inverse()                                   # eq_2, -1 when control = 1\n    targets = list(range(n_pos)) + [n_pos]\n    coin_q = coin_reg[0]\n\n    for _ in range(steps):\n        # eq_3: coin flip C (placeholder generic U(2) for C(lambda))\n        qc.u(theta, phi, lam, coin_q)\n        # eq_2 / eq_3: shift S. coin = 0 -> x+1 (open control via X conjugation)\n        qc.x(coin_q)\n        qc.compose(inc, qubits=targets, inplace=True)\n        qc.x(coin_q)\n        # coin = 1 -> x-1\n        qc.compose(dec, qubits=targets, inplace=True)\n    return qc",
+    "example_instance_json": "{\"N\": 4, \"steps\": 8, \"coin\": {\"theta\": 1.5707963267948966, \"phi\": 0.0, \"lam\": 3.141592653589793}}",
+    "register_layout": [
+      "qubit 0: position bit 0 (least significant bit of vertex x in Z_N, little-endian)",
+      "qubit 1: position bit 1 (most significant bit for N = 4, n = 2)",
+      "qubit 2: coin qubit c (c = 0 -> shift +1 mod N, c = 1 -> shift -1 mod N)",
+      "Example: N = 4, n = 2 position qubits + 1 coin qubit = 3 qubits; coin u(pi/2, 0, pi) = Hadamard; circuit = U^8"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: QuantumRegister(n_pos, 'position'), QuantumRegister(1, 'coin'); n_pos = (N-1).bit_length()",
+        "explanation": "Position register of n = ceil(log2 N) qubits encoding x in little-endian unsigned binary, followed by a single coin qubit; registers ordered position then coin as specified."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_controlled_increment_mod_n (controlled +1 mod N) and its .inverse() (controlled -1 mod N), applied in build_circuit with X-conjugation for the c=0 branch",
+        "explanation": "Conditional shift: c=0 moves x -> x+1 mod N, c=1 moves x -> x-1 mod N. For N a power of two the MCX increment ladder realises the modular wrap directly; otherwise a controlled swap of basis states |N> and |0> is appended so that N-1 -> 0 and 0 -> N-1 under the inverse."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop over steps applying qc.u(theta, phi, lam, coin) then the shift sub-circuits",
+        "explanation": "U = S (I ⊗ C) applied `steps` times; the lambda-dependent coin C(lambda) is replaced by a generic U(2) gate u(theta, phi, lam) whose angles are instance inputs, since the explicit lambda-dependence is unknown."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "P_t(x) is obtained by measuring the position register; the module returns a measurement-free operation, so the Born-rule marginal is computed by the runner."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The time average requires running the circuit for each t = 0..T-1 (separate build_circuit calls with steps = t) and classical averaging; this is runner post-processing, not part of the unitary."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Uniformity criterion and Delta_T diagnostic are classical post-processing on measured distributions."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "C(lambda) is replaced by a generic single-qubit unitary u(theta, phi, lam) whose Euler angles are instance parameters; the memory parameter lambda in [0,8] is not an input and no lambda -> C mapping is invented.",
+        "reason": "The abstract does not give the explicit form of the recycled-coin flip operator, so only a placeholder U(2) coin can be implemented without fabrication."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The modular shift for N not a power of two is realised by a binary increment followed by a controlled permutation swapping basis states |N> and |0>; unused basis states x >= N are permuted among themselves (2^n-1 -> N, etc.) rather than left fixed.",
+        "reason": "Keeps the gate unitary on the full n-qubit register while acting exactly as x -> (x±1) mod N on the valid subspace x < N."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Only a single circuit U^steps for one chosen t is produced per call; the time average over t must be assembled by the runner from multiple calls. steps is capped at 1024 and total qubits at 12 (N <= 2048).",
+        "reason": "The module must return one bound unitary operation; resource caps are required by the task constraints."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Position register restricted to N >= 3 with n = ceil(log2 N) qubits; qubit ordering is position bits 0..n-1 (little-endian) then coin at index n.",
+        "reason": "Makes the register layout explicit in Qiskit's little-endian convention; the specification's 'position first, coin last' ordering is preserved."
+      }
+    ],
+    "assumptions": [
+      "The recycled-coin walk is modelled as a standard time-homogeneous coined walk with a 2-dimensional coin; the true recycled-coin mechanism may differ.",
+      "Direction convention: coin value 0 -> +1 (clockwise), coin value 1 -> -1; the paper may use the opposite convention.",
+      "Initial state preparation (e.g. |x=0>|c=0>) is done by the runner; the circuit is the bare evolution operator.",
+      "Example instance uses the Hadamard coin u(pi/2, 0, pi) purely as an illustrative placeholder for C(lambda).",
+      "MCX gates with up to n open/closed controls are acceptable standard gates; no dense unitaries are used."
+    ],
+    "unresolved_issues": [
+      "Explicit functional form of the coin C(lambda) and how lambda in [0,8] enters it is unknown, so lambda cannot be accepted as an instance parameter.",
+      "Whether the recycled-coin model requires a larger coin space or a non-product step operator cannot be determined from the abstract.",
+      "Which lambda values give non-uniform time-averaged distributions, the N mod 4 dependence, and the relation to the other memory-based walk are not reproducible from this construction."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 280,
+    "depth": 185,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

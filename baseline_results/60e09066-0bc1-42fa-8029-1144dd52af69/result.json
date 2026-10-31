@@ -1,0 +1,135 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "60e09066-0bc1-42fa-8029-1144dd52af69",
+  "parent_run_id": "0ce8d2ac-2973-412c-bb32-a64678e3ed65",
+  "created_at": "2026-10-31T17:09:48.799846+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "01486045e280520d35dad89a854af83f9c6f717a5faa6d4536abb6d15bc19d67",
+  "source_specification_sha256": "4d84dbd0352182188e0efddc2bcbea2aff480204fba9c88aabfe446fd4e151e4",
+  "source_python_sha256": "9640bda5ce14324aa8722c5459d49f379c2adbf46808eaa43c2e782282926d7c",
+  "elapsed_seconds": 63.829,
+  "usage": {
+    "input_tokens": 8033,
+    "output_tokens": 5732,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the trusted small-simulator operation of the scoped construction: the time-evolution unitary e^{-i H_S(x) t} for the truncated open-chain transverse-field Ising patch Hamiltonian H_S(x)=sum_i J_i Z_i Z_{i+1} + sum_i h_i X_i (eq_2) as a first- or second-order Trotter product of RZZ and RX gates on an n-qubit 'sim' register (2<=n<=12). State preparation |0...0>, the Z measurement on the edge site (eq_3's projector), the Lieb-Robinson time selection (eq_4), the particle-filter Bayes update (eq_5) and the Fisher-information argument (eq_6) are classical/runner-side and not part of the returned circuit.",
+    "source_python": "\"\"\"Trotterized time evolution under the truncated (compressed) transverse-field Ising\npatch Hamiltonian H_S(x) used by the trusted small simulator (eq_2 / unitary part of eq_3).\n\nH_S(x) = sum_{i=1}^{n-1} J_i Z_i Z_{i+1} + sum_{i=1}^{n} h_i X_i   (open chain, n patch qubits)\n\nSite i of the patch (site 1 = measured edge site) is mapped to Qiskit qubit index i-1.\nThe circuit returned is the unitary U = exp(-i H_S(x) t), approximated by a product formula\nwith `trotter_steps` repetitions of order 1 or 2.  No state preparation or measurement.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nMIN_QUBITS = 2\n\n\ndef _as_real(value, name):\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(f\"{name} must be a real number\")\n    out = float(value)\n    if not math.isfinite(out):\n        raise ValueError(f\"{name} must be finite\")\n    return out\n\n\ndef _as_positive_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(f\"{name} must be a positive integer\")\n    if value < 1:\n        raise ValueError(f\"{name} must be >= 1\")\n    return int(value)\n\n\ndef _as_real_list(value, length, name):\n    if not isinstance(value, (list, tuple)):\n        raise ValueError(f\"{name} must be a list of real numbers\")\n    if len(value) != length:\n        raise ValueError(f\"{name} must have length {length}\")\n    return [_as_real(v, f\"{name}[{k}]\") for k, v in enumerate(value)]\n\n\ndef _parse_instance(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object (dict)\")\n    if \"n\" not in instance or \"J\" not in instance or \"h\" not in instance or \"t\" not in instance:\n        raise ValueError(\"instance requires keys 'n', 'J', 'h', 't'\")\n    n = _as_positive_int(instance[\"n\"], \"n\")\n    if n < MIN_QUBITS or n > MAX_QUBITS:\n        raise ValueError(f\"n must satisfy {MIN_QUBITS} <= n <= {MAX_QUBITS}\")\n    couplings = _as_real_list(instance[\"J\"], n - 1, \"J\")\n    fields = _as_real_list(instance[\"h\"], n, \"h\")\n    t = _as_real(instance[\"t\"], \"t\")\n    steps = _as_positive_int(instance[\"trotter_steps\"], \"trotter_steps\") if \"trotter_steps\" in instance else 1\n    order = _as_positive_int(instance[\"order\"], \"order\") if \"order\" in instance else 2\n    if order not in (1, 2):\n        raise ValueError(\"order must be 1 or 2\")\n    return n, couplings, fields, t, steps, order\n\n\ndef _append_zz_layer(qc, couplings, dt):\n    # exp(-i J_i Z_i Z_{i+1} dt) == RZZ(2 J_i dt) on (i-1, i)  [eq_2 coupling terms]\n    for i, coupling in enumerate(couplings):\n        qc.rzz(2.0 * coupling * dt, i, i + 1)\n\n\ndef _append_x_layer(qc, fields, dt):\n    # exp(-i h_i X_i dt) == RX(2 h_i dt) on qubit i-1  [eq_2 transverse-field terms]\n    for i, field in enumerate(fields):\n        qc.rx(2.0 * field * dt, i)\n\n\ndef build_circuit(instance):\n    \"\"\"Return the Trotterized unitary exp(-i H_S(x) t) on an n-qubit 'sim' register.\n\n    instance keys:\n      n             : patch size (2..12)\n      J             : list of n-1 real ZZ couplings J_1..J_{n-1}\n      h             : list of n real transverse fields h_1..h_n\n      t             : real evolution time\n      trotter_steps : positive integer number of product-formula repetitions (optional, default 1)\n      order         : 1 (Lie-Trotter) or 2 (symmetric Strang) (optional, default 2)\n    \"\"\"\n    n, couplings, fields, t, steps, order = _parse_instance(instance)\n    sim = QuantumRegister(n, \"sim\")\n    qc = QuantumCircuit(sim, name=\"exp(-i H_S t)\")\n    dt = t / steps\n    # eq_3 (unitary part): U = exp(-i H_S(x) t) approximated by a product formula.\n    for _ in range(steps):\n        if order == 1:\n            _append_zz_layer(qc, couplings, dt)\n            _append_x_layer(qc, fields, dt)\n        else:\n            _append_x_layer(qc, fields, 0.5 * dt)\n            _append_zz_layer(qc, couplings, dt)\n            _append_x_layer(qc, fields, 0.5 * dt)\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"J\": [0.5], \"h\": [0.3, 0.7], \"t\": 1.0, \"trotter_steps\": 4, \"order\": 2}",
+    "register_layout": [
+      "sim[0] (Qiskit qubit 0, least significant bit): patch site 1 = measured edge site; receives h_1 and one leg of J_1",
+      "sim[1] (Qiskit qubit 1): patch site 2 = neighbour of the edge site; receives h_2 and the other leg of J_1",
+      "general n: patch site i -> sim[i-1]; coupling J_i acts on (sim[i-1], sim[i]); total qubits = n <= 12",
+      "The 4-qubit 'device' register of the specification is NOT allocated: it is the physical data source, not a simulated object"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Full N-qubit device Hamiltonian; it is the physical system being characterized and is not simulated by the trusted small simulator, so it is not part of the returned operation."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_append_zz_layer, _append_x_layer (comments '[eq_2 coupling terms]' and '[eq_2 transverse-field terms]'); parameters J, h parsed in _parse_instance",
+        "explanation": "The truncated patch Hamiltonian H_S(x) is realised term-by-term: exp(-i J_i Z_i Z_{i+1} dt) as RZZ(2 J_i dt) and exp(-i h_i X_i dt) as RX(2 h_i dt)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit (comment 'eq_3 (unitary part)'): Trotter loop producing exp(-i H_S(x) t)",
+        "explanation": "Only the unitary evolution e^{-i H_S(x) t} is built; the |00> input and the Z-measurement projector Pi_d (whose Born-rule probability gives the likelihood) are supplied by the runner, per the operation-only contract."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Lieb-Robinson truncation bound constrains the admissible experiment time t classically; it is not a quantum operation. The module accepts any finite t and does not enforce v t < l."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Particle-filter Bayesian update is classical post-processing over many circuit runs and cannot be part of a single measurement-free unitary circuit."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Fisher-information scaling motivates choosing longer t; it is an analytical statement with no circuit counterpart."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The exact propagator e^{-i H_S(x) t} is replaced by a product formula (first-order Lie-Trotter or second-order Strang splitting) with a user-chosen number of steps; the non-commuting ZZ and X layers are split accordingly.",
+        "reason": "Opaque dense unitaries are disallowed; H_S(x) terms do not commute, so a gate-level decomposition requires Trotterization. Error is O(t^2/steps) (order 1) or O(t^3/steps^2) (order 2)."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to the simulator-side unitary only: no |00> preparation, no Z measurement, no likelihood estimation, no Bayes update, and no device-side experiment.",
+        "reason": "The deliverable is a measurement-free unitary operation; preparation, measurement, sampling and classical inference are performed by the runner / classical code."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Generalised from the fixed n=2 patch {1,2} to an open chain of n patch qubits (2<=n<=12) with arbitrary real J_1..J_{n-1} and h_1..h_n, all supplied as instance parameters (no distinction between 'unknown' and 'known' parameters inside the circuit).",
+        "reason": "The circuit must work for varying valid instances; which parameters are being learned is a property of the classical inference loop, not of the simulator unitary. n=2 with (J_1,h_1,h_2) reproduces the specification exactly."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Qubit index mapping: specification site i (site 1 = leftmost tensor factor / measured site) is placed on Qiskit qubit i-1, i.e. the measured edge site is the least-significant qubit.",
+        "reason": "Qiskit's little-endian convention differs from the leftmost-tensor-factor convention of the specification; the mapping is disclosed so the runner measures sim[0] for site 1."
+      }
+    ],
+    "assumptions": [
+      "Gate conventions: RZZ(theta)=exp(-i theta Z⊗Z/2) and RX(theta)=exp(-i theta X/2), so theta = 2*coefficient*dt reproduces exp(-i coefficient * P * dt).",
+      "Second-order (symmetric) Trotter is the default; order 1 is available via 'order': 1. Default trotter_steps is 1 if omitted.",
+      "Any finite real t (including 0 or negative) is accepted; enforcing the Lieb-Robinson condition v t < l is left to the classical experiment-design layer.",
+      "The example instance corresponds to the specification's scoped patch: n=2, J_1=0.5, h_1=0.3 (unknown parameters as a particle value), h_2=0.7 (known), t=1.0.",
+      "Ideal (noiseless) simulator gates."
+    ],
+    "unresolved_issues": [
+      "Trotter step count and order needed to make the product-formula error negligible relative to the Lieb-Robinson truncation error (eq_4) is not determined by the specification.",
+      "The paper's actual bootstrapping schedule (which patches, which times, transfer of learned parameters) and the interactive learning variant remain unreconstructed; this module only provides the per-particle simulator unitary used in step 4 of the specification."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 28,
+    "depth": 20,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

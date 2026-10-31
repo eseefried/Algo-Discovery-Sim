@@ -1,0 +1,144 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "b40e63f6-3e64-475b-8116-e19d7bc62cd2",
+  "parent_run_id": "f737f24c-52e8-447c-b643-1c313803dcbd",
+  "created_at": "2026-10-31T17:36:20.896130+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "cbe0848377371ba67928bfc05e09d99586e847d31c629ca528d6bac965ba6782",
+  "source_specification_sha256": "d1b0885ee7887d820b12aae2b929f492182e7812bbdad1b9ce7651263a84e629",
+  "source_python_sha256": "e47910364ab786f44199c682692c49851ae87627bf56c558f1db70faf45682ac",
+  "elapsed_seconds": 92.381,
+  "usage": {
+    "input_tokens": 7396,
+    "output_tokens": 7524,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the T-step QPA evolution U(theta)^T of eq_3/eq_4 as a unitary circuit: a 2-level coin qubit mixed by C(theta)=Rx(-2*theta) followed by a coin-conditioned cyclic shift (+1 for coin |0>, -1 for coin |1>) on a periodic n-site ring embedded in m=ceil(log2 n) position qubits. The mod-n shift is built from an mcx incrementer mod 2^m followed by a controlled transposition |n><->|0>, which makes the n used sites a closed cycle while unused basis states permute among themselves. Input-state preparation (eq_2), position measurement/partition decision (eq_5), the majority target (eq_1) and the GA fitness (eq_6) are classical or runner-side and are not part of the returned operation.",
+    "source_python": "\"\"\"Quantum Particle Automaton (QPA) evolution U(theta)^T for density classification.\n\nImplements eq_3 (one-step unitary U(theta) = S (I x C(theta))) and eq_4 (T repeated steps)\nof the specification as a measurement-free unitary circuit on a periodic n-site ring.\n\nRegister layout (Qiskit little-endian):\n  qubits 0..m-1 : position register, m = ceil(log2 n); site j <-> computational basis |j>\n                  (qubit 0 is the least significant bit of j); basis states j >= n are\n                  unused ancilla-like states that are permuted among themselves only.\n  qubit  m      : coin (internal/velocity) qubit c.\n\nInstance keys: n_sites (int >= 2), theta (real), steps (int >= 1).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _as_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(f\"{name} must be an integer, got {value!r}\")\n    return value\n\n\ndef _as_real(value, name):\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(f\"{name} must be a real number, got {value!r}\")\n    value = float(value)\n    if not math.isfinite(value):\n        raise ValueError(f\"{name} must be finite\")\n    return value\n\n\ndef _controlled_shift_plus(m, n):\n    \"\"\"Circuit on m+1 qubits (0..m-1 position, m control) implementing, when the control\n    is |1>, the cyclic shift |j> -> |j+1 mod n> on the n used sites (the shift S for\n    coin branch |0> in eq_3). Unused states j >= n are permuted among themselves.\"\"\"\n    qc = QuantumCircuit(m + 1, name=\"cshift+1\")\n    pos = list(range(m))\n    ctrl = m\n    # Controlled increment modulo 2^m: flip bit k iff control=1 and all lower bits are 1.\n    for k in range(m - 1, -1, -1):\n        controls = [ctrl] + pos[:k]\n        qc.mcx(controls, pos[k])\n    # If n < 2^m, redirect the wrap: site n-1 was mapped to |n>; swap |n> <-> |0>\n    # (controlled on ctrl) so that n-1 -> 0, giving an exact mod-n cycle on 0..n-1.\n    if n < (1 << m):\n        ones = [i for i in range(m) if (n >> i) & 1]\n        h = ones[-1]\n        others = [i for i in ones if i != h]\n        # Gray-code conjugation: map |n> -> |2^h>, keep |0> fixed.\n        for i in others:\n            qc.cx(pos[h], pos[i])\n        zero_controls = [pos[i] for i in range(m) if i != h]\n        for q in zero_controls:\n            qc.x(q)\n        qc.mcx([ctrl] + zero_controls, pos[h])\n        for q in zero_controls:\n            qc.x(q)\n        for i in reversed(others):\n            qc.cx(pos[h], pos[i])\n    return qc\n\n\ndef _qpa_step(qc, pos, coin, theta, shift_plus, shift_minus):\n    \"\"\"One application of U(theta) = S (I_n x C(theta)) (eq_3).\n    C(theta) = [[cos t, i sin t],[i sin t, cos t]] = Rx(-2 t).\"\"\"\n    qc.rx(-2.0 * theta, coin)\n    # Coin |0> -> shift +1 (conditioned via X conjugation), coin |1> -> shift -1.\n    qubits = list(pos) + [coin]\n    qc.x(coin)\n    qc.compose(shift_plus, qubits=qubits, inplace=True)\n    qc.x(coin)\n    qc.compose(shift_minus, qubits=qubits, inplace=True)\n\n\ndef build_circuit(instance):\n    \"\"\"Return the unitary U(theta)^T (eq_4) on the position+coin registers.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    for key in (\"n_sites\", \"theta\", \"steps\"):\n        if key not in instance:\n            raise ValueError(f\"missing instance key {key!r}\")\n    n = _as_int(instance[\"n_sites\"], \"n_sites\")\n    theta = _as_real(instance[\"theta\"], \"theta\")\n    steps = _as_int(instance[\"steps\"], \"steps\")\n    if n < 2:\n        raise ValueError(\"n_sites must be >= 2\")\n    if steps < 1:\n        raise ValueError(\"steps must be >= 1\")\n    m = max(1, math.ceil(math.log2(n)))\n    while (1 << m) < n:\n        m += 1\n    total = m + 1\n    if total > MAX_QUBITS:\n        raise ValueError(f\"instance needs {total} qubits, exceeding the cap of {MAX_QUBITS}\")\n    position = QuantumRegister(m, \"pos\")\n    coin_reg = QuantumRegister(1, \"coin\")\n    qc = QuantumCircuit(position, coin_reg, name=f\"QPA_U^{steps}\")\n    pos = [position[i] for i in range(m)]\n    coin = coin_reg[0]\n    shift_plus = _controlled_shift_plus(m, n)\n    shift_minus = shift_plus.inverse()\n    # eq_4: |psi_T> = U(theta)^T |psi_0>\n    for _ in range(steps):\n        _qpa_step(qc, pos, coin, theta, shift_plus, shift_minus)\n    return qc",
+    "example_instance_json": "{\"n_sites\": 5, \"theta\": 0.3, \"steps\": 5}",
+    "register_layout": [
+      "Total 4 qubits for the example (n_sites=5 -> m=3 position qubits + 1 coin qubit).",
+      "qubits 0,1,2: position register 'pos'; site j in {0,...,4} is the computational basis state |j> with qubit 0 the least significant bit (j = q0 + 2*q1 + 4*q2). Basis states |5>,|6>,|7> are unused and only permuted among themselves by the shift.",
+      "qubit 3: coin register 'coin'; |0>_c shifts +1 (mod n), |1>_c shifts -1 (mod n). Runner should prepare it in |0> per eq_2.",
+      "Input state (eq_2) and position measurement/partition (eq_5) are prepared/performed by the runner, not by build_circuit."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Classical majority target M(x); used only for evaluation/fitness, not part of the unitary operation."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Initial particle state |psi_0(x)> is input-state preparation, which the runner performs; the module returns only the evolution operator."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_qpa_step (coin C(theta) as rx(-2*theta)) and _controlled_shift_plus / its inverse (coin-conditioned periodic shift S)",
+        "explanation": "One step U(theta) = S (I x C(theta)): coin mixing then +1/-1 cyclic shift on the n-site ring with exact mod-n wrap via incrementer plus controlled transposition |n><->|0>."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit, loop 'for _ in range(steps)' (comment '# eq_4')",
+        "explanation": "U(theta)^T realized by repeating the step circuit T=steps times."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Position measurement, marginalization over the coin, and the boundary-partition decision are measurement/classical post-processing outside the returned operation."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "GA fitness over inputs is a classical outer loop, not a circuit element."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The n-site ring is embedded in m=ceil(log2 n) qubits (n=5 -> 3 qubits); the shift acts as the exact cyclic shift mod n on basis states 0..n-1 and as an arbitrary (closed) permutation on the 2^m-n unused basis states.",
+        "reason": "Qiskit registers are qubit-based; a 5-level qudit must be embedded. The used subspace is invariant, so dynamics on valid inputs are unchanged."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Tensor order fixed as position on qubits 0..m-1 (little-endian) and coin on qubit m, i.e. the state |j> x |c> corresponds to integer j + 2^m * c.",
+        "reason": "The specification's |j> x |c> notation does not fix a physical qubit ordering; an explicit layout is required."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "C(theta) is realized as the standard gate Rx(-2*theta), which equals [[cos t, i sin t],[i sin t, cos t]] exactly.",
+        "reason": "Expressing the coin in terms of a standard gate; no change of meaning."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "steps (T) is an instance parameter required to be >= 1; the example uses T=5.",
+        "reason": "T is unspecified in the source; T=0 (identity) is rejected as a degenerate operation."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_5",
+          "eq_1",
+          "eq_6"
+        ],
+        "change": "Narrowed scope to the evolution operator only; encoding, measurement, partition decision and GA fitness are excluded.",
+        "reason": "Task requires an operation without state preparation, measurement, or classical post-processing."
+      }
+    ],
+    "assumptions": [
+      "The QPA step is the one-parameter coined-walk form of eq_3 (an assumption of the math stage; the actual operator of reference [12] / the GA-found unitaries may differ).",
+      "Periodic boundary conditions (indices mod n) with coin |0> moving +1 and coin |1> moving -1.",
+      "Coin is applied before the shift within each step, matching U = S (I x C).",
+      "n_sites may be any integer >= 2 with ceil(log2 n)+1 <= 12 qubits; n=5 is the paper's case.",
+      "theta is any finite real; the small/large theta mass interpretation is not enforced."
+    ],
+    "unresolved_issues": [
+      "The exact QPA definition, input encoding, number of steps, and the GA-found unitaries/partitions are unknown, so this operator is a plausible stand-in, not a reproduction of the paper's solution.",
+      "Whether the partition in the paper is over positions only or over position-and-coin basis states is unknown; the circuit is agnostic since it returns only the evolution."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 855,
+    "depth": 676,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

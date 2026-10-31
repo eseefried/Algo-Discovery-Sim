@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "3ddc4c5c-967e-43a6-92a7-460b2e112d54",
+  "parent_run_id": "7d2283dd-b549-4e3f-b4b9-8026b347a50c",
+  "created_at": "2026-10-31T16:56:02.739198+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "46d9bbc09fbeb5f49ed1049d04805c75c686ed0e41f3aed358966a00030130a0",
+  "source_specification_sha256": "664bbbfc2240c97fdd993ed539489dd1d219b10b80976d268a5b14bc8cab1985",
+  "source_python_sha256": "4502cc48ce61a04460ce6952b10cb646f03abdefc84e92543dd0cc92adb3926c",
+  "elapsed_seconds": 55.71,
+  "usage": {
+    "input_tokens": 7426,
+    "output_tokens": 4709,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the single-attempt unitary of the one-ancilla RUS squaring/multiplication primitive (eq_2/eq_4): ancilla pre-rotation e^{-i phi1 X}, controlled-(-iX) from ancilla onto target (CX followed by Sdg on the control), ancilla post-rotation e^{+i phi2 X}. The runner prepares |0> on the ancilla and measures it; outcome 0 leaves e^{-i theta X} on the target with tan(theta)=tan(phi1)tan(phi2) (squaring when phi1=phi2). Measurement, failure correction and repetition (eq_3, eq_6) are classical-control aspects outside the returned unitary.",
+    "source_python": "\"\"\"One-ancilla Repeat-Until-Success (RUS) primitive: single-attempt unitary.\n\nQubit layout (Qiskit little-endian):\n  qubit 0 : target t  (receives e^{-i theta X} on RUS success)\n  qubit 1 : ancilla a (runner prepares |0>, measures in Z after this circuit)\n\nConventions: rx(lam) = exp(-i lam X / 2), so e^{-i phi X} = rx(2 phi).\nThe controlled-(-iX) = controlled-exp(-i pi X / 2) is realised as CX(a->t) then Sdg on a\n(the phase -i is attached to the control=|1> branch).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _as_angle(value, name):\n    \"\"\"Validate a real, finite angle supplied in the instance.\"\"\"\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(f\"{name} must be a real number, got {value!r}\")\n    x = float(value)\n    if not math.isfinite(x):\n        raise ValueError(f\"{name} must be finite, got {value!r}\")\n    return x\n\n\ndef build_circuit(instance):\n    \"\"\"Return the pre-measurement unitary of one RUS attempt.\n\n    instance keys (exactly one form):\n      {\"phi\": float}                 -> squaring primitive, phi1 = phi2 = phi  (eq_2)\n      {\"phi1\": float, \"phi2\": float} -> product-of-tangents primitive          (eq_4)\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object (dict)\")\n    allowed = {\"phi\", \"phi1\", \"phi2\"}\n    unknown = set(instance.keys()) - allowed\n    if unknown:\n        raise ValueError(f\"unknown instance keys: {sorted(unknown)}\")\n    if \"phi\" in instance:\n        if \"phi1\" in instance or \"phi2\" in instance:\n            raise ValueError(\"supply either 'phi' or both 'phi1' and 'phi2', not a mixture\")\n        phi1 = _as_angle(instance[\"phi\"], \"phi\")\n        phi2 = phi1\n    elif \"phi1\" in instance and \"phi2\" in instance:\n        phi1 = _as_angle(instance[\"phi1\"], \"phi1\")\n        phi2 = _as_angle(instance[\"phi2\"], \"phi2\")\n    else:\n        raise ValueError(\"instance must contain 'phi' or both 'phi1' and 'phi2'\")\n\n    n_qubits = 2  # one target + one ancilla\n    if n_qubits > MAX_QUBITS:\n        raise ValueError(\"qubit budget exceeded\")\n\n    t = QuantumRegister(1, \"t\")\n    a = QuantumRegister(1, \"a\")\n    qc = QuantumCircuit(t, a, name=\"rus_attempt\")\n\n    # eq_2 / eq_4 step 1: ancilla pre-rotation e^{-i phi1 X} = rx(2 phi1)\n    qc.rx(2.0 * phi1, a[0])\n\n    # eq_2 step 2: controlled-(e^{-i pi X/2}) = controlled-(-iX), ancilla control, target target.\n    # CX applies X on t when a=|1>; Sdg on a supplies the -i phase on the a=|1> branch.\n    qc.cx(a[0], t[0])\n    qc.sdg(a[0])\n\n    # eq_2 / eq_4 step 3: ancilla post-rotation e^{+i phi2 X} = rx(-2 phi2)\n    qc.rx(-2.0 * phi2, a[0])\n\n    # Measurement of a (eq_3) and repeat-on-failure (eq_6) are performed by the runner.\n    return qc",
+    "example_instance_json": "{\"phi\": 0.39269908169872414}",
+    "register_layout": [
+      "qubit 0: target t (1 qubit) - receives e^{-i theta X} on ancilla outcome 0, tan(theta)=tan(phi1)*tan(phi2); input state |psi> arbitrary (prepared by runner)",
+      "qubit 1: ancilla a (1 qubit) - runner prepares |0>, circuit applies rx(2 phi1), CX(a->t), Sdg(a), rx(-2 phi2); runner measures a in Z basis: 0 = success, 1 = failure",
+      "example: phi = pi/8 -> success probability 3/4, theta = arctan(3 - 2 sqrt 2) ~ 0.1699 rad; failure branch applies e^{+i pi X/4} to t"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Defines the target family e^{-i f X}; the implemented circuit realises the special case f = arctan(tan phi1 tan phi2) but eq_1 itself is a definition, not an operation."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: comments 'eq_2 / eq_4 step 1', 'eq_2 step 2', 'eq_2 / eq_4 step 3' (rx, cx+sdg, rx on ancilla)",
+        "explanation": "The full pre-measurement unitary of the one-ancilla squaring primitive is built; projecting the ancilla onto <0| yields K_0 = cos^2 phi I - i sin^2 phi X."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Success probability and failure Kraus operator are consequences of the eq_2 unitary; the measurement and the e^{-i pi X/4} correction are non-unitary / classical-control steps performed by the runner, not part of the returned operation."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: branch reading 'phi1'/'phi2'; same gate sequence with rx(2 phi1) pre- and rx(-2 phi2) post-rotation",
+        "explanation": "The two-angle variant is supported by allowing distinct phi1 and phi2 in the instance, giving K_0 = cos phi1 cos phi2 I - i sin phi1 sin phi2 X on ancilla outcome 0."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Small-angle Taylor expansion explaining the sense of 'approximate' multiplication; purely interpretive, no circuit content."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Geometric attempt statistics concern the repeat loop, which requires mid-circuit measurement and classical control; the module returns only a single-attempt unitary."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_6"
+        ],
+        "change": "Only the single-attempt unitary (before ancilla measurement) is returned; ancilla state preparation, Z measurement, the failure correction e^{-i pi X/4} and repetition are left to the runner.",
+        "reason": "Task constraints require a measurement-free, unitary circuit without reset or dynamic control."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Controlled-(-iX) realised as CX(a->t) followed by Sdg on the ancilla control, rather than a generic controlled-RX gate.",
+        "reason": "Exact standard-gate decomposition: controlled-U with U = -iX equals CX times a phase of -i on the control=|1> subspace, which Sdg = diag(1,-i) provides."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "Tensor order (a,t) in the specification is mapped to Qiskit layout target = qubit 0 (least significant), ancilla = qubit 1.",
+        "reason": "Qiskit little-endian convention: the leftmost tensor factor is the highest qubit index."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "For phi1 != phi2 the failure branch is not a fixed correction; the module makes no attempt to handle it (no scope for the paper's 3-ancilla multiplication circuit).",
+        "reason": "Failure handling for distinct angles was unspecified in the math stage; only the success-branch unitary is implemented."
+      }
+    ],
+    "assumptions": [
+      "Angles phi, phi1, phi2 are classically known real numbers; no range restriction is enforced beyond finiteness, though the arithmetic interpretation (theta ~ phi1*phi2) holds only for small angles.",
+      "The runner prepares the ancilla (qubit 1) in |0> and measures it in the computational basis after the circuit; outcome 0 signals success.",
+      "The target qubit (qubit 0) may be in an arbitrary input state.",
+      "Ideal gates; rx(lam) = exp(-i lam X/2) so e^{-i phi X} = rx(2 phi)."
+    ],
+    "unresolved_issues": [
+      "The implemented primitive was derived in the math stage and may differ from the paper's actual two basic RUS primitives.",
+      "The 3-ancilla multiplication and reciprocal circuits, composition for general smooth f, and error/resource analysis remain out of scope.",
+      "Failure correction for the two-angle variant with phi1 != phi2 is not a fixed rotation and is not addressed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 4,
+    "depth": 4,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

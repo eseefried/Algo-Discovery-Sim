@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "b7f78622-f6d9-4dcb-8593-be8aad7c64bc",
+  "parent_run_id": "08660780-fdd4-49a1-b030-172647946c6e",
+  "created_at": "2026-10-31T17:40:05.683754+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "fc4ed7c893bb2c633083a1e2703a3273b1e2b24584558dd207a62849668f4d46",
+  "source_specification_sha256": "6ffa8b0e96858adad7ffcf204d741ebd978320effeb3196a637dd2792299f2d1",
+  "source_python_sha256": "3fcbedce5143b87e8bcfdccd2c39e81883849f28ff1c68a781557b3be8a2ebf3",
+  "elapsed_seconds": 91.835,
+  "usage": {
+    "input_tokens": 8220,
+    "output_tokens": 7640,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit implementation of the 3-step trine-POVM quantum walk (eq_2-eq_4): one coin (polarisation) qubit plus a binary-encoded position register (default 2 qubits, positions x = 0..3). Each step applies position-controlled coin unitaries (RY(2*arccos(sqrt(2/3))) at x=0 and X at x=1 in step 2; H at x=1 in step 3) followed by the polarisation-dependent shift S that increments the position register (mod 2^n) when the coin is |V>=|1>. The returned circuit is the Naimark dilation unitary U3 U2 U1 of eq_3; reading out the position register (by the runner) realises the trine POVM E_k = (2/3)|psi_k><psi_k|. An optional trine_phase parameter rotates the trine plane about the Bloch z-axis via a phase gate on the coin before the walk.",
+    "source_python": "\"\"\"Trine-POVM via a 3-step discrete-time quantum walk (Naimark dilation).\n\nRegisters (little-endian Qiskit convention):\n  qubit 0            : coin / polarisation qubit, |0> = |H>, |1> = |V>\n  qubits 1 .. n      : position register, x = sum_i 2**i * pos[i], pos[0] = qubit 1\n\nThe circuit implements U = U_3 U_2 U_1 of eq_3 with U_t = S (sum_x C_x^(t) (x) |x><x|)\n(eq_2) and the coin schedule of eq_4.  With the walker prepared at x = 0 and the\nposition register read out afterwards, outcome x in {0,1,2} corresponds to the trine\nelement E_x = (2/3)|psi_x><psi_x| (eq_1).  No state preparation or measurement is\nincluded here.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import HGate, RYGate, XGate\n\nMAX_QUBITS = 12\n\n\ndef _validate(instance):\n    \"\"\"Return (num_position_qubits, trine_phase) or raise ValueError.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object / dict\")\n    allowed = {\"num_position_qubits\", \"trine_phase\"}\n    for key in instance:\n        if key not in allowed:\n            raise ValueError(\"unknown instance key: %s\" % str(key))\n    n = instance.get(\"num_position_qubits\", 2)\n    if isinstance(n, bool) or not isinstance(n, int):\n        raise ValueError(\"num_position_qubits must be an integer\")\n    if n < 2:\n        raise ValueError(\"num_position_qubits must be >= 2 to hold positions 0,1,2\")\n    if 1 + n > MAX_QUBITS:\n        raise ValueError(\"total qubits 1 + num_position_qubits exceeds %d\" % MAX_QUBITS)\n    phi = instance.get(\"trine_phase\", 0.0)\n    if isinstance(phi, bool) or not isinstance(phi, (int, float)):\n        raise ValueError(\"trine_phase must be a real number\")\n    phi = float(phi)\n    if not math.isfinite(phi):\n        raise ValueError(\"trine_phase must be finite\")\n    return n, phi\n\n\ndef _shift(qc, coin, pos):\n    \"\"\"eq_2: S = |H><H| (x) I + |V><V| (x) (x -> x+1 mod 2**n).\n\n    Controlled incrementer on the position register, controlled on coin = |1> = |V>.\n    Most significant target first so that every step uses the *old* lower bits.\n    \"\"\"\n    n = len(pos)\n    for i in range(n - 1, 0, -1):\n        controls = [coin] + [pos[j] for j in range(i)]\n        qc.mcx(controls, pos[i])\n    qc.cx(coin, pos[0])\n\n\ndef _site_coin(qc, gate, x, coin, pos):\n    \"\"\"eq_2: apply coin unitary `gate` to the coin qubit only at position |x>.\n\n    ctrl_state = x is interpreted little-endian over the control list pos[0..n-1],\n    matching the binary encoding x = sum_i 2**i * pos[i].\n    \"\"\"\n    n = len(pos)\n    cg = gate.control(n, ctrl_state=x)\n    qc.append(cg, list(pos) + [coin])\n\n\ndef build_circuit(instance):\n    \"\"\"Build the trine-POVM quantum-walk dilation unitary (eq_2, eq_3, eq_4).\"\"\"\n    n, phi = _validate(instance)\n\n    coin_reg = QuantumRegister(1, \"coin\")\n    pos_reg = QuantumRegister(n, \"pos\")\n    qc = QuantumCircuit(coin_reg, pos_reg, name=\"trine_walk\")\n    coin = coin_reg[0]\n    pos = [pos_reg[i] for i in range(n)]\n\n    # Optional rotation of the trine plane about the Bloch z-axis:\n    # measuring E'_k = W E_k W^dag with W = diag(1, e^{i phi}) is done by applying\n    # W^dag to the coin before the (x-z plane) walk.\n    if phi != 0.0:\n        qc.p(-phi, coin)\n\n    # Coin matrices of eq_4 (ordered basis |H>, |V>).\n    # C2_0 = [[sqrt(2/3), -sqrt(1/3)], [sqrt(1/3), sqrt(2/3)]] = RY(theta),\n    # theta/2 = arccos(sqrt(2/3)).\n    theta = 2.0 * math.acos(math.sqrt(2.0 / 3.0))\n    c2_0 = RYGate(theta)\n    c2_1 = XGate()\n    c3_1 = HGate()\n\n    # Step 1 (eq_4): C1_0 = I, then shift S.\n    _shift(qc, coin, pos)\n\n    # Step 2 (eq_4): C2_0 at x=0, sigma_x at x=1, then shift S.\n    _site_coin(qc, c2_0, 0, coin, pos)\n    _site_coin(qc, c2_1, 1, coin, pos)\n    _shift(qc, coin, pos)\n\n    # Step 3 (eq_4): identity at x=0 and x=2, Hadamard at x=1, then shift S.\n    _site_coin(qc, c3_1, 1, coin, pos)\n    _shift(qc, coin, pos)\n\n    # eq_3: position readout of this circuit's output (done by the runner) yields\n    # E_x = K_x^dag K_x with K_x = (I (x) <x|) U (I (x) |0>), x in {0,1,2}.\n    return qc",
+    "example_instance_json": "{\"num_position_qubits\": 2, \"trine_phase\": 0.0}",
+    "register_layout": [
+      "qubit 0: coin / polarisation qubit (|0> = |H>, |1> = |V>); holds the input state to be measured",
+      "qubit 1: position bit x_0 (least significant), qubit 2: position bit x_1; position x = x_0 + 2*x_1, must be prepared in |0> (walker at x = 0)",
+      "Total qubits for the example: 3. Outcome label = final value x of the position register (0, 1 or 2); x = 3 is never populated for an input with x = 0.",
+      "For num_position_qubits = n, qubits 1..n form the position register (little-endian) and the shift increments mod 2^n."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Defines the target trine POVM; it is realised indirectly as the induced POVM of the walk (eq_3) under the coin schedule (eq_4) and is not coded directly."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_shift (conditional increment = S) and _site_coin (position-controlled coin C_x^(t)) in source_python",
+        "explanation": "One walk step = position-dependent coins followed by the V-conditioned translation; the translation is a controlled incrementer on the binary position register (mod 2^n)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit (whole circuit = U_3 U_2 U_1; see closing comment)",
+        "explanation": "The circuit is the Naimark dilation unitary; the position-basis readout and the resulting Kraus/POVM elements arise when the runner prepares x = 0 and measures the position register."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: theta/c2_0/c2_1/c3_1 definitions and the three step blocks",
+        "explanation": "C2_0 is RY(2 arccos sqrt(2/3)), C2_1 is X at x=1, C3_1 is H at x=1; identity coins are omitted."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Algebraic consequence of eq_2-eq_4; not coded. Note the sign of K_2 in the specification is a global phase and the correct expression is K_2 = +sqrt(2/3)|V><psi_2| (see specification_changes)."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Born-rule outcome statistics used for post-processing; outside the operation returned by build_circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The shift S is implemented on a finite binary position register of n >= 2 qubits as a V-conditioned increment modulo 2^n (positions 0..2^n-1) instead of an isometry on the infinite line.",
+        "reason": "A unitary circuit on a finite register is required; since the walker starts at x = 0 and only reaches x <= 2 in three steps, the wrap-around is never populated and the induced POVM is unchanged."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "K_2 = +sqrt(2/3)|V><psi_2| (no minus sign): direct evaluation of the step-3 Hadamard output at x=1 gives amplitude (beta - alpha/sqrt3)/sqrt2 = sqrt(2/3) <psi_2|psi> with psi_2 = (-1/2, sqrt3/2).",
+        "reason": "Minor sign correction; it is a global phase of the Kraus operator and leaves E_2 = K_2^dag K_2 = (2/3)|psi_2><psi_2| unchanged."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "Added an optional instance parameter trine_phase phi: a phase gate P(-phi) on the coin before the walk, so the implemented POVM is E'_k = W E_k W^dag with W = diag(1, e^{i phi}) (trine plane rotated about the Bloch z-axis). Default phi = 0 reproduces the x-z plane trine of eq_1 exactly.",
+        "reason": "Provides a family of valid instances as required, while preserving the specification's default construction."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Input-state preparation (coin in |psi>, position in |0>) and the position-basis measurement are not part of the returned circuit.",
+        "reason": "The deliverable is the dilation operation only; preparation and readout are performed by the runner."
+      }
+    ],
+    "assumptions": [
+      "Coin qubit 0 encodes |H> = |0>, |V> = |1>; coin matrices of eq_4 are in the ordered basis (|H>, |V>) and RY(theta) = [[cos(theta/2), -sin(theta/2)], [sin(theta/2), cos(theta/2)]] matches C2_0 for theta = 2 arccos(sqrt(2/3)).",
+      "Position register is little-endian (qubit 1 = x_0); ctrl_state integers in _site_coin follow Qiskit's little-endian convention over the control list, so ctrl_state = x selects position |x>.",
+      "The runner prepares the position register in |0...0>; outcomes are read from the position register only (coin traced out), as in eq_3.",
+      "Ideal, noiseless gates; no optical loss or interferometric phase errors are modelled.",
+      "Coins at unoccupied positions are identity and omitted from the circuit."
+    ],
+    "unresolved_issues": [
+      "The coin schedule (eq_4) is a proposed construction consistent with the abstract, not the paper's actual wave-plate settings or walk layout.",
+      "The SIC-POVM and unambiguous-discrimination constructions named in the abstract are not implemented (scope narrowed to the trine POVM).",
+      "Correctness (E_x = (2/3)|psi_x><psi_x| for x = 0,1,2) follows from the algebra in eq_5 but has not been numerically verified here; validation software should check it."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 115,
+    "depth": 80,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

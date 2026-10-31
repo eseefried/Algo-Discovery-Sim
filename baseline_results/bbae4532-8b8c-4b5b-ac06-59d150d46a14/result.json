@@ -1,0 +1,149 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "bbae4532-8b8c-4b5b-ac06-59d150d46a14",
+  "parent_run_id": "168416ba-f57b-4911-a0ac-be58ef6cbdf5",
+  "created_at": "2026-10-31T17:55:15.555281+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "ae7e9461580f0c57e072b4bf868045e4eb0f9e387b2702db365ab8ed570ea48a",
+  "source_specification_sha256": "9104938fd1e673268da9be3652b589717f7fb778a4a4b22139a4de279f268fb6",
+  "source_python_sha256": "63e35cb9eb91eac416a3838c7b2cb15df00d8bdf8c486a91b906ca4ebb441c1a",
+  "elapsed_seconds": 95.568,
+  "usage": {
+    "input_tokens": 8517,
+    "output_tokens": 8694,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing the scoped construction: a second-order (Strang) Trotter-Suzuki approximation of exp(-i H_N t) for the discretized 1D quantum harmonic oscillator H_N = (X^2 + P^2)/2 on an n-qubit position register (N = 2^n Fourier-grid points, Delta x = sqrt(2 pi/N), x_j = (j - N/2) Delta x). Each of the r steps is exp(-i X^2 delta/4) F_c^dag exp(-i X^2 delta/2) F_c exp(-i X^2 delta/4) with delta = t/r. The diagonal quadratic phases are realized exactly by single-qubit phase gates, pairwise controlled-phase gates and a global phase; the centered DFT F_c is realized exactly as e^{i pi N/2} Z_0 . QFTGate(n) . Z_0. An optional flag adds the global phase e^{i t/2} that turns the evolution into the fractional Fourier transform of angle t. The operation contains no state preparation or measurements.",
+    "source_python": "\"\"\"Second-order Trotter-Suzuki simulation of the discretized 1D quantum harmonic oscillator.\n\nOperation implemented (eq_3 of the specification):\n    exp(-i H_N t) ~= ( exp(-i X^2 d/4) F_c^dag exp(-i X^2 d/2) F_c exp(-i X^2 d/4) )^r,  d = t / r,\nwith H_N = (X^2 + P^2)/2, P = F_c^dag X F_c (eq_2), on an n-qubit register holding a\nwavefunction on the symmetric Fourier grid x_j = (j - N/2) * sqrt(2 pi / N), N = 2^n.\n\nQubit layout: a single register ``pos`` of n qubits; qubit a (Qiskit index a, 0 = least\nsignificant) holds the bit of weight 2^a of the grid label j in 0..N-1.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\n\nMAX_QUBITS = 12\nMAX_TROTTER_STEPS = 4096\n\n\ndef _validate_instance(instance):\n    \"\"\"Validate and unpack the instance dictionary. Returns (n, t, r, include_frft_phase).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    if \"n\" not in instance or \"t\" not in instance or \"r\" not in instance:\n        raise ValueError(\"instance must contain keys 'n', 't' and 'r'\")\n    n = instance[\"n\"]\n    t = instance[\"t\"]\n    r = instance[\"r\"]\n    if isinstance(n, bool) or not isinstance(n, int):\n        raise ValueError(\"n must be an integer\")\n    if n < 1 or n > MAX_QUBITS:\n        raise ValueError(\"n must satisfy 1 <= n <= %d\" % MAX_QUBITS)\n    if isinstance(r, bool) or not isinstance(r, int):\n        raise ValueError(\"r must be an integer\")\n    if r < 1 or r > MAX_TROTTER_STEPS:\n        raise ValueError(\"r must satisfy 1 <= r <= %d\" % MAX_TROTTER_STEPS)\n    if isinstance(t, bool) or not isinstance(t, (int, float)):\n        raise ValueError(\"t must be a real number\")\n    t = float(t)\n    if not math.isfinite(t):\n        raise ValueError(\"t must be finite\")\n    include_frft_phase = instance.get(\"include_frft_phase\", False)\n    if not isinstance(include_frft_phase, bool):\n        raise ValueError(\"include_frft_phase must be a boolean\")\n    return n, t, r, include_frft_phase\n\n\ndef _apply_quadratic_phase(qc, qubits, theta, n):\n    \"\"\"Apply exp(-i theta X^2) = sum_j exp(-i theta dx^2 (j - N/2)^2) |j><j|  (eq_4, eq_2).\n\n    Expanding (j - N/2)^2 = sum_a j_a (4^a - N 2^a) + sum_{a<b} j_a j_b 2^(a+b+1) + N^2/4\n    (using j_a^2 = j_a) gives single-qubit phases, pairwise controlled phases and a\n    global phase. The grid spacing is dx^2 = 2 pi / N.\n    \"\"\"\n    big_n = 2 ** n\n    dx2 = 2.0 * math.pi / big_n\n    c = -theta * dx2\n    for a in range(n):\n        qc.p(c * (4 ** a - big_n * 2 ** a), qubits[a])\n    for a in range(n):\n        for b in range(a + 1, n):\n            qc.cp(c * 2 ** (a + b + 1), qubits[a], qubits[b])\n    qc.global_phase += c * (big_n * big_n / 4.0)\n\n\ndef _apply_centered_qft(qc, qubits, n, inverse):\n    \"\"\"Apply the centered DFT F_c (or its inverse) of eq_2.\n\n    (F_c)_{kj} = N^(-1/2) exp(2 pi i (j - N/2)(k - N/2)/N)\n               = exp(i pi N/2) (-1)^k (QFT)_{kj} (-1)^j,\n    and (-1)^j = (-1)^{j_0} is a Z gate on the least significant qubit. Hence\n    F_c = exp(i pi N/2) Z_0 QFT Z_0 and F_c^dag = exp(-i pi N/2) Z_0 QFT^dag Z_0.\n    \"\"\"\n    big_n = 2 ** n\n    gate = QFTGate(n)\n    if inverse:\n        gate = gate.inverse()\n    qc.z(qubits[0])\n    qc.append(gate, qubits)\n    qc.z(qubits[0])\n    if inverse:\n        qc.global_phase += -math.pi * big_n / 2.0\n    else:\n        qc.global_phase += math.pi * big_n / 2.0\n\n\ndef build_circuit(instance):\n    \"\"\"Build the r-step second-order Trotter-Suzuki circuit for exp(-i H_N t) (eq_3).\n\n    instance keys:\n        n (int): number of qubits, 1 <= n <= 12 (N = 2^n grid points)\n        t (float): total evolution time\n        r (int): number of Trotter steps\n        include_frft_phase (bool, optional): if True, add the global phase exp(i t/2) so the\n            circuit approximates the fractional Fourier transform of angle alpha = t (eq_6).\n    \"\"\"\n    n, t, r, include_frft_phase = _validate_instance(instance)\n    pos = QuantumRegister(n, \"pos\")\n    qc = QuantumCircuit(pos, name=\"qho_trotter2\")\n    qubits = list(range(n))\n    delta = t / r\n    for _ in range(r):\n        # eq_3: symmetric Strang step  e^{-iX^2 d/4} e^{-iP^2 d/2} e^{-iX^2 d/4}\n        _apply_quadratic_phase(qc, qubits, delta / 4.0, n)\n        _apply_centered_qft(qc, qubits, n, False)          # F_c\n        _apply_quadratic_phase(qc, qubits, delta / 2.0, n)  # e^{-iX^2 d/2} in momentum basis\n        _apply_centered_qft(qc, qubits, n, True)           # F_c^dag  -> e^{-iP^2 d/2}\n        _apply_quadratic_phase(qc, qubits, delta / 4.0, n)\n    if include_frft_phase:\n        # eq_6: F_alpha = exp(i alpha/2) exp(-i alpha H), alpha = t\n        qc.global_phase += t / 2.0\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"t\": 1.5707963267948966, \"r\": 4, \"include_frft_phase\": false}",
+    "register_layout": [
+      "Register 'pos': 3 qubits (indices 0,1,2) for the example instance; N = 8 grid points.",
+      "Qubit index a holds bit of weight 2^a of the grid label j (Qiskit little-endian: index 0 is the least significant bit).",
+      "Grid position encoded by |j> is x_j = (j - N/2) * sqrt(2*pi/N); for N = 8, x_j = (j - 4) * sqrt(pi/4).",
+      "Momentum representation reached through F_c = e^{i pi N/2} Z_0 QFT Z_0 uses the same register and the same bit convention for the momentum label k."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Defines the continuum QHO Hamiltonian H = (x^2 + p^2)/2 and the sl(2,R) commutator closure that motivates the paper's refined Trotter analysis. The splitting into X^2 and P^2 terms is what the circuit implements, but the commutation relations themselves are not used in the code and the refined bound is not reconstructed."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_apply_quadratic_phase (grid constants dx^2 = 2 pi/N, x_j = (j - N/2) dx) and _apply_centered_qft (F_c = e^{i pi N/2} Z_0 QFT Z_0, so P = F_c^dag X F_c)",
+        "explanation": "The discretized position operator enters through the quadratic phases and the momentum operator is obtained by conjugating with the centered DFT realized exactly via QFTGate and Z gates."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit (loop over r Trotter steps; comment 'eq_3: symmetric Strang step')",
+        "explanation": "Each step applies e^{-iX^2 d/4}, F_c, e^{-iX^2 d/2}, F_c^dag, e^{-iX^2 d/4} with d = t/r, repeated r times. The error bound part of eq_3 is analytical and not represented in code."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_apply_quadratic_phase",
+        "explanation": "Exact decomposition of exp(-i theta dx^2 (j - N/2)^2) into n single-qubit p gates, n(n-1)/2 cp gates and a global phase using (j - N/2)^2 = sum_a j_a(4^a - N 2^a) + sum_{a<b} j_a j_b 2^{a+b+1} + N^2/4."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The subpolynomial complexity bound O(exp(gamma sqrt(log(N/epsilon)))) is an analytical result about the paper's refined step schedule; the module uses a user-supplied step count r and does not implement or claim that scaling."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "build_circuit, optional include_frft_phase flag (comment 'eq_6')",
+        "explanation": "When include_frft_phase is true the global phase e^{i t/2} is added so the circuit approximates the fractional Fourier transform of angle alpha = t; for t = pi/2 this approximates the ordinary (continuum) Fourier transform on bounded-energy states."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Bit labeling of the grid index j changed from the specification's big-endian description j = sum_l j_l 2^{n-1-l} to Qiskit's little-endian convention: qubit index a carries the bit of weight 2^a.",
+        "reason": "Qiskit qubit 0 is the least significant bit and QFTGate(n) follows this convention; the operator meaning (grid label j in 0..N-1) is unchanged, only the physical qubit assignment is fixed."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The centered DFT F_c is realized as e^{i pi N/2} Z_0 . QFTGate(n) . Z_0 (and F_c^dag as e^{-i pi N/2} Z_0 . QFTGate(n).inverse() . Z_0), including the exact global phase e^{i pi N/2} via circuit.global_phase.",
+        "reason": "Exact algebraic identity (j - N/2)(k - N/2) = jk - N(j+k)/2 + N^2/4 and (-1)^j = (-1)^{j_0}; the specification only stated 'up to a global phase', the code tracks the phase exactly."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The constant term -theta dx^2 N^2/4 of the quadratic phase is included as a global phase rather than dropped.",
+        "reason": "Keeps the implemented unitary exactly equal to exp(-i theta X^2) so that the composed circuit equals the product formula of eq_3 as an operator, not only up to phase."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Scope narrowed to the operation only: initial Gaussian state preparation, computational-basis measurement, and classical comparison described in the specification are not part of the module; the instance parameters n, t, r are user-supplied with caps n <= 12 and r <= 4096.",
+        "reason": "Task requires a measurement-free unitary operation with the input prepared by the runner, a 12-qubit cap, and rejection of invalid parameters."
+      },
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "The fractional-Fourier global phase e^{i t/2} is made optional (instance flag include_frft_phase, default false).",
+        "reason": "The primary scoped operation is the Hamiltonian evolution exp(-i H_N t); the phase is a trivial global factor relevant only when interpreting the circuit as a fractional Fourier transform."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Adjacent e^{-iX^2 d/4} factors between consecutive Trotter steps are not merged.",
+        "reason": "Keeps the circuit a literal transcription of the r-fold symmetric product; merging would be an equivalent optimization but obscures the one-to-one mapping to eq_3."
+      }
+    ],
+    "assumptions": [
+      "Units hbar = m = omega = 1 and the symmetric Fourier grid with Delta x = sqrt(2 pi / N), x_j = (j - N/2) Delta x, as in the specification.",
+      "Momentum is defined as P = F_c^dag X F_c; the alternative sign convention P = F_c X F_c^dag gives the same P^2 and hence the same circuit.",
+      "The time t may be any finite real (including 0 or negative); r is a positive integer up to 4096; n between 1 and 12.",
+      "QFTGate(n) implements |j> -> N^{-1/2} sum_k exp(2 pi i jk/N)|k> on the given index order with index 0 the least significant bit, as stated in the task description.",
+      "The runner prepares the input state (e.g. the discretized Gaussian) and performs any measurement; the module only returns the evolution operation."
+    ],
+    "unresolved_issues": [
+      "The paper's refined Lie-algebraic Trotter error bound and the resulting step schedule achieving O(exp(gamma sqrt(log(N/epsilon)))) are not reconstructed; the generic second-order bound governs the choice of r here.",
+      "For n = 1 (N = 2) the centered-grid construction is degenerate (positions +-sqrt(pi)) and the global phase e^{i pi N/2} = -1 is nontrivial; the circuit is still a valid unitary but has little physical meaning.",
+      "No simulation or verification has been performed; correctness of the phase decompositions relies on the algebraic identities stated in the docstrings."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 400,
+    "depth": 298,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

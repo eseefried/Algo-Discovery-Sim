@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "eddf1b5b-dedb-435f-8d16-0fe15e0b0a6f",
+  "parent_run_id": "14fbc71a-f922-4335-838f-664ad16f0752",
+  "created_at": "2026-10-31T16:40:18.118726+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "9af4bd2ed363cead3101813a1134375cc9d701ebc8eb3ebde340ddb53d2344de",
+  "source_specification_sha256": "7cfab1d422542b182cb0e0d367bacf5a31b887d9015098d820a7565135f6f0dd",
+  "source_python_sha256": "5b9e3bb489e4f15795e3a8183ac7ead4af800cbcd56cbcf78555490b4898f7ba",
+  "elapsed_seconds": 67.732,
+  "usage": {
+    "input_tokens": 7408,
+    "output_tokens": 6072,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the scoped construction: a Toffoli network G=(g_1,...,g_L) of positive-control MCT gates T(C;t) on n<=12 wires (paper setting n=4) applied in order to realize a reversible function as a permutation, with the additive quantum-cost and gate-count metrics attached as metadata. The GC/QC search tool, benchmark set and savings computation are out of scope; the example instance is the tiny target f_0 = T({1,2,3};4) of eq_7.",
+    "source_python": "\"\"\"Toffoli-network (MCT) circuit builder for n-bit reversible functions.\n\nScoped construction from the specification: given an ordered list of\nmultiple-control Toffoli gates T(C;t) (eq_2) on n wires (paper: n = 4),\nbuild the reversible circuit f = g_L o ... o g_1 (eq_3) and report the\nadditive quantum cost QC(G) (eq_4) and gate count GC(G) in the circuit\nmetadata.  Wire i (1 = top / most significant bit of the truth-table\nlabel) is mapped to Qiskit qubit n - i, so that the integer label\nx = sum_i x_i 2^(n-i) coincides with Qiskit's little-endian basis index.\n\nInstance format:\n  {\"n\": 4, \"gates\": [{\"controls\": [1, 2, 3], \"target\": 4}, ...]}\n\"\"\"\nfrom __future__ import annotations\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _check_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(\"%s must be an integer\" % name)\n    return value\n\n\ndef _parse_instance(instance):\n    \"\"\"Validate the instance and return (n, [(controls_tuple, target), ...]).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    if \"n\" not in instance or \"gates\" not in instance:\n        raise ValueError(\"instance needs keys 'n' and 'gates'\")\n    n = _check_int(instance[\"n\"], \"n\")\n    if n < 1 or n > MAX_QUBITS:\n        raise ValueError(\"n must satisfy 1 <= n <= %d\" % MAX_QUBITS)\n    gates_in = instance[\"gates\"]\n    if not isinstance(gates_in, list):\n        raise ValueError(\"gates must be a list\")\n    gates = []\n    for idx, g in enumerate(gates_in):\n        if not isinstance(g, dict) or \"controls\" not in g or \"target\" not in g:\n            raise ValueError(\"gate %d must be a dict with 'controls' and 'target'\" % idx)\n        controls_in = g[\"controls\"]\n        if not isinstance(controls_in, list):\n            raise ValueError(\"gate %d: controls must be a list\" % idx)\n        target = _check_int(g[\"target\"], \"gate %d target\" % idx)\n        if target < 1 or target > n:\n            raise ValueError(\"gate %d: target wire out of range 1..%d\" % (idx, n))\n        controls = []\n        for c in controls_in:\n            c = _check_int(c, \"gate %d control\" % idx)\n            if c < 1 or c > n:\n                raise ValueError(\"gate %d: control wire out of range 1..%d\" % (idx, n))\n            if c == target:\n                raise ValueError(\"gate %d: target wire cannot also be a control\" % idx)\n            if c in controls:\n                raise ValueError(\"gate %d: duplicate control wire\" % idx)\n            controls.append(c)\n        gates.append((tuple(controls), target))\n    return n, gates\n\n\ndef gate_quantum_cost(num_controls):\n    \"\"\"eq_4 per-gate cost table: NOT/CNOT = 1, Toffoli = 5, 3-control = 13.\n\n    For k >= 1 controls the table is 2^(k+1) - 3 (a standard MCT cost\n    formula consistent with the assumed table); k = 0 (NOT) costs 1.\n    \"\"\"\n    if num_controls == 0:\n        return 1\n    return 2 ** (num_controls + 1) - 3\n\n\ndef quantum_cost(gates):\n    \"\"\"eq_4: QC(G) = sum_i qc(g_i), additive over the gate list.\"\"\"\n    total = 0\n    for controls, _target in gates:\n        total += gate_quantum_cost(len(controls))\n    return total\n\n\ndef _wire_to_qubit(n, wire):\n    \"\"\"Wire 1 (top, MSB of the truth-table label) -> qubit n-1; wire n -> qubit 0.\"\"\"\n    return n - wire\n\n\ndef _apply_mct(qc, n, controls, target):\n    \"\"\"eq_2: T(C;t): x_t -> x_t XOR AND_{c in C} x_c, other wires unchanged.\"\"\"\n    tq = _wire_to_qubit(n, target)\n    cqs = [_wire_to_qubit(n, c) for c in controls]\n    k = len(cqs)\n    if k == 0:\n        qc.x(tq)\n    elif k == 1:\n        qc.cx(cqs[0], tq)\n    elif k == 2:\n        qc.ccx(cqs[0], cqs[1], tq)\n    else:\n        qc.mcx(cqs, tq)\n\n\ndef build_circuit(instance):\n    \"\"\"Build the Toffoli network f = g_L o ... o g_1 (eq_3) on n wires.\n\n    Gates are appended in list order, so gates[0] = g_1 acts first.  The\n    resulting circuit permutes computational basis states exactly as the\n    composed MCT gates (eq_1/eq_3); GC(G) and QC(G) (eq_4) are stored in\n    qc.metadata.  The example instance is f_0 = T({1,2,3};4) of eq_7.\n    \"\"\"\n    n, gates = _parse_instance(instance)\n    qr = QuantumRegister(n, \"x\")\n    qc = QuantumCircuit(qr, name=\"mct_network\")\n    for controls, target in gates:\n        _apply_mct(qc, n, controls, target)\n    qc.metadata = {\"gate_count\": len(gates), \"quantum_cost\": quantum_cost(gates)}\n    return qc",
+    "example_instance_json": "{\"n\": 4, \"gates\": [{\"controls\": [1, 2, 3], \"target\": 4}]}",
+    "register_layout": [
+      "Register x of n=4 qubits; wire i of the specification is mapped to Qiskit qubit n - i so the truth-table label x = sum_i x_i 2^(4-i) equals Qiskit's little-endian basis index.",
+      "qubit 3 = wire 1 = x_1 (top line, most significant bit)",
+      "qubit 2 = wire 2 = x_2",
+      "qubit 1 = wire 3 = x_3",
+      "qubit 0 = wire 4 = x_4 (target of the example gate, least significant bit)",
+      "Example circuit: single 3-control Toffoli with controls on qubits [3,2,1] and target qubit 0, realizing |x1 x2 x3 x4> -> |x1 x2 x3 (x4 xor x1 x2 x3)>; metadata gate_count=1, quantum_cost=13."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The target as a bijection/permutation of {0,1}^n is the semantic model the circuit realizes; the module takes a gate list as input rather than a permutation, so no explicit permutation data structure is built."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_apply_mct",
+        "explanation": "Each MCT gate T(C;t) is realized by x / cx / ccx / mcx on the mapped qubits, flipping the target iff all controls are 1."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit (gate loop) and metadata 'gate_count'",
+        "explanation": "The circuit is the sequential composition g_L o ... o g_1 with g_1 appended first; GC(G)=L is recorded. The minimization GC^*(f) itself is not performed."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "gate_quantum_cost, quantum_cost",
+        "explanation": "Additive quantum cost with the assumed table NOT/CNOT=1, Toffoli=5, 3-control=13 (generalized as 2^(k+1)-3 for k>=1 controls), stored in qc.metadata."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The QC-minimizing search over realizing networks (and the GC-optimal synthesis tool) is not specified in the abstract and is not implemented; the module only builds and costs a supplied network."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Relative savings against previously known circuits require benchmark circuits not given in the abstract; this is classical post-processing outside the circuit operation."
+      },
+      {
+        "equation_id": "eq_7",
+        "disposition": "implemented",
+        "code_location": "example_instance_json / build_circuit docstring",
+        "explanation": "The example instance is exactly f_0 = T({1,2,3};4), a one-gate network with GC=1 and QC=13 under the assumed table."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "The module input is an explicit MCT gate list rather than a target permutation f; realization of f is by construction of the supplied network, and GC^* minimization is not performed.",
+        "reason": "The synthesis/search algorithm of the GC-optimal tool is missing from the abstract; building and costing a given Toffoli network is the only fully specified construction."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Per-gate cost for k>=4 controls is extrapolated as 2^(k+1)-3 (matching the assumed 1/5/13 values for k=1,2,3); NOT costs 1.",
+        "reason": "The module accepts n up to 12 wires for generality, so gates with more than 3 controls can occur; the paper's table beyond 4 bits is unknown."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Wire i is mapped to Qiskit qubit n-i (wire 1 = most significant qubit).",
+        "reason": "Specification labels wire 1 as the MSB of the truth-table index while Qiskit qubit 0 is the least significant bit; the mapping keeps truth-table row labels consistent with Qiskit basis indices."
+      }
+    ],
+    "assumptions": [
+      "Positive-control MCT library only; no ancilla lines (n equals the number of function variables).",
+      "Quantum-cost table NOT/CNOT=1, Toffoli=5, 3-control Toffoli=13 is assumed and may differ from the paper's metric.",
+      "qc.mcx with >=3 controls is left to Qiskit's standard MCX gate; its internal decomposition is irrelevant to the realized permutation but is not the cost model of eq_4.",
+      "The example instance f_0=T({1,2,3};4) is a chosen tiny target, not a benchmark from the paper.",
+      "An empty gate list is accepted and yields the identity network (GC=QC=0)."
+    ],
+    "unresolved_issues": [
+      "The GC-optimal synthesis tool's algorithm and its adaptation to QC minimization are unspecified, so no optimization is performed.",
+      "The paper's exact QC cost model (negative controls, free-line discounts) and benchmark circuits achieving up to 74% savings are unknown."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 31,
+    "depth": 27,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

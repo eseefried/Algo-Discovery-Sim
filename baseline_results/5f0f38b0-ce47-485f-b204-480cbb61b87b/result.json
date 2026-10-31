@@ -1,0 +1,138 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "5f0f38b0-ce47-485f-b204-480cbb61b87b",
+  "parent_run_id": "68e0108c-483d-4849-9710-256d7bae804f",
+  "created_at": "2026-10-31T16:37:55.213010+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "67f628d7bdac2d84f1d73aef4d480382ed176dc372246eec499d54ee1979c628",
+  "source_specification_sha256": "9b387d78b66607fdb80e6281f6dca8c73f05830efd289d05701ce7efd46207d9",
+  "source_python_sha256": "87ade30e881dc792337fbe829e458cf49a3f6221f73967049eb8e636cd9c3922",
+  "elapsed_seconds": 90.076,
+  "usage": {
+    "input_tokens": 8204,
+    "output_tokens": 8139,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the ideal gate-level Grover search operator (eq_3 with the eq_4 default iteration count) for a single marked basis state on n qubits (2 <= n <= 12, n = 4 in the paper's instance): optional Hadamard layer creating |s>, then r repetitions of the phase oracle O_w (X-conjugated multi-controlled Z) followed by the diffusion operator D (H, O_0, H). The pulse-level Ising spin-chain model (eq_1, eq_2), the 2*pi*k Rabi-frequency condition (eq_5) and the fidelity figure of merit (eq_6) are not implemented; they describe the Hamiltonian simulation the paper performs, which is not a unitary circuit construction within this scope.",
+    "source_python": "\"\"\"Ideal gate-level Grover search operator for a single marked basis state.\n\nImplements eq_3 (uniform superposition |s>, phase oracle O_w, diffusion D,\nGrover iterate G = D O_w) and eq_4 (default iteration count\nr_opt = floor(pi/4 sqrt(N))) of the specification as a measurement-free\nunitary circuit.  The pulse-level Ising spin-chain model (eq_1, eq_2), the\n2*pi*k Rabi-frequency condition (eq_5) and the fidelity figure of merit\n(eq_6) are NOT implemented here.\n\nQubit convention: specification spin k (k = 1..n, spin 1 = most significant\nbit, x = sum_k x_k 2^(n-k)) is mapped to Qiskit qubit n - k, so that Qiskit\nqubit 0 is the least significant bit.  A marked bitstring \"x_1 x_2 ... x_n\"\nis therefore read with its leftmost character on the highest qubit index.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nMAX_ITERATIONS = 1024\n\n\ndef _parse_marked(marked, n):\n    \"\"\"Return the marked item w as an integer in [0, 2^n).\"\"\"\n    if isinstance(marked, bool):\n        raise ValueError(\"marked must be an int or a bitstring, not a bool\")\n    if isinstance(marked, int):\n        if marked < 0 or marked >= 2 ** n:\n            raise ValueError(\"marked integer out of range for n qubits\")\n        return marked\n    if isinstance(marked, str):\n        if len(marked) != n:\n            raise ValueError(\"marked bitstring length must equal n\")\n        for c in marked:\n            if c not in \"01\":\n                raise ValueError(\"marked bitstring must contain only 0/1\")\n        return int(marked, 2)\n    raise ValueError(\"marked must be an int or a bitstring\")\n\n\ndef _phase_flip(qc, qubits, w):\n    \"\"\"eq_3 oracle: apply O_w = 1 - 2|w><w| on the given qubits.\n\n    Qubits whose bit of w is 0 are X-conjugated so that the multi-controlled\n    phase pi (multi-controlled Z) fires exactly on |w>.\n    \"\"\"\n    n = len(qubits)\n    flip = [qubits[q] for q in range(n) if ((w >> q) & 1) == 0]\n    for q in flip:\n        qc.x(q)\n    qc.mcp(math.pi, [qubits[i] for i in range(n - 1)], qubits[n - 1])\n    for q in flip:\n        qc.x(q)\n\n\ndef _diffusion(qc, qubits):\n    \"\"\"eq_3 diffusion: D = 2|s><s| - 1 realised as H^n O_0 H^n (equals -D, a global phase).\"\"\"\n    for q in qubits:\n        qc.h(q)\n    _phase_flip(qc, qubits, 0)\n    for q in qubits:\n        qc.h(q)\n\n\ndef build_circuit(instance):\n    \"\"\"Build the ideal Grover search circuit.\n\n    instance keys:\n      n                      int, number of qubits (2 <= n <= 12)\n      marked                 int in [0, 2^n) or bitstring of length n (spin 1 leftmost)\n      iterations             optional non-negative int r; default eq_4 r_opt = floor(pi/4 sqrt(2^n))\n      prepare_superposition  optional bool (default True): prepend H on every qubit (|0..0> -> |s>)\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"n\")\n    if isinstance(n, bool) or not isinstance(n, int):\n        raise ValueError(\"n must be an int\")\n    if n < 2 or n > MAX_QUBITS:\n        raise ValueError(\"n must satisfy 2 <= n <= 12\")\n    if \"marked\" not in instance:\n        raise ValueError(\"instance must contain 'marked'\")\n    w = _parse_marked(instance[\"marked\"], n)\n    big_n = 2 ** n\n    iterations = instance.get(\"iterations\")\n    if iterations is None:\n        # eq_4: r_opt = floor(pi/4 * sqrt(N))\n        iterations = math.floor(math.pi / 4.0 * math.sqrt(big_n))\n    if isinstance(iterations, bool) or not isinstance(iterations, int):\n        raise ValueError(\"iterations must be an int\")\n    if iterations < 0 or iterations > MAX_ITERATIONS:\n        raise ValueError(\"iterations must be in [0, 1024]\")\n    prep = instance.get(\"prepare_superposition\", True)\n    if not isinstance(prep, bool):\n        raise ValueError(\"prepare_superposition must be a bool\")\n\n    reg = QuantumRegister(n, \"spin\")\n    qc = QuantumCircuit(reg, name=\"grover\")\n    qubits = list(range(n))\n\n    # eq_3: |s> = H^n |0..0>\n    if prep:\n        for q in qubits:\n            qc.h(q)\n\n    # eq_3 / eq_4: apply G = D O_w  r times\n    for _ in range(iterations):\n        _phase_flip(qc, qubits, w)\n        _diffusion(qc, qubits)\n\n    return qc",
+    "example_instance_json": "{\"n\": 4, \"marked\": \"1111\", \"iterations\": 3, \"prepare_superposition\": true}",
+    "register_layout": [
+      "Register 'spin' with 4 qubits (indices 0..3); total qubits = 4",
+      "Qiskit qubit 3 = specification spin 1 (most significant bit x_1); qubit 2 = spin 2; qubit 1 = spin 3; qubit 0 = spin 4 (least significant bit x_4)",
+      "Basis state |x>, x = sum_k x_k 2^(4-k), with |0> = spin up and |1> = spin down; marked item w = 1111 = 15",
+      "Runner input: |0000> (all qubits in |0>); with prepare_superposition=true the circuit applies H on all qubits then 3 Grover iterations, giving |<1111|psi>|^2 = sin^2(7 theta) ~ 0.961 (eq_4)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Drift Ising Hamiltonian H_0 of the spin chain is part of the pulse-level Hamiltonian simulation, not of the gate-level Grover construction chosen for implementation; not realised as a circuit."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Time-dependent RF pulse Hamiltonian requires time-ordered Hamiltonian integration and physical parameters (omega_k, J, J', Omega) that are not available; not implemented."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_phase_flip (oracle O_w), _diffusion (D), build_circuit (H layer for |s> and the loop applying G = D O_w)",
+        "explanation": "Uniform superposition via H on every qubit, phase oracle via X-conjugated multi-controlled phase pi, diffusion via H^n O_0 H^n (equal to D up to global phase -1), Grover iterate repeated r times."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit, comment '# eq_4: r_opt = floor(pi/4 * sqrt(N))' (default value of iterations)",
+        "explanation": "Default iteration count r_opt = floor(pi/4 sqrt(2^n)) is used when 'iterations' is absent; for n = 4 this gives r = 3. The success-probability formula itself is analytic background and not computed in the circuit."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The 2*pi*k Rabi-frequency condition concerns the pulse-level realisation and the numerical fidelity scan; no pulse model is implemented."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Fidelity between ideal and pulse-driven states requires Hamiltonian simulation and state comparison, which is excluded (no simulation or operator construction in the module)."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Scope narrowed from the pulse-level spin-chain simulation of Grover's algorithm to the ideal gate-level Grover operator only.",
+        "reason": "The pulse-level model needs numerical Larmor frequencies, couplings, pulse durations and the paper's pulse sequence (all listed as missing), and the fidelity/2*pi*k analysis is a simulation result rather than a unitary circuit construction."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Qubit ordering: specification spin k (spin 1 = MSB) is mapped to Qiskit qubit n - k so that Qiskit qubit 0 is the LSB; marked bitstrings are read with spin 1 as the leftmost character.",
+        "reason": "Qiskit's little-endian convention differs from the spin-chain labelling x = sum_k x_k 2^(n-k) in the specification."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Diffusion operator realised as H^n (1 - 2|0><0|) H^n, which equals -D (global phase -1 relative to D = 2|s><s| - 1).",
+        "reason": "Standard circuit realisation; a global phase does not change the algorithm's state or success probability."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Generalised from n = 4 (N = 16) to any 2 <= n <= 12 with arbitrary single marked state and optional user-supplied iteration count r (default r_opt of eq_4); the H layer preparing |s> is optional (prepare_superposition flag, default true).",
+        "reason": "Required to accept varying valid instance parameters under the 12-qubit cap; the |s> preparation is part of the Grover algorithm but may be disabled if the runner prepares the superposition itself."
+      }
+    ],
+    "assumptions": [
+      "Single marked item w; the paper's choice of marked state is unknown and w = 1111 is the instance choice from the specification.",
+      "Three Grover iterations (eq_4 r_opt for N = 16) are used in the example; the paper may have simulated a different number.",
+      "Spin up encodes bit 0 and spin down bit 1; the runner supplies |0...0> as input.",
+      "Multi-controlled Z is realised with QuantumCircuit.mcp(pi, controls, target), a standard library gate rather than an opaque dense unitary.",
+      "Global phase of the diffusion operator is ignored."
+    ],
+    "unresolved_issues": [
+      "The Ising spin-chain pulse-level realisation (eq_1, eq_2), the 2*pi*k Rabi-frequency condition (eq_5) and the fidelity scan (eq_6) remain unimplemented because physical parameters and the paper's pulse sequence are missing.",
+      "Whether the paper's fidelity is a squared overlap and how the ideal reference state is defined during pulses cannot be resolved from the abstract."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 346,
+    "depth": 225,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

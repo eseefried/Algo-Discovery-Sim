@@ -1,0 +1,138 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "750415cc-0af0-4902-8fce-1259a2bf2874",
+  "parent_run_id": "2b020afc-0567-40d7-a727-e607d61924f2",
+  "created_at": "2026-10-31T16:40:26.832318+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "6ac4c6725e3706af38ffe8b1b8b65ad47e7b27e242fb57158e3f8c891d0dc98c",
+  "source_specification_sha256": "dae2f9798f93cf14984da35c15b2d7cc9ec402d83c4c9e3af2735a33ed9c41f8",
+  "source_python_sha256": "f510485004714c8ff3ec142d40c9bde67cfc6db9e7f28993878b75f60b59cd70",
+  "elapsed_seconds": 114.279,
+  "usage": {
+    "input_tokens": 7070,
+    "output_tokens": 10343,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the ternary SWAP gate synthesis of eq_6 (three TCX gates plus one one-qutrit negation F_3^2) on qubit-encoded qutrits. Each qutrit is encoded in two qubits (value j = q_low + 2*q_high, |11> unused but mapped to itself so every gate is a permutation and the circuit is unitary). X_3 and X_3^2 (eq_1) are built as products of two transpositions realised by X-conjugated CX/CCX gates; TCX^k (eq_2) is realised as C_{c_low}(X_3^k) C_{c_high}(X_3^{2k}); the negation is a qubit SWAP inside the qutrit. Instance parameters: num_pairs (1-3 independent qutrit pairs swapped in parallel, 4 qubits each, max 12) and variant ('A' = eq_6 as written, 'B' = the mirror synthesis TCX^{-1}, TCX, TCX^{-1} with negation on the second qutrit).",
+    "source_python": "\"\"\"Ternary SWAP gate (eq_6) synthesised from ternary controlled-X gates (eq_2)\non qubit-encoded qutrits.\n\nQutrit encoding: a qutrit occupies two qubits (q_low, q_high) with value\nj = q_low + 2*q_high, j in {0,1,2}; the pattern |11> (j=3) is unused and is\nmapped to itself by every gate so that all operations are permutations.\n\nFor pair p the first qutrit (q_1 of the specification, control of TCX_{1->2})\nis on qubits (4p, 4p+1) and the second qutrit (q_2) on qubits (4p+2, 4p+3).\n\"\"\"\nfrom __future__ import annotations\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nQUBITS_PER_PAIR = 4\n\n\ndef _transposition_01(qc, ctrl, t0, t1):\n    \"\"\"(Controlled) swap of |0>=|00> and |1>=|01> on target qutrit bits (t1 t0):\n    flip t0 when t1 == 0.  ctrl is a qubit index or None (uncontrolled).\"\"\"\n    qc.x(t1)\n    if ctrl is None:\n        qc.cx(t1, t0)\n    else:\n        qc.ccx(ctrl, t1, t0)\n    qc.x(t1)\n\n\ndef _transposition_02(qc, ctrl, t0, t1):\n    \"\"\"(Controlled) swap of |0>=|00> and |2>=|10>: flip t1 when t0 == 0.\"\"\"\n    qc.x(t0)\n    if ctrl is None:\n        qc.cx(t0, t1)\n    else:\n        qc.ccx(ctrl, t0, t1)\n    qc.x(t0)\n\n\ndef _controlled_shift(qc, ctrl, t0, t1, power):\n    \"\"\"eq_1: (controlled) X_3^power on the target qutrit (t0 low bit, t1 high bit).\n    X_3 = (0 2)(0 1) and X_3^2 = (0 1)(0 2) as permutation products acting\n    right-to-left; power 0 is the identity.\"\"\"\n    if power == 0:\n        return\n    if power == 1:\n        _transposition_01(qc, ctrl, t0, t1)\n        _transposition_02(qc, ctrl, t0, t1)\n    elif power == 2:\n        _transposition_02(qc, ctrl, t0, t1)\n        _transposition_01(qc, ctrl, t0, t1)\n    else:\n        raise ValueError(\"power must be 0, 1 or 2\")\n\n\ndef _tcx(qc, c0, c1, t0, t1, power):\n    \"\"\"eq_2: TCX^power with control qutrit (c0, c1) and target qutrit (t0, t1):\n    |a>|b> -> |a>|b + power*a mod 3>.  With a = c0 + 2*c1 this equals\n    C_{c0}(X_3^power) * C_{c1}(X_3^(2*power mod 3)); the two factors commute.\n    power=1 is TCX, power=2 is TCX^{-1} = TCX^2.\"\"\"\n    _controlled_shift(qc, c0, t0, t1, power % 3)\n    _controlled_shift(qc, c1, t0, t1, (2 * power) % 3)\n\n\ndef _negation(qc, q0, q1):\n    \"\"\"eq_6 one-qutrit factor F_3^2: |j> -> |-j mod 3>, i.e. |1>=|01> <-> |2>=|10>,\n    which is a qubit SWAP inside the qutrit (|00> and |11> fixed).\"\"\"\n    qc.swap(q0, q1)\n\n\ndef build_circuit(instance):\n    \"\"\"Return the ternary SWAP circuit (eq_6) acting on num_pairs qutrit pairs.\n\n    instance keys:\n      num_pairs : int in {1,2,3}; number of independent qutrit pairs (4 qubits each).\n      variant   : 'A' -> SWAP_3 = (F_3^2 x I) TCX_{1->2} TCX_{2->1}^{-1} TCX_{1->2}  (eq_6)\n                  'B' -> SWAP_3 = (I x F_3^2) TCX_{1->2}^{-1} TCX_{2->1} TCX_{1->2}^{-1}\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    allowed = {\"num_pairs\", \"variant\"}\n    for key in instance:\n        if key not in allowed:\n            raise ValueError(\"unknown instance key: %s\" % str(key))\n    num_pairs = instance.get(\"num_pairs\", 1)\n    variant = instance.get(\"variant\", \"A\")\n    if isinstance(num_pairs, bool) or not isinstance(num_pairs, int):\n        raise ValueError(\"num_pairs must be an int\")\n    if num_pairs < 1:\n        raise ValueError(\"num_pairs must be >= 1\")\n    if variant not in (\"A\", \"B\"):\n        raise ValueError(\"variant must be 'A' or 'B'\")\n    n_qubits = QUBITS_PER_PAIR * num_pairs\n    if n_qubits > MAX_QUBITS:\n        raise ValueError(\"too many qubits: %d > %d\" % (n_qubits, MAX_QUBITS))\n\n    qr = QuantumRegister(n_qubits, \"q\")\n    qc = QuantumCircuit(qr, name=\"ternary_swap_\" + variant)\n\n    for p in range(num_pairs):\n        a0 = QUBITS_PER_PAIR * p        # qutrit 1 low bit\n        a1 = QUBITS_PER_PAIR * p + 1    # qutrit 1 high bit\n        b0 = QUBITS_PER_PAIR * p + 2    # qutrit 2 low bit\n        b1 = QUBITS_PER_PAIR * p + 3    # qutrit 2 high bit\n        if variant == \"A\":\n            # eq_6, operators applied in time order (right-to-left in the formula):\n            # |a,b> -> |a,a+b> -> |-b,a+b> -> |-b,a> -> |b,a>\n            _tcx(qc, a0, a1, b0, b1, 1)   # TCX_{1->2}\n            _tcx(qc, b0, b1, a0, a1, 2)   # TCX_{2->1}^{-1} = TCX_{2->1}^2\n            _tcx(qc, a0, a1, b0, b1, 1)   # TCX_{1->2}\n            _negation(qc, a0, a1)         # F_3^2 on qutrit 1\n        else:\n            # mirror variant: |a,b> -> |a,b-a> -> |b,b-a> -> |b,-a> -> |b,a>\n            _tcx(qc, a0, a1, b0, b1, 2)   # TCX_{1->2}^{-1}\n            _tcx(qc, b0, b1, a0, a1, 1)   # TCX_{2->1}\n            _tcx(qc, a0, a1, b0, b1, 2)   # TCX_{1->2}^{-1}\n            _negation(qc, b0, b1)         # F_3^2 on qutrit 2\n    return qc",
+    "example_instance_json": "{\"num_pairs\": 1, \"variant\": \"A\"}",
+    "register_layout": [
+      "Total qubits for the example: 4 (num_pairs=1); qubit 0 is the least significant bit of the Qiskit computational basis.",
+      "Qutrit q_1 (specification's first qutrit, control of TCX_{1->2}, left ket in |a>|b>): qubits 0 (low bit) and 1 (high bit); value a = q0 + 2*q1 with a in {0,1,2}; |q1 q0> = |11> is an unused (invalid) code word mapped to itself.",
+      "Qutrit q_2 (specification's second qutrit, right ket in |a>|b>): qubits 2 (low bit) and 3 (high bit); value b = q2 + 2*q3.",
+      "Example input |a>|b> = |1>|2> corresponds to qubits (q3 q2 q1 q0) = (1 0 0 1), i.e. basis index 9; expected output |2>|1> is (q3 q2 q1 q0) = (0 1 1 0), basis index 6.",
+      "For num_pairs = k, pair p (0-based) uses qubits 4p,4p+1 (qutrit 1) and 4p+2,4p+3 (qutrit 2); pairs are swapped independently and in parallel."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_controlled_shift (with _transposition_01 / _transposition_02): X_3 and X_3^2 as 3-cycles on the encoded qutrit; Z_3 and the commutation relation are not needed for the SWAP synthesis",
+        "explanation": "The qutrit cyclic shift X_3 is realised as the permutation (0 2)(0 1) on the two-qubit code space using X-conjugated CX/CCX gates; its square is the reversed product. The code word |11> is left fixed so the extension to 4 dimensions is a permutation (unitary)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_tcx",
+        "explanation": "TCX^power (power 1 = TCX, power 2 = TCX^{-1}) is implemented as C_{c_low}(X_3^power) C_{c_high}(X_3^{2 power mod 3}), which applies X_3^{power*a} to the target for control value a = c_low + 2 c_high in {0,1,2}."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The TCZ definition is context only; the chosen construction (ternary SWAP, eq_6) uses TCX gates exclusively."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Replacing TCX by F_3-conjugated TCZ would require synthesising the one-qutrit Fourier gate F_3 inside the two-qubit code space from standard gates, which is not done here; eq_4 is a relation between gates, not part of the implemented operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The Cartan KAK structure of a general one-qutrit gate is structural background; the only one-qutrit gate used (F_3^2 negation) is implemented directly as a qubit SWAP."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "build_circuit (variant 'A' branch) together with _negation",
+        "explanation": "The circuit applies, in time order, TCX_{1->2}, TCX_{2->1}^{-1}, TCX_{1->2}, then F_3^2 on qutrit 1, exactly the right-to-left product of eq_6, mapping |a>|b> -> |b>|a> on valid code words."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_6"
+        ],
+        "change": "Qutrits are encoded in two qubits each (j = q_low + 2 q_high), and every qutrit operation is extended to the unused code word |11> as the identity (for X_3, X_3^2, F_3^2) and as X_3^{3k} = I for an invalid control value 3, so all gates are permutations of the 4-qubit basis.",
+        "reason": "Qiskit provides only qubits; a unitary extension to the full 2^n-dimensional space is required and the identity extension keeps the construction a pure permutation circuit built from X, CX, CCX and SWAP."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_6"
+        ],
+        "change": "TCX_{2->1}^{-1} is implemented directly as a single controlled X_3^2 (power=2) rather than as two sequential TCX gates.",
+        "reason": "TCX^{-1} = TCX^2 (eq_2) and the controlled 3-cycle X_3^2 is just the reversed transposition product, so this is exactly equal and shorter."
+      },
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "An optional mirror variant 'B' is offered: SWAP_3 = (I x F_3^2) TCX_{1->2}^{-1} TCX_{2->1} TCX_{1->2}^{-1}; variant 'A' is eq_6 as written and is the example instance.",
+        "reason": "Provides a second valid instance parameter family while preserving the meaning (|a>|b> -> |b>|a>): |a,b> -> |a,b-a> -> |b,b-a> -> |b,-a> -> |b,a>."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The TCZ-based realisation of the elementary gate (TCZ conjugated by F_3) is not implemented; only the TCX path is used.",
+        "reason": "Scope narrowed to the single smallest construction (ternary SWAP from TCX); synthesising F_3 on the encoded qutrit from standard gates is outside this scope."
+      }
+    ],
+    "assumptions": [
+      "TCX follows the generalized SUM convention |a>|b> -> |a>|b+a mod 3> (eq_2); the paper's actual TCX definition may differ (e.g. control condition on a specific state), which would change the synthesis circuit.",
+      "Input states prepared by the runner are expected to lie in the valid code space (each qutrit in {|00>,|01>,|10>}); behaviour on |11> code words is the identity extension and carries no physical meaning.",
+      "The negation gate F_3^2 is treated as an available one-qutrit gate, consistent with the abstract's assumption of arbitrary one-qutrit gates.",
+      "Qubit index 0 is the least significant bit; within each qutrit the lower-indexed qubit is the low bit of the ternary value."
+    ],
+    "unresolved_issues": [
+      "The paper's exact TCX/TCZ definitions and its actual ternary SWAP circuit are not recoverable from the abstract; the implemented decomposition is a valid one under the stated convention but may not be the paper's.",
+      "No synthesis of the one-qutrit Fourier gate F_3 (needed for eq_4 or a TCZ-based variant) is provided."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 207,
+    "depth": 144,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

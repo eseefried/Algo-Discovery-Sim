@@ -1,0 +1,166 @@
+# Abstract to equations
+
+Status: **partial**
+
+Model: `claude-fable-5-1`
+
+Mathematics has not been independently verified.
+
+Quantify the nonlocal (entangling) content of a bipartite diagonal unitary gate U of order N^2 acting on C^N (x) C^N, drawn from the ensemble of diagonal unitaries with random phases, via its Schmidt strength (operator entanglement). The abstract states this is governed by the von Neumann entropy of the auxiliary state rho = A A^dagger / N^2, where A is the N x N matrix obtained by reshaping the diagonal of U, and that the ensemble average scales as log N instead of log N^2.
+
+Scope: Smallest useful construction (chosen as an assumption, no experiment_scope supplied): N = 2, i.e. a two-qubit diagonal gate U = diag(e^{i phi_00}, e^{i phi_01}, e^{i phi_10}, e^{i phi_11}) with i.i.d. uniform random phases. In scope: (i) definition of the ensemble and of A and rho, (ii) the identification of the Schmidt strength of U with S(rho), (iii) a 4-qubit Choi-state circuit (two Bell pairs, U applied to one half of each) whose A A' reduced state has the same spectrum as rho so that S(rho) can be estimated by tomography, (iv) an explicit gate decomposition of the N=2 diagonal gate, (v) the abstract's log N scaling claim as a target for sample averaging. Out of scope (paper contributions not reconstructed): the first four moments of the squared singular values of the unimodular ensemble, the conjectured connection to the Borel triangle, the exact formula for the mean von Neumann entropy of random-phase density matrices, the average entanglement of the corresponding bipartite pure-state ensemble, and the formal definition/optimality proof of contradiagonal states under coarse graining.
+
+## Symbols
+
+- $N$: Local dimension of each subsystem; U is of order N^2; domain: integer, N >= 2 (instance: N = 2)
+- $\phi_{jk}$: Random phase of the diagonal entry of U indexed by basis state |j>_A |k>_B; domain: [0, 2\pi), j,k in {0,...,N-1}
+- $U$: Diagonal bipartite unitary gate on C^N (x) C^N; domain: N^2 x N^2 diagonal unitary matrix
+- $A$: N x N unimodular matrix with entries A_{jk} = e^{i phi_{jk}} obtained by reshaping the diagonal of U; domain: N x N complex matrix, |A_{jk}| = 1
+- $\rho$: Auxiliary density matrix A A^dagger / N^2, all diagonal entries equal to 1/N; domain: N x N positive semidefinite, unit trace
+- $s_l$: Operator Schmidt coefficients of U (equal to the singular values of A for diagonal U); domain: s_l >= 0, sum_l s_l^2 = N^2
+- $\lambda_l$: Normalized squared Schmidt coefficients s_l^2 / N^2, i.e. eigenvalues of rho; domain: probability vector of length N
+- $K_{Sch}(U)$: Schmidt strength (operator entanglement entropy) of U; domain: [0, log N] for diagonal U; natural log used
+- $S(\rho)$: von Neumann entropy -Tr rho log rho; domain: [0, log N]
+- $|\Phi\rangle_{XX'}$: Maximally entangled state (1/sqrt N) sum_j |j>_X |j>_{X'}; domain: unit vector in C^N (x) C^N
+- $P(\theta)$: Single-qubit phase gate diag(1, e^{i theta}); domain: 2 x 2 unitary
+- $CP(\theta)$: Two-qubit controlled-phase gate diag(1,1,1,e^{i theta}); domain: 4 x 4 unitary
+
+## eq_1: Random diagonal unitary ensemble
+
+$$
+U = \sum_{j,k=0}^{N-1} e^{i\phi_{jk}}\, |j\rangle\langle j|_A \otimes |k\rangle\langle k|_B, \qquad \phi_{jk} \sim \mathrm{Unif}[0,2\pi)\ \text{i.i.d.}
+$$
+
+Diagonal bipartite gate of order N^2 with random unimodular diagonal entries; basis ordering is |j>_A|k>_B with integer index jN + k (A most significant).
+
+Provenance: `abstract_inferred`. The abstract studies diagonal random unitaries of order N^2 with entries of unit modulus and random phases; a diagonal unitary is fully specified by its diagonal phases. The specific uniform i.i.d. distribution is an added assumption.
+
+Abstract evidence: Nonlocal properties of an ensemble of diagonal random unitary matrices of order $N^{2}$ are investigated.
+
+Equation assumptions:
+
+- Phases are independent and uniformly distributed on [0, 2 pi) (Haar measure on the diagonal unitary group)
+- Tensor-product ordering A (x) B with A the most significant index
+
+## eq_2: Reshaped matrix and auxiliary state
+
+$$
+A_{jk} = e^{i\phi_{jk}}, \qquad \rho = \frac{A A^{\dagger}}{N^{2}}, \qquad \rho_{jj} = \frac{1}{N}\ \forall j
+$$
+
+The N^2-vector of diagonal entries of U is reshaped row-wise into the N x N unimodular matrix A; rho is the normalized Gram matrix of its rows, whose diagonal is constant 1/N because every row has squared norm N.
+
+Provenance: `abstract_explicit`. Stated directly in the abstract; the constant diagonal follows from |A_{jk}| = 1 and matches the abstract's statement that all diagonal entries of rho equal 1/N.
+
+Abstract evidence: auxiliary quantum state $\rho=AA^{\dagger}/N^{2}$, where the square matrix $A$ is obtained by reshaping the vector of diagonal elements of $U$ of length $N^{2}$ into a square matrix of order $N$
+
+Equation assumptions:
+
+- Row-major reshaping consistent with the ordering of eq_1
+
+## eq_3: Operator Schmidt decomposition and Schmidt strength
+
+$$
+U = \sum_{l=1}^{N^2} s_l\, A_l \otimes B_l,\quad \mathrm{Tr}(A_l^{\dagger}A_m)=\mathrm{Tr}(B_l^{\dagger}B_m)=\delta_{lm},\quad \lambda_l = \frac{s_l^2}{N^2},\quad K_{Sch}(U) = -\sum_l \lambda_l \log \lambda_l
+$$
+
+Standard definition of operator Schmidt coefficients with respect to the Hilbert-Schmidt inner product and of the Schmidt strength (operator entanglement entropy); unitarity gives sum_l s_l^2 = N^2.
+
+Provenance: `standard_background`. Textbook definition (Nielsen et al.) of the Schmidt strength used in the abstract; the abstract names the quantity but does not define it.
+
+Equation assumptions:
+
+- Natural logarithm
+
+## eq_4: Schmidt strength of a diagonal gate equals S(rho)
+
+$$
+U = \sum_{j,k} A_{jk}\, |j\rangle\langle j| \otimes |k\rangle\langle k| \;\Rightarrow\; \{s_l\} = \mathrm{sing.\,vals}(A),\qquad K_{Sch}(U) = S(\rho) = -\mathrm{Tr}\,\rho \log \rho
+$$
+
+For a diagonal gate the projectors |j><j| and |k><k| form orthonormal operator bases, so the operator Schmidt coefficients of U are the singular values of A, and the Schmidt strength is exactly the von Neumann entropy of rho = A A^dagger / N^2.
+
+Provenance: `abstract_inferred`. The abstract asserts the relation between entangling power/Schmidt strength and S(rho); the exact equality follows from eq_3 since the coefficient matrix of U in the product basis {|j><j| (x) |k><k|} is A and singular values are basis-independent.
+
+Abstract evidence: Entangling power of a diagonal gate $U$ is related to the von Neumann entropy of an auxiliary quantum state $\rho=AA^{\dagger}/N^{2}$
+
+Equation assumptions:
+
+- Schmidt strength (not another entangling-power measure) is the quantity identified with S(rho); the abstract says 'related to' and the exact equality is an inference
+
+## eq_5: Choi-state circuit realization of the Schmidt spectrum
+
+$$
+|\Psi_U\rangle = (U_{AB} \otimes I_{A'B'})\, |\Phi\rangle_{AA'} |\Phi\rangle_{BB'},\qquad \mathrm{spec}\big(\mathrm{Tr}_{BB'} |\Psi_U\rangle\langle\Psi_U|\big) = \{\lambda_l\},\qquad S(\rho_{AA'}) = K_{Sch}(U)
+$$
+
+Applying U to one half of two maximally entangled pairs yields a pure 4-party state whose entanglement entropy across the AA' | BB' cut equals the Schmidt strength of U; this gives a circuit-level observable for S(rho).
+
+Provenance: `standard_background`. Standard Choi-Jamiolkowski correspondence between operator entanglement of U and state entanglement of its Choi state.
+
+Equation assumptions:
+
+- Ancilla registers A', B' of dimension N are available
+- |Phi> = (1/sqrt N) sum_j |j>|j>
+
+## eq_6: N = 2 decomposition of the diagonal gate and average scaling target
+
+$$
+U = e^{i\phi_{00}}\, \big(P(\phi_{10}-\phi_{00}) \otimes P(\phi_{01}-\phi_{00})\big)\, CP(\phi_{11}-\phi_{10}-\phi_{01}+\phi_{00}),\qquad \langle K_{Sch}(U)\rangle_{\phi} = \Theta(\log N)
+$$
+
+Explicit circuit for the two-qubit instance (global phase, local phase gates on A and B, controlled-phase). The second relation is the abstract's claim that the ensemble-averaged Schmidt strength grows like log N (rather than log N^2); for N = 2 it is a finite number in [0, log 2] to be estimated by sampling.
+
+Provenance: `abstract_explicit`. Scaling claim is quoted from the abstract (constant prefactor and exact mean are not given in the abstract). The decomposition is elementary linear algebra verified entrywise (e.g. entry |11>: phi_00 + (phi_10-phi_00) + (phi_01-phi_00) + (phi_11-phi_10-phi_01+phi_00) = phi_11) and is an added construction for the chosen instance.
+
+Abstract evidence: The average Schmidt strength of such a bipartite diagonal quantum gate is shown to scale as $\log N$, in contrast to the $\log N^{2}$ behavior characteristic to random unitary gates.
+
+Equation assumptions:
+
+- N = 2 instance chosen as the minimal construction
+- P(theta) acts on qubit A in the first factor and on qubit B in the second factor, consistent with the ordering of eq_1
+- The exact value of the mean entropy (the paper's Borel-triangle result) is not reproduced; only the Theta(log N) scaling is taken from the abstract
+
+## Registers
+
+- A: 1 qubit (log2 N with N=2) qubits; First subsystem on which U acts
+- B: 1 qubit (log2 N with N=2) qubits; Second subsystem on which U acts
+- A': 1 qubit qubits; Reference half of the maximally entangled pair with A (Choi-state construction)
+- B': 1 qubit qubits; Reference half of the maximally entangled pair with B (Choi-state construction)
+
+## Initial state
+
+|0>_A |0>_{A'} |0>_B |0>_{B'}; after Bell-pair preparation: |Phi>_{AA'} |Phi>_{BB'} with |Phi> = (|00> + |11>)/sqrt 2 (eq_5).
+
+## Measurement
+
+Two-qubit state tomography of the reduced state on registers A, A' (Pauli measurements in the 9 setting combinations {X,Y,Z}^2, or informationally complete alternative) to reconstruct rho_{AA'}; alternatively, a two-copy SWAP test on AA' yields Tr rho^2 (a Renyi-2 proxy, not the von Neumann entropy). Direct measurement of the von Neumann entropy is not available from a single-copy measurement.
+
+## Classical postprocessing
+
+From the tomographic estimate of rho_{AA'}, compute eigenvalues lambda_l and S = -sum_l lambda_l log lambda_l; compare with the classically computed S(A A^dagger / 4) for the same phases (for N = 2 the eigenvalues are (1 +/- |c|)/2 with c = (e^{i(phi_00 - phi_10)} + e^{i(phi_01 - phi_11)})/2). Average S over the sampled phases to estimate <K_Sch>; report the sample mean and standard error. Note that the abstract's exact mean-entropy formula is not reconstructed, so only the Theta(log N) scaling can be compared qualitatively.
+
+## Algorithm steps
+
+1. Classically sample four phases phi_00, phi_01, phi_10, phi_11 i.i.d. uniform on [0, 2 pi), defining the diagonal gate U and the reshaped matrix A; compute rho = A A^dagger / 4 as the classical reference. (eq_1, eq_2)
+2. Prepare two Bell pairs: H on A then CNOT(A -> A'); H on B then CNOT(B -> B'). (eq_5)
+3. Apply the diagonal gate U on registers A (most significant) and B using the decomposition P(phi_10 - phi_00) on A, P(phi_01 - phi_00) on B, CP(phi_11 - phi_10 - phi_01 + phi_00) on (A,B); the global phase e^{i phi_00} may be omitted. (eq_6, eq_1)
+4. The resulting pure state |Psi_U> has reduced state rho_{AA'} on registers A,A' whose spectrum equals the eigenvalues lambda_l of rho, so that S(rho_{AA'}) = K_Sch(U) = S(rho). (eq_5, eq_4, eq_3)
+5. Repeat for many independent phase samples to estimate the ensemble average <K_Sch(U)> and compare with the log N scaling statement of the abstract. (eq_6)
+
+## Assumptions
+
+- No experiment_scope was provided; the N = 2 (two-qubit) instance with uniform i.i.d. phases was chosen as the smallest useful construction
+- Basis ordering |j>_A |k>_B with integer index jN + k (register A most significant) and row-major reshaping of the diagonal into A
+- Natural logarithm in all entropies
+- Entangling power in the abstract is interpreted through the Schmidt strength, for which the identification K_Sch(U) = S(rho) is exact; other entangling-power measures are not reconstructed
+- The Choi-state circuit (eq_5) is a standard device introduced here to make S(rho) accessible to a circuit; the paper's own analysis is presumably purely analytic/classical
+
+## Missing information
+
+- Exact expressions for the first four moments of the squared singular values of the unimodular ensemble
+- The precise conjectured relation to the Borel triangle and the resulting exact formula for the mean von Neumann entropy of random-phase density matrices
+- The exact average entanglement of the corresponding ensemble of bipartite pure states
+- Formal definition of contradiagonal states and the coarse-graining argument showing they maximize entropy copied to the environment
+- The precise probability measure on the phases assumed in the paper (uniform i.i.d. is assumed here)
+- Constant prefactor and finite-N corrections in the log N scaling of the average Schmidt strength

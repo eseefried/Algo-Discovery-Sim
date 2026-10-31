@@ -1,0 +1,145 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "8f8e9b8b-4b16-416b-8682-a9524d9eb2e6",
+  "parent_run_id": "1c13d7d7-7f1b-453a-8a09-50f0ac39d408",
+  "created_at": "2026-10-31T16:46:16.100662+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "fac162012c570f67f99f46b4c3485219df83a47b30f2405f496c4018947df568",
+  "source_specification_sha256": "334037af871518448affc4ddfd22fc2d79e075dc632a853ddb5865cd950a34a8",
+  "source_python_sha256": "30ec8770e223bc9ebd58a13943cacd14532413516ffa4b6f0a9a039743dd6011",
+  "elapsed_seconds": 143.951,
+  "usage": {
+    "input_tokens": 7497,
+    "output_tokens": 12455,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the fixed-configuration one-step unitaries U_K = S_K (I_N x C) of the dynamic-percolation coined quantum walk on a finite one-dimensional chain (eq_1-eq_3), composed over a user-supplied sequence of edge configurations K_1..K_t, i.e. the circuit is U_{K_t}...U_{K_1} (one Kraus-branch realisation of Phi^t). The reflecting shift S_K of eq_2 is synthesised exactly from standard gates via the identity S_K = (I x X) * prod_{(x,x+1) in K} SWAP(|x,R>,|x+1,L>), each transposition being a CNOT-conjugated multi-controlled X. Sampling of configurations from pi(K), averaging over branches, and the attractor analysis (eq_4, eq_5) are classical tasks for the runner and are not part of the returned operation.",
+    "source_python": "\"\"\"Coined quantum walk on a finite chain with dynamic percolation (1D).\n\nFor a user-supplied sequence of edge configurations K_1..K_t the circuit is\nthe product unitary  U_{K_t} ... U_{K_1}  with  U_K = S_K (I_N x C)  (eq_3),\nwhere S_K is the reflecting conditional shift of eq_2.  Averaging over\nconfigurations (the random unitary map Phi of eq_3) is a classical task for\nthe runner: build one circuit per sampled configuration sequence.\n\nQubit layout (Qiskit little-endian, eq_1): qubit 0 = coin (|0>=L, |1>=R),\nqubits 1..n = position bits, x = sum_k pos[k] 2^k, n = ceil(log2 N).\nThe basis integer is 2*x + c, i.e. |x> (x) |c> with the coin least significant.\nPositions x >= N (padding when N is not a power of two) are never reached from\nvalid positions; on them the circuit only flips the coin each step (unitary).\n\"\"\"\nfrom __future__ import annotations\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nCOIN_NAMES = (\"H\", \"X\", \"Y\", \"Z\", \"I\")\n\n\ndef _as_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(name + \" must be an integer\")\n    return value\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n_sites = _as_int(instance.get(\"N\"), \"N\")\n    if n_sites < 2:\n        raise ValueError(\"N must be >= 2\")\n    n_pos = (n_sites - 1).bit_length()\n    if n_pos + 1 > MAX_QUBITS:\n        raise ValueError(\"instance needs more than 12 qubits\")\n    coin = instance.get(\"coin\", \"H\")\n    if coin not in COIN_NAMES:\n        raise ValueError(\"coin must be one of \" + \", \".join(COIN_NAMES))\n    configs = instance.get(\"configs\")\n    if not isinstance(configs, list) or len(configs) == 0:\n        raise ValueError(\"configs must be a non-empty list of edge configurations\")\n    clean = []\n    for step, cfg in enumerate(configs):\n        if not isinstance(cfg, list) or len(cfg) != n_sites - 1:\n            raise ValueError(\"configs[%d] must have length N-1 = %d\" % (step, n_sites - 1))\n        bits = []\n        for e, b in enumerate(cfg):\n            if isinstance(b, bool):\n                bits.append(1 if b else 0)\n            elif isinstance(b, int) and b in (0, 1):\n                bits.append(b)\n            else:\n                raise ValueError(\"configs[%d][%d] must be 0 or 1\" % (step, e))\n        clean.append(bits)\n    if \"p\" in instance:\n        p = instance[\"p\"]\n        if isinstance(p, bool) or not isinstance(p, (int, float)) or not 0.0 <= p <= 1.0:\n            raise ValueError(\"p must be a number in [0, 1]\")\n    return n_sites, n_pos, coin, clean\n\n\ndef _apply_coin(qc, coin_qubit, coin):\n    \"\"\"eq_3 / eq_6: the coin operator I_N (x) C acting on the coin qubit.\"\"\"\n    if coin == \"H\":\n        qc.h(coin_qubit)\n    elif coin == \"X\":\n        qc.x(coin_qubit)\n    elif coin == \"Y\":\n        qc.y(coin_qubit)\n    elif coin == \"Z\":\n        qc.z(coin_qubit)\n    # \"I\": identity coin, nothing to apply\n\n\ndef _swap_pair(qc, pos, coin_qubit, x, n_pos):\n    \"\"\"Transposition |x,R> <-> |x+1,L>, all other basis states fixed (eq_2).\n\n    CNOTs from the coin into the position bits where x and x+1 differ map\n    |x,1> -> |x+1,1> while leaving |x+1,0> unchanged; a multi-controlled X on\n    the coin conditioned on position == x+1 then exchanges exactly these two\n    states; the CNOT layer is undone afterwards.\n    \"\"\"\n    y = x + 1\n    diff = [k for k in range(n_pos) if ((x ^ y) >> k) & 1]\n    zeros = [pos[k] for k in range(n_pos) if not ((y >> k) & 1)]\n    for k in diff:\n        qc.cx(coin_qubit, pos[k])\n    for q in zeros:\n        qc.x(q)\n    qc.mcx(list(pos), coin_qubit)\n    for q in zeros:\n        qc.x(q)\n    for k in diff:\n        qc.cx(coin_qubit, pos[k])\n\n\ndef _apply_shift(qc, pos, coin_qubit, config, n_pos):\n    \"\"\"eq_2: S_K = (I (x) X) . prod_{(x,x+1) in K} SWAP(|x,R>, |x+1,L>).\n\n    Present edge: |x,R> -> |x+1,L> -> |x+1,R| and |x+1,L> -> |x,R> -> |x,L>.\n    Absent edge / chain end: state untouched by the swaps, coin flipped\n    (reflection).  The transpositions are disjoint, so their order is free.\n    \"\"\"\n    for x, present in enumerate(config):\n        if present:\n            _swap_pair(qc, pos, coin_qubit, x, n_pos)\n    qc.x(coin_qubit)\n\n\ndef build_circuit(instance):\n    \"\"\"Return U_{K_t} ... U_{K_1} for instance[\"configs\"] = [K_1, ..., K_t].\n\n    Each K_s is a list of N-1 bits, bit x = 1 iff edge (x, x+1) is present.\n    \"\"\"\n    n_sites, n_pos, coin, configs = _validate(instance)\n    coin_reg = QuantumRegister(1, \"coin\")\n    pos = QuantumRegister(n_pos, \"pos\")\n    qc = QuantumCircuit(coin_reg, pos, name=\"percolation_walk\")\n    c = coin_reg[0]\n    for config in configs:\n        # eq_3: U_K = S_K (I_N x C), coin first then shift\n        _apply_coin(qc, c, coin)\n        _apply_shift(qc, pos, c, config, n_pos)\n    return qc",
+    "example_instance_json": "{\"N\": 4, \"coin\": \"H\", \"p\": 0.5, \"configs\": [[1, 0, 1], [1, 1, 0], [0, 1, 1]]}",
+    "register_layout": [
+      "qubit 0: coin register 'coin' (1 qubit), |0> = L, |1> = R (least significant bit of the basis integer 2x+c)",
+      "qubits 1-2: position register 'pos' (n = ceil(log2 N) = 2 qubits for N=4), x = pos[0]*1 + pos[1]*2, i.e. qubit 1 is the least significant position bit, qubit 2 the most significant",
+      "basis state |x,c> of the specification corresponds to Qiskit integer 2*x + c; e.g. the spec initial state |1,R> is integer 3 = |0 1 1> (qubit2 qubit1 qubit0)",
+      "total qubits = n + 1 <= 12, so 2 <= N <= 2048; the example uses 3 qubits",
+      "the runner must prepare the input state (e.g. |1,R>) and supply one circuit per sampled configuration sequence; averaging over sequences estimates Phi^t"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (register construction) and module docstring; pi(K) is not sampled in-circuit",
+        "explanation": "Hilbert space C^N (x) C^2 realised as a 1-qubit coin register plus an n-qubit position register with x = sum_k pos[k] 2^k. The Bernoulli(p) product distribution pi(K) is only validated (optional key 'p'); sampling K from it is a classical runner task, the configurations enter via instance['configs']."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_apply_shift and _swap_pair",
+        "explanation": "S_K is synthesised exactly as (I x X) times the disjoint transpositions |x,R> <-> |x+1,L> for every present edge, which reproduces the moving/reflecting rules of eq_2 including reflection at both chain ends."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop (comment 'eq_3: U_K = S_K (I_N x C)') and _apply_coin",
+        "explanation": "For each supplied configuration the circuit applies the coin then S_K, giving U_K; the loop yields the product U_{K_t}...U_{K_1}, one Kraus branch of Phi^t. The convex average over K (the map Phi itself) is not a unitary and is left to classical averaging by the runner."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Attractor (intertwining) equations are a classical linear-algebra problem on the 2N x 2N unitaries, not a quantum operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Asymptotic-state formula is classical post-processing used to predict the long-time limit; it is not implemented in the circuit."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "example_instance_json together with _apply_coin ('H') and build_circuit (N=4)",
+        "explanation": "The tiny instance parameters N=4 and Hadamard coin are realised by the example instance; p=1/2 is recorded but only used classically; the initial state |1,R> is not prepared because the module returns an operation only."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "The random per-step configurations K_s are not drawn inside the circuit; they are supplied explicitly as instance['configs'] (list of N-1 bit lists) and the circuit implements the single Kraus branch U_{K_t}...U_{K_1}. The random unitary map Phi and its iterate Phi^t are obtained by the runner by classically sampling sequences from pi(K) and averaging.",
+        "reason": "A QuantumCircuit must be a bound unitary operation; a convex mixture of unitaries is not unitary and in-circuit randomness/environment access is disallowed."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "S_K is implemented through the algebraic identity S_K = (I x X) * prod_{(x,x+1) in K} SWAP(|x,R>,|x+1,L>), each transposition realised by CNOT conjugation of a multi-controlled X (with X gates for zero controls).",
+        "reason": "Needed to express the configuration-dependent permutation with standard gates; the identity is exact and reproduces eq_2 case by case."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_6"
+        ],
+        "change": "Qubit ordering: the coin is Qiskit qubit 0 (least significant) and the position bits are qubits 1..n, so |x,c> maps to integer 2x+c. This matches |x> (x) |c> with the coin last but differs from reading the register list from the specification's 'position first' description as Qiskit indices.",
+        "reason": "Qiskit index 0 is the least-significant bit; the layout is disclosed so the runner prepares |1,R> as integer 3 for N=4."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "General N >= 2 is accepted (not only powers of two); padding positions x >= N are decoupled from valid positions and merely receive a coin flip each step.",
+        "reason": "Keeps the operation unitary on the full register while allowing arbitrary chain lengths within the 12-qubit cap (N <= 2048)."
+      },
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "The coin may be chosen from {H, X, Y, Z, I}; the example uses H. No input-state preparation is included.",
+        "reason": "The abstract does not fix the coin; the module returns an operation only, inputs are prepared by the runner."
+      }
+    ],
+    "assumptions": [
+      "Dynamic percolation is modelled as i.i.d. Bernoulli(p) edges resampled every step; the circuit itself is agnostic to p and takes the configuration sequence as data.",
+      "Reflecting (coin-flip) rule at broken edges and at both chain ends, open boundary conditions (no wrap-around).",
+      "Coin is applied before the shift in each step.",
+      "Configurations in instance['configs'] are ordered in time, configs[0] = K_1 applied first.",
+      "Multi-controlled X (qc.mcx) with up to 11 controls is synthesised by the runner's transpiler."
+    ],
+    "unresolved_issues": [
+      "The paper's actual rule at missing edges and its coin/boundary choices for the 1D chain are unknown; a different rule would change the implemented S_K.",
+      "The explicit attractor basis and asymptotic states for the 1D chain (the paper's main result) cannot be reconstructed from the abstract and are left to classical computation via eq_4/eq_5.",
+      "Two-dimensional lattice and Grover-coin results are entirely out of scope."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 120,
+    "depth": 90,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

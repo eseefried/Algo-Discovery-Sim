@@ -1,0 +1,130 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "58aed43d-e3b6-473e-969d-860c33ce3810",
+  "parent_run_id": "a161f9db-f5c3-46b2-8db9-c947a9be4bb0",
+  "created_at": "2026-10-31T16:42:40.582210+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "cb3f6360a5d1a31529f17b01243b08dc9d42256d58498964c59fcc6d1aff63b5",
+  "source_specification_sha256": "726f7699f1fc301f18a99453df6c9cc52554b2e958b87cf437cdf831d36b0ccd",
+  "source_python_sha256": "aa731019a83f72b952e54b143eb7a187364e369276093d981624a2c7d8f893a0",
+  "elapsed_seconds": 58.044,
+  "usage": {
+    "input_tokens": 7277,
+    "output_tokens": 4928,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the proposed non-adaptive nearest-neighbour CNOT fanout (eq_5) on a rows x cols 2D grid: a control qubit at grid site (0,0) is broadcast along row 0 by a sequential chain of CNOTs, then down every column by parallel layers of CNOTs. Every CNOT acts on L1-adjacent grid sites (eq_2, checked at construction time), size is n-1 and depth is (cols-1)+(rows-1), i.e. Theta(sqrt n) for square grids. On clean targets (|0>) the circuit realises the fanout of eq_1 (GHZ-type copy of the control).",
+    "source_python": "\"\"\"Nearest-neighbour CNOT fanout on a 2D grid (non-adaptive model).\n\nImplements eq_5 of the specification: control at grid site (0, 0), row-0\nbroadcast followed by parallel column broadcast.  Grid site (r, c) is mapped to\nQiskit qubit index r * cols + c; qubit 0 is the control.  All two-qubit gates\nact on L1-adjacent sites (eq_2).  On clean targets |0> the circuit realises the\nfanout F_n of eq_1.  Depth = (cols - 1) + (rows - 1), size = rows * cols - 1.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _read_positive_int(instance, key):\n    \"\"\"Fetch a strictly positive integer field from the instance dict.\"\"\"\n    if key not in instance:\n        raise ValueError(\"instance is missing required key '%s'\" % key)\n    value = instance[key]\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(\"'%s' must be an integer, got %r\" % (key, value))\n    if value < 1:\n        raise ValueError(\"'%s' must be >= 1, got %d\" % (key, value))\n    return value\n\n\ndef _parse_instance(instance):\n    \"\"\"Validate the instance and return (rows, cols).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict with keys 'rows' and 'cols'\")\n    rows = _read_positive_int(instance, \"rows\")\n    cols = _read_positive_int(instance, \"cols\")\n    n = rows * cols\n    if n < 2:\n        raise ValueError(\"grid must contain at least 2 qubits (1 control + 1 target)\")\n    if n > MAX_QUBITS:\n        raise ValueError(\n            \"grid has %d qubits, exceeding the cap of %d\" % (n, MAX_QUBITS)\n        )\n    return rows, cols\n\n\ndef _site_index(r, c, cols):\n    \"\"\"Linear qubit index of grid site (r, c): i = r * cols + c (eq_2 layout).\"\"\"\n    return r * cols + c\n\n\ndef _nn_cx(qc, qr, src, dst, cols):\n    \"\"\"Apply CNOT from grid site src to grid site dst, enforcing eq_2 adjacency.\"\"\"\n    dist = abs(src[0] - dst[0]) + abs(src[1] - dst[1])\n    if dist != 1:\n        # eq_2: only L1-adjacent grid sites may interact\n        raise ValueError(\"non-nearest-neighbour CNOT requested: %r -> %r\" % (src, dst))\n    qc.cx(qr[_site_index(src[0], src[1], cols)], qr[_site_index(dst[0], dst[1], cols)])\n\n\ndef build_circuit(instance):\n    \"\"\"Build the row-then-column nearest-neighbour fanout circuit (eq_5).\n\n    instance: {\"rows\": int, \"cols\": int} with 2 <= rows * cols <= 12.\n    Returns a measurement-free unitary QuantumCircuit on rows * cols qubits.\n    Qubit 0 = control at site (0, 0); qubit r * cols + c = site (r, c).\n    On input |x>|0...0> the output is |x>^{(rows*cols)} (eq_1 with clean targets).\n    \"\"\"\n    rows, cols = _parse_instance(instance)\n    n = rows * cols\n    qr = QuantumRegister(n, \"grid\")\n    qc = QuantumCircuit(qr, name=\"nn_fanout_%dx%d\" % (rows, cols))\n\n    # eq_5, first factor (applied first): sequential broadcast along row 0.\n    # CNOT_{(0,t-1) -> (0,t)} for t = 1..cols-1; depth cols - 1.\n    for t in range(1, cols):\n        _nn_cx(qc, qr, (0, t - 1), (0, t), cols)\n\n    # eq_5, second factor: parallel broadcast down every column.\n    # Layer t applies CNOT_{(t-1,c) -> (t,c)} for all c simultaneously; depth rows - 1.\n    for t in range(1, rows):\n        for c in range(cols):\n            _nn_cx(qc, qr, (t - 1, c), (t, c), cols)\n\n    # Sanity: size = n - 1 CNOTs, as stated in eq_5.\n    if qc.size() != n - 1:\n        raise ValueError(\"internal error: unexpected gate count\")\n    return qc",
+    "example_instance_json": "{\"rows\": 3, \"cols\": 3}",
+    "register_layout": [
+      "Register 'grid' with rows*cols = 9 qubits for the example; grid site (r,c) maps to qubit index i = r*cols + c (qubit 0 is the least significant bit).",
+      "Qubit 0 = site (0,0): control qubit holding |x>.",
+      "Qubits 1,2 = sites (0,1),(0,2): row-0 targets, filled by the sequential row broadcast (layers 1-2).",
+      "Qubits 3,4,5 = sites (1,0),(1,1),(1,2): filled by column layer 1 (layer 3).",
+      "Qubits 6,7,8 = sites (2,0),(2,1),(2,2): filled by column layer 2 (layer 4).",
+      "All targets are assumed to be prepared in |0> by the runner; output on |x>|0>^8 is |x>^9."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit docstring and module docstring: the circuit realises F_n on clean targets |x>|0...0> -> |x>^{n}",
+        "explanation": "The CNOT tree copies the control value onto every target when targets start in |0>; for arbitrary target inputs the Boolean map differs from eq_1 (reported in specification_changes)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_nn_cx (raises ValueError if the requested CNOT is not between L1-adjacent sites) and _site_index (linear layout i = r*cols + c)",
+        "explanation": "Every two-qubit gate is checked to act on grid sites at L1 distance 1; the layout maps grid coordinates to physical qubit indices."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Asymptotic Theta bounds from the abstract; the implemented circuit has depth (rows-1)+(cols-1) = 2(sqrt n - 1) for square grids and size n-1, consistent with these bounds, but no asymptotic statement is encoded in code."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Light-cone lower bound used to argue optimality; it constrains depth but is not an operation to implement."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: the two loops commented 'eq_5, first factor' (row broadcast) and 'eq_5, second factor' (parallel column broadcast)",
+        "explanation": "Row-then-column CNOT fanout with control at (0,0); time ordering follows the right-to-left product (row chain first, then column layers)."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Adaptive-model depth equivalence requires measurements and classically controlled gates, which are excluded from this unitary, non-adaptive construction."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Generalised the m x m square grid to a rows x cols rectangular grid with 2 <= rows*cols <= 12 (so the square 3 x 3 example of the specification is one valid instance); depth becomes (cols-1)+(rows-1), size rows*cols-1.",
+        "reason": "The 12-qubit cap would otherwise allow only m in {2,3}; rectangular grids give more valid instances while preserving the same row-then-column nearest-neighbour construction."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_5"
+        ],
+        "change": "The circuit equals the fanout F_n of eq_1 only on inputs whose target qubits are |0> (clean-ancilla / GHZ-type copy); for arbitrary target inputs y_i it implements a different Boolean map (each target receives the XOR of its tree-parent's current value).",
+        "reason": "Inherited from the specification's eq_5 assumptions; the general-input fanout conversion was declared outside scope."
+      },
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "Narrowed scope to the non-adaptive, unitary nearest-neighbour fanout; the adaptive constant-depth constructions are not implemented.",
+        "reason": "Adaptive circuits need mid-circuit measurement and classical feed-forward, which are disallowed for this operation-only artifact and not described in the abstract."
+      }
+    ],
+    "assumptions": [
+      "k = 2 (2D grid); grid site (r,c) is mapped to qubit index r*cols + c with the control at qubit 0 (site (0,0)).",
+      "Target qubits are prepared in |0> by the runner; the control may be any single-qubit state (e.g. (|0>+|1>)/sqrt2 yields an n-qubit GHZ state).",
+      "Depth is counted as layers of disjoint nearest-neighbour CNOTs; Qiskit's qc.depth() will report (rows-1)+(cols-1) for this circuit since the column layers are disjoint.",
+      "The construction is the specification's own proposal consistent with the stated Theta(sqrt n) bounds, not the paper's actual circuit."
+    ],
+    "unresolved_issues": [
+      "The paper's actual non-adaptive fanout/controlled-operation circuits and their exact constants are unknown; only a construction matching the asymptotic bounds is implemented.",
+      "Handling of arbitrary (non-zero) target inputs for a true general fanout in nearest-neighbour depth O(sqrt n) is not implemented.",
+      "No software verification was performed here; equivalence to F_n on clean targets is asserted from the CNOT-tree argument only."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 9,
+    "gate_count": 8,
+    "depth": 4,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,128 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "0c295a26-c9ba-49bb-9bfd-1310fea234a8",
+  "parent_run_id": "ae43105e-1062-43d8-bdd2-b8fd1bf63496",
+  "created_at": "2026-10-31T17:35:53.504409+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "569a805f4eb2f4e33e96758fa15ea9c266011edb3c7ed638893d3714025abe4c",
+  "source_specification_sha256": "77a0ac438c34c35a385e66ef527c61d29ae8554f7c267b6a7edec314244aae0d",
+  "source_python_sha256": "7c84756a3c7412e900c1f617bdac78122a8170a2a5d720754dbf0202a9c6fcfe",
+  "elapsed_seconds": 99.229,
+  "usage": {
+    "input_tokens": 7982,
+    "output_tokens": 8365,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the scoped d_A = d_B = 2 instance of the controlled-unitary decomposition: a generic two-qubit unitary written (via its cosine-sine decomposition) as the product of exactly three controlled unitaries U = C^A_P · C^B_theta · C^A_Q, matching the abstract's bound N = 2 d_A - 1 = 3 for d_A = 2. The instance supplies the CSD factors as parameters (Euler angles + phase for the four target unitaries Q_0, Q_1, P_0, P_1 and the two CSD angles theta_k); the module emits only standard gates (X, CU, CRY). Qubit 0 is system B (least significant), qubit 1 is system A (most significant), matching the specification's index j*d_B + k.",
+    "source_python": "\"\"\"Three-controlled-unitary decomposition of a two-qubit (d_A = d_B = 2) unitary.\n\nScoped reconstruction of the bipartite result 'N <= 2 d_A - 1 controlled unitaries\nwhen d_A is a power of two' at its smallest case d_A = 2, instantiated on a single\nqubit B (d_B = 2).  The construction follows the cosine-sine decomposition (CSD)\n\n    U = C^A_P  *  C^B_theta  *  C^A_Q                                    (eq_5)\n\nwith\n    C^A_Q     = sum_j |j><j|_A (x) Q_j            (A-controlled, target B)  (eq_1, eq_4)\n    C^B_theta = sum_k Ry(2 theta_k) (x) |k><k|_B  (B-controlled, target A)  (eq_4)\n    C^A_P     = sum_j |j><j|_A (x) P_j            (A-controlled, target B)  (eq_1, eq_4)\n\nOperators act right-to-left, so the circuit applies C^A_Q first, then C^B_theta,\nthen C^A_P.\n\nThe classical CSD preprocessing (eq_3) is NOT performed here: the instance must\nsupply the CSD factors directly.  Each 2x2 target unitary W in {Q_0, Q_1, P_0, P_1}\nis given as four real numbers [theta, phi, lam, gamma] meaning\n\n    W = exp(i*gamma) * U(theta, phi, lam),\n    U(theta, phi, lam) = [[cos(theta/2),            -exp(i*lam) sin(theta/2)],\n                          [exp(i*phi) sin(theta/2),  exp(i*(phi+lam)) cos(theta/2)]],\n\nwhich is exactly the target convention of Qiskit's CU gate.  The CSD angles are\ngiven as 'theta': [theta_0, theta_1] with Ry(2 theta_k) = [[cos t, -sin t],[sin t, cos t]].\n\nQubit layout (Qiskit little-endian): qubit 0 = B (least significant), qubit 1 = A\n(most significant), so the composite basis vector |j>_A |k>_B has integer index\nj*d_B + k = 2 j + k, as in the specification.\n\nInstance format:\n    {\n      \"d_A\": 2, \"d_B\": 2,\n      \"Q\": [[theta, phi, lam, gamma], [theta, phi, lam, gamma]],   # Q_0, Q_1\n      \"theta\": [theta_0, theta_1],                                  # CSD angles\n      \"P\": [[theta, phi, lam, gamma], [theta, phi, lam, gamma]]    # P_0, P_1\n    }\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _as_real(value, name):\n    \"\"\"Validate that value is a finite real number and return it as float.\"\"\"\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(f\"{name} must be a real number, got {value!r}\")\n    out = float(value)\n    if not math.isfinite(out):\n        raise ValueError(f\"{name} must be finite, got {value!r}\")\n    return out\n\n\ndef _as_u2_params(entry, name):\n    \"\"\"Validate a 4-tuple [theta, phi, lam, gamma] describing exp(i gamma) U(theta, phi, lam).\"\"\"\n    if not isinstance(entry, (list, tuple)) or len(entry) != 4:\n        raise ValueError(f\"{name} must be a list of four reals [theta, phi, lam, gamma]\")\n    return tuple(_as_real(entry[i], f\"{name}[{i}]\") for i in range(4))\n\n\ndef _as_u2_pair(entry, name):\n    \"\"\"Validate a pair [W_0, W_1] of 2x2 unitary parameterisations.\"\"\"\n    if not isinstance(entry, (list, tuple)) or len(entry) != 2:\n        raise ValueError(f\"{name} must be a list of two entries (one per A basis state)\")\n    return (_as_u2_params(entry[0], f\"{name}[0]\"), _as_u2_params(entry[1], f\"{name}[1]\"))\n\n\ndef _a_controlled(qc, a, b, targets):\n    \"\"\"eq_1 / eq_4: append sum_j |j><j|_A (x) W_j with W_j = exp(i gamma_j) U(theta_j, phi_j, lam_j).\n\n    Control value j = 1 is a plain CU gate; control value j = 0 is obtained by\n    conjugating the CU gate with X on the control qubit A.\n    \"\"\"\n    for j in (0, 1):\n        theta, phi, lam, gamma = targets[j]\n        if j == 0:\n            qc.x(a)\n        qc.cu(theta, phi, lam, gamma, a, b)\n        if j == 0:\n            qc.x(a)\n\n\ndef _b_controlled_ry(qc, a, b, angles):\n    \"\"\"eq_4: append sum_k Ry(2 theta_k) (x) |k><k|_B (control B, target A).\n\n    Qiskit ry(2t) = [[cos t, -sin t], [sin t, cos t]] reproduces the CSD middle\n    block [[C, -S], [S, C]] restricted to the pair |0>_A|k>_B, |1>_A|k>_B.\n    \"\"\"\n    for k in (0, 1):\n        if k == 0:\n            qc.x(b)\n        qc.cry(2.0 * angles[k], b, a)\n        if k == 0:\n            qc.x(b)\n\n\ndef build_circuit(instance):\n    \"\"\"Build U = C^A_P * C^B_theta * C^A_Q (eq_5) as a measurement-free two-qubit circuit.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object (dict)\")\n    for key in (\"d_A\", \"d_B\", \"Q\", \"theta\", \"P\"):\n        if key not in instance:\n            raise ValueError(f\"instance is missing required key {key!r}\")\n\n    d_a = instance[\"d_A\"]\n    d_b = instance[\"d_B\"]\n    if isinstance(d_a, bool) or isinstance(d_b, bool) or not isinstance(d_a, int) or not isinstance(d_b, int):\n        raise ValueError(\"d_A and d_B must be integers\")\n    if d_a != 2 or d_b != 2:\n        raise ValueError(\"this scoped construction supports only d_A = 2 and d_B = 2 (one qubit each)\")\n\n    n_a = 1  # qubits for A (d_A = 2)\n    n_b = 1  # qubits for B (d_B = 2)\n    if n_a + n_b > MAX_QUBITS:\n        raise ValueError(\"too many qubits requested\")\n\n    q_params = _as_u2_pair(instance[\"Q\"], \"Q\")\n    p_params = _as_u2_pair(instance[\"P\"], \"P\")\n    theta_raw = instance[\"theta\"]\n    if not isinstance(theta_raw, (list, tuple)) or len(theta_raw) != d_b:\n        raise ValueError(\"theta must be a list of d_B = 2 CSD angles\")\n    csd_angles = tuple(_as_real(theta_raw[k], f\"theta[{k}]\") for k in range(d_b))\n\n    # qubit 0 = B (least significant), qubit 1 = A (most significant): index j*d_B + k\n    reg_b = QuantumRegister(n_b, \"b\")\n    reg_a = QuantumRegister(n_a, \"a\")\n    qc = QuantumCircuit(reg_b, reg_a, name=\"three_controlled_unitaries\")\n    a = reg_a[0]\n    b = reg_b[0]\n\n    # eq_5, factor applied first (rightmost): C^A_Q = sum_j |j><j|_A (x) Q_j\n    _a_controlled(qc, a, b, q_params)\n    # eq_5, middle factor: C^B_theta = sum_k Ry(2 theta_k) (x) |k><k|_B\n    _b_controlled_ry(qc, a, b, csd_angles)\n    # eq_5, factor applied last (leftmost): C^A_P = sum_j |j><j|_A (x) P_j\n    _a_controlled(qc, a, b, p_params)\n\n    # Total: N = 3 = 2 d_A - 1 controlled unitaries (eq_2 bound at d_A = 2).\n    return qc",
+    "example_instance_json": "{\"d_A\": 2, \"d_B\": 2, \"Q\": [[0.7, 0.3, -0.4, 0.1], [1.2, -0.8, 0.5, 0.0]], \"theta\": [0.4, 1.1], \"P\": [[0.9, 0.2, 0.6, -0.3], [0.35, 1.0, -1.5, 0.2]]}",
+    "register_layout": [
+      "qubit 0: register 'b' (system B, d_B = 2, least significant bit k)",
+      "qubit 1: register 'a' (system A, d_A = 2, most significant bit j)",
+      "Composite basis |j>_A |k>_B has integer index 2*j + k, matching the specification's ordering j*d_B + k",
+      "Instance 'Q'[j] = [theta, phi, lam, gamma] parameterises Q_j = exp(i gamma) U(theta, phi, lam) applied to B when A = j; likewise 'P'[j] for P_j; 'theta'[k] is the CSD angle theta_k giving Ry(2 theta_k) on A when B = k"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_a_controlled (A-controlled unitary sum_j |j><j|_A (x) W_j) and _b_controlled_ry (B-controlled unitary sum_k V_k (x) |k><k|_B)",
+        "explanation": "Both controlled-unitary types are realised with computational-basis controls using CU / CRY gates, with X-conjugation of the control for the j = 0 or k = 0 branch."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Existence bound; the circuit realises N = 3 = 2 d_A - 1 factors for d_A = 2 (noted in the final comment of build_circuit), but the general-d_A constructions are not implemented."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The cosine-sine decomposition is the classical preprocessing that produces P_j, Q_j, theta_k; the module takes these factors as instance parameters rather than computing the CSD of a dense U (see specification_changes)."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_a_controlled (block-diagonal outer factors) and _b_controlled_ry (middle [[C,-S],[S,C]] block as controlled Ry(2 theta_k))",
+        "explanation": "The tensor-product identification of the CSD factors is what each helper appends; Qiskit ry(2t) matches the [[cos t, -sin t],[sin t, cos t]] block with A as the row index."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit (sequence: _a_controlled with Q, _b_controlled_ry, _a_controlled with P)",
+        "explanation": "The three factors are appended in right-to-left operator order (C^A_Q first, C^A_P last), giving the full decomposition U = C^A_P C^B_theta C^A_Q."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "n-partite bound stated in the abstract; no construction available and outside the scoped bipartite d_A = 2 instance."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The classical CSD preprocessing step (computing P_0, P_1, Q_0, Q_1, theta_k from a dense 4x4 unitary U) is moved outside the module: the instance supplies the CSD factors directly as Euler-angle-plus-phase parameters for each 2x2 target unitary and the two CSD angles.",
+        "reason": "The module may not construct or embed dense unitaries, and a robust numerical CSD (including matching of singular vectors across blocks for degenerate cosines) is not available with the permitted imports. The emitted circuit still realises exactly the operator product of eq_5 for the supplied factors."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Each 2x2 target unitary is parameterised as exp(i gamma) U(theta, phi, lam) (Qiskit CU convention) so that an arbitrary element of U(2), including its global phase, is covered; controls are restricted to the computational basis.",
+        "reason": "Generic U(2) targets are needed to reproduce an arbitrary two-qubit U; in the CSD-based construction all controls are in the computational basis, so arbitrary control bases (allowed in eq_1) are not needed."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Scope narrowed to d_A = d_B = 2; other dimensions raise ValueError.",
+        "reason": "No experiment_scope was supplied and the paper's general 4 d_A - 5 and 2 d_A - 1 constructions are not recoverable from the abstract; only the d_A = 2 case has an explicit construction (via CSD) in the specification."
+      }
+    ],
+    "assumptions": [
+      "Composite basis ordering |j>_A |k>_B with A most significant; realised as Qiskit qubit 1 = A, qubit 0 = B.",
+      "Instance parameters are the exact CSD factors of the intended U; the module does not verify unitarity of U or recompute the decomposition.",
+      "Qiskit CU(theta, phi, lam, gamma) applies exp(i gamma) U(theta, phi, lam) on the target when the control is |1>; Ry(2 theta_k) reproduces the CSD cosine-sine block in the stated basis.",
+      "The count N = 3 is reported as the number of controlled-unitary factors, not the number of elementary Qiskit gates (each factor is expanded into two controlled gates plus X conjugations)."
+    ],
+    "unresolved_issues": [
+      "The paper's actual proof technique for the 2 d_A - 1 bound is unknown; the CSD-based construction coincides with the bound only at d_A = 2.",
+      "Extension to d_B > 2 would require decomposing arbitrary d_B x d_B target unitaries into standard gates, which is not implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 42,
+    "depth": 34,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

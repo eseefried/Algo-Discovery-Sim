@@ -1,0 +1,133 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "f47d9853-d5c2-4045-904a-78c1f288a23a",
+  "parent_run_id": "998c0eac-a9a4-4d71-9f81-3f691b44592d",
+  "created_at": "2026-10-31T17:18:04.710721+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "8975e69b07c1a8fc205f92ec6abca2bd7887b561450defb721ede8c4e70f42c5",
+  "source_specification_sha256": "6fbd58dc21ca45581d4e61967e73c35582450b1b1c64be099eb275d5c16c46b2",
+  "source_python_sha256": "58ee9c730f940988c3b61421a92eef1a6f52993f212e0ad7582a7cd6c62478f8",
+  "elapsed_seconds": 83.446,
+  "usage": {
+    "input_tokens": 8950,
+    "output_tokens": 7266,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the scoped construction: a first-order (Lie-Trotter) step U_T(dt) = prod_j exp(-i c_j P_j dt) for a Jordan-Wigner electronic-structure Hamiltonian supplied as an ordered list of Pauli-string terms (eq_1 input, eq_2 product). Each exponential is compiled from standard gates (basis changes, CNOT ladder, Rz); identity terms become global phases. Optionally repeats the step num_steps times. The classical error analysis (effective Hamiltonian, ground-energy error, commutator bound, step-size search) is post-processing and not part of the returned operation.",
+    "source_python": "\"\"\"First-order Trotter step for a Jordan-Wigner Pauli-string Hamiltonian.\n\nbuild_circuit(instance) returns the unitary\n    U_T(dt)^num_steps,  U_T(dt) = prod_{j=1}^{L} exp(-i c_j P_j dt)\n(eq_2, product applied in the listed term order j = 1..L), where\nH = sum_j c_j P_j (eq_1, after Jordan-Wigner) is given by the instance.\n\nPauli labels use the Qiskit convention: the rightmost character acts on\nqubit 0 (least significant, occupation of spin orbital 0).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n_MAX_QUBITS = 12\n_MAX_STEPS = 64\n_PAULI_CHARS = \"IXYZ\"\n\n\ndef _check_real(value, name):\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(f\"{name} must be a real number\")\n    val = float(value)\n    if not math.isfinite(val):\n        raise ValueError(f\"{name} must be finite\")\n    return val\n\n\ndef _check_int(value, name, lo, hi):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(f\"{name} must be an integer\")\n    if value < lo or value > hi:\n        raise ValueError(f\"{name} must satisfy {lo} <= {name} <= {hi}\")\n    return value\n\n\ndef _parse_terms(instance, n):\n    \"\"\"eq_1: parse H = sum_j c_j P_j (ordered list of Pauli strings).\"\"\"\n    terms = instance.get(\"terms\")\n    if not isinstance(terms, list) or len(terms) == 0:\n        raise ValueError(\"terms must be a non-empty list\")\n    parsed = []\n    for k, term in enumerate(terms):\n        if not isinstance(term, dict):\n            raise ValueError(f\"terms[{k}] must be an object\")\n        label = term.get(\"pauli\")\n        if not isinstance(label, str) or len(label) != n:\n            raise ValueError(f\"terms[{k}].pauli must be a string of length {n}\")\n        for ch in label:\n            if ch not in _PAULI_CHARS:\n                raise ValueError(f\"terms[{k}].pauli contains invalid character {ch!r}\")\n        coeff = _check_real(term.get(\"coeff\"), f\"terms[{k}].coeff\")\n        parsed.append((label, coeff))\n    return parsed\n\n\ndef _append_pauli_rotation(qc, label, theta, n):\n    \"\"\"Append exp(-i * theta * P) for Pauli string P (Qiskit label order).\"\"\"\n    support = []\n    for q in range(n):\n        ch = label[n - 1 - q]\n        if ch != \"I\":\n            support.append((q, ch))\n    if len(support) == 0:\n        # exp(-i theta I) is a global phase\n        qc.global_phase -= theta\n        return\n    # basis change to Z eigenbasis\n    for q, ch in support:\n        if ch == \"X\":\n            qc.h(q)\n        elif ch == \"Y\":\n            qc.sdg(q)\n            qc.h(q)\n    # parity ladder onto the last support qubit\n    qubits = [q for q, _ in support]\n    for i in range(len(qubits) - 1):\n        qc.cx(qubits[i], qubits[i + 1])\n    # Rz(2 theta) = exp(-i theta Z)\n    qc.rz(2.0 * theta, qubits[-1])\n    for i in range(len(qubits) - 2, -1, -1):\n        qc.cx(qubits[i], qubits[i + 1])\n    for q, ch in support:\n        if ch == \"X\":\n            qc.h(q)\n        elif ch == \"Y\":\n            qc.h(q)\n            qc.s(q)\n\n\ndef build_circuit(instance):\n    \"\"\"Return U_T(dt)^num_steps as a measurement-free QuantumCircuit (eq_2).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object\")\n    n = _check_int(instance.get(\"num_qubits\"), \"num_qubits\", 1, _MAX_QUBITS)\n    dt = _check_real(instance.get(\"dt\"), \"dt\")\n    if dt <= 0.0:\n        raise ValueError(\"dt must be positive\")\n    num_steps = instance.get(\"num_steps\")\n    if num_steps is None:\n        num_steps = 1\n    num_steps = _check_int(num_steps, \"num_steps\", 1, _MAX_STEPS)\n    terms = _parse_terms(instance, n)\n\n    sys_reg = QuantumRegister(n, \"sys\")\n    qc = QuantumCircuit(sys_reg, name=\"trotter_step\")\n    # eq_2: U_T(dt) = prod_j exp(-i H_j dt), H_j = c_j P_j, fixed order j = 1..L\n    for _ in range(num_steps):\n        for label, coeff in terms:\n            _append_pauli_rotation(qc, label, coeff * dt, n)\n    return qc",
+    "example_instance_json": "{\"num_qubits\": 4, \"dt\": 0.5, \"num_steps\": 1, \"terms\": [{\"pauli\": \"IIII\", \"coeff\": -0.81054798}, {\"pauli\": \"IIIZ\", \"coeff\": 0.17218393}, {\"pauli\": \"IIZI\", \"coeff\": -0.22575349}, {\"pauli\": \"IZII\", \"coeff\": 0.17218393}, {\"pauli\": \"ZIII\", \"coeff\": -0.22575349}, {\"pauli\": \"IIZZ\", \"coeff\": 0.12091263}, {\"pauli\": \"IZIZ\", \"coeff\": 0.16892754}, {\"pauli\": \"ZIIZ\", \"coeff\": 0.16614543}, {\"pauli\": \"IZZI\", \"coeff\": 0.16614543}, {\"pauli\": \"ZIZI\", \"coeff\": 0.17464343}, {\"pauli\": \"ZZII\", \"coeff\": 0.12091263}, {\"pauli\": \"XXYY\", \"coeff\": -0.0452328}, {\"pauli\": \"YYXX\", \"coeff\": -0.0452328}, {\"pauli\": \"XXXX\", \"coeff\": 0.0452328}, {\"pauli\": \"YYYY\", \"coeff\": 0.0452328}]}",
+    "register_layout": [
+      "sys[0] = qubit 0 (least significant): occupation of spin orbital 0 (Jordan-Wigner)",
+      "sys[1] = qubit 1: occupation of spin orbital 1",
+      "sys[2] = qubit 2: occupation of spin orbital 2",
+      "sys[3] = qubit 3: occupation of spin orbital 3",
+      "Pauli labels in the instance follow the Qiskit convention: rightmost character acts on qubit 0",
+      "No ancilla register: the optional phase-estimation embedding is not built"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_parse_terms (Hamiltonian H = sum_j c_j P_j taken as an ordered list of Jordan-Wigner Pauli terms supplied by the instance)",
+        "explanation": "The second-quantized Hamiltonian is consumed in its post-Jordan-Wigner Pauli-string form; computing h_pq, h_pqrs and performing the JW transform are classical pre-processing not possible with the allowed imports, so the instance provides the terms."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop and _append_pauli_rotation (comment 'eq_2: U_T(dt) = prod_j exp(-i H_j dt)')",
+        "explanation": "The first-order Trotter product is built by applying exp(-i c_j P_j dt) in the listed order; the commutator-norm bound in the same equation is a classical quantity and is not part of the circuit."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The effective Hamiltonian (BCH / matrix logarithm of U_T) is a classical analysis of the produced unitary, not an operation to build."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Ground-state energy error requires exact diagonalization / phase estimation and measurement; both are classical post-processing or an experiment, excluded from the returned operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Bound B(dt) and looseness ratio R are classical computations on the Hamiltonian terms, not circuit content."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Step-size search and step count are classical post-processing; the module only exposes num_steps as an input to repeat the Trotter step."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Molecular integrals and the Jordan-Wigner transformation are not computed in the module; the Hamiltonian must be supplied as an ordered list of Pauli strings with real coefficients.",
+        "reason": "Allowed imports exclude chemistry and quantum_info packages; supplying the Pauli decomposition preserves the Hamiltonian's meaning while keeping the module self-contained."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Only the circuit U_T(dt) (optionally repeated num_steps times) is built; the operator-norm bound part of eq_2 is dropped from the implementation.",
+        "reason": "The bound is a classical diagnostic, and the deliverable is a unitary operation only."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4",
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Narrowed scope: effective Hamiltonian, energy error, bound comparison, and step-size search are not implemented; the optional phase-estimation embedding (ancilla register) is also omitted.",
+        "reason": "These are classical post-analysis or experiment-level steps (measurement, diagonalization) excluded by the operation-only requirement."
+      }
+    ],
+    "assumptions": [
+      "Pauli label convention: rightmost character of each label acts on qubit 0 (Qiskit little-endian), matching qubit k = occupation of spin orbital k.",
+      "Term order in the instance defines the Trotter ordering j = 1..L; the product is applied left-to-right in that order.",
+      "Identity Pauli terms are implemented as global phases exp(-i c dt), so the returned unitary equals the full product including the constant energy offset.",
+      "The example H2/STO-3G coefficients (R = 0.7414 A) are approximate values recalled from memory; magnitudes are standard but the signs of the XXYY/YYXX/XXXX/YYYY terms depend on orbital phase conventions and may differ from a specific chemistry package output.",
+      "dt = 0.5 a.u. in the example satisfies ||H|| dt < pi so the principal-branch effective Hamiltonian of the specification is well defined.",
+      "Qubit count capped at 12 and num_steps capped at 64 to bound circuit size."
+    ],
+    "unresolved_issues": [
+      "Exact molecular integrals / Pauli coefficients for the H2 instance could not be derived here and should be regenerated by a chemistry package if quantitative agreement is required.",
+      "The paper's actual Trotter order, term ordering, and norm convention are unknown from the abstract; only the first-order product with instance-defined ordering is implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 98,
+    "depth": 54,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

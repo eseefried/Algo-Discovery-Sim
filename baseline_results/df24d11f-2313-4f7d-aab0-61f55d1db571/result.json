@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "df24d11f-2313-4f7d-aab0-61f55d1db571",
+  "parent_run_id": "d93106a3-ee0d-437e-8203-073d1ff294d3",
+  "created_at": "2026-10-31T17:29:42.413283+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "a06f80ea31cf3731a2d0afb485d4768b98b4e4b560125ca593ce8416ffffd137",
+  "source_specification_sha256": "dee5fc297cb8568ff4773f1e8d7d22ebf3b492c5bd78014b4ba340c246ec427f",
+  "source_python_sha256": "081e68d256baa2c4138e0c63059327969e25bd803f10737701d99e80db2bc584",
+  "elapsed_seconds": 89.956,
+  "usage": {
+    "input_tokens": 8826,
+    "output_tokens": 7630,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": false,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the ancilla-indicator factorization of an n-qubit diagonal unitary with k distinct phases (eq_1-eq_3): for every distinct nonzero phase theta_j, a reversible minterm network (X-conjugated multi-controlled-X gates) computes the indicator f_j(x) of the phase class S_j into one clean ancilla, a single phase gate P(theta_j) acts on the ancilla, and the network is uncomputed. The result equals D (x) I exactly on ancilla |0>. The Clifford+T approximation of P(theta_j) (eq_4) is replaced by the exact phase gate, which is disclosed as a scope narrowing.",
+    "source_python": "\"\"\"Ancilla-indicator decomposition of a diagonal operator with k distinct phases.\n\nConstruction (specification eq_1-eq_3):\n  D = sum_j e^{i theta_j} Pi_j = prod_j exp(i theta_j Pi_j)\nEach factor exp(i theta_j Pi_j) is realised as\n  O_j^dagger (I (x) P(theta_j)) O_j,\nwhere O_j XORs the Boolean indicator f_j(x) of the phase class S_j into a clean\nancilla.  Restricted to ancilla |0> the product equals D (x) I exactly.\n\nQubit layout: data qubits 0..n-1 (qubit 0 = least significant bit of the basis\nlabel x), ancilla at index n.\n\nThe single-qubit phase gate is applied exactly (qc.p); the Clifford+T\napproximation of eq_4 is NOT performed here (see specification_changes).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n_TWO_PI = 2.0 * math.pi\n_MAX_QUBITS = 12\n_ROUND_DIGITS = 10\n\n\ndef _validate_instance(instance):\n    \"\"\"Validate the instance dictionary and return (n, phases, epsilon).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"num_qubits\")\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1:\n        raise ValueError(\"num_qubits must be a positive integer\")\n    if n + 1 > _MAX_QUBITS:\n        raise ValueError(\"num_qubits + 1 ancilla exceeds the qubit cap of 12\")\n    phases = instance.get(\"phases\")\n    if not isinstance(phases, (list, tuple)) or len(phases) != 2 ** n:\n        raise ValueError(\"phases must be a list of length 2**num_qubits\")\n    clean = []\n    for value in phases:\n        if isinstance(value, bool) or not isinstance(value, (int, float)):\n            raise ValueError(\"phases must be real numbers\")\n        f = float(value)\n        if not math.isfinite(f):\n            raise ValueError(\"phases must be finite\")\n        clean.append(f)\n    eps = instance.get(\"epsilon\")\n    if eps is not None:\n        if isinstance(eps, bool) or not isinstance(eps, (int, float)):\n            raise ValueError(\"epsilon must be a real number in (0, 1)\")\n        eps = float(eps)\n        if not (0.0 < eps < 1.0):\n            raise ValueError(\"epsilon must lie in the open interval (0, 1)\")\n    return n, clean, eps\n\n\ndef _group_phases(phases):\n    \"\"\"eq_1: regroup the diagonal by its k distinct phase values.\n\n    Returns an ordered list of (theta_j, S_j) with S_j the list of basis labels\n    x whose phase equals theta_j (mod 2 pi).  theta_j is reduced to [0, 2 pi).\n    \"\"\"\n    classes = {}\n    order = []\n    for x, theta in enumerate(phases):\n        reduced = math.fmod(theta, _TWO_PI)\n        if reduced < 0.0:\n            reduced += _TWO_PI\n        key = round(reduced / _TWO_PI, _ROUND_DIGITS)\n        if key >= 1.0:\n            key = 0.0\n        if key not in classes:\n            classes[key] = []\n            order.append(key)\n        classes[key].append(x)\n    return [(key * _TWO_PI, classes[key]) for key in order]\n\n\ndef _apply_indicator(qc, data, anc, n, members):\n    \"\"\"eq_3: reversible network O_j with O_j|x>|a> = |x>|a XOR f_j(x)>.\n\n    f_j is the OR of the minterms of S_j; since minterms are pairwise disjoint\n    the XOR of the minterm flips equals the OR.  Each minterm is an\n    X-conjugated multi-controlled-X on all n data qubits.  O_j is self-inverse,\n    so the same routine performs the uncomputation O_j^dagger.\n    \"\"\"\n    if len(members) == 2 ** n:\n        # Indicator is identically 1: a single X suffices (constant function).\n        qc.x(anc)\n        return\n    controls = [data[i] for i in range(n)]\n    for x in members:\n        zero_bits = [i for i in range(n) if not ((x >> i) & 1)]\n        for i in zero_bits:\n            qc.x(data[i])\n        if n == 1:\n            qc.cx(controls[0], anc)\n        elif n == 2:\n            qc.ccx(controls[0], controls[1], anc)\n        else:\n            qc.mcx(controls, anc)\n        for i in zero_bits:\n            qc.x(data[i])\n\n\ndef build_circuit(instance):\n    \"\"\"Return the unitary circuit realising D (x) I on data (x) ancilla |0>.\n\n    instance keys:\n      num_qubits : n >= 1 with n + 1 <= 12\n      phases     : list of 2**n real angles theta(x), x little-endian\n      epsilon    : optional target precision in (0, 1); validated only, since\n                   rotations are applied exactly in this module (eq_4/eq_5\n                   budget epsilon/k is not consumed by any synthesis step).\n    \"\"\"\n    n, phases, _eps = _validate_instance(instance)\n    data = QuantumRegister(n, \"data\")\n    anc_reg = QuantumRegister(1, \"anc\")\n    qc = QuantumCircuit(data, anc_reg, name=\"diag_k_phases\")\n    anc = anc_reg[0]\n\n    # eq_2: D = prod_j exp(i theta_j Pi_j); factors with theta_j = 0 are the\n    # identity and are skipped, so at most k (and at least k-1) rotations occur.\n    for theta_j, members in _group_phases(phases):\n        if theta_j == 0.0:\n            continue\n        # eq_3: U_j = O_j^dagger (I (x) P(theta_j)) O_j\n        _apply_indicator(qc, data, anc, n, members)   # O_j\n        qc.p(theta_j, anc)                            # P(theta_j) = diag(1, e^{i theta_j})\n        _apply_indicator(qc, data, anc, n, members)   # O_j^dagger (self-inverse)\n    return qc",
+    "example_instance_json": "{\"num_qubits\": 2, \"phases\": [0.0, 0.0, 0.0, 0.6283185307179586], \"epsilon\": 0.001}",
+    "register_layout": [
+      "qubits 0..n-1 = data register (instance: qubits 0,1); basis label x has bit i stored on qubit i, qubit 0 least significant",
+      "qubit n = anc (instance: qubit 2); clean ancilla receiving the indicator f_j(x), restored to |0> after each factor",
+      "example: D = diag(1,1,1,e^{i pi/5}) on data; circuit = Toffoli(data0,data1->anc), P(pi/5) on anc, Toffoli uncompute; total 3 qubits"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_group_phases",
+        "explanation": "Scans the 2^n phases, reduces them mod 2 pi, and groups equal values into (theta_j, S_j) classes forming the partition sum_j Pi_j = I."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop over _group_phases (comment 'eq_2')",
+        "explanation": "Applies the commuting factors exp(i theta_j Pi_j) sequentially; factors with theta_j = 0 are the identity and skipped."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_apply_indicator and the qc.p call in build_circuit",
+        "explanation": "O_j is a minterm network of X-conjugated multi-controlled-X gates XORing f_j(x) into the ancilla; P(theta_j) is applied on the ancilla; O_j is reapplied as its own inverse."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "No Clifford+T Rz synthesis is performed; the exact phase gate P(theta_j) stands in for the approximant tilde P_j. Only the module's docstring records this substitution."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "epsilon is validated to lie in (0,1) but, because rotations are exact, no per-rotation budget epsilon/k is consumed; the bound is informational."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Headline T-count bound is a resource statement about the synthesized circuit; it is not an operation and E(n,k) is not reconstructable from the abstract."
+      },
+      {
+        "equation_id": "eq_7",
+        "disposition": "implemented",
+        "code_location": "example_instance_json consumed by build_circuit",
+        "explanation": "n=2, phases [0,0,0,pi/5] yields one class S_2={11} with f_2 = x1 AND x0 realised by ccx, one P(pi/5), and the ccx uncompute."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The Clifford+T approximation tilde P_j of each phase gate is replaced by the exact Qiskit phase gate qc.p(theta_j); the epsilon parameter is validated but not used for synthesis.",
+        "reason": "Clifford+T Rz synthesis (e.g. number-theoretic gridsynth) cannot be implemented with the allowed imports in a compact module; the exact gate preserves the construction's meaning (the circuit equals D (x) I exactly rather than to precision epsilon)."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "No phase is dropped as a global phase; every distinct nonzero phase class gets its own indicator+rotation stage, so between k-1 and k rotations are applied.",
+        "reason": "Keeps the returned operation exactly equal to D (x) I (not merely equal up to a global phase), avoiding ambiguity for downstream validation."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The indicator network O_j is a naive disjoint-minterm ESOP (one n-controlled X per element of S_j, X-conjugated for zero bits), with the constant-1 indicator special-cased to a single X on the ancilla.",
+        "reason": "The paper's optimized predicate circuitry and entanglement-cost function E(n,k) are unknown; the minterm network is exact for arbitrary S_j but is not T-count optimal and is only a surrogate for E(n,k)."
+      }
+    ],
+    "assumptions": [
+      "Instance phases are given as a dense list of 2^n real angles theta(x) indexed little-endian (qubit 0 = least significant bit).",
+      "Phases are considered equal (same class) when they agree mod 2 pi after rounding to 10 decimal places of theta/(2 pi).",
+      "The ancilla is prepared in |0> by the runner; on other ancilla states the circuit implements the phase on the complementary class instead.",
+      "Multi-controlled X gates (qc.mcx) with up to 11 controls are acceptable standard-library gates for the reversible logic; their internal decomposition is left to the transpiler.",
+      "Qubit cap: n + 1 <= 12, hence n <= 11."
+    ],
+    "unresolved_issues": [
+      "Actual Clifford+T synthesis of the phase rotations (eq_4) and the resulting per-rotation precision budget (eq_5) are not realised; the circuit is exact rather than epsilon-approximate.",
+      "The paper's entanglement cost E(n,k) and its optimized indicator/phase-context circuitry are unknown; the minterm network used here may have far higher T-count for large classes S_j.",
+      "How the log_2 k overhead from uniform error allocation is handled in the paper is not addressed."
+    ]
+  },
+  "validation": {
+    "status": "failed",
+    "detail": "Generated source was not executed: ValueError: Module constants must be literals or small numeric expressions.",
+    "reference": "none",
+    "worker_image_id": null,
+    "qiskit_version": null,
+    "num_qubits": null,
+    "gate_count": null,
+    "depth": null,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

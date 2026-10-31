@@ -1,0 +1,145 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "ae45a651-d150-414b-bd97-88acb20761fc",
+  "parent_run_id": "5a21f803-cbf6-415a-91a6-c004c53aae90",
+  "created_at": "2026-10-31T17:05:41.953252+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "630b3e78f7c05ca6d5598d2dde4711ba151c0fc64d28eeee8f6ebd1162dcd399",
+  "source_specification_sha256": "3af1fe52922c5c4a893ad51e4d8725f534d478289d480df8f92817fb0c719916",
+  "source_python_sha256": "8752b7de4b00c1928c4597d3d3284e9e43acecfc251510c79f38ea16e16a1037",
+  "elapsed_seconds": 124.737,
+  "usage": {
+    "input_tokens": 7131,
+    "output_tokens": 11025,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing the operation U^t = (S C)^t of a discrete-time coined quantum-walk search on a 4-regular circulant graph (vertices Z_n, n a power of two, offsets +-1 and +-m). The coin C is a Grover coin on unmarked vertices and -I on the single marked vertex w, encoded without any oracle as a multi-controlled Z conditioned on the classical bits of w. The shift S is a coin-controlled modular constant adder in the QFT basis (p/cp/mcp phases between QFTGate and its inverse). No state preparation or measurement is included; the runner supplies the input state (e.g. the uniform superposition of eq_2).",
+    "source_python": "'''Discrete-time coined quantum-walk search operator U^t = (S C)^t on a 4-regular\ncirculant graph (vertices Z_n, offsets +-1 and +-m), with the marked vertex w encoded\ndirectly in the circuit (no black-box oracle).  Exposes build_circuit(instance).\n\nLayout (Qiskit little-endian): position register pos[0..npos-1] holds the vertex label\nx in binary (pos[j] is bit 2^j); coin register coin[0] (= c0) and coin[1] (= c1) holds\nthe direction c = c0 + 2*c1 with displacements (+1, -1, +m, -m) for c = 0, 1, 2, 3.\n'''\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\n\nMAX_QUBITS = 12\nCOIN_SIZE = 2\nMAX_STEPS = 10000\n\n\ndef _require_int(instance, key, minimum):\n    if key not in instance:\n        raise ValueError('missing instance key: ' + key)\n    value = instance[key]\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError('instance key must be an integer: ' + key)\n    if value < minimum:\n        raise ValueError('instance key below minimum: ' + key)\n    return value\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _require_int(instance, 'n', 8)\n    if n & (n - 1) != 0:\n        raise ValueError('n must be a power of two')\n    npos = n.bit_length() - 1\n    if npos + COIN_SIZE > MAX_QUBITS:\n        raise ValueError('too many qubits: n <= 1024 required')\n    m = _require_int(instance, 'm', 2)\n    if not (1 < m < n // 2):\n        raise ValueError('m must satisfy 1 < m < n/2')\n    w = _require_int(instance, 'w', 0)\n    if w >= n:\n        raise ValueError('w must satisfy 0 <= w < n')\n    t = _require_int(instance, 't', 0)\n    if t > MAX_STEPS:\n        raise ValueError('t too large')\n    return n, npos, m, w, t\n\n\ndef _grover_coin(qc, coin):\n    # eq_4 (unmarked part): C_0 = 2|s><s| - I = -(H H)(X X) CZ (X X)(H H) on the coin.\n    # The leading minus sign is an unconditional global phase, tracked exactly.\n    qc.h(coin[0])\n    qc.h(coin[1])\n    qc.x(coin[0])\n    qc.x(coin[1])\n    qc.cz(coin[0], coin[1])\n    qc.x(coin[0])\n    qc.x(coin[1])\n    qc.h(coin[0])\n    qc.h(coin[1])\n    qc.global_phase += math.pi\n\n\ndef _marked_correction(qc, coin, pos, npos, w):\n    # eq_4 (marked part, oracle-free): on |x> = |w> apply C_1 C_0^{-1} = -C_0 = I - 2|s><s|\n    # = (H H)(X X) CZ (X X)(H H); controlled on x = w this is (H H)(X X) [multi-controlled Z\n    # with controls = all position qubits (zero bits of w flipped by X) and coin[0],\n    # target coin[1]] (X X)(H H).  Composition with _grover_coin gives\n    # C = C_0 (x) (I - |w><w|) + C_1 (x) |w><w| exactly.\n    for j in range(npos):\n        if ((w >> j) & 1) == 0:\n            qc.x(pos[j])\n    qc.h(coin[0])\n    qc.h(coin[1])\n    qc.x(coin[0])\n    qc.x(coin[1])\n    controls = [pos[j] for j in range(npos)] + [coin[0]]\n    qc.mcp(math.pi, controls, coin[1])\n    qc.x(coin[0])\n    qc.x(coin[1])\n    qc.h(coin[0])\n    qc.h(coin[1])\n    for j in range(npos):\n        if ((w >> j) & 1) == 0:\n            qc.x(pos[j])\n\n\ndef _shift(qc, coin, pos, npos, n, m):\n    # eq_3 with the eq_1 graph: |c>|x> -> |c>|x + delta_c mod n>, delta = (+1, -1, +m, -m)\n    # for c = c0 + 2*c1.  Write delta_c = a + b*c0 + e*c1 + f*c0*c1 with\n    # a = 1, b = -2, e = m - 1, f = 2 - 2m and add each term in the QFT basis:\n    # after QFTGate, adding k to x multiplies the Fourier bit j by exp(2*pi*i*k*2^j/n).\n    a = 1\n    b = -2\n    e = m - 1\n    f = 2 - 2 * m\n    targets = [pos[j] for j in range(npos)]\n    qc.append(QFTGate(npos), targets)\n    for j in range(npos):\n        base = 2.0 * math.pi * float(2 ** j) / float(n)\n        qc.p(base * a, pos[j])\n        qc.cp(base * b, coin[0], pos[j])\n        qc.cp(base * e, coin[1], pos[j])\n        qc.mcp(base * f, [coin[0], coin[1]], pos[j])\n    qc.append(QFTGate(npos).inverse(), targets)\n\n\ndef build_circuit(instance):\n    '''Return the unitary U^t = (S C)^t (eq_5) as a measurement-free QuantumCircuit.'''\n    n, npos, m, w, t = _validate(instance)\n    pos = QuantumRegister(npos, 'pos')\n    coin = QuantumRegister(COIN_SIZE, 'coin')\n    qc = QuantumCircuit(pos, coin, name='qw_search_steps')\n    for _ in range(t):\n        # eq_5: one step U = S C (coin first, then shift)\n        _grover_coin(qc, coin)\n        _marked_correction(qc, coin, pos, npos, w)\n        _shift(qc, coin, pos, npos, n, m)\n    return qc",
+    "example_instance_json": "{\"n\": 8, \"m\": 3, \"w\": 0, \"t\": 1}",
+    "register_layout": [
+      "qubits 0-2: position register pos[0..2], vertex label x in {0..7} in binary, pos[j] = bit 2^j (qubit 0 least significant)",
+      "qubit 3: coin[0] = c0 (low bit of the direction c)",
+      "qubit 4: coin[1] = c1 (high bit of the direction c); c = c0 + 2*c1 selects displacement (+1, -1, +3, -3) for c = (0, 1, 2, 3)",
+      "In tensor-product notation |c> (x) |x> the coin register is the most significant (highest-index) factor, consistent with Qiskit little-endian ordering",
+      "Total qubits = log2(n) + 2 (5 for the example); general instances allow n up to 1024 (12 qubits)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_shift (comment 'eq_3 with the eq_1 graph'): offsets +-1 and +-m mod n = 2^npos define the circulant stand-in graph; _validate enforces n power of two and 1 < m < n/2",
+        "explanation": "The graph structure enters the circuit only through the four displacement values and the modular arithmetic of the QFT adder."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Input-state preparation (uniform superposition via Hadamards) is excluded by the operation-only contract; the runner prepares the input state."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_shift: QFTGate, p/cp/mcp phase ladder realising delta_c = a + b c0 + e c1 + f c0 c1, then QFTGate.inverse()",
+        "explanation": "Coin-preserving (moving) modular shift implemented as a coin-controlled constant adder in the Fourier basis."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_grover_coin (C_0 on the coin with exact global_phase) and _marked_correction (controlled -C_0 on x = w via X-mapping of w's zero bits and a multi-controlled Z)",
+        "explanation": "C = C_0 (x) (I-|w><w|) + (-I) (x) |w><w| is realised as D * (C_0 (x) I) with D = I (x) (I-|w><w|) + (-C_0) (x) |w><w|; the marked vertex is a classical constant in the circuit, so no oracle is used."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop 'for _ in range(t)' applying coin then shift",
+        "explanation": "U = S C repeated t times; t = 0 yields the identity (empty) circuit."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Success probability, measurement and the asymptotic gate-count statement are experiment/analysis quantities, not part of the returned unitary operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_6"
+        ],
+        "change": "Initial-state preparation and the final position measurement / success-probability evaluation are removed from the generated module; build_circuit returns only the unitary U^t.",
+        "reason": "Operation-only contract: inputs are prepared and measurements performed by the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The marked-dependent coin is implemented as the product D * (C_0 (x) I) with D = I (x) (I-|w><w|) + (-C_0) (x) |w><w|, using HH XX (multi-controlled Z) XX HH on the coin controlled by the position register; the -1 sign of C_0 = -(HH XX CZ XX HH) is tracked exactly via qc.global_phase += pi per step.",
+        "reason": "Gives an exact (not merely up-to-phase) realisation of the specified coin using standard gates and no oracle."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The four coin-controlled modular adders are merged into a single QFT-basis adder with the constant decomposition delta_c = 1 - 2 c0 + (m-1) c1 + (2-2m) c0 c1 (p, cp, mcp phases).",
+        "reason": "Equivalent unitary with fewer multi-controlled gates; relies on n being a power of two so that addition mod 2^npos is natural in the Fourier basis."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Register ordering fixed to Qiskit little-endian: position qubits 0..npos-1, coin qubits npos (c0) and npos+1 (c1); the tensor factor |c> of |c>(x)|x> is therefore the high-index register.",
+        "reason": "The specification's abstract ordering must be mapped to a concrete physical qubit order; disclosed to avoid misinterpretation of basis-state labels."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Instance generalised beyond the fixed n = 8, m = 3 example to any power-of-two n with 8 <= n <= 1024 and 1 < m < n/2, w in [0, n), t >= 0; invalid values raise ValueError.",
+        "reason": "Requirement to implement the operation for varying valid parameters within the 12-qubit cap."
+      }
+    ],
+    "assumptions": [
+      "The twisted toroid family is modelled by a degree-4 circulant graph with offsets +-1 and +-m; the paper's actual family may differ.",
+      "Discrete-time coined walk with Grover coin on unmarked vertices and -I on the single marked vertex, coin applied before shift, coin-preserving (moving) shift.",
+      "Degree d = 4 is fixed (2 coin qubits); n is a power of two so vertex labels fill the position register exactly.",
+      "Multi-controlled phase gates (mcp) are counted as composite gates; their decomposition into 2-qubit gates is left to the transpiler and is not part of the claimed gate count.",
+      "The number of steps t is an instance parameter; the optimal t is not derived here."
+    ],
+    "unresolved_issues": [
+      "Exact definition of the paper's twisted toroid graph family and the other graph families is unknown.",
+      "The paper's actual walk model, coin operators, shift convention and explicit circuit decompositions are not available from the abstract.",
+      "No validation contract was supplied; the success probability P_w(t) for the stand-in instance has not been evaluated and the O(sqrt(n) log n) scaling is not checked for this graph."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 5,
+    "gate_count": 252,
+    "depth": 181,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

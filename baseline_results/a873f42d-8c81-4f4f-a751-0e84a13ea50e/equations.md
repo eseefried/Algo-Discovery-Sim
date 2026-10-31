@@ -1,0 +1,161 @@
+# Abstract to equations
+
+Status: **partial**
+
+Model: `claude-fable-5-1`
+
+Mathematics has not been independently verified.
+
+Approximate MaxCut via a p-layer alternating-operator quantum algorithm (QAOA, as this abstract describes): prepare a parameterized state from a cost unitary and a mixing unitary, choose the angles classically to maximize the expected cut value, then sample a bit string whose cut is close to optimal. The abstract claims a worst-case approximation ratio of 0.6924 for p=1 on 3-regular graphs.
+
+Scope: Smallest useful construction (chosen as an assumption since no experiment_scope was supplied): p=1 QAOA for MaxCut on the 4-vertex ring C_4 (2-regular graph, edges (0,1),(1,2),(2,3),(3,0)), using n=4 qubits. Scope covers the cost Hamiltonian, mixer, the single-layer state, the expectation function to be optimized classically, the recalled closed form for a 2-regular ring at p=1, and the abstract's 0.6924 claim as a stated bound. Outside scope: general p>1 layers and their performance scaling, the locality/depth arguments, the 'different strategy' for p growing with input size, the derivation of the 0.6924 bound on 3-regular graphs, and any 3-regular instance.
+
+## Symbols
+
+- $G=(V,E)$: Input graph for MaxCut; vertices V, undirected edges E; domain: Finite simple graph; instance: C_4 with V={0,1,2,3}, E={(0,1),(1,2),(2,3),(3,0)}
+- $n$: Number of vertices = number of qubits; domain: Positive integer; n=4 in the instance
+- $m$: Number of edges (constraints/clauses); domain: Positive integer; m=4 in the instance
+- $p$: Number of alternating layers; domain: Integer p\geq 1; p=1 in the instance
+- $z=z_{n-1}\cdots z_0$: Computational-basis bit string; bit z_j is the side of the cut assigned to vertex j; domain: \{0,1\}^n
+- $C(z)$: Classical MaxCut objective: number of edges with endpoints on different sides; domain: Integer in [0,m]
+- $C_{\max}$: Optimal (maximum) cut value of G; domain: Integer; C_{\max}=4 for C_4
+- $C$: Diagonal cost Hamiltonian with C|z\rangle = C(z)|z\rangle; domain: Hermitian operator on (\mathbb{C}^2)^{\otimes n}
+- $B$: Mixing Hamiltonian, sum of single-qubit X operators; domain: Hermitian operator on (\mathbb{C}^2)^{\otimes n}
+- $\gamma_l,\beta_l$: Cost and mixer angles of layer l; domain: \gamma_l\in[0,2\pi), \beta_l\in[0,\pi) (period of e^{-i\gamma C} is 2\pi since C has integer spectrum)
+- $|\gamma,\beta\rangle$: QAOA variational state after p layers; domain: Unit vector in (\mathbb{C}^2)^{\otimes n}
+- $F_p(\gamma,\beta)$: Expected cut value of the QAOA state; domain: Real number in [0,m]
+- $X_j, Z_j$: Pauli X and Z acting on qubit j; domain: Unitary Hermitian operators on qubit j
+
+## eq_1: MaxCut cost Hamiltonian
+
+$$
+C=\sum_{(j,k)\in E}\tfrac{1}{2}\left(\mathbb{1}-Z_jZ_k\right),\qquad C|z\rangle=C(z)|z\rangle,\qquad C(z)=\sum_{(j,k)\in E}\left[z_j\neq z_k\right]
+$$
+
+Encodes the MaxCut objective as a diagonal 2-local Hamiltonian; each edge term is 1 if the edge is cut and 0 otherwise. Uses Z_j|z\rangle=(-1)^{z_j}|z\rangle.
+
+Provenance: `abstract_inferred`. The abstract names MaxCut as the objective and says gate locality matches objective locality; the standard diagonal encoding of a 2-local MaxCut objective gives exactly this operator.
+
+Abstract evidence: MaxCut on regular graphs
+
+Equation assumptions:
+
+- Bit z_j encodes the side of vertex j; qubit j corresponds to vertex j
+
+## eq_2: Mixing Hamiltonian
+
+$$
+B=\sum_{j=0}^{n-1}X_j
+$$
+
+Transverse-field mixer; its exponential is a product of single-qubit X rotations.
+
+Provenance: `standard_background`. Standard QAOA mixer recalled from background knowledge; the abstract does not specify it.
+
+Equation assumptions:
+
+- The algorithm uses the transverse-field mixer rather than a constraint-preserving mixer
+
+## eq_3: p-layer QAOA state (p=1 instance)
+
+$$
+|\gamma,\beta\rangle=\prod_{l=1}^{p}e^{-i\beta_lB}e^{-i\gamma_lC}\,|+\rangle^{\otimes n},\qquad |+\rangle^{\otimes n}=\frac{1}{2^{n/2}}\sum_{z\in\{0,1\}^n}|z\rangle;\quad p=1:\ |\gamma,\beta\rangle=e^{-i\beta B}e^{-i\gamma C}|+\rangle^{\otimes n}
+$$
+
+Alternating application of the cost unitary and mixer unitary starting from the uniform superposition. e^{-i\gamma C} factors into m commuting two-qubit ZZ rotations (one per edge), e^{-i\beta B} into n single-qubit X rotations, consistent with depth linear in p times the number of constraints.
+
+Provenance: `standard_background`. Recalled as the known structure of this algorithm (QAOA); the abstract only states dependence on p, locality bounded by the objective's locality, and depth linear in p times the number of constraints, which this product form is consistent with but does not uniquely determine.
+
+Equation assumptions:
+
+- Operator ordering: rightmost factor acts first; layer l=1 acts first
+- Exactly one cost and one mixer exponential per layer
+
+## eq_4: Expected cut and classical angle optimization
+
+$$
+F_p(\gamma,\beta)=\langle\gamma,\beta|\,C\,|\gamma,\beta\rangle,\qquad (\gamma^*,\beta^*)=\arg\max_{\gamma,\beta}F_p(\gamma,\beta),\qquad M_p=F_p(\gamma^*,\beta^*)\le C_{\max}
+$$
+
+The figure of merit is the expectation of C in the variational state; for fixed p the maximizing angles are found by classical preprocessing (for bounded-degree graphs F_p depends only on local subgraph structure and can be evaluated classically).
+
+Provenance: `abstract_inferred`. The abstract states fixed-p classical preprocessing; in QAOA this preprocessing is the classical determination of angles maximizing the expected objective, which is the quantity whose ratio to the optimum is reported.
+
+Abstract evidence: If $p$ is fixed, that is, independent of the input size, the algorithm makes use of efficient classical preprocessing.
+
+Equation assumptions:
+
+- The preprocessing consists of maximizing F_p over angles; the abstract does not describe the procedure
+
+## eq_5: p=1 edge expectation on a 2-regular ring (recalled, unverified)
+
+$$
+\langle\gamma,\beta|\tfrac{1}{2}(\mathbb{1}-Z_jZ_k)|\gamma,\beta\rangle=\tfrac{1}{2}+\tfrac{1}{4}\sin(4\beta)\sin(2\gamma)\ \ (n>3),\qquad M_1=\tfrac{3n}{4}\text{ at }\gamma^*=\tfrac{\pi}{4},\beta^*=\tfrac{\pi}{8};\quad C_4:\ M_1=3,\ \frac{M_1}{C_{\max}}=\frac{3}{4}
+$$
+
+Closed form for a single edge of a ring (triangle-free, degree 2) at p=1, obtained from the light-cone of the edge (4 qubits); maximizing gives expected cut 3n/4. For C_4 (even ring, C_max=n=4) this gives ratio 0.75. This is an exact expectation, not a bound; sampled cuts fluctuate around it.
+
+Provenance: `standard_background`. Recalled formula for QAOA p=1 on triangle-free regular graphs specialized to degree 2; not derived from the abstract and not verified here by simulation. The abstract only says 2-regular graphs were analyzed.
+
+Equation assumptions:
+
+- Ring has n>3 so that the two endpoints of an edge have distinct other neighbours (true for C_4)
+- Formula recalled from memory; should be checked numerically before use
+
+## eq_6: Stated worst-case ratio for p=1 on 3-regular graphs
+
+$$
+\frac{M_1}{C_{\max}}=\frac{F_1(\gamma^*,\beta^*)}{C_{\max}}\ \ge\ 0.6924\quad\text{for every 3-regular graph }G
+$$
+
+Abstract's performance guarantee; the derivation (case analysis over local edge neighbourhoods) is not given in the abstract and is outside this reconstruction.
+
+Provenance: `abstract_explicit`. Directly stated in the abstract; interpreted as a bound on the expected cut value (guaranteeing a sampled string of at least that value exists with nonzero probability, and with repeated sampling one is found with high probability).
+
+Abstract evidence: For $p=1$, on 3-regular graphs the quantum algorithm always finds a cut that is at least 0.6924 times the size of the optimal cut.
+
+Equation assumptions:
+
+- 'Finds a cut' is interpreted as the expected cut size M_1 being at least 0.6924 C_max
+
+## Registers
+
+- q: n = 4 qubits; One qubit per vertex of C_4; qubit j holds bit z_j (cut side of vertex j). Basis state |z\rangle = |z_3 z_2 z_1 z_0\rangle with qubit 0 least significant; Z_j|z\rangle=(-1)^{z_j}|z\rangle.
+
+## Initial state
+
+|+\rangle^{\otimes 4} = H^{\otimes 4}|0000\rangle, the uniform superposition over all 16 bit strings.
+
+## Measurement
+
+Measure all 4 qubits in the computational (Z) basis, yielding a bit string z\in\{0,1\}^4. Each outcome is a candidate cut with value C(z) computed classically from eq_1. Repeating O(m) times (or more) gives an estimate of F_1 and, with high probability, a sample with C(z)\ge F_1 (since C(z) is bounded by m, Chebyshev-type arguments apply).
+
+## Classical postprocessing
+
+Compute C(z) for each sampled string; report the maximum observed cut and the sample mean as an estimate of F_1(\gamma^*,\beta^*). For the C_4 instance compare the mean to the recalled value 3 (ratio 3/4 of C_max=4). Angle selection itself is classical preprocessing (eq_4), e.g. a grid search over (\gamma,\beta) using the analytic edge expectation or exact 4-qubit simulation.
+
+## Algorithm steps
+
+1. Classical preprocessing: for p=1 on the ring instance, evaluate F_1(\gamma,\beta) (via eq_5 or by direct classical computation on the 4-qubit light cone) and pick maximizing angles (\gamma^*,\beta^*)=(\pi/4,\pi/8) (to be verified numerically). (eq_4, eq_5)
+2. Prepare the uniform superposition by applying H to each of the 4 qubits. (eq_3)
+3. Apply the cost unitary e^{-i\gamma^* C} = \prod_{(j,k)\in E} e^{-i\gamma^*(\mathbb{1}-Z_jZ_k)/2} as four commuting two-qubit ZZ-phase gates on edges (0,1),(1,2),(2,3),(3,0) (the global phase e^{-i\gamma^* m/2} may be dropped). (eq_1, eq_3)
+4. Apply the mixer unitary e^{-i\beta^* B} = \prod_{j=0}^{3} e^{-i\beta^* X_j} as four single-qubit X rotations R_X(2\beta^*). (eq_2, eq_3)
+5. Measure all qubits in the computational basis to obtain z; compute C(z) classically; repeat the circuit to estimate F_1 and retain the best observed string. (eq_1, eq_4)
+
+## Assumptions
+
+- No experiment_scope was supplied; the instance (C_4 ring, p=1, n=4 qubits) is a choice made here as the smallest useful construction illustrating the 2-regular analysis mentioned in the abstract
+- The algorithm is identified as QAOA with transverse-field mixer and one cost/mixer pair per layer; the abstract does not spell this out
+- Qubit j \leftrightarrow vertex j, little-endian bit ordering, Z_j|z\rangle=(-1)^{z_j}|z\rangle
+- The optimal p=1 angles and the 3/4 ratio for even rings are recalled from background knowledge and are unverified here
+- The 0.6924 guarantee is interpreted as a bound on the expected cut value for p=1
+- Cut values are integers; the expected cut F_p is generally a non-integer real number and is not itself a cut
+
+## Missing information
+
+- Derivation/proof technique for the 0.6924 bound on 3-regular graphs at p=1 (not in abstract)
+- The 'different strategy' proposed when p grows with input size
+- Explicit classical preprocessing procedure for general fixed p (how F_p is computed from local subgraphs and maximized)
+- Performance values for p>1 on 2-regular and 3-regular graphs
+- Formal statement of the depth and locality claims (gate decomposition assumed here)
+- Any numerical verification of eq_5 and the chosen angles; no simulator was available
