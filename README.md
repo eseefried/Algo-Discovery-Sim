@@ -2,6 +2,27 @@
 
 Hackathon project.
 
+## Workstreams
+
+This repository holds three systems that attack the same problem from opposite ends, over the
+same 300-paper corpus:
+
+| | Workstream | Entry points | Docs |
+|---|---|---|---|
+| **A** | **Single-agent pipeline** — one agent takes an abstract to equations, to Qiskit, to a simulated result | `abstract-to-equations`, `run-pipeline`, ... | the blocks below |
+| **B** | **Abstract2Method** — a decentralised agent swarm under an economic survival game, scored by a sealed judge against the paper's own method, and benchmarked against single-agent and central-planner baselines | `a2m` | [docs/SWARM.md](docs/SWARM.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| **C** | **Ledger swarm** — three workers bid for parts of one paper's math specification through a shared SQLite ledger; its spec feeds the same black box as A (`run-code-sim`) | `run-swarm`, `scripts/run_swarm_batch.sh` | [docs/ledger-swarm.md](docs/ledger-swarm.md) |
+
+Workstream B treats A's question as a benchmark: given only a claim, can agents rebuild a
+correct, testable method? Quantum circuits and algorithms are its primary target (3 tasks);
+chemistry, materials, biology and dynamics each contribute one task to show the design is not
+quantum-specific.
+
+```bash
+uv run a2m tasks                                          # runnable benchmark tasks
+uv run a2m run --system swarm --task arxiv-1409.3305 --llm mock --judge   # offline, no key
+```
+
 ## Ledger swarm
 
 The default model is now **Claude Haiku 5.5** (`claude-haiku-5-5`). Three independent
