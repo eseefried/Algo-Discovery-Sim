@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "0daca8db-2b81-4ecb-bfac-3d8a51a85646",
+  "parent_run_id": "4ed49d48-77fd-4f3b-8beb-e653f671d1d4",
+  "created_at": "2026-10-31T21:41:44.068617+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "2b988038f19b47ac1acc0673fd3551e00225a578336223d15202871a99eedd1e",
+  "source_specification_sha256": "7187e235707ef02c28de074dd7616d97e78e75f8d27ea9ebffa916c0f5c23108",
+  "source_python_sha256": "464b799a76fb19c53a97536fe77cbc0656562e6ceaf41936ef55f9101edb9eaf",
+  "elapsed_seconds": 27.619,
+  "usage": {
+    "input_tokens": 3995,
+    "output_tokens": 3924,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Coherent (deferred-measurement) unrolling of n weak-measurement iterations on a system qubit with n fresh probe qubits. Each iteration applies exp(-i*phi*|0><0|_S (x) Y_P), a controlled-RY(2*phi) from system to probe, followed by a fixed system unitary pulse. Probe preparation and readout are left to the runner. The Hamiltonian, probe state and pulses are assumed, since the abstract does not give them.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef build_circuit(instance):\n    \"\"\"Unrolled qubit-probe weak-measurement loop with fixed system pulses.\n\n    instance: {\"n_steps\": int 1..11, \"phi\": float (= g*dt),\n               \"pulses\": optional list of n_steps [theta, phi, lam] U-gate angles}\n    Qubit 0 = system S; qubit k (1..n) = probe of iteration k (runner prepares |0>).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"n_steps\")\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 11:\n        raise ValueError(\"n_steps must be an integer in 1..11\")\n    phi = instance.get(\"phi\")\n    if isinstance(phi, bool) or not isinstance(phi, (int, float)) or not math.isfinite(phi):\n        raise ValueError(\"phi must be a finite real number\")\n    pulses = instance.get(\"pulses\")\n    if pulses is None:\n        pulses = [[0.0, 0.0, 0.0] for _ in range(n)]\n    if not isinstance(pulses, list) or len(pulses) != n:\n        raise ValueError(\"pulses must be a list of length n_steps\")\n    clean = []\n    for p in pulses:\n        if not isinstance(p, (list, tuple)) or len(p) != 3:\n            raise ValueError(\"each pulse needs three angles\")\n        row = []\n        for a in p:\n            if isinstance(a, bool) or not isinstance(a, (int, float)) or not math.isfinite(a):\n                raise ValueError(\"pulse angles must be finite reals\")\n            row.append(float(a))\n        clean.append(row)\n\n    sys_reg = QuantumRegister(1, \"S\")\n    probes = QuantumRegister(n, \"P\")\n    qc = QuantumCircuit(sys_reg, probes)\n    for k in range(n):\n        # eq_2: exp(-i*phi*|0><0|_S (x) Y_P) = controlled-on-|0> RY(2*phi)\n        qc.x(0)\n        qc.cry(2.0 * float(phi), 0, 1 + k)\n        qc.x(0)\n        # fixed system pulse (replaces outcome-dependent feedback)\n        qc.u(clean[k][0], clean[k][1], clean[k][2], 0)\n    return qc",
+    "example_instance_json": "{\"n_steps\":3,\"phi\":0.2,\"pulses\":[[0.3,0.0,0.0],[0.5,0.1,0.2],[0.0,0.0,0.0]]}",
+    "register_layout": [
+      "qubit 0: system S (qubit being weakly measured; input prepared by runner)",
+      "qubits 1..n_steps: probe qubits P_k, one fresh probe per iteration k, assumed prepared in |0> by runner; computational-basis readout is done by runner (deferred measurement)",
+      "Qiskit little-endian: qubit 0 is least significant bit"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Completeness of the Kraus operators is a standard property. It holds automatically here because each step is a unitary dilation, so the code does not implement it directly."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop body, X-CRY-X on (S, P_k)",
+        "explanation": "With assumed H_int = |0><0|_S (x) Y_P, probe |0> and readout in the computational basis, M_0 = diag(cos(phi), 1) and M_1 = diag(sin(phi), 0). The unitary exp(-i*phi*H) is implemented as a controlled-RY(2*phi) with the control active on system |0>."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Chose a concrete H_int = |0><0|_S (x) Y_P with phi = g*dt, probe initial state |0>, and computational-basis readout.",
+        "reason": "The abstract gives no explicit Hamiltonian, probe state or readout basis, so a concrete simple choice was needed to build a circuit."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Narrowed scope to a fixed-length unrolled sequence of n_steps coherent weak-measurement steps. Pulses are fixed U gates given in the instance and are not conditioned on outcomes. Measurement is deferred and left to the runner.",
+        "reason": "The required output is a measurement-free unitary circuit with no dynamic circuits, reset or classical feedback. The abstract's feedback rule and stopping criterion are not specified."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "The circuit does not realize or verify a specific target two-outcome measurement or the two-distinct-singular-values result.",
+        "reason": "The mapping from the outcome record to the final binary outcome is not given."
+      }
+    ],
+    "assumptions": [
+      "Probe qubits start in |0>, prepared by the runner.",
+      "H_int = |0><0|_S (x) Y_P, with phi = g*dt supplied in the instance.",
+      "Pulses are arbitrary fixed single-qubit U(theta, phi, lambda) gates on the system, applied after each step.",
+      "Up to 11 iterations, each with its own probe, so the total is at most 12 qubits."
+    ],
+    "unresolved_issues": [
+      "The paper's actual Hamiltonian, probe state and readout basis are unknown.",
+      "The feedback pulse rule and stopping criterion are unknown, and outcome-conditioned feedback is not implemented.",
+      "The rule mapping the outcome record to the final binary outcome is unknown.",
+      "The circuit does not itself demonstrate the abstract's claim about two distinct singular values."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 21,
+    "depth": 18,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

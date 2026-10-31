@@ -1,0 +1,115 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "d08136c9-720f-4a1f-b406-28a916505ae9",
+  "parent_run_id": "5265f42c-b6b8-4d45-8c16-506c4e52ac87",
+  "created_at": "2026-10-31T21:40:14.476215+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "5a947ab87f5a3560b7a284e8787cc3e30b76afede22c532e9f6c272294c3b356",
+  "source_specification_sha256": "5eb62f054c95ce6fb91abf476d13c7382ef06f6ba04b546e21edd409fe540a91",
+  "source_python_sha256": "8c1cfb2e49d636d13830b150eb9b73594c0a6863f4528a25355be429ce7e8695",
+  "elapsed_seconds": 46.078,
+  "usage": {
+    "input_tokens": 4461,
+    "output_tokens": 6192,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Ancilla-assisted fanout / controlled single-qubit gate on a k-dimensional grid with nearest-neighbor interactions only. Each grid site holds one target qubit and one copy qubit. The origin site's copy qubit is the control. The control value is spread by CNOTs along a spanning tree between adjacent sites, so tree depth equals Manhattan distance. Each copy then acts locally on its target (CX, CZ or CP), and the spreading is uncomputed in reverse. Depth is O(k*side), size is Theta(n) and width is 2n. This is a small-scale, non-adaptive reconstruction of the assumed plan, not the paper's adaptive simulation result.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    shape = instance.get('shape')\n    if not isinstance(shape, list) or len(shape) < 2 or len(shape) > 12:\n        raise ValueError('shape must be a list of >=2 positive ints (k>=2)')\n    n = 1\n    for s in shape:\n        if isinstance(s, bool) or not isinstance(s, int) or s < 1:\n            raise ValueError('shape entries must be positive ints')\n        n *= s\n        if 2 * n > 12:\n            raise ValueError('total qubits 2*prod(shape) must be <= 12')\n    op = instance.get('operation', 'x')\n    if op not in ('x', 'z', 'p'):\n        raise ValueError(\"operation must be 'x', 'z' or 'p'\")\n    angle = instance.get('angle', 0.0)\n    if isinstance(angle, bool) or not isinstance(angle, (int, float)):\n        raise ValueError('angle must be a number')\n    angle = float(angle)\n    if not math.isfinite(angle):\n        raise ValueError('angle must be finite')\n    return shape, n, op, angle\n\n\ndef _coords(idx, shape):\n    out = []\n    for s in shape:\n        out.append(idx % s)\n        idx //= s\n    return out\n\n\ndef _spread_edges(shape, n):\n    # Spanning tree: parent of a site lowers its first nonzero coordinate by 1.\n    # Edges are ordered by Manhattan distance from the origin (eq_2 depth structure).\n    strides = []\n    st = 1\n    for s in shape:\n        strides.append(st)\n        st *= s\n    maxd = 0\n    for s in shape:\n        maxd += s - 1\n    edges = []\n    for d in range(1, maxd + 1):\n        for idx in range(1, n):\n            c = _coords(idx, shape)\n            if sum(c) != d:\n                continue\n            j = 0\n            while c[j] == 0:\n                j += 1\n            edges.append((idx - strides[j], idx))\n    return edges\n\n\ndef build_circuit(instance):\n    shape, n, op, angle = _parse(instance)\n    t = QuantumRegister(n, 't')\n    c = QuantumRegister(n, 'c')\n    qc = QuantumCircuit(t, c)\n    edges = _spread_edges(shape, n)\n    # spread control copy over the grid with nearest-neighbor CNOTs (eq_2)\n    for p, ch in edges:\n        qc.cx(c[p], c[ch])\n    # local controlled operation on each site's target (fanout, eq_3)\n    for idx in range(n):\n        if op == 'x':\n            qc.cx(c[idx], t[idx])\n        elif op == 'z':\n            qc.cz(c[idx], t[idx])\n        else:\n            qc.cp(angle, c[idx], t[idx])\n    # uncompute the copies\n    for p, ch in reversed(edges):\n        qc.cx(c[p], c[ch])\n    return qc",
+    "example_instance_json": "{\"shape\": [3, 2], \"operation\": \"x\"}",
+    "register_layout": [
+      "n = product(shape) sites, site index idx = x0 + shape[0]*x1 + shape[0]*shape[1]*x2 + ... (first coordinate fastest)",
+      "qubits 0..n-1: register t, target at site idx is qubit idx",
+      "qubits n..2n-1: register c, copy qubit at site idx is qubit n+idx",
+      "qubit n (c[0], origin site) is the control qubit and holds the original control value",
+      "qubits n+1..2n-1 are copy ancillas; the runner must prepare them in |0>",
+      "total qubits = 2n <= 12",
+      "encoding: computational basis, qubit 0 least significant"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The adaptive-to-standard depth equivalence is an asymptotic theorem about classical-controller simulation. The abstract gives no construction, and the circuit here is non-adaptive."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_spread_edges and the spreading/uncompute loops in build_circuit",
+        "explanation": "Control copies spread over the kD grid only between adjacent sites, in layers of increasing Manhattan distance. For a cubic shape of side about n^(1/k) with constant k, this gives depth O(n^(1/k)). The implementation is limited to at most 12 qubits, so the asymptotic claim is only structurally reflected and the lower bound is not addressed."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "register layout and local-operation loop in build_circuit",
+        "explanation": "The circuit uses n target qubits plus n copy qubits (width 2n = Theta(n)). The gate count is 2(n-1) spreading CNOTs plus n local gates (size Theta(n))."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Narrowed scope to one explicit non-adaptive ancilla-assisted fanout/controlled-gate (CX, CZ or CP) on a grid with side lengths given by the 'shape' parameter. Total qubits are capped at 12, so n <= 6.",
+        "reason": "The abstract gives no gate-level construction, so the spec's assumed spread-apply-uncompute plan was implemented. The 12-qubit cap limits the size."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The adaptive depth-equivalence result is not implemented.",
+        "reason": "No simulation mechanism is given in the abstract, and adaptivity requires mid-circuit measurement and classical control, which are not allowed."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The Theta(n^(1/k)) depth is realized only as O(sum of shape side lengths) for chosen shapes, not proven. No lower-bound circuit is implemented.",
+        "reason": "Asymptotic statements cannot be verified by a fixed small instance."
+      }
+    ],
+    "assumptions": [
+      "Copy qubits (all c qubits except the control c[0]) are supplied in |0> by the runner.",
+      "The control is qubit c[0] at the grid origin, and each grid site also hosts one target qubit.",
+      "Interactions are only between grid-adjacent copy qubits, or between a site's copy and target qubits.",
+      "The k-th root reading of 'k√n' is used.",
+      "Spanning-tree spreading is an assumed scheme, not taken from the paper."
+    ],
+    "unresolved_issues": [
+      "The paper's actual non-adaptive optimal circuit and its lower bound are not reconstructed.",
+      "The adaptive simulation of arbitrary standard-model circuits is not reconstructed.",
+      "Shor's algorithm and constant-depth claims are not addressed.",
+      "Correctness requires the copy ancillas to start in |0>. This cannot be enforced inside a unitary circuit."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 12,
+    "gate_count": 16,
+    "depth": 9,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

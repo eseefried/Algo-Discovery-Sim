@@ -1,0 +1,111 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "ef477cbd-9984-4ea2-9e56-25c9d8849a66",
+  "parent_run_id": "f6ef9ddf-8e9a-4857-a0e7-96fcd22fcef1",
+  "created_at": "2026-10-31T21:39:33.313350+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "bcb55538f380c6a9dab73550a47f88063fa2389ffce589aa660b4c07f5d454b5",
+  "source_specification_sha256": "feab1ae43284761f853eda4c9d42c45c5425b20aa343f94aee03b9d94b240c1e",
+  "source_python_sha256": "ea01297c232a84639ea2cc5d2731cb5fbfa3f32369934e73953f6685f3074c1d",
+  "elapsed_seconds": 41.299,
+  "usage": {
+    "input_tokens": 3913,
+    "output_tokens": 5548,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Canonical amplitude-estimation unitary for the mean of a tabulated function f:{0..2^n-1}->[0,1]. It applies Hadamards to the index register and a multiplexed RY on the ancilla, so P(a=1)=mean(f). Counting qubit k then controls Q^(2^k), where Q is the Grover iterate, followed by an inverse QFT on the counting register. This is a generic placeholder, not the paper's algorithms. There is no input preparation or measurement, and the runner must supply |0...0>.",
+    "source_python": "from qiskit import QuantumCircuit\nfrom qiskit.circuit.library import QFTGate, RYGate\nimport math\n\nMAX_QUBITS = 12\nMAX_COUNTING = 6\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    f = instance.get('f_values')\n    m = instance.get('counting_qubits')\n    if not isinstance(f, list) or len(f) < 2:\n        raise ValueError('f_values must be a list of length >= 2')\n    size = len(f)\n    if size & (size - 1) != 0:\n        raise ValueError('len(f_values) must be a power of two')\n    n = size.bit_length() - 1\n    if isinstance(m, bool) or not isinstance(m, int) or m < 1 or m > MAX_COUNTING:\n        raise ValueError('counting_qubits must be an int in 1..6')\n    if m + n + 1 > MAX_QUBITS:\n        raise ValueError('too many qubits (cap is 12)')\n    vals = []\n    for v in f:\n        if isinstance(v, bool) or not isinstance(v, (int, float)):\n            raise ValueError('f_values must be numeric')\n        v = float(v)\n        if not math.isfinite(v) or v < 0.0 or v > 1.0:\n            raise ValueError('f_values must lie in [0,1]')\n        vals.append(v)\n    return vals, n, m\n\n\ndef _state_prep(vals, n):\n    # A|0>|0> = (1/sqrt N) sum_x |x>( sqrt(1-f(x))|0> + sqrt(f(x))|1> ); P(a=1)=mean(f)  (eq_1)\n    qc = QuantumCircuit(n + 1)\n    for q in range(n):\n        qc.h(q)\n    for x, v in enumerate(vals):\n        theta = 2.0 * math.asin(math.sqrt(v))\n        if abs(theta) > 1e-14:\n            g = RYGate(theta).control(n, ctrl_state=x)\n            qc.append(g, list(range(n)) + [n])\n    return qc\n\n\ndef _iterate(vals, n):\n    # Q = -A S0 A^dag S_chi with S0 = I-2|0><0|; the global -1 is applied later as a phase on the control.\n    a_circ = _state_prep(vals, n)\n    q = QuantumCircuit(n + 1)\n    q.z(n)\n    q.compose(a_circ.inverse(), inplace=True)\n    for i in range(n + 1):\n        q.x(i)\n    q.h(n)\n    q.mcx(list(range(n)), n)\n    q.h(n)\n    for i in range(n + 1):\n        q.x(i)\n    q.compose(a_circ, inplace=True)\n    return q\n\n\ndef build_circuit(instance):\n    vals, n, m = _validate(instance)\n    qc = QuantumCircuit(m + n + 1)\n    xs = list(range(m, m + n))\n    anc = m + n\n    reg = xs + [anc]\n    qc.compose(_state_prep(vals, n), qubits=reg, inplace=True)\n    for c in range(m):\n        qc.h(c)\n    cq = _iterate(vals, n).to_gate().control(1)\n    for c in range(m):\n        for _ in range(2 ** c):\n            qc.append(cq, [c] + reg)\n            qc.p(math.pi, c)\n    qc.append(QFTGate(m).inverse(), list(range(m)))\n    return qc",
+    "example_instance_json": "{\"f_values\": [0.0, 0.25, 0.5, 1.0], \"counting_qubits\": 4}",
+    "register_layout": [
+      "qubits 0..m-1: counting register (qubit k controls Q^(2^k); qubit 0 is least significant bit of the phase integer y)",
+      "qubits m..m+n-1: index register x (n=log2 N, qubit m is the least significant bit of x)",
+      "qubit m+n: ancilla a whose |1> amplitude squared on branch x is f(x)",
+      "example: m=4, n=2 -> counting 0-3, x 4-5, ancilla 6 (7 qubits)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_state_prep (Hadamards plus multiplexed RY with theta_x=2*asin(sqrt(f(x))) so P(a=1)=mean f); used by _iterate and build_circuit",
+        "explanation": "The mean mu=(1/N) sum f(x) is encoded as the probability of a=1 after A. Amplitude estimation then writes a phase encoding mu into the counting register."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The additive accuracy goal is not a circuit operation. It only informs the choice of counting_qubits (error about pi/2^m), and the circuit does not check it."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The black-box oracle for f is replaced by an explicit table f_values of length N=2^n, compiled into a multiplexed RY rotation. The spec's ceil(log2 N) is restricted to N an exact power of two.",
+        "reason": "No oracle model is specified, and a generic black box cannot be built without a defined interface. Padding non-power-of-two domains would change the mean."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Scope is narrowed to the generic canonical amplitude-estimation unitary (state prep, controlled Grover powers, inverse QFT), with counting_qubits as the free accuracy parameter. It is not the paper's optimal algorithm, the Aharonov variant, or the median algorithm.",
+        "reason": "The abstract gives no details of the paper's algorithms. The spec itself labels this generic sketch a placeholder."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Measurement, the sin^2(pi*y/M) postprocessing and median amplification are omitted.",
+        "reason": "The task requires a measurement-free unitary operation, and the runner handles measurement."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Counting register size is capped at 6 qubits and total qubits at 12.",
+        "reason": "Controlled Q^(2^k) is implemented by repetition, so gate count grows as 2^m. The caps keep the circuit compact and within the qubit limit."
+      }
+    ],
+    "assumptions": [
+      "f maps {0..N-1} to [0,1] with N=2^n, and the distribution is uniform",
+      "The runner prepares |0...0> on all qubits. The state-preparation unitary A is part of the operation, since amplitude estimation includes it.",
+      "Q = A(2|0><0|-I)A^dag S_chi with S_chi = Z on the ancilla, which has eigenphases e^{+-2i*theta_a} with sin^2(theta_a)=mu. Implemented as -A S0 A^dag S_chi, with the -1 applied as p(pi) on the control after each controlled-Q.",
+      "The standard QPE bit order is used: counting qubit k controls Q^(2^k), and the inverse QFT is QFTGate(m).inverse() on qubits 0..m-1."
+    ],
+    "unresolved_issues": [
+      "The paper's actual algorithms (novel optimal mean estimator, Aharonov variant, median algorithm) are not reconstructed.",
+      "The oracle for f is modeled as a classical lookup table rather than a true black-box query.",
+      "Non-power-of-two domain sizes are unsupported."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 7,
+    "gate_count": 21734,
+    "depth": 16880,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

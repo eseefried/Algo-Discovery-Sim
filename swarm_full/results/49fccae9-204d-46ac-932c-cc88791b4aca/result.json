@@ -1,0 +1,114 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "49fccae9-204d-46ac-932c-cc88791b4aca",
+  "parent_run_id": "37224a3d-856b-44a4-947a-0b49cda8582c",
+  "created_at": "2026-10-31T21:42:26.848075+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "ed69e13e13709404d9b831e37d9b468cf424720349870e58201e76ea3fc51a3b",
+  "source_specification_sha256": "a26027a45f2d3ab71a89ee59dc1eac5e870fe153a5a70cdf62d66cbd474c9a8e",
+  "source_python_sha256": "6db95f3c70635643a69cf56e6d82418c01d7bd31f8e79a86941c3ddd5626ab63",
+  "elapsed_seconds": 32.887,
+  "usage": {
+    "input_tokens": 4222,
+    "output_tokens": 5060,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit implementation of the operator (I_x ⊗ C_f) U^t on a 2^m-site circular walk with one coin qubit, where U = S (I ⊗ C). The coin C is chosen from identity, flip (X), Hadamard, or a biased real reflection coin. The shift S moves the walker +1 on coin |0> and -1 on coin |1>, mod 2^m. The final coin C_f is a state-independent single-qubit U(theta, phi, lam) gate on the coin. Only the operation is built. Input preparation and the check of eq_2 are left to the runner.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _flt(v, name):\n    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):\n        raise ValueError(name + \" must be a finite number\")\n    return float(v)\n\n\ndef _int(v, name, lo, hi):\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError(name + \" must be an integer in [\" + str(lo) + \", \" + str(hi) + \"]\")\n    return v\n\n\ndef _mc(qc, controls, target):\n    if len(controls) == 1:\n        qc.cx(controls[0], target)\n    else:\n        qc.mcx(controls, target)\n\n\ndef build_circuit(instance):\n    \"\"\"Circuit for (I_x (x) C_f) U^t, U = S (I (x) C), on a 2^m-site cycle.\n    Qubit 0 = coin; qubits 1..m = position (little-endian).\n    Shift: coin 0 -> x+1, coin 1 -> x-1 (mod 2^m).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    m = _int(instance.get(\"position_qubits\"), \"position_qubits\", 1, 11)\n    t = _int(instance.get(\"steps\"), \"steps\", 0, 256)\n    name = instance.get(\"coin\", \"hadamard\")\n    if name not in (\"identity\", \"flip\", \"hadamard\", \"biased\"):\n        raise ValueError(\"coin must be identity, flip, hadamard or biased\")\n    theta = _flt(instance.get(\"coin_theta\", 0.0), \"coin_theta\")\n    fc = instance.get(\"final_coin\", [0, 0, 0])\n    if not isinstance(fc, (list, tuple)) or len(fc) != 3:\n        raise ValueError(\"final_coin must be [theta, phi, lam]\")\n    fa = [_flt(x, \"final_coin entry\") for x in fc]\n    coin = QuantumRegister(1, \"coin\")\n    pos = QuantumRegister(m, \"pos\")\n    qc = QuantumCircuit(coin, pos)\n    c = coin[0]\n    p = list(pos)\n    for _ in range(t):\n        # coin operator C (eq_1)\n        if name == \"flip\":\n            qc.x(c)\n        elif name == \"hadamard\":\n            qc.h(c)\n        elif name == \"biased\":\n            # [[cos th, sin th],[sin th, -cos th]] = RY(2 th) Z\n            qc.z(c)\n            qc.ry(2.0 * theta, c)\n        # conditional shift S (eq_1): increment if coin=0\n        qc.x(c)\n        for i in range(m - 1, -1, -1):\n            _mc(qc, [c] + p[:i], p[i])\n        qc.x(c)\n        # decrement if coin=1 (inverse of the increment ladder)\n        for i in range(m):\n            _mc(qc, [c] + p[:i], p[i])\n    # final state-independent coin C_f (eq_2 operator)\n    qc.u(fa[0], fa[1], fa[2], c)\n    return qc",
+    "example_instance_json": "{\"position_qubits\": 3, \"steps\": 2, \"coin\": \"hadamard\", \"coin_theta\": 0.0, \"final_coin\": [0.0, 0.0, 0.0]}",
+    "register_layout": [
+      "qubit 0: coin (carries the unknown qubit state; computational basis |0>,|1>)",
+      "qubits 1..m: position register, little-endian binary encoding of x in 0..2^m-1 (qubit 1 is the least significant bit), circular boundary",
+      "Shift convention: coin |0> moves x -> x+1 mod 2^m; coin |1> moves x -> x-1 mod 2^m",
+      "Total qubits = position_qubits + 1 <= 12"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: per-step loop (coin gate block, then increment/decrement ladders of controlled-X gates)",
+        "explanation": "One walk step U = S (I_x ⊗ C): the coin gate on qubit 0, then a coin-conditioned shift on the cyclic position register."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: t-step loop followed by the final qc.u(...) on the coin qubit",
+        "explanation": "Only the operator (I_x ⊗ C_f) U^t on the left-hand side is built. The equality with |d>|psi> is a verification target left to the runner and is not enforced. The runner prepares |0>_x|psi>. C_f is user-supplied because the paper's form is not given in the abstract."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Narrowed the infinite line or N-site circle to a circle with N = 2^m sites (m between 1 and 11) with periodic boundary.",
+        "reason": "Qubit-register encoding needs a power-of-two position space and a cap of 12 qubits. Line behaviour is reproduced only while the walker does not wrap around."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The final coin C_f is an arbitrary user-supplied U(theta, phi, lam) gate (default identity) rather than the paper's specific operator.",
+        "reason": "The abstract does not give the explicit C_f, so no specific choice can be reconstructed."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The walk coin is restricted to identity, flip (X), Hadamard, or the biased real coin [[cos th, sin th],[sin th, -cos th]]. The shift sign convention (coin 0 -> +1, coin 1 -> -1) is fixed.",
+        "reason": "These cover the coin families named in the abstract. The exact biased-coin parametrization and shift convention are assumptions."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The transfer distance d and the perfect-transfer equality are not parameters or checks in the circuit. Periodicity and the identity/flip versus Hadamard/biased results are not encoded.",
+        "reason": "The circuit is an operation only. The abstract gives no equations for these claims."
+      }
+    ],
+    "assumptions": [
+      "Walker starts at the origin and the unknown qubit is in the coin, prepared by the runner.",
+      "Homogeneous single-coin walk with the same C at every step.",
+      "Coin gates act before the shift in each step.",
+      "Biased coin = RY(2*theta) applied after Z, which gives [[cos, sin],[sin, -cos]]; theta = pi/4 reproduces the Hadamard.",
+      "Position qubit 1 is the least significant bit of x."
+    ],
+    "unresolved_issues": [
+      "The paper's explicit final coin operator is unknown.",
+      "The finite transfer-distance bounds for Hadamard and biased coins are not encoded.",
+      "The periodicity statements and periods are not encoded.",
+      "The relation between circle size and transfer distance d is unspecified.",
+      "Whether the target coin state equals psi or a fixed unitary transform of it is unresolved."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 195,
+    "depth": 153,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

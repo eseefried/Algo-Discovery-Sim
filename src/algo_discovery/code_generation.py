@@ -88,9 +88,15 @@ def generate_code(request: CodeRequest, settings: Settings, *, client=None) -> C
         ) from None
     except anthropic.APIConnectionError:
         raise GenerationError("Claude API connection failed or timed out.") from None
-    except (ValidationError, ValueError):
+    except ValidationError as exc:
+        # Field paths and messages only, so model output is never echoed.
+        fields = "; ".join(".".join(map(str, e["loc"])) + ": " + e["msg"] for e in exc.errors()[:3])
         raise GenerationError(
-            "Code artifact failed schema or equation-mapping validation.", "invalid_output"
+            "Code artifact failed schema validation: " + fields[:400], "invalid_output"
+        ) from None
+    except ValueError as exc:
+        raise GenerationError(
+            "Code artifact failed equation-mapping validation: " + str(exc)[:200], "invalid_output"
         ) from None
 
     validation = CircuitValidation(

@@ -1,0 +1,117 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "1c4236f2-9692-4c35-bf2d-fe98cfd9e307",
+  "parent_run_id": "e594cc32-cf6b-4228-8c46-dc45e598b6a6",
+  "created_at": "2026-10-31T21:41:23.126601+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "35da0fd67167e9ab5675d82cbecd602d9bf26efb221bcad732de94b4f584add2",
+  "source_specification_sha256": "5c6142aa6724a797527d4516ff2ab26fc5933c183e4a59fe8d15e487ef0298b2",
+  "source_python_sha256": "e4cdb61509ad09897cc68b6917ad5ebd6f4f6d9376b28505e9bb35e444d2aa2c",
+  "elapsed_seconds": 32.09,
+  "usage": {
+    "input_tokens": 4651,
+    "output_tokens": 4434,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the eq_1 path-superposition state-preparation operation for a rate-1/n binary feedforward convolutional-code trellis. Hadamards on all path bits create a uniform superposition over all legal paths (start memory plus N input bits). A diagonal, ancilla-free phase exp(-i*gamma*HammingDistance(path output, received data)) is then applied using CNOT-parity, phase and uncompute. Amplitude amplification is not implemented because the abstract gives no oracle.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _as_int(v, name):\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError(name + ' must be an integer')\n    return v\n\n\ndef build_circuit(instance):\n    \"\"\"Path superposition with probability-dependent phase (eq_1).\n\n    instance keys: constraint_length K>=2, num_frames N>=1,\n    generators: list of ints in [1, 2^K-1] (bit j acts on window position j),\n    received: N lists of len(generators) bits, gamma: real phase scale.\n    Path bits x_0..x_{M-1}, M=(K-1)+N, qubit i holds x_i.\n    Frame t window is x_t..x_{t+K-1}.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    for key in ('constraint_length', 'num_frames', 'generators', 'received', 'gamma'):\n        if key not in instance:\n            raise ValueError('missing key ' + key)\n    K = _as_int(instance['constraint_length'], 'constraint_length')\n    N = _as_int(instance['num_frames'], 'num_frames')\n    if K < 2 or N < 1:\n        raise ValueError('need K>=2 and N>=1')\n    M = K - 1 + N\n    if M > 12:\n        raise ValueError('too many qubits (max 12)')\n    gens = instance['generators']\n    if not isinstance(gens, (list, tuple)) or len(gens) == 0:\n        raise ValueError('generators must be a non-empty list')\n    gens = [_as_int(g, 'generator') for g in gens]\n    for g in gens:\n        if g < 1 or g >= (1 << K):\n            raise ValueError('generator out of range')\n    rec = instance['received']\n    if not isinstance(rec, (list, tuple)) or len(rec) != N:\n        raise ValueError('received must have N frames')\n    for fr in rec:\n        if not isinstance(fr, (list, tuple)) or len(fr) != len(gens):\n            raise ValueError('each received frame must have one bit per generator')\n        for b in fr:\n            if _as_int(b, 'received bit') not in (0, 1):\n                raise ValueError('received bits must be 0/1')\n    gv = instance['gamma']\n    if isinstance(gv, bool) or not isinstance(gv, (int, float)):\n        raise ValueError('gamma must be real')\n    gamma = float(gv)\n    if not math.isfinite(gamma):\n        raise ValueError('gamma must be finite')\n\n    path = QuantumRegister(M, 'x')\n    qc = QuantumCircuit(path)\n    # uniform superposition over all legal paths (start memory + input bits)\n    for i in range(M):\n        qc.h(path[i])\n    # phase phi = -gamma * Hamming distance(path output, received)\n    for t in range(N):\n        for k, g in enumerate(gens):\n            r = rec[t][k]\n            qs = [t + j for j in range(K) if (g >> j) & 1]\n            tgt = qs[-1]\n            others = qs[:-1]\n            for c in others:\n                qc.cx(path[c], path[tgt])\n            # parity p; mismatch indicator is p (r=0) or 1-p (r=1)\n            if r == 0:\n                qc.p(-gamma, path[tgt])\n            else:\n                qc.p(gamma, path[tgt])\n                qc.global_phase = qc.global_phase - gamma\n            for c in reversed(others):\n                qc.cx(path[c], path[tgt])\n    return qc",
+    "example_instance_json": "{\"constraint_length\": 3, \"num_frames\": 4, \"generators\": [7, 5], \"received\": [[1, 1], [1, 0], [0, 0], [0, 1]], \"gamma\": 0.7}",
+    "register_layout": [
+      "Qiskit qubit i (0..M-1, M=(K-1)+N) holds path bit x_i; qubit 0 is the earliest bit (initial encoder memory), least significant in basis index",
+      "Example: K=3, N=4 gives 6 qubits: q0,q1 = start memory bits, q2..q5 = input bits of frames 0..3",
+      "Frame t uses window qubits t..t+K-1; no ancillas"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: Hadamard layer (uniform amplitudes over legal paths) and parity-phase loop (phi = -gamma*Hamming distance)",
+        "explanation": "Prepares (1/sqrt(2^M)) sum_pi exp(i*phi(pi))|pi> from an all-zero input, with concrete phi(P(pi|r)) = -gamma*d_H(output(pi), r), which is a monotone function of the BSC log-likelihood."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The argmax objective is the goal of the amplitude amplification, which the abstract does not specify and is not implemented. The circuit only encodes path quality in phase."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Path count Q*F^N: for the shift-register trellis here Q=2^(K-1), F=2, so |L|=2^(K-1+N)=2^M, matching the number of basis states superposed. Used only for the sizing and validation of qubit count."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Chose a concrete phase function: phi = -gamma times Hamming distance between convolutional-encoder output and received hard-decision bits; the path is encoded as raw bit string x (initial memory plus input bits) with fanout F=2 rather than a ceil(log2 F)-qubit branch register.",
+        "reason": "The abstract leaves phi and the encoding unspecified; a concrete additive metric is required for a unitary circuit without ancilla metric register."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Amplitude amplification and optimal-path search are omitted; the construction is narrowed to the state preparation of eq_1.",
+        "reason": "No oracle, reflection, or iteration count is given in the abstract."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Replaced the approximate count Q F^N by exact 2^(K-1+N) for binary feedforward encoders; the start state is a free (uniformly superposed) memory.",
+        "reason": "Exact for the chosen trellis."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The ancilla metric compute/uncompute step is replaced by direct CNOT-parity phase gates.",
+        "reason": "Additive Hamming metric is diagonal, so no ancilla is needed."
+      }
+    ],
+    "assumptions": [
+      "Binary feedforward rate-1/n convolutional code with n=len(generators); generator bit j acts on window position j",
+      "Hard-decision received bits; BSC-like additive metric",
+      "All start memory states are legal and uniformly weighted",
+      "Input state is |0...0> prepared by the runner; Hadamards create the superposition inside the operation",
+      "gamma is a real user-supplied scale"
+    ],
+    "unresolved_issues": [
+      "Specialized amplitude amplification not implemented",
+      "Abstract does not specify the true phase function phi or encoding used by the QVA",
+      "Complexity advantages (dependence on fanout) are not represented",
+      "Trellis structure/butterfly FFT-based preparation is not used; plain Hadamards suffice for uniform superposition here"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 38,
+    "depth": 30,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

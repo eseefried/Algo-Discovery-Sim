@@ -54,5 +54,36 @@ def test_score_paper_counts_matches_and_recovered_core_equations():
     result = score_paper(agent, paper, IDF)
     assert result["matched_agent_equations"] == result["strong_agent_matches"] == 1
     assert result["matches"][0]["paper_id"] == "p1"
-    assert result["core_paper_equations"] == 2  # only numbered equations count as core
-    assert result["core_equations_recovered"] == 1
+    assert result["main_equation_source"] == "numbered_fallback"
+    assert result["main_paper_equations"] == 2  # without labels, numbered equations count
+    assert result["main_equations_recovered"] == 1
+
+
+def test_labelled_main_equations_replace_the_numbered_fallback():
+    agent = [{"id": "eq_1", "latex": r"H = -\gamma A - |w\rangle\langle w|"}]
+    paper = [
+        {"id": "p1", "latex": r"H=-\gamma A-|w\rangle\langle w|", "equation_number": 1},
+        {"id": "p2", "latex": r"\Pr[\text{fail}] = (1-p)^m", "equation_number": 2},
+        {"id": "p3", "latex": r"x = y + z + w", "equation_number": 3},
+    ]
+    result = score_paper(agent, paper, IDF, main_ids=["p1"])
+    assert result["main_equation_source"] == "labelled"
+    assert result["main_paper_equations"] == result["main_equations_recovered"] == 1
+    assert result["recall"] > 0.95
+
+
+def test_one_agent_equation_recovers_at_most_one_repeated_paper_equation():
+    qft = r"QFT|x\rangle=\frac{1}{\sqrt{N}}\sum_{k=0}^{N-1}e^{2\pi i xk/N}|k\rangle"
+    agent = [{"id": "eq_1", "latex": qft}]
+    paper = [
+        {"id": f"p{i}", "latex": qft.replace("x", v), "equation_number": i}
+        for i, v in enumerate("xab", 1)
+    ]
+    result = score_paper(agent, paper, IDF)
+    assert result["main_equations_recovered"] == 1  # not 3: the paper repeats one idea
+
+
+def test_chained_equality_side_matches_a_single_paper_term():
+    agent = pieces(r"S = \sum_{j=1}^{m} w_j x_j = w\cdot x", "eq_1")
+    paper = Candidate(r"\sum_{m=1}^{N}a_{m}x_{m}", "p1")
+    assert max(similarity(a, paper, IDF) for a in agent) >= MATCH_THRESHOLD

@@ -1,0 +1,104 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "6b42f0c0-cb4a-4696-85c7-5506e4cec0ae",
+  "parent_run_id": "84cc3310-d1a5-4956-9c48-943c5dff14d5",
+  "created_at": "2026-10-31T21:42:23.031190+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "72af4098e944324b7aac2352ce4540bbdd3ab617508f459e8535fb3f779b75a4",
+  "source_specification_sha256": "756ccfb90de26924d1511c0df4b91429793c474961c88d90e8c931bc94b37694",
+  "source_python_sha256": "381659584169f9ba457f156f74e0610dbcb828710dec880c646e43d045973ae6",
+  "elapsed_seconds": 27.43,
+  "usage": {
+    "input_tokens": 4916,
+    "output_tokens": 4091,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the diagonal bipartite unitary U = diag(exp(i*phi_x)) on 2n qubits (N = 2^n per subsystem), whose diagonal vector reshaped to an N x N matrix is the unimodular matrix A of eq_2. Phases are supplied in the instance or generated from an integer seed. The diagonal is synthesized with standard gates by a Walsh-Hadamard expansion into parity phases (CX ladders and P gates) and a global phase, with no dense unitary. Computing rho and its entropy (eq_1, eq_3) is classical post-processing and is not implemented in the circuit.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport numpy as np\nimport math\n\n\ndef build_circuit(instance):\n    \"\"\"Diagonal unitary U on 2n qubits with phases phi_x, x = i*N + j, N = 2**n.\n    Qubits 0..n-1 hold j (column index of A), qubits n..2n-1 hold i (row index of A),\n    so A[i, j] = exp(i*phi[i*N + j]) is the row-major reshaping of the diagonal.\n    Synthesis: phi(x) = sum_S w_S (-1)^(S.x), exp(i*phi(x)) is a product of parity phases.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 6:\n        raise ValueError('n must be an integer in 1..6')\n    m = 2 * n\n    M = 1 << m\n    ph = instance.get('phases')\n    if ph is None:\n        seed = instance.get('seed')\n        if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:\n            raise ValueError('provide phases or a non-negative integer seed')\n        phi = np.random.default_rng(seed).uniform(0.0, 2.0 * math.pi, M)\n    else:\n        if not isinstance(ph, list) or len(ph) != M:\n            raise ValueError('phases must be a list of length 4**n')\n        try:\n            phi = np.array([float(v) for v in ph], dtype=float)\n        except (TypeError, ValueError):\n            raise ValueError('phases must be real numbers')\n        if not np.all(np.isfinite(phi)):\n            raise ValueError('phases must be finite')\n    w = phi.copy()\n    h = 1\n    while h < M:\n        for s in range(0, M, 2 * h):\n            a = w[s:s + h].copy()\n            b = w[s + h:s + 2 * h].copy()\n            w[s:s + h] = a + b\n            w[s + h:s + 2 * h] = a - b\n        h *= 2\n    w = w / M\n    reg = QuantumRegister(m, 'q')\n    qc = QuantumCircuit(reg)\n    qc.global_phase = float(phi[0])\n    for S in range(1, M):\n        theta = -2.0 * float(w[S])\n        if abs(theta) < 1e-15:\n            continue\n        bits = [k for k in range(m) if (S >> k) & 1]\n        t = bits[0]\n        others = bits[1:]\n        for c in others:\n            qc.cx(c, t)\n        qc.p(theta, t)\n        for c in reversed(others):\n            qc.cx(c, t)\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"phases\": [0.3, 1.1, 2.5, 4.0, 5.2, 0.7, 3.3, 1.9, 2.2, 6.0, 0.1, 4.4, 3.9, 2.8, 5.5, 1.4]}",
+    "register_layout": [
+      "q[0..n-1]: subsystem B, column index j of A (q0 least significant)",
+      "q[n..2n-1]: subsystem A, row index i of A",
+      "computational basis index x = i*N + j with N = 2^n; U|x> = exp(i*phi_x)|x>",
+      "A[i,j] = exp(i*phi[i*N+j]) (row-major reshape); example n=2 uses 4 qubits, N=4",
+      "no ancilla qubits"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "rho = A A^dagger / N^2 is classical post-processing of the diagonal of U and is not part of the circuit. The circuit only produces U, whose diagonal defines A."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: phase vector phi, unit-modulus diagonal entries exp(i*phi_x), row-major reshape x = i*N + j",
+        "explanation": "The gate has unimodular diagonal entries exp(i*phi_x), which form the unimodular matrix A under the stated qubit layout. Random phases come from the instance or from a seeded generator."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Von Neumann entropy is a classical functional of the spectrum of rho and is not a unitary operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "Scope narrowed to constructing the diagonal gate U only. The spectrum of rho, its entropy, and ensemble averages are left to classical post-processing.",
+        "reason": "The abstract gives no quantum protocol for estimating the entropy or the entangling power, and the operation must be measurement-free and unitary."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The random phases are deterministic inputs (explicit list or seed) rather than sampled inside an ensemble average. N is restricted to a power of 2 with n <= 6 so the circuit has at most 12 qubits.",
+        "reason": "The circuit builder must be reproducible, and the qubit encoding needs a power-of-2 dimension."
+      }
+    ],
+    "assumptions": [
+      "The diagonal vector is reshaped row-major: A[i,j] = d[i*N+j], with i on the high qubits and j on the low qubits.",
+      "Phases are in radians and real-valued.",
+      "If no phases are given, a seeded numpy uniform [0,2pi) generator provides them.",
+      "The Walsh-Hadamard parity-phase decomposition is an exact synthesis of the diagonal, up to a global phase that is set explicitly."
+    ],
+    "unresolved_issues": [
+      "The exact entangling power formula and its link to S(rho) are not given in the abstract and are not implemented.",
+      "The Borel triangle moment formulas are not given in the abstract and are not implemented.",
+      "The gate count grows as about 4^n parity terms, which is acceptable for n <= 6 but not optimized."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 49,
+    "depth": 45,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "34c5d415-235e-4b9c-92f5-38ae3927b7ef",
+  "parent_run_id": "60be2e42-515f-45c2-849d-02c164c794e7",
+  "created_at": "2026-10-31T21:43:04.367853+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "730772a7570898dc646bfe42b87dacc59207451d01716207d2f8f597901a9581",
+  "source_specification_sha256": "462221e0cf3cc889299a878f1d1fef8238a4682b9188fd2668e1f9409023bf19",
+  "source_python_sha256": "c3b326ab28fcdb05eb220c647a6e7e23af4e0a6b5a113bf02481bb64b0d89b3f",
+  "elapsed_seconds": 27.113,
+  "usage": {
+    "input_tokens": 4426,
+    "output_tokens": 3571,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Position-only coinless 1D walk on a cycle of N=2^n sites. One step is U = H_1 H_0, where H_a is the reflection 2*sum|alpha_k^a><alpha_k^a| - I over adjacent site pairs. For size-2 polygons H_0 reduces exactly to X on qubit 0, and H_1 is the same swap on the one-site-shifted pairs, built as Inc X0 Inc^dagger with an increment mod N from multi-controlled X gates. The circuit applies U for t steps and contains no state preparation or measurement.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _increment(qc, n):\n    # |x> -> |x+1 mod 2^n>\n    for i in range(n - 1, 0, -1):\n        qc.mcx(list(range(i)), i)\n    qc.x(0)\n\n\ndef _decrement(qc, n):\n    # inverse of _increment: |x> -> |x-1 mod 2^n>\n    qc.x(0)\n    for i in range(1, n):\n        qc.mcx(list(range(i)), i)\n\n\ndef _h0(qc):\n    # eq_2, a=0: pairs (2k,2k+1). 2|+><+| - I = X on the lowest bit.\n    qc.x(0)\n\n\ndef _h1(qc, n):\n    # eq_2, a=1: pairs (2k+1,2k+2 mod N) = shift of the a=0 pairing by one site.\n    # H_1 = Inc X0 Dec (circuit order: Dec first, then X0, then Inc).\n    _decrement(qc, n)\n    qc.x(0)\n    _increment(qc, n)\n\n\ndef build_circuit(instance):\n    \"\"\"Coinless 1D tessellation walk U^t, U = H_1 H_0, on N = 2^n_qubits sites (cycle).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n_qubits')\n    t = instance.get('steps')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 2 or n > 12:\n        raise ValueError('n_qubits must be an integer in [2, 12]')\n    if isinstance(t, bool) or not isinstance(t, int) or t < 0 or t > 256:\n        raise ValueError('steps must be an integer in [0, 256]')\n    pos = QuantumRegister(n, 'pos')\n    qc = QuantumCircuit(pos, name='coinless_walk')\n    for _ in range(t):\n        _h0(qc)      # first apply H_0\n        _h1(qc, n)   # then H_1, so one step is U = H_1 H_0 (eq_1)\n    return qc",
+    "example_instance_json": "{\"n_qubits\": 3, \"steps\": 2}",
+    "register_layout": [
+      "qubits 0..n-1: position register 'pos', little-endian, site x = sum_i q_i*2^i, N = 2^n sites on a cycle",
+      "no coin qubit and no ancilla qubits",
+      "input state (e.g. localized |x=0>) is prepared by the runner"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop applying _h0 then _h1 each step",
+        "explanation": "One step U = H_1 H_0 is implemented by applying H_0 first and H_1 second, repeated per step."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_h0 and _h1",
+        "explanation": "For size-2 polygons, 2|alpha><alpha| - I on each pair equals the swap (X) of the pair. H_0 is X on qubit 0. H_1 is the same pairing shifted by one site, built as Inc X0 Dec with periodic wrap (even N = 2^n)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: the loop over t steps",
+        "explanation": "The circuit implements the operator U^t. Applying it to the runner-prepared |psi_0> gives |psi_t>. The probabilities p_t(x) come from measurement outside the module."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Register size restricted to N = 2^n sites with periodic boundary conditions, n between 2 and 12. The infinite line is not implemented.",
+        "reason": "A finite qubit register is needed, and a power-of-two cycle was the assumed layout."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Scope narrowed to the assumed size-2-polygon tessellation operator. The coined equivalence, the specific operator family and the cycle mixing analysis are not implemented.",
+        "reason": "The abstract gives no formulas for those parts, and the specification lists them as missing information."
+      }
+    ],
+    "assumptions": [
+      "Qiskit qubit 0 is the least significant bit of the site index x.",
+      "H_1 pairs sites (2k+1, 2k+2 mod N).",
+      "Steps are applied as H_0 first, then H_1.",
+      "The initial state, measurement and mixing-time analysis are handled by the runner."
+    ],
+    "unresolved_issues": [
+      "With size-2 polygons and the plain reflection, H_a is a permutation (swap). U is then a deterministic permutation, so a localized state does not spread into a superposition. The more general operator family from the paper, which would give nontrivial quantum spreading, is not specified and was not invented.",
+      "The coined-walk equivalence mapping and the mixing-time and limiting-distribution results are not reconstructed.",
+      "The upper bound of 256 steps is an arbitrary cap on circuit size."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 72,
+    "depth": 50,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

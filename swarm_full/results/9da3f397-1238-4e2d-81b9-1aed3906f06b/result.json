@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "9da3f397-1238-4e2d-81b9-1aed3906f06b",
+  "parent_run_id": "a6c6f469-071a-450e-8c71-aa0740d7fb9e",
+  "created_at": "2026-10-31T21:46:24.102021+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "f9ea90b68f9e42a8347577e492fe3dfbf5aba79fa9b87315657e71988bc0a064",
+  "source_specification_sha256": "cad68d4cc0c4062de86349bf860171a97e35079e533b99743ef20b6aa61a7b9c",
+  "source_python_sha256": "7a0af98dceabb72a531ccff5aebd518b4976e1b203f4329f910fcd7205c08aa7",
+  "elapsed_seconds": 26.053,
+  "usage": {
+    "input_tokens": 4063,
+    "output_tokens": 3699,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds t steps of a 1D lazy discrete-time quantum walk on a cyclic position register. The coin is 4-dimensional (2 qubits) with a DFT or Hadamard-tensor coin. Coin values 0, 1, 2, 3 map to left, stay, right, stay. The conditional shift is a QFT-basis phase adder, and no dense unitaries are used. Only the unitary walk operation is implemented. Moment scaling, occupancy measures and concentration intervals are classical post-processing and are not implemented.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\nimport math\n\n\ndef _int_param(instance, key, lo, hi):\n    if key not in instance:\n        raise ValueError('missing parameter: ' + key)\n    v = instance[key]\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError(key + ' must be an integer')\n    if v < lo or v > hi:\n        raise ValueError(key + ' out of range')\n    return v\n\n\ndef build_circuit(instance):\n    \"\"\"Lazy quantum walk: t x (coin on 2 coin qubits, then coin-conditioned shift -1/0/+1/0 mod 2^n).\n    Layout: qubits 0,1 = coin (qubit 0 LSB); qubits 2..n+1 = position (LSB first).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _int_param(instance, 'position_qubits', 2, 10)\n    t = _int_param(instance, 'steps', 0, 1000)\n    coin_type = instance.get('coin', 'dft')\n    if coin_type not in ('dft', 'hadamard'):\n        raise ValueError('coin must be dft or hadamard')\n    N = 2 ** n\n    if 2 * t + 1 > N:\n        raise ValueError('position register too small: need 2*steps+1 <= 2^position_qubits')\n    coin = QuantumRegister(2, 'coin')\n    pos = QuantumRegister(n, 'pos')\n    qc = QuantumCircuit(coin, pos)\n    cq = [coin[0], coin[1]]\n    pq = [pos[i] for i in range(n)]\n    for _ in range(t):\n        # coin operator\n        if coin_type == 'dft':\n            qc.append(QFTGate(2), cq)\n        else:\n            qc.h(coin[0])\n            qc.h(coin[1])\n        # conditional shift in the Fourier basis of the position register\n        qc.append(QFTGate(n), pq)\n        for value, sign in ((0, -1), (2, 1)):\n            flips = [cq[b] for b in range(2) if not ((value >> b) & 1)]\n            for q in flips:\n                qc.x(q)\n            for m in range(n):\n                qc.mcp(sign * 2.0 * math.pi * (2 ** m) / N, cq, pq[m])\n            for q in flips:\n                qc.x(q)\n        qc.append(QFTGate(n).inverse(), pq)\n    return qc",
+    "example_instance_json": "{\"position_qubits\": 4, \"steps\": 3, \"coin\": \"dft\"}",
+    "register_layout": [
+      "qubit 0: coin bit 0 (LSB of coin value c)",
+      "qubit 1: coin bit 1 (MSB of coin value c)",
+      "qubits 2..(n+1): position register, little-endian, cyclic mod 2^n; qubit 2 is the LSB",
+      "coin value 0 = move left (-1), 1 = stay, 2 = move right (+1), 3 = stay"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The n-th moment and its O(t^n) scaling are classical post-processing of the measured distribution P(x,t). The circuit has no measurement and does not compute moments."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Normalization follows from the circuit being unitary (coin gates, QFTGate, phase gates only). It is not coded separately."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Scope narrowed to the unitary lazy-walk operator for a finite cyclic position register. No moments, occupancy number or occupancy rate are computed.",
+        "reason": "The abstract gives only qualitative claims, and the occupancy definitions are missing."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The lazy walk is realised as a 4-dimensional coin (2 qubits) with the directions left, stay, right, stay. The coin is either the 4-point DFT (QFTGate(2)) or H tensor H. Childs' exact lazy-walk operator is not used.",
+        "reason": "The exact operator and laziness parameter are not given. A 3-direction coin cannot be a DFT on whole qubits, so a duplicated stay direction is used."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The position shift is implemented mod 2^n with QFT-basis phases. The step count is required to satisfy 2t+1 <= 2^n so the walk does not wrap around the register.",
+        "reason": "Without this, a cyclic register would alias positions."
+      }
+    ],
+    "assumptions": [
+      "Coin value 0 shifts the position by -1, value 2 by +1, and values 1 and 3 leave it unchanged.",
+      "The runner prepares the initial state (e.g. position 0 and a fixed coin state).",
+      "Position register size n is between 2 and 10, so the total is at most 12 qubits.",
+      "In the QFTGate convention, adding s to the position equals a phase exp(2*pi*i*s*2^m/2^n) on Fourier qubit m, applied before QFTGate inverse."
+    ],
+    "unresolved_issues": [
+      "Exact lazy-walk operator and laziness parameter of the source paper are unknown.",
+      "Definitions of occupancy number and rate are unavailable.",
+      "The paper's initial coin state and DFT coin dimension are unknown.",
+      "Negative positions appear as wrapped high indices in the cyclic register."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 600,
+    "depth": 432,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

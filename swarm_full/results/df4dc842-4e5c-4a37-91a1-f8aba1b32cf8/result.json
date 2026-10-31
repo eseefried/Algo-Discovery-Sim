@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "df4dc842-4e5c-4a37-91a1-f8aba1b32cf8",
+  "parent_run_id": "b91b29a2-fe93-47d5-bdfe-48cd354d1e53",
+  "created_at": "2026-10-31T21:41:03.877243+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "c757740dd48bb345965434ecf15b827279759801733675d0265bd1f3e51cb087",
+  "source_specification_sha256": "48e26a3cf37fff5931c17a2d6db2024218ac79b70520ebaa6c96e04c3687a19e",
+  "source_python_sha256": "0a07fd7cb6b22c7f1dc42f8d4ac7a2fd604000c005b7118781eda85a4159e2a3",
+  "elapsed_seconds": 21.704,
+  "usage": {
+    "input_tokens": 4440,
+    "output_tokens": 3095,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "build_circuit(instance) implements a diagonal Hermitian gate D=diag((-1)^f(x)) on n<=12 qubits as a product of multiple-controlled Z gates. It takes the GF(2) algebraic normal form of the truth table f using a Moebius transform, then applies Z, CZ or a multi-controlled Z (H-MCX-H) for every subset S with c_S=1. A set empty-subset coefficient becomes a global phase of pi.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef build_circuit(instance):\n    \"\"\"Decompose D=diag((-1)^f(x)) into multiple-controlled Z gates.\n\n    instance: {\"n\": int in 1..12, \"f\": list of 2^n bits}; f[x] is the truth table,\n    where qubit i is bit i of x (qubit 0 least significant).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"n\")\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 12:\n        raise ValueError(\"n must be an integer in 1..12\")\n    size = 1 << n\n    f = instance.get(\"f\")\n    if not isinstance(f, (list, tuple)) or len(f) != size:\n        raise ValueError(\"f must be a list of length 2^n\")\n    a = []\n    for v in f:\n        if isinstance(v, bool):\n            v = int(v)\n        if not isinstance(v, int) or v not in (0, 1):\n            raise ValueError(\"f entries must be 0 or 1\")\n        a.append(v)\n    # eq_2: GF(2) Moebius transform -> algebraic normal form coefficients c_S = a[mask(S)]\n    for i in range(n):\n        bit = 1 << i\n        for x in range(size):\n            if x & bit:\n                a[x] ^= a[x ^ bit]\n    qr = QuantumRegister(n, \"q\")\n    qc = QuantumCircuit(qr)\n    # eq_2: apply Z_S for each subset S with c_S = 1 (gates commute)\n    for mask in range(1, size):\n        if a[mask]:\n            qubits = [i for i in range(n) if (mask >> i) & 1]\n            if len(qubits) == 1:\n                qc.z(qubits[0])\n            elif len(qubits) == 2:\n                qc.cz(qubits[0], qubits[1])\n            else:\n                t = qubits[-1]\n                qc.h(t)\n                qc.mcx(qubits[:-1], t)\n                qc.h(t)\n    # empty subset: constant term f(0)=1 is a global phase of -1\n    if a[0]:\n        qc.global_phase = math.pi\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"f\": [0, 1, 1, 0, 0, 1, 0, 1]}",
+    "register_layout": [
+      "Qubit i (0..n-1) is data qubit q[i]; qubit 0 is the least significant bit of the basis index x.",
+      "Truth table f[x] with x = sum_i x_i 2^i gives D|x> = (-1)^f(x)|x>.",
+      "No ancilla qubits; total qubits = n <= 12."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: validation of n and truth-table f (entries 0/1 meaning diagonal +1/-1)",
+        "explanation": "The instance supplies the binary vector f that defines D=diag((-1)^f(x)). Its length and bit values are validated, and the circuit realizes this diagonal."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: Moebius transform loop and the subset loop applying Z/CZ/H-MCX-H",
+        "explanation": "The coefficients c_S are computed by the GF(2) ANF transform. A Z_S gate is applied for each nonempty S with c_S=1, and the empty-set term becomes a global phase."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The empty-subset term c_empty=f(0) is implemented as a global phase of pi instead of a gate.",
+        "reason": "The specification left this term unspecified. The identity-subset 'MCZ' is a scalar -1, and it is needed for the circuit to equal D exactly rather than up to phase."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "The scope is narrowed to the truth-table binary representation over GF(2) and the ANF/Moebius basis change. The paper's own binary encoding, cost optimization and ordering are not reproduced.",
+        "reason": "The abstract does not give the paper's exact encoding or algorithm."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Multi-controlled Z on three or more qubits is built as H, MCX, H on the highest-index qubit of S, without further decomposition into CZ.",
+        "reason": "The abstract gives no explicit CZ-level decomposition of larger MCZ gates, and they are valid unitary gates."
+      }
+    ],
+    "assumptions": [
+      "Qubit i corresponds to bit i of x in the truth-table index (little-endian, Qiskit convention).",
+      "The binary representation is the truth table f over GF(2), and the MCZ basis is the monomial basis indexed by nonempty subsets.",
+      "The instance supplies f directly as a list of 0/1 values.",
+      "MCZ gates commute, so their order is arbitrary."
+    ],
+    "unresolved_issues": [
+      "The paper's actual binary representation and basis-change algorithm are not available from the abstract.",
+      "No cost metric (CZ count, depth) is optimized or reproduced.",
+      "Larger MCZ gates are not decomposed into CZ plus single-qubit gates."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 5,
+    "depth": 3,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

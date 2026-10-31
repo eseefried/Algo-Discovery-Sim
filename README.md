@@ -2,9 +2,24 @@
 
 Hackathon project.
 
+## Ledger swarm
+
+The default model is now **Claude Haiku 5.5** (`claude-haiku-5-5`). Three independent
+workers auction, decompose, and reconstruct an abstract through a shared SQLite
+ledger, with virtual wallets, 30-second leases, and a cloning/mutation supervisor.
+Their output feeds the existing black box. Historical Fable results are preserved.
+
+```bash
+uv sync --locked
+uv run run-swarm --arxiv-id 1411.5949 --max-calls 12
+```
+
+See [ledger architecture and commands](docs/ledger-swarm.md) for economics,
+failure recovery, model-call limits, and optional `--blackbox` execution.
+
 ## Block 1: abstract to equations
 
-One Claude Fable 5.1 call converts an abstract into a structured mathematical
+One configured Claude model call converts an abstract into a structured mathematical
 specification. It records LaTeX equations, symbol definitions, registers, algorithm
 steps, assumptions, missing information, and per-equation provenance. It does not
 generate Qiskit itself; block 2 consumes its output. Schema and evidence checks do not
@@ -18,7 +33,7 @@ cp .env.example .env  # Only if you do not already have a populated .env
 ```
 
 Set `CLAUDE_HACKATHON_API` in `.env` or the environment. `CLAUDE_MODEL` defaults
-to `claude-fable-5-1`. The app intentionally uses the hackathon key rather than an
+to `claude-haiku-5-5`. The app intentionally uses the hackathon key rather than an
 unrelated `ANTHROPIC_API_KEY`. Existing environment values take precedence over `.env`.
 Run commands from this project directory so `.env` and artifact paths resolve correctly.
 
@@ -44,8 +59,8 @@ model IDs, prompt version/hash, request/abstract hashes, usage, timing, generati
 retries or model fallbacks; truncation, refusal, invalid output, and unsupported
 model access produce errors. The 8,192-token default includes any model thinking;
 increase `CLAUDE_MAX_TOKENS` explicitly if needed (up to the 32,768-token app cap).
-`CLAUDE_EFFORT` is explicitly set to `high` by default and recorded in each run;
-it can be changed to `low`, `medium`, `xhigh`, or `max` for separate experiments.
+`CLAUDE_EFFORT` is explicitly set to `medium` by default and recorded in each run;
+it can be changed to `low`, `high`, `xhigh`, or `max` for separate experiments.
 
 Statuses are `specified`, `partial`, `insufficient_information`, and
 `not_applicable`. Partial results can supply useful background equations while
@@ -75,12 +90,12 @@ uv run ruff check src tests
 
 Tests use mocked HTTP responses through the real Anthropic SDK and make no paid
 requests. Model and output integration follow Anthropic's
-[Fable 5.1 model documentation](https://platform.claude.com/docs/en/models/fable-5-1/overview)
+[Haiku 5.5 model documentation](https://platform.claude.com/docs/en/models/haiku-5-5/overview)
 and [structured output documentation](https://platform.claude.com/docs/en/build-with-claude/structured-outputs).
 
 ## Block 2: equations to Qiskit
 
-The same Fable model continues with the original abstract request and its saved
+The same configured Claude model continues with the original abstract request and its saved
 mathematical specification as conversation context. It produces a Python module
 exposing `build_circuit(instance) -> QuantumCircuit`, an equation-to-code mapping,
 an example instance, explicit changes to the specification, and unresolved issues.
@@ -131,7 +146,7 @@ integer weights of magnitude at most 2^20, and a bound unitary circuit. This is 
 first independent reference, not a universal quantum-algorithm verifier. It must
 only be selected for a compatible declared scope. The reference contract is
 additional task information and should be logged consistently in scored runs.
-No full paper, textbook, or evaluator implementation is provided to Fable.
+No full paper, textbook, or evaluator implementation is provided to the model.
 
 An optional `--instance-file path/to/instance.json` overrides the generated example.
 For the weighted-sum contract, that file has exactly these fields:

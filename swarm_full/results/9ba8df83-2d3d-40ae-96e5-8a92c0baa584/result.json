@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "9ba8df83-2d3d-40ae-96e5-8a92c0baa584",
+  "parent_run_id": "3e76a2f8-34a1-4414-ad5f-51ba8c87e501",
+  "created_at": "2026-10-31T21:38:46.749035+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "71282a075d1434b39dfa0936c02e0290fee1593f3f08066025ed63033d70e678",
+  "source_specification_sha256": "5d0bf5407cc5545fe9114f196f06204a71362275710b626d2a3f7d716d99cae2",
+  "source_python_sha256": "7becf3e30480f0d86e0909b21417e8f4fb22f42957efaec06c8c9ff103098ffb",
+  "elapsed_seconds": 30.215,
+  "usage": {
+    "input_tokens": 4363,
+    "output_tokens": 4330,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Gate-level 4-qubit (default) Grover iteration operator G^k (oracle plus inversion about the mean) for one marked basis state. After each oracle and diffusion block it optionally applies free Ising ZZ evolution between nearest and second-nearest neighbours, lasting tau = pi/Omega per block. It does not include state preparation, fidelity evaluation or Rabi-frequency scans.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _real(value, name):\n    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):\n        raise ValueError(name + ' must be a finite real number')\n    return float(value)\n\n\ndef _integer(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(name + ' must be an integer')\n    return value\n\n\ndef _ising_layer(qc, n, j_nn, j_nnn, tau):\n    # eq_1: exp(-i H_J tau) with Iz = Z/2 -> exp(-i J tau/4 ZZ) = RZZ(J tau/2)\n    if tau == 0.0:\n        return\n    for i in range(n - 1):\n        if j_nn != 0.0:\n            qc.rzz(j_nn * tau / 2.0, i, i + 1)\n    for i in range(n - 2):\n        if j_nnn != 0.0:\n            qc.rzz(j_nnn * tau / 2.0, i, i + 2)\n\n\ndef _all_ones_phase(qc, n):\n    # phase -1 on |1...1>\n    qc.h(n - 1)\n    qc.mcx(list(range(n - 1)), n - 1)\n    qc.h(n - 1)\n\n\ndef _oracle(qc, n, marked):\n    zeros = [q for q in range(n) if not (marked >> q) & 1]\n    for q in zeros:\n        qc.x(q)\n    _all_ones_phase(qc, n)\n    for q in zeros:\n        qc.x(q)\n\n\ndef _diffusion(qc, n):\n    # inversion about the mean (up to a global phase): H X (CZ..Z) X H\n    for q in range(n):\n        qc.h(q)\n        qc.x(q)\n    _all_ones_phase(qc, n)\n    for q in range(n):\n        qc.x(q)\n        qc.h(q)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _integer(instance.get('n_qubits', 4), 'n_qubits')\n    if n < 2 or n > 12:\n        raise ValueError('n_qubits must be between 2 and 12')\n    marked = _integer(instance.get('marked', 0), 'marked')\n    if marked < 0 or marked >= 2 ** n:\n        raise ValueError('marked out of range')\n    iterations = instance.get('iterations', None)\n    if iterations is None:\n        iterations = int(math.floor(math.pi / 4.0 * math.sqrt(2 ** n)))\n    iterations = _integer(iterations, 'iterations')\n    if iterations < 0 or iterations > 100:\n        raise ValueError('iterations must be in 0..100')\n    j_nn = _real(instance.get('j_nn', 0.0), 'j_nn')\n    j_nnn = _real(instance.get('j_nnn', 0.0), 'j_nnn')\n    omega = instance.get('omega', None)\n    if omega is None:\n        tau = 0.0\n    else:\n        omega = _real(omega, 'omega')\n        if omega <= 0.0:\n            raise ValueError('omega must be positive')\n        tau = math.pi / omega\n    reg = QuantumRegister(n, 'spins')\n    qc = QuantumCircuit(reg)\n    for _ in range(iterations):\n        _oracle(qc, n, marked)\n        _ising_layer(qc, n, j_nn, j_nnn, tau)\n        _diffusion(qc, n)\n        _ising_layer(qc, n, j_nn, j_nnn, tau)\n    return qc",
+    "example_instance_json": "{\"n_qubits\": 4, \"marked\": 5, \"iterations\": 3, \"omega\": 10.0, \"j_nn\": 1.0, \"j_nnn\": 0.2}",
+    "register_layout": [
+      "Qubits 0..n-1 form one register 'spins'; the default is n=4 with qubits 0-3",
+      "Qubit 0 is the least significant bit of the computational-basis index and of the marked item",
+      "Chain neighbours are qubits i and i+1; second neighbours are qubits i and i+2",
+      "Input state (e.g. uniform superposition) is prepared by the runner; the circuit is G^k only"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_ising_layer",
+        "explanation": "H_J with Iz=Z/2 gives exp(-i J t ZZ/4) = RZZ(J t/2) on nearest (i,i+1) and second-nearest (i,i+2) pairs. It is applied as a discrete layer of duration tau after each oracle and diffusion block."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Fidelity is an evaluation quantity computed by the runner or simulator, not part of the operation."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The 2πk condition is only a schematic placeholder in the specification. The code uses omega solely to set the block duration tau = pi/omega, and neither enforces nor scans the condition."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Continuous simultaneous Ising evolution during rf pulses is replaced by ideal instantaneous gates followed by a free-evolution ZZ layer of duration tau = pi/omega after each oracle and each diffusion block.",
+        "reason": "The abstract gives no pulse sequences or couplings, so a standard gate decomposition with a Trotter-like coupling layer is the only well-defined construction."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "No initial Hadamard or pulse layer and no Ising layer for state preparation is included. The circuit is the Grover iterate G^k only, and omega enters only through tau.",
+        "reason": "The task requires an operation without input-state preparation. The step 1 pulse block is the runner's responsibility."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Fidelity computation, the Rabi-frequency scan and identification of 2πk maxima are excluded from the circuit.",
+        "reason": "These are classical post-processing or experiment steps, and the 2πk formula is unspecified."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The oracle uses a single marked basis state (parameter 'marked'), the default iteration count is floor(pi/4*sqrt(2^n)), and the diffusion operator is implemented up to a global phase.",
+        "reason": "These details are assumed in the specification and are unspecified in the abstract."
+      }
+    ],
+    "assumptions": [
+      "Iz = Z/2, so J is an angular frequency in the same units as omega and the time unit is 1/omega",
+      "Each oracle and diffusion block is followed by free Ising evolution of duration pi/omega; omega=None or zero couplings give the ideal Grover operator",
+      "Single marked item and about 3 iterations for n=4",
+      "Qiskit little-endian bit ordering for the marked index"
+    ],
+    "unresolved_issues": [
+      "The exact 2πk condition for second-nearest-neighbour coupling is unknown",
+      "Real coupling constants and pulse decompositions of the oracle and diffusion are unknown",
+      "Ising evolution during the rf pulses is not modelled; only the interleaved free-evolution approximation is",
+      "Fidelity with respect to the ideal state must be evaluated externally"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 348,
+    "depth": 243,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "eaad4f2c-cea2-4fd0-acd7-3db4a3ea7a42",
+  "parent_run_id": "78a434eb-5079-49de-8c75-82bc974e0f62",
+  "created_at": "2026-10-31T21:42:00.509760+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "c4ea9c437b694ce16d4c434d6b7d912fc4ac498decd60268e8d4c9eb0ef7ea57",
+  "source_specification_sha256": "90ff121cafca4bed2b74108d14233a293f79f985a23fb84f7e5a0e5f30c7d8e5",
+  "source_python_sha256": "d341941a980a7dd7167947fe06e817be987d321948976a3b8f46cf14301df654",
+  "elapsed_seconds": 55.239,
+  "usage": {
+    "input_tokens": 4298,
+    "output_tokens": 7854,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the XOR oracle O_f|x>|b>=|x>|b xor f(x)> for a classical f on n<=8 bits, either OR or a user truth table. f is expanded exactly in its Fourier (parity) basis, f(x)=sum_S fhat(S) Z_S. O_f is then H_b * prod_S exp(i*pi/2*fhat(S)*Z_S) * exp(-i*pi/2*fhat(S)*Z_S*Z_b) * H_b, built from H, CNOT and Rz gates with one ancilla per nonzero parity term. Ancillas are returned to |0>. The MBQC equivalence and the constant-depth claim are not implemented.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef build_circuit(instance):\n    \"\"\"Fourier/phase-polynomial XOR oracle for f on n bits.\n\n    Qubits: x_i -> index i (i<n), b -> index n, parity ancillas -> n+1...\n    Ancillas must be supplied in |0> and are returned to |0>.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 8:\n        raise ValueError('n must be an integer in 1..8')\n    kind = instance.get('function', 'or')\n    size = 1 << n\n    if kind == 'or':\n        table = [0] + [1] * (size - 1)\n    elif kind == 'truth_table':\n        tt = instance.get('truth_table')\n        if not isinstance(tt, list) or len(tt) != size:\n            raise ValueError('truth_table must be a list of length 2**n')\n        table = []\n        for v in tt:\n            if isinstance(v, bool):\n                v = int(v)\n            if not isinstance(v, int) or v not in (0, 1):\n                raise ValueError('truth_table entries must be 0 or 1')\n            table.append(v)\n    else:\n        raise ValueError(\"function must be 'or' or 'truth_table'\")\n\n    # Fourier coefficients fhat(S) = 2^-n sum_x f(x) (-1)^{S.x}; f = sum_S fhat(S) Z_S\n    coeffs = {}\n    for s in range(size):\n        tot = 0\n        for x in range(size):\n            if table[x]:\n                tot += -1 if (bin(s & x).count('1') % 2) else 1\n        c = tot / size\n        if abs(c) > 1e-12:\n            coeffs[s] = c\n    subsets = [s for s in sorted(coeffs) if s != 0]\n    total = n + 1 + len(subsets)\n    if total > 12:\n        raise ValueError('instance needs more than 12 qubits')\n\n    xr = QuantumRegister(n, 'x')\n    br = QuantumRegister(1, 'b')\n    ar = QuantumRegister(len(subsets), 'anc')\n    qc = QuantumCircuit(xr, br, ar)\n    b = n\n\n    # X^f = H Z^f H; Z^f = exp(i pi/2 f) exp(-i pi/2 f Z_b)\n    qc.h(b)\n    if 0 in coeffs:\n        qc.rz(math.pi * coeffs[0], b)  # constant-term Z_b rotation\n    for k, s in enumerate(subsets):\n        a = n + 1 + k\n        c = coeffs[s]\n        bits = [i for i in range(n) if (s >> i) & 1]\n        for i in bits:\n            qc.cx(i, a)  # fan-out/parity of S into ancilla\n        qc.rz(-math.pi * c, a)  # exp(i pi/2 c Z_S)\n        qc.cx(b, a)\n        qc.rz(math.pi * c, a)  # exp(-i pi/2 c Z_S Z_b)\n        qc.cx(b, a)\n        for i in reversed(bits):\n            qc.cx(i, a)  # uncompute parity\n    qc.h(b)\n    return qc",
+    "example_instance_json": "{\"n\":3,\"function\":\"or\"}",
+    "register_layout": [
+      "qubits 0..n-1: input register x, x_i on qubit i (qubit 0 is the least significant bit of x)",
+      "qubit n: target qubit b, receives b XOR f(x)",
+      "qubits n+1..n+m: parity ancillas, one per nonzero nonempty Fourier subset S in increasing bitmask order; must be input as |0> and are returned to |0>",
+      "example n=3, OR: x=q0,q1,q2; b=q3; ancillas q4..q10 for S=1..7 (11 qubits total)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: whole construction (H on b, parity-ancilla phase gadgets, H on b)",
+        "explanation": "The XOR oracle is realised as H_b * exp(i pi/2 f(x)) * exp(-i pi/2 f(x) Z_b) * H_b, with f expanded exactly as sum_S fhat(S) Z_S."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: qc.rz calls on ancillas and on b",
+        "explanation": "Arbitrary Z rotations Rz(theta)=exp(-i theta Z/2) with angles +-pi*fhat(S) are the only non-Clifford gates used."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: function=='or' branch (table=[0]+[1]*(2^n-1))",
+        "explanation": "The disjunction oracle is obtained exactly by setting the truth table of f to OR."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "Narrowed to an explicit finite-n circuit-model construction with n<=8 inputs and total qubits <=12. Dense Fourier expansion with one ancilla per nonzero parity term; for OR this means 2^n-1 ancillas, so n<=3 in practice.",
+        "reason": "The abstract gives no explicit constant-depth construction, so a concrete exact phase-polynomial realisation was chosen, subject to the 12-qubit cap."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The MBQC pattern, measurement angles, byproduct corrections, and the constant-depth/unbounded fan-out claim are not implemented. Parity fan-in uses sequential CNOTs, so circuit depth grows with n.",
+        "reason": "These details are not in the specification, and the operation must be a unitary measurement-free circuit."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The oracle is exact only up to a global phase exp(i pi/2 fhat(empty set)), which is dropped, and only on the subspace where the ancillas are in |0>.",
+        "reason": "A global phase is physically irrelevant, and ancillas are uncomputed to |0>."
+      }
+    ],
+    "assumptions": [
+      "XOR (bit-flip) oracle form.",
+      "Ancillas are prepared in |0> by the runner.",
+      "x_i is stored on qubit i, so truth_table index x has bit i equal to x_i.",
+      "Fourier coefficients with magnitude <=1e-12 are treated as zero.",
+      "Instance format: {'n': int, 'function': 'or' | 'truth_table', 'truth_table': optional list of 2^n bits}."
+    ],
+    "unresolved_issues": [
+      "The paper's actual constant-depth construction and MBQC equivalence are not reconstructed.",
+      "Depth of this circuit is not constant because CNOT fan-out is sequential.",
+      "Ancilla count is exponential in n for dense functions such as OR, which limits n to 3 for OR."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 11,
+    "gate_count": 55,
+    "depth": 40,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

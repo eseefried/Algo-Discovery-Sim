@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "18543b72-d1b1-4d0f-94b0-34248dba1564",
+  "parent_run_id": "69183d37-b2d9-4fd2-acb6-2bc4ad31d77f",
+  "created_at": "2026-10-31T21:41:52.723723+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "c1f7bef7ba43af8c0c1afc0e76517e5deb2163fd8b7e76fab4ea5cb7e4b144b4",
+  "source_specification_sha256": "1368063d5cea2d314a8604503222d83b38efe4554a9838908b42787bcfb109c7",
+  "source_python_sha256": "1d7387925855bbb8d7202d8991b1cb686fab7b0f0a23c9cf2adad1a8bd9f9148",
+  "elapsed_seconds": 26.315,
+  "usage": {
+    "input_tokens": 4270,
+    "output_tokens": 3803,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the Grover iterate G^k on an n-qubit index register (N=2^n) with a single marked address, using an ancilla-free phase oracle and the diffusion operator. k is given explicitly or derived from a guessed database size N' via k=floor(pi/4*sqrt(N')), which models the size-uncertainty setting. No state preparation or measurement is included; the runner supplies the uniform superposition. The phone-book encoding and the discrimination analysis are not implemented.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _is_int(x):\n    return isinstance(x, int) and not isinstance(x, bool)\n\n\ndef _flip_all_ones(qc, n):\n    # Phase -1 on |1...1> of the n index qubits.\n    if n == 1:\n        qc.z(0)\n    else:\n        qc.mcp(math.pi, list(range(n - 1)), n - 1)\n\n\ndef _oracle(qc, n, marked):\n    # Phase oracle O = I - 2|marked><marked| (eq_1 oracle step).\n    zeros = [i for i in range(n) if not (marked >> i) & 1]\n    for i in zeros:\n        qc.x(i)\n    _flip_all_ones(qc, n)\n    for i in zeros:\n        qc.x(i)\n\n\ndef _diffusion(qc, n):\n    # H X (C^{n-1}Z) X H = I - 2|s><s|, s uniform superposition.\n    for i in range(n):\n        qc.h(i)\n    for i in range(n):\n        qc.x(i)\n    _flip_all_ones(qc, n)\n    for i in range(n):\n        qc.x(i)\n    for i in range(n):\n        qc.h(i)\n\n\ndef build_circuit(instance):\n    \"\"\"Grover iterate G^k on n index qubits. instance keys: n (1..12), marked (0..2^n-1),\n    optional iterations (int >= 0) XOR guessed_size (int >= 1). If neither is given,\n    k is derived from N=2^n.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    if not _is_int(n) or n < 1 or n > 12:\n        raise ValueError('n must be an integer in 1..12')\n    N = 2 ** n\n    marked = instance.get('marked')\n    if not _is_int(marked) or marked < 0 or marked >= N:\n        raise ValueError('marked must be an integer in [0, 2^n)')\n    has_k = 'iterations' in instance and instance['iterations'] is not None\n    has_g = 'guessed_size' in instance and instance['guessed_size'] is not None\n    if has_k and has_g:\n        raise ValueError('give only one of iterations or guessed_size')\n    if has_k:\n        k = instance['iterations']\n        if not _is_int(k) or k < 0:\n            raise ValueError('iterations must be a nonnegative integer')\n    else:\n        if has_g:\n            g = instance['guessed_size']\n            if not _is_int(g) or g < 1 or g > 2 ** 24:\n                raise ValueError('guessed_size must be an integer in 1..2^24')\n        else:\n            g = N\n        # eq_2: k_opt ~ (pi/4) sqrt(N')\n        k = int(math.floor(math.pi / 4.0 * math.sqrt(g)))\n    if k > 1000:\n        raise ValueError('too many iterations (cap 1000)')\n    reg = QuantumRegister(n, 'index')\n    qc = QuantumCircuit(reg, name='grover_iterate')\n    for _ in range(k):\n        _oracle(qc, n, marked)\n        _diffusion(qc, n)\n        # (I-2|s><s|)O = -G with G=(2|s><s|-I)O; restore the global phase\n        qc.global_phase += math.pi\n    return qc",
+    "example_instance_json": "{\"n\":3,\"marked\":5,\"iterations\":2}",
+    "register_layout": [
+      "Qubits 0..n-1: index register 'index', little-endian (qubit i holds bit i of the address; marked address m has bit i of m on qubit i)",
+      "No ancilla qubits; total qubits = n <= 12",
+      "Expected input prepared by runner: uniform superposition H^{⊗n}|0...0> for standard Grover"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop with _oracle and _diffusion",
+        "explanation": "The circuit applies G^k (oracle then diffusion). On the uniform input state it yields sin((2k+1)theta)|w> + cos((2k+1)theta)|w_perp>."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: k = floor(pi/4*sqrt(g)) branch",
+        "explanation": "The iteration count is derived from the (possibly guessed) size g=N' using the approximate optimal formula. If guessed_size differs from 2^n, this models a mismatched-size run."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The overlap and unambiguous-discrimination analysis is a classical or POVM analysis of states, not part of this unitary operation. The abstract also does not specify its setup."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The initial Hadamard layer is omitted, and only the Grover iterate G^k is built as the operation.",
+        "reason": "The task forbids input-state preparation in the circuit, so the runner must supply the uniform superposition."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The oracle is an ancilla-free phase oracle (multi-controlled phase) instead of the specified ancilla in |->.",
+        "reason": "This is equivalent by phase kickback and uses fewer qubits. It also avoids ancilla preparation."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "A global phase of pi per iteration is added so the circuit equals (2|s><s|-I)O exactly.",
+        "reason": "Diffusion is built as I-2|s><s|, the negative of the standard form."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "The scope is narrowed to N=2^n and a single marked integer address. Number-versus-name phone-book queries are not modeled, and a guessed N' only sets k.",
+        "reason": "The abstract gives no encoding of the phone book or the programmable query construction."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The distinguishability and discrimination analysis is not implemented.",
+        "reason": "The discrimination setup, POVM and success rates are unspecified. The analysis is not a unitary circuit."
+      }
+    ],
+    "assumptions": [
+      "Single marked item, with N=2^n.",
+      "The runner prepares the uniform superposition on the index register.",
+      "The guessed size N' only affects the iteration count, and the physical register stays at n qubits.",
+      "The iteration count is capped at 1000 and the guessed size at 2^24."
+    ],
+    "unresolved_issues": [
+      "The quantum phone book encoding and programmable name or number queries are not specified in the abstract.",
+      "The unambiguous discrimination scheme and its success rates are not implemented.",
+      "The prior distribution over database size is unspecified."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 80,
+    "depth": 56,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

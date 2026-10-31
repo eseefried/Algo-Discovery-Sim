@@ -1,0 +1,110 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "99220029-2a85-4dfd-aa72-3421c77b83f6",
+  "parent_run_id": "e948ab4b-9686-4c7c-91db-e11714fa16fb",
+  "created_at": "2026-10-31T21:45:00.106830+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "5faac5098f7a4e57d9776ed12abd6ef8bc585898cb17ef3dcfb516abb682c905",
+  "source_specification_sha256": "b5bb52981e75a4d1aa84fb0933618d85ffa4fae5466965e66a382344d3846a7f",
+  "source_python_sha256": "0cdf3894f86f2771c41f92f7c9e90e161838f79f57b0800e361b12a2a9b6dae6",
+  "elapsed_seconds": 28.558,
+  "usage": {
+    "input_tokens": 4310,
+    "output_tokens": 4251,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Trotterized time-evolution operator exp(-i H_P t) for the reduced BCS pairing Hamiltonian in a pair-occupation (hard-core boson / pseudospin-1/2) qubit mapping. Each qubit is one pair level (|1> is an occupied pair). The circuit uses single-qubit RZ gates for the level energies and RXX/RYY gates for the all-to-all pair-hopping terms, in first- or second-order product-formula steps. No state preparation or measurement is included.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _num(x, name):\n    if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):\n        raise ValueError(name + \" must be a finite real number\")\n    return float(x)\n\n\ndef _int(x, name, lo, hi):\n    if isinstance(x, bool) or not isinstance(x, int) or x < lo or x > hi:\n        raise ValueError(name + \" must be an integer in [%d, %d]\" % (lo, hi))\n    return x\n\n\ndef _local(qc, eps_eff, dt):\n    # exp(-i dt e (1-Z)/2) = exp(-i dt e/2) * RZ(-e dt)\n    for j, e in enumerate(eps_eff):\n        qc.rz(-e * dt, j)\n        qc.global_phase += -e * dt / 2.0\n\n\ndef _pairs(qc, pairs, G, dt):\n    # exp(-i dt * (-G/2)(XX+YY)) = RXX(-G dt) RYY(-G dt); XX and YY commute on a pair\n    for (j, k) in pairs:\n        qc.rxx(-G * dt, j, k)\n        qc.ryy(-G * dt, j, k)\n\n\ndef build_circuit(instance):\n    \"\"\"Trotterized exp(-i H t), H = sum_j eps_j*2*n_j - G sum_{j,k} b_j^dag b_k, hard-core pairs b=sigma^-.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = _int(instance.get(\"n_levels\"), \"n_levels\", 1, 12)\n    eps = instance.get(\"epsilon\")\n    if not isinstance(eps, (list, tuple)) or len(eps) != n:\n        raise ValueError(\"epsilon must be a list of length n_levels\")\n    eps = [_num(e, \"epsilon\") for e in eps]\n    G = _num(instance.get(\"G\"), \"G\")\n    t = _num(instance.get(\"time\"), \"time\")\n    steps = _int(instance.get(\"steps\"), \"steps\", 1, 200)\n    order = _int(instance.get(\"order\"), \"order\", 1, 2)\n    # single-particle energy per pair-occupation: each pair has 2 fermions (2*eps_j), plus j=k term -G\n    eps_eff = [2.0 * e - G for e in eps]\n    pairs = [(j, k) for j in range(n) for k in range(j + 1, n)]\n    qr = QuantumRegister(n, \"q\")\n    qc = QuantumCircuit(qr)\n    dt = t / steps\n    for _ in range(steps):\n        if order == 1:\n            _local(qc, eps_eff, dt)\n            _pairs(qc, pairs, G, dt)\n        else:\n            _local(qc, eps_eff, dt / 2.0)\n            _pairs(qc, pairs, G, dt / 2.0)\n            _pairs(qc, pairs[::-1], G, dt / 2.0)\n            _local(qc, eps_eff, dt / 2.0)\n    return qc",
+    "example_instance_json": "{\"n_levels\":4,\"epsilon\":[0.1,0.3,0.5,0.7],\"G\":0.4,\"time\":1.0,\"steps\":3,\"order\":2}",
+    "register_layout": [
+      "qubit j (0..n_levels-1) = pair level j; qubit 0 is the least significant bit",
+      "|0> = pair-empty level, |1> = pair-occupied level; n_pair=(1-Z)/2, b_j^dagger=sigma^+_j",
+      "no ancilla qubits"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit with helpers _local (level-energy terms) and _pairs (pair-hopping terms)",
+        "explanation": "H_P is mapped to H = sum_j (2 eps_j - G)(1-Z_j)/2 - (G/2) sum_{j<k}(X_jX_k+Y_jY_k). The j=k part of the double sum gives -G n_j. The circuit implements a Trotter product formula of exp(-iHt)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Fidelity is a classical post-analysis metric of a prepared state against a target state. It is not part of the unitary operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Scoped to Trotterized real-time evolution under the reduced BCS Hamiltonian, which is a generic abstract-level construction. The paper's actual algorithms, gate sequences, and native-interaction decompositions are not reproduced.",
+        "reason": "The abstract gives no explicit algorithm. This is the only well-defined operation derivable from the specification."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The abstract's nearest-neighbor interaction constraint is not enforced. The circuit uses all-to-all RXX/RYY gates rather than a nearest-neighbor decomposition.",
+        "reason": "Platform-specific decompositions are missing from the specification."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Made the qubit mapping and constants explicit: hard-core pair bosons with n_pair=(1-Z)/2, fermion-count energy 2*eps_j per pair, and the j=k term of the double sum folded into an effective level energy 2*eps_j - G.",
+        "reason": "eq_1 left the mapping unspecified, and the j=k term must be handled for a consistent Hamiltonian."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "No circuit is produced for fidelity, and no spectrum-measurement circuit is produced.",
+        "reason": "The operation is measurement-free, and the measurement scheme is unspecified."
+      }
+    ],
+    "assumptions": [
+      "Reduced BCS pairing Hamiltonian with level-independent coupling G",
+      "One qubit per pair level, with pairs treated as hard-core bosons (seniority-zero subspace)",
+      "The Trotter order is 1 or 2 and the number of steps is a user parameter, so the circuit is only an approximation to exact evolution",
+      "The global phase is tracked on the circuit"
+    ],
+    "unresolved_issues": [
+      "The paper's actual algorithms, native Hamiltonian types (Ising/XY/Heisenberg), and gate sequences are unknown",
+      "Nearest-neighbor connectivity constraints are not modeled",
+      "The energy spectrum measurement scheme and complexity analysis are not implemented",
+      "Trotter error and the fidelity study are left to downstream evaluation"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 528,
+    "depth": 306,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

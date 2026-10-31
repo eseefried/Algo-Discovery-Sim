@@ -1,0 +1,117 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "3e84d049-4192-4c28-9942-6d519d80846e",
+  "parent_run_id": "981fe678-71f8-4abd-b0a4-c086a89d0a39",
+  "created_at": "2026-10-31T21:43:16.639427+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "748631929ee8a4fb8457fbe96ff29927591247f84e5b7b222ab404107f4fbe0c",
+  "source_specification_sha256": "eabada41a3248a1d2e7a3f20561d819dd3c5bab3f3bc2e9bd81d66bd607ff313",
+  "source_python_sha256": "3fef973eb7aab7512cd5179151bbce1c94bb5afe1bc087091aee155c589ceafe",
+  "elapsed_seconds": 41.571,
+  "usage": {
+    "input_tokens": 4877,
+    "output_tokens": 5989,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Textbook quantum order-finding (QOFA) operation for small N: Hadamards on a t-qubit control register, controlled multiplications by a^(2^k) mod N on an n-qubit target register, then inverse QFT on the control register. Each controlled modular multiplication is built from CX and multi-controlled X gates that realize the basis permutation x -> m*x mod N (identity for x >= N). There is no dense unitary, no state preparation and no measurement. The runner should prepare the target in |1>. Classical postprocessing (continued fractions, gcd factor extraction) and the odd-order techniques are out of scope.",
+    "source_python": "from math import gcd\nfrom qiskit import QuantumCircuit\nfrom qiskit.circuit.library import QFTGate\n\n\ndef _as_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(name + ' must be an integer')\n    return value\n\n\ndef _cycles(m, N, size):\n    # permutation f(x) = m*x mod N for x < N, identity otherwise\n    seen = [False] * size\n    out = []\n    for s in range(N):\n        if seen[s]:\n            continue\n        cyc = [s]\n        seen[s] = True\n        x = (m * s) % N\n        while x != s:\n            seen[x] = True\n            cyc.append(x)\n            x = (m * x) % N\n        if len(cyc) > 1:\n            out.append(cyc)\n    return out\n\n\ndef _controlled_transposition(qc, ctrl, tq, n, u, v):\n    # swap basis states |u> and |v> of the target register when ctrl is 1\n    d = u ^ v\n    p = (d & -d).bit_length() - 1\n    others = [j for j in range(n) if ((d >> j) & 1) and j != p]\n    for j in others:\n        qc.cx(tq[p], tq[j])\n    u2 = u\n    if (u >> p) & 1:\n        for j in others:\n            u2 ^= 1 << j\n    ctl_bits = [j for j in range(n) if j != p]\n    zeros = [j for j in ctl_bits if not ((u2 >> j) & 1)]\n    for j in zeros:\n        qc.x(tq[j])\n    qc.mcx([ctrl] + [tq[j] for j in ctl_bits], tq[p])\n    for j in zeros:\n        qc.x(tq[j])\n    for j in reversed(others):\n        qc.cx(tq[p], tq[j])\n\n\ndef _controlled_modmul(qc, ctrl, tq, n, N, m):\n    # |x> -> |m*x mod N> for x < N, controlled on ctrl\n    for cyc in _cycles(m, N, 1 << n):\n        k = len(cyc)\n        for j in range(k - 2, -1, -1):\n            _controlled_transposition(qc, ctrl, tq, n, cyc[j], cyc[j + 1])\n\n\ndef build_circuit(instance):\n    \"\"\"instance: {'N': int>=3, 'a': int with 1<a<N and gcd(a,N)=1, optional 't': control qubits}.\n    Qubits 0..t-1: control (little-endian, qubit k controls a^(2^k)); t..t+n-1: target, n=ceil(log2 N).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    N = _as_int(instance.get('N'), 'N')\n    a = _as_int(instance.get('a'), 'a')\n    if N < 3:\n        raise ValueError('N must be at least 3')\n    if N > 2047:\n        raise ValueError('N too large for qubit cap')\n    if not (1 < a < N) or gcd(a, N) != 1:\n        raise ValueError('a must satisfy 1<a<N and gcd(a,N)=1')\n    n = (N - 1).bit_length()\n    if 't' in instance:\n        t = _as_int(instance['t'], 't')\n    else:\n        t = min(2 * n, 12 - n)\n    if t < 1:\n        raise ValueError('t must be at least 1')\n    if t + n > 12:\n        raise ValueError('total qubits exceed 12')\n    qc = QuantumCircuit(t + n)\n    ctrl_q = list(range(t))\n    tq = list(range(t, t + n))\n    for q in ctrl_q:\n        qc.h(q)\n    for k in range(t):\n        m = pow(a, 1 << k, N)\n        if m != 1:\n            _controlled_modmul(qc, ctrl_q[k], tq, n, N, m)\n    qc.append(QFTGate(t).inverse(), ctrl_q)\n    return qc",
+    "example_instance_json": "{\"N\": 15, \"a\": 7, \"t\": 6}",
+    "register_layout": [
+      "qubits 0..t-1: control/phase-estimation register, little-endian (qubit k controls multiplication by a^(2^k) mod N); inverse QFT acts on these qubits",
+      "qubits t..t+n-1: target/work register holding x in binary, little-endian, n=ceil(log2 N); runner should prepare |1> (x=1)",
+      "example (N=15, a=7, t=6): control qubits 0-5, target qubits 6-9, 10 qubits total"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_controlled_modmul / build_circuit: controlled multiplications by a^(2^k) mod N",
+        "explanation": "The periodic function x -> a^x mod N, whose period is the order r, is encoded by controlled modular multiplications; the order itself is not computed in the circuit."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: validation 'gcd(a,N)=1' raising ValueError",
+        "explanation": "Coprimality is enforced so each multiplier is invertible mod N and the map is a valid permutation (unitary)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical gcd postprocessing from an even order; not part of the quantum operation."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical gcd postprocessing from an even order; not part of the quantum operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Scope narrowed to the generic textbook QOFA circuit (Hadamards, controlled modular multiplications, inverse QFT) for small N. Measurement, continued fractions and order extraction are omitted.",
+        "reason": "The abstract gives no circuit details and the task requires a measurement-free unitary operation; the circuit skeleton is an assumption from the spec."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Factor-extraction equations and the paper's odd-order / square-coprime techniques are not implemented.",
+        "reason": "They are classical postprocessing, and the abstract does not specify the odd-order techniques."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Modular multiplication is built as an explicit permutation (cycle decomposition into transpositions via CX and multi-controlled X), acting as identity on x >= N. The Hadamard layer is included in the operation, and the control register is little-endian with inverse QFT via QFTGate(t).inverse() on qubits 0..t-1.",
+        "reason": "Avoids opaque dense unitaries and follows the Qiskit convention; the target must be prepared in |1> by the runner."
+      }
+    ],
+    "assumptions": [
+      "Control register size t defaults to min(2n, 12-n) when not supplied.",
+      "Target register size n = ceil(log2 N).",
+      "Target register is initialized to |1> by the runner; the control register starts in |0...0>.",
+      "Controlled multiplier for control qubit k is a^(2^k) mod N, computed classically at build time.",
+      "Total qubits t+n are capped at 12, so N up to 2047 is accepted by the parser but only small N are practical."
+    ],
+    "unresolved_issues": [
+      "Odd-order techniques and square-coprime handling from the paper are unspecified in the abstract and not implemented.",
+      "Postprocessing (continued fractions, gcd) is left to the runner.",
+      "Multi-controlled X decomposition may produce deep circuits for larger N."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 10,
+    "gate_count": 986,
+    "depth": 836,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

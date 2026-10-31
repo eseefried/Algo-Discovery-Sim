@@ -118,7 +118,10 @@ def run_code_and_simulation(equations_dir: Path, args, settings: Settings, summa
         "cases_passed": report.cases_passed,
         "report": str(code_dir / "simulation.json"),
     }
-    log(f"      {report.status}, {report.cases_passed}/{report.cases_run} cases passed")
+    if report.status == "simulated":  # no reference, so nothing to pass
+        log(f"      simulated, {report.cases_run} cases")
+    else:
+        log(f"      {report.status}, {report.cases_passed}/{report.cases_run} cases passed")
     if report.status not in {"simulated", "reference_passed"}:
         summary["stopped_at"] = "simulation"
         return 2

@@ -1,0 +1,118 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "f6101057-4418-4cf2-ad22-ebf0179806ac",
+  "parent_run_id": "2b1ebc9f-5c93-4ddd-abd5-bd386dd43c05",
+  "created_at": "2026-10-31T21:48:33.465933+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "bcdece3a70ecf13de2ac189b8f7916acf99ae361b6a9ad91f8a82c4d40f5fd5a",
+  "source_specification_sha256": "cd4f08f02f6df687349319eafe30d5738d706de9f1532f70d06ce33ffa35e999",
+  "source_python_sha256": "546fd465a87e07ffcdcf9593e751acdd1f57f391ec775295ba004d838fc3c341",
+  "elapsed_seconds": 101.919,
+  "usage": {
+    "input_tokens": 4531,
+    "output_tokens": 14456,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds a unitary Naimark dilation of a single-qubit trine or SIC POVM on 2 qubits. Qubit 0 is the system (polarisation) qubit and qubit 1 is the ancilla (walk position). With the input state |psi> on qubit 0 and |0> on qubit 1, the computational-basis index k = q0 + 2*q1 occurs with probability <psi|E_k|psi>. The 4x4 unitary is built from two-level (Givens) controlled rotations plus phase gates, using standard gates only. It is not a literal beam-displacer or wave-plate model.",
+    "source_python": "import math\nimport numpy as np\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n_EPS = 1e-12\n\n\ndef _bloch_vectors(povm, offset):\n    '''Bloch vectors n_k and weight w with E_k = w|psi_k><psi_k| (eq_2 trine, eq_3 SIC).'''\n    if povm == 'trine':\n        vecs = [(math.cos(2.0 * math.pi * k / 3.0 + offset), math.sin(2.0 * math.pi * k / 3.0 + offset), 0.0) for k in range(3)]\n        return vecs, 2.0 / 3.0\n    s2 = math.sqrt(2.0)\n    s23 = math.sqrt(2.0 / 3.0)\n    base = [(0.0, 0.0, 1.0), (2.0 * s2 / 3.0, 0.0, -1.0 / 3.0), (-s2 / 3.0, s23, -1.0 / 3.0), (-s2 / 3.0, -s23, -1.0 / 3.0)]\n    c = math.cos(offset)\n    s = math.sin(offset)\n    vecs = [(c * x - s * y, s * x + c * y, z) for (x, y, z) in base]\n    return vecs, 0.5\n\n\ndef _isometry(povm, offset):\n    '''4x2 isometry V with V[k,j] = sqrt(w) <psi_k|j>, so V^dag V = sum_k E_k = I (eq_1).'''\n    vecs, w = _bloch_vectors(povm, offset)\n    m = np.zeros((4, 2), dtype=complex)\n    for k, (x, y, z) in enumerate(vecs):\n        th = math.acos(max(-1.0, min(1.0, z)))\n        ph = math.atan2(y, x)\n        psi = np.array([math.cos(th / 2.0), np.exp(1j * ph) * math.sin(th / 2.0)])\n        m[k, :] = math.sqrt(w) * np.conj(psi)\n    return m\n\n\ndef _givens(m, col, a, b, keep):\n    '''Two-level unitary that zeroes the non-kept entry of column col; applied to m in place.'''\n    xa = m[a, col]\n    xb = m[b, col]\n    elim = xb if keep == a else xa\n    if abs(elim) < _EPS:\n        return None\n    r = math.sqrt(abs(xa) ** 2 + abs(xb) ** 2)\n    if keep == a:\n        g = np.array([[np.conj(xa), np.conj(xb)], [-xb, xa]]) / r\n    else:\n        g = np.array([[xb, -xa], [np.conj(xa), np.conj(xb)]]) / r\n    m[[a, b], :] = g @ m[[a, b], :]\n    return g\n\n\ndef _cu_params(g):\n    c = abs(g[0, 0])\n    s = abs(g[1, 0])\n    theta = 2.0 * math.atan2(s, c)\n    if c > _EPS:\n        gam = float(np.angle(g[0, 0]))\n        if s > _EPS:\n            phi = float(np.angle(g[1, 0])) - gam\n            lam = float(np.angle(-g[0, 1])) - gam\n        else:\n            phi = 0.0\n            lam = float(np.angle(g[1, 1])) - gam\n    else:\n        gam = 0.0\n        phi = float(np.angle(g[1, 0]))\n        lam = float(np.angle(-g[0, 1]))\n    return theta, phi, lam, gam\n\n\ndef _two_level(qc, a, b, g):\n    '''Apply 2x2 unitary g on basis states a<b (index = q0 + 2*q1) differing in one bit.'''\n    diff = a ^ b\n    if diff == 1:\n        tgt, ctl, val = 0, 1, (a >> 1) & 1\n    elif diff == 2:\n        tgt, ctl, val = 1, 0, a & 1\n    else:\n        raise ValueError('unsupported two-level pair')\n    th, ph, la, ga = _cu_params(g)\n    if val == 0:\n        qc.x(ctl)\n    qc.cu(th, ph, la, ga, ctl, tgt)\n    if val == 0:\n        qc.x(ctl)\n\n\ndef build_circuit(instance):\n    '''Naimark-dilation unitary for the trine or SIC POVM. Outcome k = q0 + 2*q1.'''\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    for key in instance:\n        if key not in ('povm', 'azimuth_offset'):\n            raise ValueError('unknown instance key')\n    povm = instance.get('povm')\n    if povm not in ('trine', 'sic'):\n        raise ValueError('povm must be trine or sic')\n    offset = instance.get('azimuth_offset', 0.0)\n    if isinstance(offset, bool) or not isinstance(offset, (int, float)):\n        raise ValueError('azimuth_offset must be a real number')\n    offset = float(offset)\n    if not math.isfinite(offset):\n        raise ValueError('azimuth_offset must be finite')\n    m = _isometry(povm, offset)\n    gates = []\n    plan = [(0, 2, 3, 2), (0, 0, 2, 0), (0, 0, 1, 0), (1, 2, 3, 3), (1, 1, 3, 1)]\n    for (col, a, b, keep) in plan:\n        g = _givens(m, col, a, b, keep)\n        if g is not None:\n            gates.append((a, b, g))\n    if abs(abs(m[0, 0]) - 1.0) > 1e-8 or abs(abs(m[1, 1]) - 1.0) > 1e-8:\n        raise ValueError('internal elimination failed')\n    alpha = float(np.angle(m[0, 0]))\n    beta = float(np.angle(m[1, 1]))\n    qc = QuantumCircuit(QuantumRegister(1, 'sys'), QuantumRegister(1, 'anc'))\n    # D^dagger: phase e^{i alpha} on index 0 and e^{i beta} on index 1 (both have q1=0)\n    qc.x(1)\n    qc.p(alpha, 1)\n    qc.cp(beta - alpha, 1, 0)\n    qc.x(1)\n    # U = G_1^dag ... G_m^dag D^dag : apply G_m^dag first\n    for (a, b, g) in reversed(gates):\n        _two_level(qc, a, b, np.conj(g.T))\n    return qc",
+    "example_instance_json": "{\"povm\": \"trine\", \"azimuth_offset\": 0.0}",
+    "register_layout": [
+      "qubit 0 = sys: polarisation qubit, input system state; low bit of the outcome label",
+      "qubit 1 = anc: walk-position/Naimark ancilla, prepared in |0> by the runner; high bit of the outcome label",
+      "outcome k = q0 + 2*q1 (little-endian). Trine uses k=0..2 (k=3 has zero probability). SIC uses k=0..3.",
+      "input convention: state |psi> on qubit 0 tensor |0> on qubit 1; computational basis outcome probabilities equal Tr(rho E_k)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_isometry and build_circuit",
+        "explanation": "The isometry V[k,j] = sqrt(w)<psi_k|j> satisfies V^dag V = sum_k E_k = I. build_circuit extends it to a unitary on sys+anc, so outcome probabilities follow the Born rule Tr(rho E_k)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_bloch_vectors (povm == 'trine' branch)",
+        "explanation": "Three equatorial Bloch vectors at angles 2*pi*k/3 (plus optional azimuth_offset) with weight 2/3, so E_k = (2/3)|psi_k><psi_k|."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_bloch_vectors (sic branch)",
+        "explanation": "Four tetrahedron Bloch vectors with weight 1/2, so E_k = (1/2)|phi_k><phi_k| and pairwise overlaps |<phi_j|phi_k>|^2 = 1/3. The tetrahedron orientation is a choice and is rotated by azimuth_offset about z."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The physical beam-displacer/wave-plate quantum walk is replaced by an abstract Naimark dilation on two qubits: one polarisation qubit and one position/ancilla qubit.",
+        "reason": "The abstract gives no walk geometry or wave-plate angles. The Naimark isometry is the mathematically specified content, so it is realised through Givens-type controlled rotations."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Scope is narrowed to the trine and SIC POVMs. Unambiguous discrimination of two non-orthogonal states is not implemented.",
+        "reason": "No equation, states or overlap are specified for the discrimination POVM, and no equation ID covers it."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The states |psi_k> and |phi_k> are defined explicitly from the Bloch vectors. The SIC tetrahedron orientation is fixed with one vertex on +z. An optional azimuth_offset rotates all vectors about z.",
+        "reason": "The supplied equations leave the state definitions and orientation unspecified."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The detected output spatial mode is represented by computational-basis index k = q0 + 2*q1, with no measurement included. Only the unitary on sys+anc is returned. Outcome 3 is unused for the trine.",
+        "reason": "The task requires a measurement-free unitary operation, with inputs prepared by the runner."
+      }
+    ],
+    "assumptions": [
+      "The ancilla qubit starts in |0> and the system qubit holds the input state, both prepared by the runner.",
+      "Output spatial modes map one-to-one to POVM outcomes, labelled by the two-qubit basis index.",
+      "The unitary completion beyond the two physical input columns is arbitrary and is fixed by the Givens construction."
+    ],
+    "unresolved_issues": [
+      "Unambiguous state discrimination is not implemented because its states and overlap are not specified.",
+      "The physical walk geometry, wave-plate angles, step count and detectors are not reconstructed.",
+      "The Givens-based unitary completion has not been verified in this stage."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 40,
+    "depth": 32,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

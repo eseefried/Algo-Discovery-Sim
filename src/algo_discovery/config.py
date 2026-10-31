@@ -15,10 +15,10 @@ class ConfigurationError(ValueError):
 @dataclass(frozen=True)
 class Settings:
     api_key: str = field(repr=False)
-    model: str = "claude-fable-5-1"
+    model: str = "claude-haiku-5-5"
     base_url: str = "https://api.anthropic.com"
     max_tokens: int = 8192
-    effort: str = "high"
+    effort: str = "medium"
     timeout_seconds: float = 180
     artifact_dir: Path = Path("artifacts")
 
@@ -46,10 +46,10 @@ class Settings:
         try:
             return cls(
                 api_key=os.getenv("CLAUDE_HACKATHON_API", ""),
-                model=os.getenv("CLAUDE_MODEL", "claude-fable-5-1"),
+                model=os.getenv("CLAUDE_MODEL", "claude-haiku-5-5"),
                 base_url=os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
                 max_tokens=int(os.getenv("CLAUDE_MAX_TOKENS", "8192")),
-                effort=os.getenv("CLAUDE_EFFORT", "high"),
+                effort=os.getenv("CLAUDE_EFFORT", "medium"),
                 timeout_seconds=float(os.getenv("CLAUDE_TIMEOUT_SECONDS", "180")),
                 artifact_dir=Path(os.getenv("ARTIFACT_DIR", "artifacts")),
             )

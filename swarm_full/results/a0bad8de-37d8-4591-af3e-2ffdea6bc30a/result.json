@@ -1,0 +1,99 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "a0bad8de-37d8-4591-af3e-2ffdea6bc30a",
+  "parent_run_id": "8460b7cf-15f8-4c11-92c0-0c35255214e3",
+  "created_at": "2026-10-31T21:43:53.498546+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "bd23ffa3c7fe9c742e2bf89a4d746d96e5b31e9e722521195dfb2393ca9e7f5d",
+  "source_specification_sha256": "d3471485c7a479222acb49c240de33fbcc4004e294e275ebca953d6149e2cb1b",
+  "source_python_sha256": "3a0d7f741cda5ded85c0d93901f4c4e7df7c9582a6ede5ca94df5e1875337dca",
+  "elapsed_seconds": 18.915,
+  "usage": {
+    "input_tokens": 4177,
+    "output_tokens": 2721,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Gate-model Simon's algorithm operation for n logical input qubits plus n output qubits (n<=6, so at most 12 qubits). It applies H on the input register, a CNOT-built oracle U_f|x>|y> = |x>|y XOR f(x)> with f(x) = x XOR (x_p * s), then H on the input register. Here p is the highest set bit of s, so f(x) = f(x XOR s). This is a scope narrowing: it is not the one-way five-qubit cluster-state implementation, whose geometry and measurement angles are not specified.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _check_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(name + ' must be an integer')\n    return value\n\n\ndef build_circuit(instance):\n    \"\"\"Simon operation H^n . U_f . H^n on input register (qubits 0..n-1),\n    with output register on qubits n..2n-1. Instance: {'n': int, 's': int}.\n    s is the hidden period as an integer; bit i of s corresponds to qubit i.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _check_int(instance.get('n'), 'n')\n    s = _check_int(instance.get('s'), 's')\n    if n < 1 or n > 6:\n        raise ValueError('n must be in 1..6 (at most 12 qubits)')\n    if s < 0 or s >= 2 ** n:\n        raise ValueError('s must satisfy 0 <= s < 2^n')\n    xr = QuantumRegister(n, 'x')\n    fr = QuantumRegister(n, 'f')\n    qc = QuantumCircuit(xr, fr)\n    # Hadamard layer on input register\n    for i in range(n):\n        qc.h(xr[i])\n    # Oracle U_f: f(x) = x XOR (x_p * s), p = highest set bit of s (eq_1)\n    for i in range(n):\n        qc.cx(xr[i], fr[i])\n    if s != 0:\n        p = s.bit_length() - 1\n        for i in range(n):\n            if (s >> i) & 1:\n                qc.cx(xr[p], fr[i])\n    # Final Hadamard layer on input register; outputs y satisfy y.s=0 mod 2 (eq_2)\n    for i in range(n):\n        qc.h(xr[i])\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"s\": 3}",
+    "register_layout": [
+      "qubit 0: input x bit 0 (least significant)",
+      "qubit 1: input x bit 1",
+      "qubit 2: output f bit 0 (least significant)",
+      "qubit 3: output f bit 1",
+      "General n: qubits 0..n-1 input register x, qubits n..2n-1 output register f; bit i of s acts on x bit i / f bit i",
+      "Input state (typically |0...0>) is prepared by the runner; no measurements included"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: oracle section (CNOT copy x->f, then CNOTs from x_p onto f_i for each set bit i of s)",
+        "explanation": "Oracle computes f(x)=x XOR (x_p s), which satisfies f(x)=f(x XOR s) for every x and is two-to-one when s is nonzero (one-to-one when s=0)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Orthogonality y.s=0 mod 2 is a property of the output distribution of the final Hadamard layer. It is not coded explicitly and is left for downstream checking."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Implemented the standard circuit-model (gate-based) Simon algorithm for general n<=6 instead of the five-qubit one-way cluster-state implementation.",
+        "reason": "The cluster graph, measurement angles, feed-forward, and tested functions are not given, so the one-way construction cannot be reconstructed. The unitary operation realises the same logical algorithm."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Chose one specific oracle family, f(x)=x XOR (x_p s) with p the highest set bit of s, with 2n qubits and no auxiliary qubit.",
+        "reason": "A concrete reversible oracle is needed. The specification's 2 input + 2 output + 1 auxiliary split was an assumption, and the auxiliary qubit is not needed in the gate model."
+      }
+    ],
+    "assumptions": [
+      "Hidden period s is supplied as an integer; bit i of s maps to input qubit i.",
+      "s=0 is allowed and gives a one-to-one function f(x)=x.",
+      "Input state preparation and measurement are done by the runner.",
+      "The oracle is a representative function, not necessarily the specific functions in the experiment."
+    ],
+    "unresolved_issues": [
+      "The one-way cluster-state implementation (graph, measurement bases, byproduct corrections) is not reconstructed.",
+      "The mapping of physical cluster qubits to logical registers is unknown.",
+      "The n-qubit resource analysis is out of scope."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 8,
+    "depth": 5,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

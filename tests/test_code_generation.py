@@ -57,8 +57,8 @@ def code_request():
     result = EquationResult(
         run_id="source-run",
         created_at="2026-10-31T00:00:00+00:00",
-        model="claude-fable-5-1",
-        response_model="claude-fable-5-1",
+        model="claude-haiku-5-5",
+        response_model="claude-haiku-5-5",
         prompt_version="test",
         prompt_sha256=sha256("prompt"),
         abstract_sha256=sha256(original.abstract),
@@ -100,14 +100,14 @@ def sdk_client(artifact):
         assert payload["messages"][1]["role"] == "assistant"
         assert json.loads(payload["messages"][1]["content"])["equations"][0]["id"] == "eq_1"
         assert payload["output_config"]["format"]["type"] == "json_schema"
-        assert payload["model"] == "claude-fable-5-1"
+        assert payload["model"] == "claude-haiku-5-5"
         return httpx2.Response(
             200,
             json={
                 "id": "msg_code",
                 "type": "message",
                 "role": "assistant",
-                "model": "claude-fable-5-1",
+                "model": "claude-haiku-5-5",
                 "content": [{"type": "text", "text": json.dumps(artifact)}],
                 "stop_reason": "end_turn",
                 "stop_sequence": None,
