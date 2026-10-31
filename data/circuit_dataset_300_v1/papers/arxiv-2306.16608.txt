@@ -1,0 +1,544 @@
+## I. INTRODUCTION
+
+Classically hard computational chemistry problems are some of the most promising applications that the advance of quantum computing technologies will allow us to tackle [1-4]. Chemical properties are generally calculated by solving the electronic structure problem for a given nuclear configuration [5]. Some systems (e.g., chemical reactions involving transition metal complexes [6, 7]) require many one-electron orbitals to represent their electronic states, making it challenging to accurately calculate their properties, even with state-of-theart high-performance computers. Harnessing the ability to efficiently simulate quantum systems, quantum computers will potentially facilitate those calculations to extend the scope of computational chemistry.
+
+Quantum phase estimation is a heavily used subroutine in various quantum algorithms. The QPE algorithm, provided a unitary operator U with eigenvector |ϕ⟩ and associated eigenvalue eiϕ , computes an estimate of the phase ϕ. The iterative scheme of QPE, originally proposed by Kitaev [8, 9], runs a set of Hadamard-test-like circuits, each of which reads off the partial information about ϕ. The obtained measurement outcomes are classically post-processed to estimate ϕ up to specified accuracy. Relative to the QPE based on the quantum Fourier transform (QFT) [10-12], the iterative scheme uses shallower circuits at the cost of more samples and hence, makes its execution amenable on noisy quantum hardware. The iterative QPE algorithm has since been improved to reduce the required quantum resources [13-22]. For example, the authors of [17] proposed an approach based on Bayesian inference to make the phase estimation protocol more efficient and robust against experimental errors.
+
+∗ kentaro.yamamoto@quantinuum.com
+
+Such algorithmic improvements, along with the remarkable development of quantum computing devices, have led to successful demonstrations of QPE algorithms on several different platforms. Experimental realizations of QPE on a quantum chemistry system were initiated in [23], where the iterative QPE was applied to a twoqubit molecular Hamiltonian on a superconducting processor. This was soon followed by an experiment using Bayesian QPE on a silicon photonic device [24]. More recently, a different type of statistical phase estimation has been tested on a superconducting processor [25]. In this algorithm, the trade-off between the number of samples and circuit depth is nicely controlled, which makes it more favourable to be run on early fault-tolerant hardware [21, 22]. However, experimental demonstration of QPE remains challenging due to the depth of the circuits.
+
+In the present work, we demonstrate Bayesian QPE on a quantum charge-coupled device trapped-ion quantum computer to push forward such limitations [26-30]. We calculate the ground-state energy of the minimal-basis molecular hydrogen system described by the spin Hamiltonian [31],
+
+$$
+H = h _ { 1 } Z _ { 1 } + h _ { 2 } Z _ { 2 } + h _ { 3 } Y _ { 1 } Y _ { 2 } + h _ { 4 } Z _ { 1 } Z _ { 2 } + h _ { 5 } I , \quad ( 1 )
+$$
+
+where {Xi, Yi, Zi} are the Pauli-X, Y , Z operators acting on ith qubit, I is the identity operator, and {hj} are real coefficients. The spin Hamiltonian is obtained with the Jordan-Wigner transformation from its fermionic Hamiltonian [3]. 1
+
+1 The coefficients {hj} are evaluated on classical computers by performing the restricted Hartree-Fock method with the STO3G atomic basis set [5] followed by the two qubits tapered off using spin and particle number conservations [31].
+
+To enhance the performance of the Bayesian QPE protocol, we develop a subroutine for the selection of circuit parameters. Our routine analytically extracts the optimal parameters by minimising a natural choice of utility function. This improves on previous works based on heuristics with certain assumptions [17].
+
+We perform the QPE experiments by adopting two different techniques to alleviate hardware noise effects. First, we employ the Bayesian QPE with a noise-aware updating rule. The hardware noise is incorporated into the likelihood function in the form of depolarizing channel to mitigate decoherence. Second, in order to run the QPE with deep circuits, we encode four logical qubits with a �6, 4, 2� quantum error detection code [32-35]. The code detects an arbitrary single-qubit error and discards the associated result to reduce the error rate at the cost of more circuit executions as well as small overhead in circuit depth and width. In particular, the code is carefully tailored to various features of the quantum hardware, such as high-fidelity gate operations, all-to-all connectivity, and conditional exit operations [30, 36, 37]. See [38-45] for previous experimental studies with a �4, 2, 2� code.
+
+The rest of the paper is organized as follows. In Section II, we review the Bayesian QPE protocol, introduce our parameter selection rule and demonstrate its benefits numerically. In Section III, the �6, 4, 2� error detection code is introduced with a sketch of the encoded QPE circuit. The experimental results from Quantinuum's H1 quantum computer are presented in Section IV. We give conclusions and outlook in Section V. Technical aspects of the Bayesian QPE, error detection code, experimental setup, and more data are found in Appendices A, B, and C.
+
+## II. BAYESIAN QUANTUM PHASE ESTIMATION
+
+In Bayesian QPE [17], measurement outcomes are generated from the following QFT-free QPE circuit
+
+$$
+| + \rangle \longrightarrow \begin{bmatrix} R _ { Z } ( \beta ) \bigsqcup X \\ | \phi \rangle \, + \, \boxed { U ^ { k } } \end{bmatrix}
+$$
+
+parametrised by k ∈ N and β ∈ [0, 2π), with probability
+
+$$
+p ( m \, | \, \phi , k , \beta ) = \frac { 1 + \cos ( k \phi + \beta - m \pi ) } { 2 } , \quad ( 3 ) ^ { \ e ^ { i \phi } }
+$$
+
+where m ∈ {0, 1} is the measurement outcome in X-basis on the top qubit in (2) and ϕ ∈ [0, 2π) is the unknown angular phase we wish to determine. The equation (3) is termed the likelihood function. RZ(β) = e-iβZ/2 is a rotation gate. In our experiment, we consider an approximate eigenstate of U as an input state |ϕ⟩ that has a sufficiently small approximation error. 2
+
+Taking a Bayesian approach, we instantiate a prior distribution p(ϕ), which can be uniform. After R measurement outcomes, we probabilistically quantify the value of ϕ through the posterior distribution
+
+$$
+p ( \phi | m _ { 1 \colon R } ) \subset p ( \phi ) \prod _ { r = 1 } ^ { R } p ( m _ { r } | \phi , k _ { r } , \beta _ { r } ) .
+$$
+
+The posterior can be updated iteratively p(ϕ | m1:R) ∝ p(ϕ | m1:R-1)p(mR | ϕ, kR, βR), until desired precision is obtained.
+
+Bayesian posterior distributions are typically approximated numerically as in [17]. However, in this setting, it was noted in [18] that the posterior is analytically tractable in the form of a Fourier distribution
+
+$$
+\begin{array} { r l } & { v e r - } & { p ( \phi | m _ { 1 \colon R } ) = \frac { 1 } { 2 \pi } + \sum _ { j = 1 } ^ { J _ { R } } c _ { R , j } \cos ( j \phi ) + s _ { R , j } \sin ( j \phi ) , \ ( 6 ) } \\ & { t u m } & { p ( \phi | m _ { 1 \colon R } ) = \frac { 1 } { 2 \pi } + \sum _ { j = 1 } ^ { J _ { R } } c _ { R , j } \cos ( j \phi ) + s _ { R , j } \sin ( j \phi ) , \ ( 6 ) } \end{array}
+$$
+
+where the number of coefficients JR grows at least quadratically in the number of experiments, as JR = JR-1 + kR. To mitigate memory requirements, the authors in [46] described an adaptive approach where after a suitable number of shots, the posterior representation is converted to a wrapped Gaussian distribution which is fully specified by a mean and variance parameter and can also be updated analytically (using moment-matching) on receipt of further measurements. The conversion from Fourier to wrapped Gaussian distribution is approximate, however after a sufficient number of shots, the posterior will be peaked and well approximated by the wrapped Gaussian distribution. In this work, we adopt an equivalently adaptive approach only we favour a von Mises distribution over the wrapped Gaussian since it is the maximum entropy distribution for wrapped random variables (with a specified first circular moment) [47] and has a simple closed-form probability density function. A von Mises representation of the posterior is similarly fully specified by a mean and precision parameter and can also be updated analytically using moment-matching. Some example posterior distributions are visualised in Fig. A1, Appendix A 3.
+
+Details of the tractable Bayesian updates can be found in Appendix A1 and a lightweight, easy-to-use implementation can be found in the Python package phayes [48].
+
+- 2 When the input state is given by ∑i ci|ϕi⟩ with U|ϕi⟩ = eiϕi |ϕi⟩, we can use the likelihood of the form
+
+$$
+p ( m \, | \, \{ \phi _ { i } \} , k , \beta ) & = \frac { 1 + \sum _ { i } | c _ { i } | ^ { 2 } \cos ( k \phi _ { i } + \beta - m \pi ) } { 2 } . \quad ( 4 ) \\
+$$
+
+Ignoring all {ci}i≥1, where c0 is the coefficient of the dominant eigenstate (e.g. ground state) |ϕ0⟩, Eq. (4) reduces to Eq. (3). The error in the estimated phase, ϕ0, due to the neglected contributions from excited states is bounded by (1 - |c0|2 )/|c0|2 in the case data is taken only from k = 1. See e.g. [18] for further discussion.
+
+## A. Parameter selection for k and β
+
+We have yet to specify a method to select the circuit parameters k and β. Existing approaches [17, 18, 46] typically use the heuristic k = ⌈1.25/√VarH[ϕ]⌉ and sample β randomly. Here we introduce an approach for deterministically selecting these parameters.
+
+We first note that it is important to quantitatively assess our posterior uncertainty over the phase ϕ, e.g. to determine a stopping criterion. This might be done by assessing the variance of the posterior distribution. However, for wrapped distributions, the standard variance Var[ϕ] = Ep(ϕ)[(ϕ-Ep(ϕ)[ϕ]) 2 ] is not well-behaved due to the misalignment of the squared error and the wrapped property [47, 49]. As such, two alternative circular metrics are used to assess concentration
+
+$$
+\text {Circular} \colon \ \ & \text {Var} _ { C } [ \phi ] = 1 - | \mathbb { E } _ { p ( \phi ) } [ e ^ { i \phi } ] | \quad \in [ 0 , 1 ] . \\ & \text {Holev} \colon \ \ & \text {Var} _ { H } [ \phi ] = | \mathbb { E } _ { p ( \phi ) } [ e ^ { i \phi } ] | ^ { - 2 } - 1 \quad \in [ 0 , \infty ] . \\
+$$
+
+The Holevo variance is often favoured due to it being unbounded above (akin to the standard variance). For sharply peaked distributions we have that Var[ϕ] ≈ 2VarC[ϕ] and Var[ϕ] ≈ VarH[ϕ].
+
+For both Fourier and von Mises distributions, the circular and Holevo variances are analytically tractable. Moreover, for the circular variance, we can calculate the expected post-measurement posterior circular variance to form a utility function
+
+$$
+U _ { C } ( k , \beta ) = \sum _ { m \in \{ 0 , 1 \} } - \text {Var} _ { C } [ \phi \, | \, m , k , \beta ] p ( m \, | \, k , \beta ) . \quad ( 7 ) \quad \text {tior} \, , \quad \text {scrib} \, \quad \text {to} \, \quad \text {optimum}
+$$
+
+A utility function [50] describes some measure of information gained from an experiment as a function of the experiment parameters which we look to maximise, i.e. kr, βr = argmaxk,β UC(k, β). In this specific case (circular variance utility and either Fourier or von Mises prior) we can analytically maximise the utility and therefore minimise the expected posterior variance (see Appendix A2 for calculations and phayes [48] for implementation).
+
+We numerically compare Bayesian QPE approaches. For a given true phase ϕ∗ ∈ [0, 2π) to be estimated, the measurement outcomes are collected from synthetic experiments, where noiseless QPE circuits are simulated pseudo-randomly directly from the likelihood (3). This process is repeated over 100 different values ϕ∗ . Displayed in Fig. 1 is the mean with min/max error bars of the expected posterior cosine distance from the target angle ϕ∗ . In green, we make a von Mises approximation throughout and choose parameters according to the heuristic above, i.e., k = ⌈1.25/√VarH[ϕ]⌉, β sampled uniformly in [0, 2π). This approach is reminiscent of [17] only with a von Mises distribution, rather than Gaussian, and Bayesian updates implemented via exact momentmatching rather than approximately with Monte Carlo. In orange, we update the true Fourier posterior again with the above heuristic parameter selection, matching the approach of [18]. In blue, we apply the adaptive procedure described above and akin to [46] where we convert the exact posterior to von Mises after reaching Jmax = 2000 coefficients. In this adaptive implementation, we also apply the optimal parameter selection as described above and in Appendix A2. We observe that the optimal parameter selection ensures the Bayesian phase estimation is significantly more accurate, allowing the posterior to efficiently rule out incorrect modes and consistently hone in on the true phase.
+
+> *Generated caption of `2306.16608_-_Demonstrating_Bayesian_Quantum_Phase_Estimation_with_Quantum_Error_Detection_assets/figure-001.png` (ollama:gemma4:26b, prompt sci-v1):* This is a line plot with error bars shown on a logarithmic scale. The y-axis is labeled $\mathbb{E}[1 - \cos(\phi - \phi^*)]$ and ranges from $10^{-6}$ to $10^0$ in increments of $10^{-1}$ using a logarithmic scale. The x-axis is labeled "Number of experiments" and ranges from 0 to 50 with major tick marks at 10, 20, 30, 40, and 50. There are three data series, each represented by circular markers and vertical error bars: "von Mises - heuristic $k, \beta$" (green circles), "Fourier - heuristic $k, \beta$" (orange circles), and "Adaptive - optimal $k, \beta$" (blue triangles). All series show a downward trend as the number of experiments increases. For the green series, the markers are located at x $\approx$ 5, 10, 15, 20, 25, 30, 35, 40, 45, and 50, with y values decreasing from approximately $10^{-1}$ to $10^{-5}$. For the orange series, markers are at x $\approx$ 5, 10, 15, 20, 25, 30, 35, 40, 45, and 50, with y values decreasing from approximately $2 \times 10^{-1}$ to $10^{-4}$. For the blue series, markers are at x $\approx$ 5, 10, 15, 20, 25, 30, 35, 40, 45, and 50, with y values decreasing from approximately $2 \times 10^{-1}$ to $10^{-5}$. The error bars for all series are large, often spanning several orders of magnitude on the y-axis.
+
+## B. Noise-aware likelihood
+
+The likelihood in (3) assumes a noiseless implementation of the circuit (2). In the presence of noise, it is more realistic to consider a noise-aware likelihood of the form [17]
+
+$$
+\text {ed} \quad p ( m \, | \, \phi , k , \beta ) = \frac { 1 + ( 1 - q ) \cos ( k \phi + \beta - m \pi ) } { 2 } , \quad ( 8 )
+$$
+
+where q is an error parameter due to decoherence. The noise-aware likelihood (8) remains in a convenient Fourier form and still admits the same analytical Bayesian updates as (3) [46] as well as the aforementioned optimal parameter selection.
+
+The error parameter q is typically determined as a function of the quantum device specifications and the depth parameter k. Naturally, deeper circuits suffer from an increased error rate. It is therefore common in practice to consider some kmax to limit the depth of the circuits and control the error rate. For example, one finds q = 1 - (1 - p2)N2Q if the noisy QPE circuit UQPE is modelled by the depolarizing channel that maps a density matrix ρ to
+
+$$
+( 1 - p _ { 2 } ) ^ { N _ { 2 Q } } U _ { Q P E } \rho U _ { Q P E } ^ { \dagger } + ( 1 - ( 1 - p _ { 2 } ) ^ { N _ { 2 Q } } ) \frac { I } { 2 ^ { n } } , \quad ( 9 ) \quad \text {circuits} \\
+$$
+
+with the depolarizing error rate p2 of two-qubit gates and the number of two-qubit gates N2Q = O(k) in the circuit.
+
+## III. ERROR DETECTION WITH �6, 4, 2� CODE
+
+Aiming at hardware demonstration of the aforementioned QPE protocol, we consider how to protect our quantum circuit from errors caused by noisy quantum hardware. Quantum error detection (QED) codes provide such protection with limited quantum resources by discarding erroneous executions of quantum circuits. For instance, the �n + 2, n, 2� code for even n is a stabilizer code whose code space is stabilized by X⊗n+2 and Z ⊗n+2 [32-35] (dubbed Iceberg code in [37]). In this work, we employ the code with n = 4, i.e. �6, 4, 2� code, to encode four logical qubits. The logical qubits and two redundant physical qubits, denoted by L := {1, 2, 3, 4} and A := {aX, aZ}, form the six-qubit code on T := L ∪ A. More concretely, the three-qubit QPE circuit, with one dummy qubit appended, is encoded into six physical qubits. We introduce two additional ancillary qubits to carry out fault-tolerant state preparation, syndrome extractions, and final measurement, leading to eight qubits used in total. We denote the two stabilizers by SX := ⊗i∈T Xi and SZ := ⊗i∈T Zi, and their simultaneous eigenstates associated with the eigenvalue +1 define the four-qubit logical space. Reading out -1 upon measuring {SX, SZ} signals the errors that do not commute with the stabilizer operators, and thus such circuit executions are discarded. The undetectable errors by stabilizer (syndrome) measurements lead to logical errors disturbing the encoded system.
+
+The encoded quantum states are manipulated by logical Pauli operators
+
+¯
+
+$$
+\bar { X } _ { i } \coloneqq X _ { i } X _ { a _ { X } } , \ \bar { Z } _ { i } \coloneqq Z _ { i } Z _ { a _ { Z } } , \ \text { for } i \in L , \quad \ \ ( 1 0 ) \quad \text {puter}
+$$
+
+¯
+
+which commute with the stabilizers and obey { X̄i, Zi} = [ X̄i, Z̄j] = 0 for i ̸= j. All the logical operations are compiled to the universal logical gate set, which, in the form of physical gates, is given by 3 [37]
+
+$$
+\{ R _ { P _ { i } P _ { j } } ( \theta ) \, | \, i , j \in T , \, i \neq j , \, P \in \{ X , Y , Z \} \} , \quad ( 1 2 ) \quad \inf d e s
+$$
+
+3 For example, the physical operation RXiXj (θ) corresponds to the following logical operations,
+
+$$
+\begin{cases} R _ { \bar { X } _ { i } } ( \theta ) & ( i \in L , \ j = a _ { X } ) , \\ R _ { \bar { X } _ { i } } \bar { X } _ { j } ( \theta ) & ( i , j \in L ) , \\ R _ { \bar { X } _ { k } } \bar { X } _ { l } ( \theta ) & ( \{ i , k , l , m \} = L , \ j = a _ { Z } ) , \\ R _ { \bar { X } _ { k } } \bar { X } _ { l } \bar { X } _ { m } ( \theta ) & ( \{ k , l , m , n \} = L , \ i = a _ { X } , \ j = a _ { Z } ) . \end{cases}
+$$
+
+where we have defined a Pauli exponential operator RP (θ) := e-iθP/2 for a rotation angle θ and a Pauli operator P.
+
+Figure 2 shows the entire structure of the encoded QPE circuit. See Appendix B for explicit compilation of each component. For concreteness, we let the operator, U k , in the QPE circuit an approximation to e-iHkt with Hamiltonian (1) and t ∈ R by the Lie-Trotter first-order product formula [51],
+
+$$
+U ^ { k } ( t ) & \colon = \left ( e ^ { - i \frac { h _ { 1 } t } { s } Z _ { 1 } } \ e ^ { - i \frac { h _ { 2 } t } { s } Z _ { 2 } } \ e ^ { - i \frac { h _ { 3 } t } { s } Y _ { 1 } Y _ { 2 } } \right ) ^ { k s } \\ & \quad \times e ^ { - i h _ { 4 } k t Z _ { 1 } Z _ { 2 } } e ^ { - i h _ { 5 } k t I } \\ & = e ^ { - i H k t } + \mathcal { O } ( k t ^ { 2 } / s ) .
+$$
+
+Here, the integer s is the number of discretized time steps. Then, the controlled version of the unitary u := e-i h1t s Z1 e-i h2t s Z2 e-i h3t s Y1Y2 is compiled to logical operators, which is denoted by ctrl-u in Fig. 2. The remaining part v := e-ih4ktZ1Z2 e-ih5ktI is similarly compiled to logical operators ctrlu-v and applied at the end because it commutes with u and does not require the Lie-Trotter decomposition.
+
+The encoded circuit starts with encoding the initial state. The two extra ancillary qubits are dedicated to performing the fault-tolerant initialization. We split the logical operation (ctrl-u)ks into ⌊ks/f⌋ blocks. Application of each block is followed by a syndrome measurement to inspect whether the encoded state is stabilized by {SX, SZ}. As soon as one syndrome measurement is read off as -1, the circuit execution is aborted. Furthermore, we insert a stabilizer SX in the middle of each block, which acts on the code space as the identity. However, it suppresses the coherent physical errors in the form of a single-qubit Z rotation accumulating in time (Appendix B3). After all the logical unitary operations are performed, we make a final measurement to ensure that both stabilizers are measured to 1 and read off logical Pauli expectation values.
+
+We remark on some features of the code exploiting the capability of Quantinuum's H1-1 trapped-ion computer [36, 37]. The state preparation, syndrome measurements, and projective measurement are performed in a fault-tolerant manner [38, 52-54]. While non-faulttolerantly implemented, a logical operator RPiPj (θ) (12) is, up to single-qubit Clifford gates, compiled to a single Mølmer-Sørensen (MS) gate, RZiZj (θ), which is natively implemented on the trapped-ion computer with the gate infidelity ∼ 2 × 10-3 [55, 56]. As such, Quantinuum's high-fidelity MS gate operations combined with the allto-all connectivity is expected to lead to logical circuit executions with a low logical error rate. 4 Lastly, the Quantinuum device is equipped with conditional exit, a functionality to immediately abort the circuit execution conditioned on classical registers. Thanks to this feature, one can save runtime by discarding calculations as soon as a syndrome measurement detects errors without running the remaining calculations in vain.
+
+4 Fault-tolerant implementations of logical gates are proposed [33, 53]. We do not pursue such protocols here to avoid extra overheads.
+
+> *Generated caption of `2306.16608_-_Demonstrating_Bayesian_Quantum_Phase_Estimation_with_Quantum_Error_Detection_assets/figure-002.png` (ollama:gemma4:26b, prompt sci-v1):* This is a diagram of a quantum circuit. On the left, there are six horizontal wire lines, labeled from top to bottom as $1, 2, 3, 4, a_X, a_Z, |0\rangle, |0\rangle$. The first four lines ($1$ through $4$) are grouped by large brackets. The $a_X$ and $a_Z$ lines represent auxiliary qubits. The bottom two lines are initialized to $|0\rangle$. The circuit components, from left to right, are: a large rectangular box spanning all six lines labeled "State preparation"; a large bracket encompassing lines $1$ through $4$ containing a rectangular box on line $1$ labeled "$\text{ctrl-}u$"; a large bracket encompassing lines $1$ through $4$ containing a rectangular box spanning all four lines labeled "$S_X$"; a large bracket encompassing lines $1$ through $4$ containing a rectangular box on line $1$ labeled "$\text{ctrl-}\bar{u}$"; a rectangular box spanning lines $a_X$ and $a_Z$ labeled "Syndrome meas."; and a final rectangular box spanning lines $1$ through $4$ containing a rectangular box on line $1$ labeled "$\text{ctrl-}v$," followed by a rectangular box spanning lines $1$ through $4$ labeled "Measurement." Above the large brackets, there are fractional exponents: above the bracket for the "$\text{ctrl-}u$" box is $\frac{f}{2}$, above the bracket for the "$S_X$" box is $\frac{f}{2}$, and above the bracket for the "$\text{ctrl-}v$" box is $\frac{ks}{f}$.
+
+## IV. EXPERIMENTS
+
+We experimentally demonstrate the Bayesian QPE protocol adopting the parameter selection introduced in Sec. IIA with and without the �6, 4, 2� error detection code on the Quantinuum H1-1 quantum computer, after calibrating the individual QPE circuit (2). We calculate the ground state energy of the Hamiltonian (1) with the coefficients (h1, h2, h3, h4, h5) = (-0.3980,-0.3980,-0.1809, 0.0112,-0.3322) hartree. It describes the equilibrium geometry of the hydrogen molecule with the inter-atomic distance RHH = 0.73486 Å. The experimental results shown in this section are calculated using the product formula (13) with t = 0.1π and s = 1 in atomic unit of time. This yields -2.0 × 10-4 hartree of systematic error. The estimated energy E is related to the estimated phase ϕ by E = -ϕ/t.
+
+The present experiments rely on the following software packages. The quantum circuits are prepared with pytket v1.13.2 [57], and executed with pytket-quantinuum v0.15.0. We use InQuanto v2.1.1 [58] and its interface to pyscf v2.2.0 [59] to calculate the coefficients of the spin Hamiltonian (1) on classical computers. The classical pre and post-processing for parameter selection and Bayesian inference are handled by phayes v0.0.3 [48].
+
+## A. Calibration of QPE
+
+We start by calibrating the performance of individual QPE circuits. The benchmark informs us of the quantitative relationship between the circuit depth k and noise level q, which limits the precision of phase estimation. It also showcases that the QED primitive can suppress hardware noise to enable experiments with deeper circuits.
+
+To this end, we evaluate the probability of obtaining the measurement outcome "0" from the QPE circuit (2) in comparison with what one would expect from a noiseless experiment. In order to reduce the source of systematic errors, we use the exact eigenstate |ϕ0⟩ of the operator U with the eigenvalue ϕ0, giving an approximation to the ground state energy of H up to the error of product formula (13).
+
+The unencoded circuit (2) (see B1-B3 for details) contains N (u) 2Q two-qubit (2Q) gates with 5
+
+$$
+N _ { 2 Q } ^ { ( u ) } ( k ) = 5 k + 4 + \Delta _ { i n i t } ,
+$$
+
+where ∆init = 0 (1) when the input state is the HartreeFock state (exact eigenstate). For the experiment with QED, we use the encoded circuit (Fig. 2), which contains N (e) 2Q 2Q gates, 6
+
+$$
+N _ { 2 Q } ^ { ( e ) } ( k ) = 6 k + 1 2 \left \lfloor \frac { k } { f } \right \rfloor + 2 0 + 5 \Delta _ { i n i t } . \quad ( 1 5 )
+$$
+
+5 A ctrl-u uses 5 2Q gates, a ctrl-v has 4 2Q gates, and the preparation of Hartree-Fock (exact ground) state uses 0 (1) 2Q gates.
+
+6 A ctrl-u contains 6 2Q gates, each syndrome measurement uses 12 2Q gates, the preparation of encoded Hartree-Fock (exact ground) state uses 9 (14) 2Q gates, the ctrl-v uses 3 2Q gates, and 8 2Q gates are used in the final measurement.
+
+The frequency of syndrome measurements is fixed to f = 8 throughout the encoded experiments presented in this section.
+
+For calibration the integer k is chosen from {20, 40, 60, 80, 100}, and for each k, we pick β from the four sample points {-kϕ0-π,-kϕ0-π/2,-kϕ0,-kϕ0+ π/2}. We run 500 shots of calculations for each parameter set {k, β} and fit the experimental data with the function,
+
+$$
+f ( k , \beta ; q , \omega ) = \frac { 1 + ( 1 - q ) \cos ( k ( \phi _ { 0 } - \omega ) + \beta ) } { 2 } , \quad ( 1 6 )
+$$
+
+to extract the parameters q and ω that characterize the amplitude damping and the shift in the estimated phase, respectively. In the absence of hardware noise, both q and ω vanish to recover the noiseless likelihood (3). The experimental results with and without QED are shown in Fig. 3. The k-dependence of q obtained from the experiments with unencoded circuits is captured by the following function,
+
+$$
+q ( k ; p _ { 2 } ) = 1 - ( 1 - p _ { 2 } ) ^ { N _ { 2 Q } ^ { ( u ) } ( k ) } , \quad ( 1 7 )
+$$
+
+with p2 = 1.6 × 10-3 . Equation (17) is derived assuming the depolarizing noise model (9). The parameter p2 gives a rough estimate of average two-qubit gate infidelity, whose order of magnitude matches the value reported in [56]. While q rapidly grows as the circuit depth k increases in the unencoded case, it is well suppressed in the encoded case thanks to the protection by the �6, 4, 2� code. As presented in Appendix C, for both unencoded and encoded benchmarks, the phase shifts ω are of order 10-3 (Fig. C1). In this work, we omit ω in the noiseaware likelihood function (8) in the Bayesian QPE and leave it as future work to explore coherent error mitigation techniques [60-64].
+
+The suppression of error rate with QED is accomplished at the cost of discarding faulty computations that are detected by syndrome measurements. The discard rate d, the ratio of the number of discarded circuits to the total number of executed circuits, with respect to the circuit depth k is shown in Fig. 4. The same error model (17),
+
+$$
+d ( k ; p _ { 2 } ) = 1 - ( 1 - p _ { 2 } ) ^ { N _ { 2 Q } ^ { ( e ) } ( k ) } , \quad ( 1 8 ) \quad \ F i g
+$$
+
+with p2 = 1.6 × 10-3 recovers the experimentally obtained discard rate. It is, however, not obvious that the discard rate d is explained by (18), which is based on the depolarizing noise model. The increase of q of (16) in the unencoded case mainly stems from incoherent errors. On the other hand, the errors detected by the QED contain all the single-qubit errors, and thus, the discard rate is generally influenced by a wider class of errors. However, we inserted an X-stabilizer SX in the middle of each block in the encoded circuit (Fig. 2) to suppress the dominant source of coherent errors. While SX acts as the identity on logical states, we confirm that the stabilizer insertion suppresses coherent error, which in turn reduces d and q as further discussed in Appendix B3 (see Fig. B1). Consequently, the discard rate in the current encoded experiments is dominated by incoherent errors and is well captured by the depolarizing model.
+
+> *Generated caption of `2306.16608_-_Demonstrating_Bayesian_Quantum_Phase_Estimation_with_Quantum_Error_Detection_assets/figure-003.png` (ollama:gemma4:26b, prompt sci-v1):* This is a line and scatter plot. The vertical axis is labeled $q$ and ranges from $0.0$ to $0.7$ with grid lines at intervals of $0.1$. The horizontal axis is labeled $k$ and has values $20, 40, 60, 80, 100$. The plot contains three data series: a solid black line labeled "Noise model", black triangles with error bars labeled "Unencoded", and red circles with error bars labeled "Encoded (error detection)". The "Noise model" curve is a smooth, upward-sloping line that starts at approximately $q \approx 0.08$ for $k=20$ and reaches approximately $q \approx 0.58$ for $k=100$. The "Unencoded" data points follow the "Noise model" curve closely: at $k=20, q \approx 0.1$; at $k=40, q \approx 0.3$; at $k=60, q \approx 0.42$; at $k=80, q \approx 0.48$; and at $k=100, q \approx 0.6$. The "Encoded (error detection)" data points are near zero across the entire range of $k$, with values fluctuating around $q \approx 0.01$ to $0.03$ and error bars extending slightly above and below these points.
+
+> *Generated caption of `2306.16608_-_Demonstrating_Bayesian_Quantum_Phase_Estimation_with_Quantum_Error_Detection_assets/figure-004.png` (ollama:gemma4:26b, prompt sci-v1):* This is a line plot with data points and error bars. The x-axis is labeled $k$ and ranges from approximately 10 to 110. The y-axis is labeled $d$ and ranges from 0.1 to 0.8. A black solid line represents the "Noise model" according to the legend. There are five red data points with vertical error bars representing "Encoded (error detection)" as indicated by the legend. The data points are approximately located at $(k, d)$ values of $(20, 0.25)$, $(40, 0.41)$, $(60, 0.52)$, $(80, 0.64)$, and $(100, 0.69)$. The "Noise model" line is a smooth, increasing curve that passes through or very close to these points. The plot includes a gray grid.
+
+## B. Bayesian QPE
+
+Having calibrated the performance of QPE circuits, we turn to the Bayesian QPE experiments with and without QED. As an input state |ϕ⟩ of QPE, we prepare the Hartree-Fock state |00⟩. The Hartree-Fock state provides the mean-field approximation to the ground state of H and is commonly used in computational chemistry to evaluate the electronic correlation energy. For the Hamiltonian given at the beginning of the section, the fidelity between the Hartree-Fock state and the exact ground state is 0.981. Therefore, it is not expected that our demonstration of Bayesian QPE is significantly influenced by contamination from the other eigenstates. In Appendix A 4, we numerically confirm this by conducting noiseless QPE simulations.
+
+> *Generated caption of `2306.16608_-_Demonstrating_Bayesian_Quantum_Phase_Estimation_with_Quantum_Error_Detection_assets/figure-005.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains two side-by-side line plots, labeled (a) and (b), showing energy differences versus a distance $R$. Both plots have an x-axis labeled $\bar{R}$ with a scale from 0 to 120 and a y-axis labeled $E - E_0 \text{ [hartree]}$ ranging from -0.2 to 1.2. A horizontal red line is drawn at $y = 0$ in both plots. Each plot contains a primary series of data points with error bars that oscillate and decay toward zero as $\bar{R}$ increases. Plot (a) shows the data points starting with large positive values at low $\bar{R}$, crossing the red line around $\bar{R} = 20$, oscillating below the line, and approaching zero from below. Plot (b) shows data points starting with large positive values, crossing the red line around $\bar{R} = 25$, and approaching zero from below. Both plots include an inset magnified view of the region where $\bar{R}$ is between approximately 60 and 120. In plot (a), the inset shows the data points oscillating slightly below the $y = 0$ red line. In plot (b), the inset shows the data points oscillating slightly above the $y = 0$ red line. Both insets feature a vertical dashed magenta line located at $\bar{R} \approx 70$ in (a) and $\bar{R} \approx 97$ in (b).
+
+The number of Fourier coefficients in (6) is set to Jmax = 2000, and the maximum depth is specified by kmax = 120. The number of 2Q gates in the unencoded QPE circuit is up to N (u) 2Q (kmax) = 604, while it is as many as N (e) 2Q (kmax) = 920 in the encoded circuit with the expected discard rate d(kmax; p2) = 0.77. We use p2 = 1.6×10-3 throughout the subsection.
+
+The estimated energy E is plotted against the number of circuit executions in Fig. 5. To take into account the discarded experiments in the QPE with QED, we use the rescaled number of experiments given by
+
+$$
+\overline { R } \colon = \sum _ { r = 1 } ^ { R } n _ { s h o t s } ( k _ { r } ) , \ \ n _ { s h o t s } ( k _ { r } ) \colon = \frac { 1 } { 1 - d ( k _ { r } ; p _ { 2 } ) } , \ ( 1 9 ) \quad \text {are} \ \ g i n g
+$$
+
+where kr stands for the depth of the circuit in the rth round of the Bayesian QPE experiment, nshots(kr) is an average number of experiments until the circuit of depth kr is executed without any error detected, and R is the number of Bayesian updates (5). The calculated energies E with the noise-aware likelihood is -1.185 ± 0.009 hartree after 125 Bayesian updates of distributions for the exact ground state energy E0 = -1.1375 hartree. On the other hand, with the QED, we find E = -1.131 ± 0.007 hartree after 44 Bayesian updates. There are two main sources of the systematic error observed in the unencoded experiment [Fig. 5(a)]. One is the coherent errors that our noise-aware likelihood function (8) fails to capture. It implies that, with the use of the noise-aware likelihood based on better characterizations of coherent errors, the precision can be further improved. This also shows the benefit of using the QED, which does not require aggressive characterization of hardware noise. The other source is that the unencoded experiment has less informative measurements (larger error parameter q of (8)), and therefore, the adaptive Bayesian inference scheme necessarily converts to a von Mises approximation earlier than in the encoded case for the same Jmax. This leads to a higher probability of algorithmic error as observed in the synthetic experiments (Fig. 1).
+
+Finally, we remark that in the encoded experiments the conditional exit operation provided by the H1 computer is used to reduce the total runtime. The feature allows one to abort the calculation as soon as the error is detected by a syndrome measurement. For example, provided the encoded QPE circuits of depth k = {40, 80, 120}, the ratios of the average number of 2Q gates before the exit to the total number of 2Q gates are given by {0.83, 0.67, 0.56}. This ratio becomes 0.60 if we accumulate the average and total number of 2Q gates along the Bayesian QPE experiment. It should be, however, noted that whether the reduction of depth by the conditional exit leads to the reduction of actual runtime depends on various other overheads.
+
+## V. CONCLUSION
+
+We conducted QPE experiments on the hydrogen molecule Hamiltonian to estimate its ground state energy using the Quantinuum H1-1 trapped-ion quantum device. To the best of our knowledge, it is the first experiment where the QPE on logical qubits is applied to a quantum chemistry problem. We note that [44, 45] addressed the same problem using the variational quantum eigensolver and the �4, 2, 2� code. We obtained good agreement with the exact ground state energy, which is due to both the algorithmic advances we have applied and the capability of the H1-1 device.
+
+To make the best use of the limited circuit volume that can be reliably run, we employed the Bayesian approach to the QPE with an enhanced parameter selection which we have demonstrated to have significantly improved robustness properties. Furthermore, we tested two approaches to cope with the hardware noise and imperfections. In the first approach, we adopted the noiseaware likelihood function for Bayesian update, assuming that the depolarizing channel models the dominant source of errors. We calculated the energy with the error 0.048 ± 0.009 hartree using the QPE circuit containing up to 604 two-qubit gates. In the second approach, the QPE circuit is encoded with the �6, 4, 2� quantum error detection code. In the encoded circuit, a simple coherent error mitigation via X-stabilizer insertions is applied to achieve lower discard and logical error rates. With the encoded circuits, the ground state energy was estimated within 0.006 ± 0.007 hartree of the exact value. The largest circuit contains 920 physical two-qubit gates with the discard rate ∼ 77%. While our experimental results show a slightly better performance with the QED, there is room for improvement in both approaches. For instance, more elaborate characterizations of hardware noise and error mitigation strategies can be deployed [63, 65, 66]. This allows one to alleviate the coherent errors which were omitted in our noise-aware likelihood function for the unencoded experiment [60-62, 64]. The error mitigation also helps the encoded experiment by reducing the discard rate and logical error rate.
+
+In the present work, we focused on a specific QPE algorithm, taking advantage of the capability of the device, for which the error detection code is highly optimized. In the future, it will be interesting to investigate other types of QPE algorithms such as the one suggested in [21, 22]
+
+to further improve the performance of ground state energy estimation towards its application to more practical problems.
+
+## DATA AVAILABILITY
+
+The data presented in this paper are available from the corresponding author upon reasonable request.
+
+## CODE AVAILABILITY
+
+The codes to reproduce the data presented in this paper are available from the corresponding author upon reasonable request.
+
+## ACKNOWLEDGMENTS
+
+We thank David Amaro, Hussain Anwar, Charles H. Baldwin, Marcello Benedetti, Yi-Hsiang Chen, Silas Dilkes, David Hayes, Steven Herbert, Dominic G. Lucchetti, Karl Mayer, Brian Neyenhuis, Matthias Rosenkranz, Ciarán Ryan-Anderson, Christopher N. Self, Andrew Tranter, Ifan Williams, and Yasuyoshi Yonezawa for useful discussions and comments on an earlier version of the manuscript.
+
+## AUTHOR CONTRIBUTIONS
+
+K.Y., S.D. and Y.K. conceived and designed the study. K.Y. and S.D. performed numerical studies. K.Y. carried out experiments on quantum hardware. All authors analysed the data, interpreted the results, and wrote the manuscript.
+
+## COMPETING INTEREST
+
+The authors declare no competing interests.
+
+- [1] A. Aspuru-Guzik, A. D. Dutoi, P. J. Love, and M. HeadGordon, Simulated quantum computation of molecular energies, Science 309, 1704 (2005).
+- [2] Y. Cao, J. Romero, J. P. Olson, M. Degroote, P. D. Johnson, M. Kieferová, I. D. Kivlichan, T. Menke, B. Peropadre, N. P. D. Sawaya, S. Sim, L. Veis, and A. AspuruGuzik, Quantum chemistry in the age of quantum computing, Chem. Rev. 119, 10856 (2019).
+- [3] S. McArdle, S. Endo, A. Aspuru-Guzik, S. C. Benjamin, and X. Yuan, Quantum computational chemistry, Rev. Mod. Phys. 92, 015003 (2020).
+- [4] J. Liu, Y. Fan, Z. Li, and J. Yang, Quantum algorithms for electronic structures: basis sets and boundary conditions, Chem. Soc. Rev. 51, 3263 (2022).
+- [5] T. Helgaker, P. Jorgensen, and J. Olsen, Molecular Electronic-Structure Theory (Wiley, New York, 2014).
+- [6] J. Kim and D. C. Rees, Structural models for the metal centers in the nitrogenase molybdenum-iron protein, Science 257, 1677 (1992).
+- [7] Y. Umena, K. Kawakami, J.-R. Shen, and N. Kamiya, Crystal structure of oxygen-evolving photosystem II at a resolution of 1.9 Å, Nature 473, 55 (2011).
+- [8] A. Y. Kitaev, Quantum measurements and the abelian stabilizer problem (1995), arXiv:quant-ph/9511026.
+- [9] A. Y. Kitaev, A. Shen, and M. N. Vyalyi, Classical and quantum computation, 47 (American Mathematical Soc., 2002).
+- [10] R. Cleve, A. Ekert, C. Macchiavello, and M. Mosca, Quantum algorithms revisited, Proc. Roy. Soc. Lond. A
+
+454, 339 (1998).
+
+- [11] D. S. Abrams and S. Lloyd, Quantum algorithm providing exponential speed increase for finding eigenvalues and eigenvectors, Phys. Rev. Lett. 83, 5162 (1999).
+- [12] M. A. Nielsen and I. Chuang, Quantum computation and quantum information (2002).
+- [13] E. Knill, G. Ortiz, and R. D. Somma, Optimal quantum measurements of expectation values of observables, Phys. Rev. A 75, 012328 (2007).
+- [14] B. L. Higgins, D. W. Berry, S. D. Bartlett, H. M. Wiseman, and G. J. Pryde, Entanglement-free Heisenberglimited phase estimation, Nature 450, 393 (2007).
+- [15] M. Dobšíček, G. Johansson, V. Shumeiko, and G. Wendin, Arbitrary accuracy iterative quantum phase estimation algorithm using a single ancillary qubit: A two-qubit benchmark, Phys. Rev. A 76, 030306 (2007).
+- [16] K. M. Svore, M. B. Hastings, and M. Freedman, Faster phase estimation (2013), arXiv:1304.0741 [quant-ph].
+- [17] N. Wiebe and C. Granade, Efficient Bayesian phase estimation, Phys. Rev. Lett. 117, 010503 (2016).
+- [18] T. E. O'Brien, B. Tarasinski, and B. M. Terhal, Quantum phase estimation of multiple eigenvalues for small-scale (noisy) experiments, New J. Phys. 21, 023022 (2019).
+- [19] R. D. Somma, Quantum eigenvalue estimation via time series analysis, New J. Phys. 21, 123025 (2019).
+- [20] K. Sugisaki, C. Sakai, K. Toyota, K. Sato, D. Shiomi, and T. Takui, Bayesian phase difference estimation: a general quantum algorithm for the direct calculation of energy gaps, Phys. Chem. Chem. Phys. 23, 20152 (2021).
+- [21] L. Lin and Y. Tong, Heisenberg-limited ground-state energy estimation for early fault-tolerant quantum computers, PRX Quantum 3, 010318 (2022).
+- [22] K. Wan, M. Berta, and E. T. Campbell, Randomized quantum algorithm for statistical phase estimation, Phys. Rev. Lett. 129, 030503 (2022).
+- [23] P. J. J. O'Malley, R. Babbush, I. D. Kivlichan, J. Romero, J. R. McClean, R. Barends, J. Kelly, P. Roushan, A. Tranter, N. Ding, B. Campbell, Y. Chen, Z. Chen, B. Chiaro, A. Dunsworth, A. G. Fowler, E. Jeffrey, E. Lucero, A. Megrant, J. Y. Mutus, M. Neeley, C. Neill, C. Quintana, D. Sank, A. Vainsencher, J. Wenner, T. C. White, P. V. Coveney, P. J. Love, H. Neven, A. Aspuru-Guzik, and J. M. Martinis, Scalable quantum simulation of molecular energies, Phys. Rev. X 6, 031007 (2016).
+- [24] S. Paesani, A. A. Gentile, R. Santagati, J. Wang, N. Wiebe, D. P. Tew, J. L. O'Brien, and M. G. Thompson, Experimental bayesian quantum phase estimation on a silicon photonic chip, Phys. Rev. Lett. 118, 100503 (2017).
+- [25] N. S. Blunt, L. Caune, R. Izsák, E. T. Campbell, and N. Holzmann, Statistical phase estimation and error mitigation on a superconducting quantum processor (2023), arXiv:2304.05126 [quant-ph].
+- [26] D. J. Wineland, C. Monroe, W. M. Itano, D. Leibfried, B. E. King, and D. M. Meekhof, Experimental issues in coherent quantum state manipulation of trapped atomic ions, J. Res. Natl. Inst. Stand. Tech. 103, 259 (1998), arXiv:quant-ph/9710025.
+- [27] J. P. Home, D. Hanneke, J. D. Jost, J. M. Amini, D. Leibfried, and D. J. Wineland, Complete methods set for scalable ion trap quantum information processing, Science 325, 1227 (2009).
+- [28] C. Monroe and J. Kim, Scaling the ion trap quantum processor, Science 339, 1164 (2013).
+- [29] V. Kaushal, B. Lekitsch, A. Stahl, J. Hilder, D. Pijn, C. Schmiegelow, A. Bermudez, M. Müller, F. SchmidtKaler, and U. Poschinger, Shuttling-based trapped-ion quantum information processing, AVS Quantum Science 2, 014101 (2020).
+- [30] J. M. Pino, J. M. Dreiling, C. Figgatt, J. P. Gaebler, S. A. Moses, M. S. Allman, C. H. Baldwin, M. Foss-Feig, D. Hayes, K. Mayer, C. Ryan-Anderson, and B. Neyenhuis, Demonstration of the trapped-ion quantum CCD computer architecture, Nature 592, 209 (2021).
+- [31] S. Bravyi, J. M. Gambetta, A. Mezzacapo, and K. Temme, Tapering off qubits to simulate fermionic hamiltonians (2017).
+- [32] A. M. Steane, Simple quantum error correcting codes, Phys. Rev. A 54, 4741 (1996).
+- [33] D. Gottesman, A Theory of fault tolerant quantum computation, Phys. Rev. A 57, 127 (1998).
+- [34] E. Knill, Fault-tolerant postselected quantum computation: Schemes, (2004), arXiv:quant-ph/0402171.
+- [35] E. Knill, Fault-tolerant postselected quantum computation: Threshold analysis, (2004), arXiv:quantph/0404104.
+- [36] C. Ryan-Anderson et al., Implementing Fault-tolerant Entangling Gates on the Five-qubit Code and the Color Code, (2022), arXiv:2208.01863 [quant-ph].
+- [37] C. N. Self, M. Benedetti, and D. Amaro, Protecting Expressive Circuits with a Quantum Error Detection Code (2022), arXiv:2211.06703 [quant-ph].
+- [38] N. M. Linke, M. Gutierrez, K. A. Landsman, C. Figgatt, S. Debnath, K. R. Brown, and C. Monroe, Fault-tolerant quantum error detection, Science Advances 3, e1701074 (2017).
+- [39] M. Takita, A. W. Cross, A. D. Córcoles, J. M. Chow, and J. M. Gambetta, Experimental demonstration of faulttolerant state preparation with superconducting qubits, Phys. Rev. Lett. 119, 180501 (2017).
+- [40] C. Vuillot, Is error detection helpful on ibm 5q chips? (2018).
+- [41] J. Roffe, D. Headley, N. Chancellor, D. Horsman, and V. Kendon, Protecting quantum memories using coherent parity check codes, Quantum Science and Technology 3, 035010 (2018).
+- [42] D. Willsch, M. Willsch, F. Jin, H. De Raedt, and K. Michielsen, Testing quantum fault tolerance on small systems, Phys. Rev. A 98, 052348 (2018).
+- [43] R. Harper and S. T. Flammia, Fault-tolerant logical gates in the ibm quantum experience, Phys. Rev. Lett. 122, 080504 (2019).
+- [44] M. Urbanek, B. Nachman, and W. A. de Jong, Error detection on quantum computers improving the accuracy of chemical calculations, Phys. Rev. A 102, 022427 (2020).
+- [45] S. Zhang, C. D. Hill, and M. Usman, Comparative analysis of error mitigation techniques for variational quantum eigensolver implementations on IBM quantum system, (2022), arXiv:2206.07907 [quant-ph].
+- [46] E. van den Berg, Efficient Bayesian phase estimation using mixed priors, Quantum 5, 469 (2021).
+- [47] P. Jupp and K. Mardia, Directional Statistics, Wiley Series in Probability and Statistics (Wiley, 2009).
+- [48] S. Duffield, phayes: A python package for easy and efficient bayesian quantum phase estimation (2023).
+
+- [49] D. Berry, Adaptive phase measurements (2002), arXiv:quant-ph/0202136.
+- [50] C. E. Granade, C. Ferrie, N. Wiebe, and D. G. Cory, Robust online hamiltonian learning, New Journal of Physics 14, 103013 (2012).
+- [51] S. Lloyd, Universal quantum simulators, Science 273, 1073 (1996).
+- [52] D. Gottesman, Quantum fault tolerance in small experiments, (2016), arXiv:1610.03507 [quant-ph].
+- [53] R. Chao and B. W. Reichardt, Fault-tolerant quantum computation with few qubits, npj Quantum Information 4, 1 (2017).
+- [54] R. Chao and B. W. Reichardt, Quantum error correction with only two extra qubits, Phys. Rev. Lett. 121, 050502 (2018).
+- [55] K. Mølmer and A. Sørensen, Multiparticle entanglement of hot trapped ions, Phys. Rev. Lett. 82, 1835 (1999).
+- [56] System Model H1 Powered by Honeywell, accessed on June 7th, 2023.
+- [57] S. Sivarajah, S. Dilkes, A. Cowtan, W. Simmons, A. Edgington, and R. Duncan, t|ket⟩: a retargetable compiler for NISQ devices, Quantum Sci. Technol. 6, 014003 (2020).
+- [58] A. Tranter, C. Di Paola, D. Muñoz Ramo, D. Z. Manrique, D. Gowland, E. Plekhanov, G. GreeneDiniz, G. Christopoulou, G. Prokopiou, H. D. J. Keen, I. Polyak, I. T. Khan, J. Pilipczuk, J. J. M. Kirsopp, K. Yamamoto, M. Tudorovskaya, M. Krompiec, M. Sze, and N. Fitzpatrick, InQuanto: Quantum Computational Chemistry (2022).
+- [59] Q. Sun, T. C. Berkelbach, N. S. Blunt, G. H. Booth, S. Guo, Z. Li, J. Liu, J. D. McClain, E. R. Sayfutyarova, S. Sharma, S. Wouters, and G. K.-L. Chan, P y SCF: the python-based simulations of chemistry framework, Wiley Interdiscip. Rev. Comput. Mol. Sci. 8, e1340 (2018).
+- [60] D. A. Lidar, Review of decoherence-free subspaces, noiseless subsystems, and dynamical decoupling, in Quantum Information and Computation for Chemistry (John Wiley & Sons, Ltd, 2014) pp. 295-354.
+- [61] D. Suter and G. A. Álvarez, Colloquium: Protecting quantum information against environmental noise, Rev. Mod. Phys. 88, 041001 (2016).
+- [62] J. J. Wallman and J. Emerson, Noise tailoring for scalable quantum computation via randomized compiling, Phys. Rev. A 94, 052325 (2016).
+- [63] Z. Cai, R. Babbush, S. C. Benjamin, S. Endo, W. J. Huggins, Y. Li, J. R. McClean, and T. E. O'Brien, Quantum Error Mitigation, (2022), arXiv:2210.00921 [quant-ph].
+- [64] Y. Gu, Y. Ma, N. Forcellini, and D. E. Liu, Noise-resilient phase estimation with randomized compiling, (2022), arXiv:2208.04100 [quant-ph].
+- [65] K. Temme, S. Bravyi, and J. M. Gambetta, Error mitigation for short-depth quantum circuits, Phys. Rev. Lett. 119, 180509 (2017).
+- [66] Y. Li and S. C. Benjamin, Efficient variational quantum simulator incorporating active error minimization, Phys. Rev. X 7, 021050 (2017).
+- [67] A. Meurer, C. P. Smith, M. Paprocki, O. Čertík, S. B. Kirpichev, M. Rocklin, A. Kumar, S. Ivanov, J. K. Moore, S. Singh, T. Rathnayake, S. Vig, B. E. Granger, R. P. Muller, F. Bonazzi, H. Gupta, S. Vats, F. Johansson, F. Pedregosa, M. J. Curry, A. R. Terrel, v. Roučka, A. Saboo, I. Fernando, S. Kulal, R. Cimrman, and A. Scopatz, Sympy: symbolic computing in python,
+
+PeerJ Comput. Sci. 3, e103 (2017).
+
+## Supplementary information
+
+## Appendix A: Details on Bayesian phase estimation
+
+## 1. Bayesian updates
+
+Recall the general phase estimation likelihood (8)
+
+$$
+p ( m \, | \, \phi , k , \beta ) = \frac { 1 + ( 1 - q ) \cos ( k \phi + \beta - m \pi ) } { 2 } .
+$$
+
+In the following, we describe the process of a single Bayesian update for converting a prior distribution p(ϕ) into a posterior distribution p(ϕ | m) ∝ p(ϕ)p(m | ϕ, k, β) on receipt of a measurement m. For brevity we describe only a single update, however the single update generalises trivially by iteratively setting the prior to the posterior from the previous update, as described in Section II.
+
+## Fourier Distribution
+
+Suppose the prior is represented by a Fourier distribution
+
+$$
+p ( \phi ) = \frac { 1 } { 2 \pi } + \sum _ { j = 1 } ^ { J } c _ { j } \cos ( j \phi ) + s _ { j } \sin ( j \phi ) ,
+$$
+
+where {cj, sj}Jj=1 are the distribution coefficients and cj = sj = 0 ∀j recovers the uniform distribution (a natural initial prior).
+
+As noted in [18] p(ϕ) is conjugate for the likelihood p(m | ϕ, k, β) meaning the posterior takes the same Fourier form (with J → J + k) and can be calculated analytically using the standard trigonometric product-sum formulae.
+
+We note that the circular moments of a Fourier distribution are also tractable
+
+$$
+\mathcal { M } _ { j } \colon = & \ \mathbb { E } _ { p ( \phi ) } [ e ^ { i j \phi } ] = \mathbb { E } _ { p ( \phi ) } [ \cos ( j \phi ) + i \sin ( j \phi ) ] , \\ & = \pi ( c _ { j } + i s _ { j } ) .
+$$
+
+$$
+v o n \ M i s e s
+$$
+
+In [46], an adaptive procedure was developed where the Fourier posterior was converted to a wrapped Gaussian distribution when the number of coefficients became prohibitively large. In this work, we advocate for the use of a von Mises distribution over the wrapped Gaussian as the von Mises distribution is the maximum entropy distribution for a wrapped random variable (with specified M1) and has a tractable density function
+
+$$
+p ( \phi ) = \frac { \exp [ \kappa \cos ( \phi - \mu ) ] } { 2 \pi I _ { 0 } ( \kappa ) } ,
+$$
+
+where µ is the mean, κ is a precision parameter and Ij is a modified Bessel function of the first kind and order j ∈ N.
+
+Note that for sharply peaked distributions we have a Gaussian approximation p(ϕ) ≈ N(ϕ | µ, √1/κ).
+
+As with Fourier distributions, the circular moments are tractable
+
+$$
+\mathcal { M } _ { j } = \frac { I _ { | j | } ( \kappa ) } { I _ { 0 } ( \kappa ) } e ^ { i j \mu } = \frac { I _ { | j | } ( \kappa ) } { I _ { 0 } ( \kappa ) } ( \cos ( j \mu ) + i \sin ( j \mu ) ) .
+$$
+
+This identity can be used to find the first circular moment M1 of the posterior p(ϕ | m) ∝ p(ϕ)p(m | ϕ, k, β). The von Mises distribution is not conjugate for p(m | ϕ, k, β) and therefore the true posterior is not von Mises. However, we can do an approximate moment-matching update (as in [17, 46]) where we find an approximate posterior with unique parameters µ, κ that give a von Mises distribution with first circular moment M1 matching that of the true posterior p(ϕ | m). This procedure resorts to inverting (A2) which can be done efficiently numerically.
+
+We can use the same moment-matching technique to convert a Fourier distribution into a von Mises distribution (with matching M1). All implementation details can be found in phayes [48].
+
+Figure A1. Example posteriors for the three Bayesian phase estimation approaches discussed in IIA and Figure 1. The posteriors are from noiseless synthetic phases estimation experiments and are displayed after five experiments have been measured. Each curve represents one of five independent runs with a different pseudo-random seed. Note that with just five measurements the adaptive approach never converts to von Mises.
+
+> *Generated caption of `2306.16608_-_Demonstrating_Bayesian_Quantum_Phase_Estimation_with_Quantum_Error_Detection_assets/figure-006.png` (ollama:gemma4:26b, prompt sci-v1):* This is a scientific figure consisting of three side-by-side line plots sharing a common y-axis labeled $p(\phi \mid m_{1:5})$ and individual x-axes labeled $\phi$ with ticks at $0$, $\pi$, and $2\pi$. The plots compare different probability density functions. The first plot (left) has a legend "von Mises - heuristic $k, \beta$" represented by several green lines of varying shades; one solid green line forms a sharp peak near $\phi = \pi/2$, while other lighter green lines show broader, lower peaks at different positions. A solid vertical red line is placed at approximately $\phi = \pi/2$. The second plot (middle) has a legend "Fourier - heuristic $k, \beta$" represented by several orange lines; one solid orange line has a high, narrow peak near $\phi = \pi/2$, while other lighter orange lines show varied, broader peaks. A solid vertical red line is placed at approximately $\phi = \pi/2$. The third plot (right) has a legend "Fourier - optimal $k, \beta$" represented by light blue and dark blue lines; the dark blue line shows a sharp peak slightly to the right of the red line, and the light blue line shows a slightly broader peak. A solid vertical red line is placed at approximately $\phi = \pi/2$. In all three plots, the red line represents the "True $\phi$" as indicated in the third plot's legend.
+
+## 2. Parameter selection
+
+As described in II A, we consider the specific (but well-motivated) choice of negative circular variance utility function
+
+$$
+U _ { C } ( k , \beta ) = \sum _ { m \in \{ 0 , 1 \} } - \text {Var} _ { C } [ \phi \, | \, m , k , \beta ] p ( m \, | \, k , \beta ) .
+$$
+
+where VarC[ϕ | m, k, β] = 1 - |Ep(ϕ|m,k,β)[eiϕ ]| ∈ [0, 1]. The goal is to find k∗ , β∗ = argmaxk,β UC(k, β).
+
+It can be shown using (A1-A2) that for both a Fourier or von Mises prior, the posterior first circular moment takes the form
+
+¯
+
+¯
+
+$$
+\mathbb { E } _ { p ( \phi | m , k , \beta ) } [ e ^ { i \phi } ] = \frac { \bar { a } + \bar { b } \cos ( \beta - m \pi ) + \bar { c } \sin ( \beta - m \pi ) } { p ( m \ | \ k , \beta ) } + i \frac { \bar { d } + \bar { e } \cos ( \beta - m \pi ) + \bar { f } \sin ( \beta - m \pi ) ) } { p ( m \ | \ k , \beta ) } ,
+$$
+
+¯
+
+where ā, . . . , f are real values independent of β but dependent on k.
+
+Thus the circular variance utility for a given value of k becomes
+
+$$
+U _ { C } ( \beta \, | \, k ) = - 1 + \sqrt { f ^ { + } ( \beta ) } + \sqrt { f ^ { - } ( \beta ) } ,
+$$
+
+where f ±(β) = a ± b cos(β) ± c sin(β) + d cos(2β) + e sin(2β) for new real-valued, k dependent coefficients a, . . . , e.
+
+This equation can be maximised in β analytically by considering ∂βUC(β | k) = 0. After multiplying by
+
+√f + (β)f -(β), squaring both sides (twice) and simplifying terms, the result is a cubic polynomial in cos 2 (β) which can be solved easily. The roots can then be checked to find the maximiser. A sympy [67] document listing these equations explicitly can be found in phayes [48].
+
+The aforementioned procedure maximises UC(β | k), i.e. for a given k. For a Fourier prior this process can simply be repeated for each k ∈ {1, . . . , J} maintaining the same O(J) complexity of a single posterior update. In the von Mises case, we find that checking a small range of k on either side of VarH[ϕ]- 1 2 finds the maximiser.
+
+## 3. Example posteriors
+
+In Fig. A1, we display some example posteriors for a small synthetic phase experiment where five measurements are collected. Observe that the optimal parameter selection allows the posterior to quickly hone in on the correct phase, whilst the heuristic parameter with the analytical Fourier posterior struggles to rule out incorrect modes. The von Mises approach (and similarly Gaussian-based approaches) are uni-modal by design and therefore have to retain a large variance. We also observe over the repeated experiments (and in Fig. 1) that the uni-modal assumption can result in the correct phase being missed entirely. The optimal parameter selection's ability to eliminate incorrect modes means that we more robustly converge to the correct phase and also that the posterior is better approximated by a von Mises distribution when the adaptive procedure reaches conversion time.
+
+Figure A2. Energy estimate plotted along the number of experiments calculated with a noiseless quantum simulator. The four panels correspond to different runs with the same computational setup as those given in Sec. IVB.
+
+> *Generated caption of `2306.16608_-_Demonstrating_Bayesian_Quantum_Phase_Estimation_with_Quantum_Error_Detection_assets/figure-007.png` (ollama:gemma4:26b, prompt sci-v1):* A figure containing four separate panels arranged in a $2 \times 2$ grid, each being a line plot with error bars and an inset plot. All four panels share identical axis labels and ranges. The y-axis for the main plots is labeled $E - E_0 \text{ [hartree]}$ and ranges from $-0.2$ to $1.2$. The x-axis for the main plots is labeled $R$ and ranges from $0$ to $50$. A horizontal red line is drawn at $E - E_0 = 0$ in all plots. Each plot features black data points connected by thin lines with vertical error bars. The error bars are large for small $R$ and decrease in size as $R$ increases. Each plot includes an inset showing a zoomed-in view of the $R$ range from $25$ to $50$, with a y-axis ranging from $-0.05$ to $0.05$. In the top-left panel, the data points approach zero from above and slightly dip below the red line around $R=35$ before approaching zero from below. In the top-right panel, the data points approach zero from below. In the bottom-left panel, the data points approach zero from below. In the bottom-right panel, the data points approach zero from below. All plots show a trend where the values and error bars decay toward zero as $R$ increases.
+
+## 4. Noiseless simulation of Bayesian QPE
+
+To show how much energy estimates vary among different instances of Bayesian QPE experiments, we exemplify the results from the noiseless quantum simulator. The computational setup is the same as that of the Bayesian QPE given in Sec. IVB. The estimated energies E from the Bayesian QPE simulations agree with the exact ground state energy E0 within ±√VarH[E] after 50 Bayesian updates as shown in Fig. A2. Such a reliable convergence is due to the optimal parameter selection method. The results also confirm that the use of Hartree-Fock state as an input does not lead to significant systematic error in estimating the ground state energy with the precision we require.
+
+## Appendix B: Encoding and compiling the QPE circuit with �6, 4, 2� code
+
+Recall that the unencoded QPE circuit (2) is given by
+
+Note the fourth qubit is absent in the experiments with unencoded circuits, but it is added so that the circuit is encoded with �n+2, n, 2� code, where n has to be even. The reason why it is initialized to |+⟩ will become clear later
+
+> *Generated caption of `2306.16608_-_Demonstrating_Bayesian_Quantum_Phase_Estimation_with_Quantum_Error_Detection_assets/figure-008.png` (ollama:gemma4:26b, prompt sci-v1):* This is a quantum circuit diagram consisting of four horizontal lines representing qubits, numbered 1 to 4 on the left. Qubit 1 starts in the state $|+\rangle$, qubit 2 in $|0\rangle$, qubit 3 in $|0\rangle$, and qubit 4 in $|+\rangle$. On qubit 1, there are three consecutive single-qubit gates: a control point for a multi-qubit operation, followed by an $R_Z(\beta)$ gate, and finally an $X$ gate represented by a rectangle with an 'X' inside. The multi-qubit operation consists of a controlled-unitary gate $u^{ks}$ acting on qubits 1 and 2, followed by a controlled-unitary gate $v$ acting on qubits 1 and 3. The gate $u^{ks}$ is a rectangular box spanning qubits 2 and 3, while the gate $v$ is a rectangular box spanning qubits 2 and 3. A small black dot on qubit 1 serves as the control for both the $u^{ks}$ and $v$ operations. To the far right, the label (B1) is present.
+
+[Eq. (B6)]. The control unitary operations are
+
+and
+
+> *Generated caption of `2306.16608_-_Demonstrating_Bayesian_Quantum_Phase_Estimation_with_Quantum_Error_Detection_assets/figure-009.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains two mathematical expressions representing quantum circuits, labeled (B2) and (B3). Expression (B2) is an equation for a unitary operator $u$: $u$ is represented by a single-qubit gate applied to a single wire with a control dot on a second wire. This is equated to a circuit consisting of a two-qubit controlled-$R_Z\left(\frac{2h_1t}{s}\right)$ gate, followed by a two-qubit controlled-$R_Z\left(\frac{2h_2t}{s}\right)$ gate, followed by a two-qubit gate $R_{YY}\left(\frac{2h_3t}{s}\right)$. This sequence is then equated to a circuit where the first wire has two $Z$ gates, the second wire has two $Z$ gates and one $Y$ gate, and the third wire has one $Y$ gate and one $Z$ gate, arranged in specific vertical columns. Expression (B3) is an equation for a unitary operator $v$: $v$ is represented by a single-qubit gate on one wire with a control dot on a second wire. This is equated to a circuit consisting of a controlled-$R_{ZZ}(2h_2kt)$ gate on two wires, which is then equated to a circuit with three wires: the first wire has two $Z$ gates, the second wire has two $Z$ gates, and the third wire has one $Z$ gate.
+
+In the second equality of each equation, we note that a controlled Pauli exponential operator ctrl-RP (θ) can be decomposed into a product of Pauli exponential operators using the following identity,
+
+$$
+\ c t r l _ { i } { - R _ { P _ { j } } ( \theta ) } = R _ { P _ { j } } ( \theta / 2 ) R _ { Z _ { i } P _ { j } } ( - \theta / 2 ) .
+$$
+
+Also, we introduced the shorthand notation of a ctrl-RP (θ) gate that shows only the Pauli operator P on the exponent with the angle θ suppressed. Note that RZ(β) in (B1) can be absorbed into the ctrl-v (B3).
+
+We discuss each component of encoded circuit (2) and how they are compiled to the universal gates (12). For the convenience of discussion, we reproduce the encoded circuit here.
+
+1. State preparation, syndrome measurements, and final measurement
+
+> *Generated caption of `2306.16608_-_Demonstrating_Bayesian_Quantum_Phase_Estimation_with_Quantum_Error_Detection_assets/figure-010.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a diagram of a quantum circuit. The circuit consists of several vertical components representing gates or operations, connected by horizontal lines representing quantum wires or qubits. On the left, there are eight horizontal lines labeled from top to bottom with the numbers 1, 2, 3, 4, $a_x$, $az$, and $|0\rangle$. A vertical block labeled "State preparation" spans all eight wires. Following this is a large bracket that encompasses the remainder of the circuit. Inside the bracket, the circuit proceeds through the following components: a vertical block labeled "ctrl-$u$" acting on wires 1 through 4, followed by a larger vertical block labeled "$S_x$" acting on wires 1 through 4; then another "ctrl-$u$" block acting on wires 1 through 4; a vertical block labeled "Syndrome meas." acting on wires $a_x$ and $az$; and finally a vertical block labeled "ctrl-$v$" acting on wires 1 through 4, followed by a block labeled "Measurement" acting on wires 1 through 4. Above the "ctrl-$u$" blocks, there is a symbol $\frac{f}{2}$, and above the final bracket, there is a symbol $\frac{k,s}{f}$. The wires labeled $a_x$ and $az$ serve as control lines for the "Syndrome meas." block, while the wires labeled $|0\rangle$ at the bottom act as auxiliary inputs.
+
+Fault-tolerant protocols are known for state preparation, syndrome measurements, and final measurement in �n+ 2, n, 2� QED code. Here, we briefly comment on each primitive by referring to the preceding literature for further details.
+
+- The Hartree-Fock state |+00+⟩ (exact ground state e-iαY2X3/2 |+00+⟩ with α = -0.07113) is fault tolerantly encoded following Appendix D of [54]. It uses 9 two-qubit (RZZ) gates and 2 ancillary qubits to detect faults.
+- The fault-tolerant syndrome measurements of SX and SZ are performed in the form proposed in [37], which uses 12 two-qubit gates and 2 ancillary qubits.
+- The final measurement is based on the implementation in [54]. The primitive consists of syndrome measurement of SZ stabilizer and destructive X measurements on all the physical qubits. If no errors are detected, the measurement outcomes are post-processed to extract the observable. There are 8 two-qubit gates and 2 ancillary qubits in the measurement circuit.
+
+## 2. Logical unitary operations
+
+Converting ctrl-v (B3) to ctrl-v and compile it to logical gates is straightforward. We focus on how to compile ctrl-u. We first pull out I ⊗S ⊗S ⊗ I and I ⊗S† ⊗S† ⊗ I in (B2) to convert Y operators into X operators,
+
+> *Generated caption of `2306.16608_-_Demonstrating_Bayesian_Quantum_Phase_Estimation_with_Quantum_Error_Detection_assets/figure-011.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a scientific diagram of a quantum circuit. On the left, a circuit has three horizontal lines labeled $1$, $2$, and $3$ on the far left. Line $1$ has a black dot connected to a vertical line that descends to a box labeled $u$ on line $2$. An equals sign follows this. To the right of the equals sign is a larger circuit with lines $1$, $2$, and $3$. Line $1$ consists of a horizontal line, a box containing $Z$ and $Z$ stacked vertically, another box containing $Z$ and $Z$ stacked vertically, and a box containing $Z$ and $Z$ stacked vertically. Line $2$ consists of a horizontal line, a box containing $S^{\dagger}$ and $Z$, a horizontal line, a box containing $X$ and $X$ stacked vertically, and a box containing $X$ and $X$ stacked vertically, and a box containing $S$. Line $3$ consists of a horizontal line, a box containing $S^{\dagger}$ and $Z$, a horizontal line, a box containing $Z$, a box containing $X$ and $X$ stacked vertically, a box containing $X$ and $X$ stacked vertically, and a box containing $S$. To the right of this circuit is the label $(B5)$. Below this, a fourth horizontal line is labeled $4: |+\rangle$ on the left and $|+\rangle$ in the center.
+
+which simplifies the compilation as we will see momentarily. The operators I ⊗S ⊗S ⊗I and I ⊗S† ⊗S† ⊗I can be absorbed either in the initial state or the final state without affecting the measurement outcome.
+
+Using Eq. (10), we find the encoded form of (B5),
+
+> *Generated caption of `2306.16608_-_Demonstrating_Bayesian_Quantum_Phase_Estimation_with_Quantum_Error_Detection_assets/figure-012.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a quantum circuit diagram. On the far left, a vertical bar contains the numbers 1, 2, 3, 4 from top to bottom, with labels $a_X$ and $a_Z$ to the left of the bottom two wires. To the right of this bar is a rectangle labeled $\overline{\text{ctrl-}u}$, followed by an equals sign. The main circuit consists of six horizontal wires. From top to bottom, the gates on these wires are arranged as follows: On wire 1, there is a $Z$ gate, then another $Z$ gate, and finally a $Y$ gate. On wire 2, there is a $Z$ gate, a $Z$ gate, and then a $Y$ gate. On wire 3, there is a $Z$ gate, a $Z$ gate, and an $X$ gate (which is a $2\times1$ box containing two $X$ symbols). On wire 4, there is a $Z$ gate, a $Z$ gate, and the bottom half of the $X$ gate box. On wire 5, there is a $Z$ gate, then a $Z$ gate, and then a $Y$ gate. On wire 6, there is a $Z$ gate, then a $Z$ gate, and then a $Y$ gate. A vertical line connects the two $X$ gates on wires 3 and 4. To the far right of the circuit, the label (B6) is visible.
+
+where the stabilizer condition SX = SZ = 1 is used to reduce the weight of Pauli operators. Furthermore, we exploit the fourth logical qubit initialize to |+⟩, which implies X4 = 1. Then, we find the reduction of the operator,
+
+$$
+\overline { Z } _ { 1 } \overline { X } _ { 2 } \overline { X } _ { 3 } = Z _ { 1 } Z _ { a _ { Z } } X _ { 2 } X _ { 3 } = - Y _ { 1 } Y _ { a _ { Z } } S _ { Z } \overline { X } _ { 4 } ,
+$$
+
+which is Y1YaZ in the subspace such that SX = SZ =X4 = 1 holds. Thus, we have compiled all the logical operators to two-qubit Pauli exponential operators to obtain (B6), which are readily implemented by the native two-qubit gate, RZZ(θ) and single-qubit gates. Each ctrl-u (B6) uses 6 two-qubit gates.
+
+## 3. Memory error suppression with X-stabilizer insertions
+
+While syndrome measurements can detect any single-qubit errors, if the number of faults in each block between two consecutive measurements is not sufficiently low, they can damage the logical circuit as logical errors. The physical errors can quickly spread across many qubits because the logical operations are not fault-tolerantly implemented. We found that the physical coherent error has sizable impacts on both the logical error rate and discard rate, as shown in Fig. B1.
+
+The coherent error on the H1 quantum device is mainly modelled by the memory error eiγZj with γ ∈ R and j ∈ T [56]. The errors mostly occur on the qubits during their idling or transportation. As such, the parameter γ is roughly characterized by (in the H1 emulator, it is proportional to) the idling or transportation time. Since Xj flips the sign of the exponent in eiγZj , the memory errors are expected to cancel before and after the inserted SX in each block.
+
+To alleviate the physical memory error, we insert an X-stabilizer, SX = ⊗i∈T Xi, in the middle of each block. While SX acts as the identity on logical states, we observe that the stabilizer insertion suppresses coherent error, which in turn reduces the discard rate and q of (16) as shown in Fig. B1.
+
+## Appendix C: Suppressing over/under-rotation of RZZ gates
+
+A small over/under-rotation in RZZ(θ) forces us to apply the gate RZZ(θ ± δ) for some unknown δ. It may not be negligible as the error accumulates similarly to the coherent error. Since RZZ(±δ) commutes with the stabilizers {SX, SZ}, the errors are not detected by the syndrome measurements of the �6, 4, 2� code.
+
+Figure B1. (a) Parameter q of (16) and (b) discard rate d are shown against k that are evaluated with Quantinuum's emulator of H1-1 quantum computer. The blue and red data points with sampling errors are obtained from the encoded QPE circuit without and with the X-stabilizer insertions, respectively. The black dashed curve is drawn using the noise model (18) with p2 = 1.6 × 10-3 .
+
+Table C1. The phase shift ω in estimating phase calculated on the emulator (H1-1E) and hardware (H1-1) with different sets of time periods t1 and t2. k = 60. The bottom two rows show the results with the protocol (C2).
+
+> *Generated caption of `2306.16608_-_Demonstrating_Bayesian_Quantum_Phase_Estimation_with_Quantum_Error_Detection_assets/figure-013.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains two side-by-side line plots, labeled (a) and (b). Plot (a) shows the relationship between a variable $k$ on the x-axis and $q$ on the y-axis. The x-axis is labeled $k$ with tick marks at 20, 40, 60, 80, and 100. The y-axis is labeled $q$ with tick marks from 0.0 to 0.8 in increments of 0.1. There are two data series: a blue series with error bars labeled "Without $S_X$ insertion" and a red series with error bars labeled "With the $S_X$ insertion". The blue series shows $q$ increasing from approximately 0.06 at $k=20$ to approximately 0.47 at $k=100$. The red series shows $q$ remaining near zero, with values starting at approximately 0.01 at $k=20$ and decreasing toward 0.0 at $k=100$. Plot (b) shows the relationship between $k$ on the x-axis and $d$ on the y-axis. The x-axis is labeled $k$ with tick marks at 20, 40, 60, 80, and 100. The y-axis is labeled $d$ with tick marks from 0.2 to 1.0 in increments of 0.2. There are three series: a dashed black line labeled "Noise model", a blue series with error bars labeled "Without $S_X$ insertion", and a red series with error bars labeled "With $S_X$ insertion". The blue series shows $d$ increasing from approximately 0.38 at $k=20$ to approximately 0.85 at $k=100$. The red series shows $d$ increasing from approximately 0.28 at $k=20$ to approximately 0.71 at $k=100$. The dashed black line shows a gradual upward curve starting at approximately 0.18 at $k=20$ and reaching approximately 0.75 at $k=100$.
+
+| Backend   |   t1/π |   t2/π | ω/10-3π   |
+|-----------|--------|--------|-----------|
+| 1 H1-1E   |   0.30 |   0.30 | 0.0±0.1   |
+| 2 H1-1    |   0.30 |   0.30 | 4.7±0.2   |
+| 3 H1-1    |   0.20 |   0.20 | 4.3±0.2   |
+| 4 H1-1    |   0.10 |   0.10 | 3.7±0.1   |
+| 5 H1-1    |  -0.10 |   0.50 | 0.2±0.3   |
+| 6 H1-1    |  -0.05 |   0.25 | 0.5±0.2   |
+
+To deal with the misalignment of the angle in RZZ(θ), we assume that the imperfect rotation angle is characterized by
+
+$$
+\delta = \bar { \delta } \frac { \theta } { | \theta | } .
+$$
+
+i.e., the misalignment δ is constant in magnitude and only sensitive to the sign of θ. To eliminate δ, we modify the time period t of each discretized time step in U(t) to t1 and t2 for even and odd k, respectively. For instance, for two consecutive time evolution operators, we make the following adjustment,
+
+$$
+\left ( e ^ { - i H t } \right ) ^ { 2 } \rightarrow e ^ { - i H t _ { 1 } } e ^ { - i H t _ { 2 } } ,
+$$
+
+with some t1 and t2 such that t1 +t2 = 2t and t1t2 < 0. It indeed removes the rotation error with (C1) at the cost of larger error from the Lie-Trotter's formula because the modified evolution time obeys max(t1, t2) > t.
+
+We tested the protocol on Quantinuum's H1-1 emulator and H1-1 hardware with different sets of (t1, t2) summarized in Table C1. We see the clear reduction of the phase shift ω with Eq. (C2). In the present QPE experiments, t1 = -0.05π and t2 = 0.25π in atomic units are employed.
+
+Finally, we show the phase shift ω in the calibration experiment with and without error detection as discussed in Sec IVA. The protocol (C2) is employed for both cases. The encoded circuit contains the SX insertion. In both unencoded and encoded experiments, the magnitudes of ω are of order 10-3 .
+
+Figure C1. Phase shift ω in (16) evaluated for unencoded (red circle) and encoded (black triangle) QPE circuits for each sample point of k.
+
+> *Generated caption of `2306.16608_-_Demonstrating_Bayesian_Quantum_Phase_Estimation_with_Quantum_Error_Detection_assets/figure-014.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a 2D line plot with error bars. The x-axis is labeled $k$ and ranges from 20 to 100 with increments of 20 marked. The y-axis is labeled $\omega / 10^{-3}\pi$ and ranges from -2.5 to 2.0 with increments of 0.5 marked. The plot contains two data series distinguished by a legend in the bottom right: "Unencoded" represented by black triangles and "Encoded (error detection)" represented by red circles. The "Unencoded" series has four data points at $k \approx 20, 40, 60, 80$ with y-values of approximately -1.1, -1.6, -1.1, and -0.4 respectively, each with vertical error bars. The "Encoded (error detection)" series has five data points at $k \approx 20, 40, 60, 80, 100$ with y-values of approximately 0.8, 1.3, 0.6, 0.8, and 0.8 respectively, each with vertical error bars. The plot is set against a gray grid.

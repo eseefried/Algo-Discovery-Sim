@@ -1,0 +1,1232 @@
+## 1 Introduction
+
+## 1.1 The crisis of scalability in variational quantum machine learning
+
+The need for scalable models has always been at the forefront of machine learning research. Many breakthroughs, from the contrastive divergence algorithm (Hinton and Salakhutdinov, 2006), the use of backpropagation in neural networks (Rumelhart et al., 1986; Krizhevsky et al., 2012), the removal of recurrence by self-attention in transformers (Vaswani, 2017), to the use of modern mixture of expert models (Fedus et al., 2022; Shazeer et al., 2017) have been so impactful precisely because they enable the use of ever larger models on ever larger datasets. At the same time, the modern era of deep learning has continually reinforced the bitter lesson (Sutton, 2019) that scaling to larger datasets and models is often the most fruitful path to improved performance.
+
+∗ erik.recio@icfo.eu
+
+† joseph@xanadu.ai
+
+In contrast, most variational quantum machine learning algorithms face a seemingly fundamental barrier to scalability. By far the most well known of these is the phenomenon of barren plateaus (McClean et al., 2018; Cerezo et al., 2021; Ragone et al., 2024; Arrasmith et al., 2022; Uvarov and Biamonte, 2021; Fontana et al., 2024), where gradients of randomly intialized circuits concentrate exponentially around zero as the number of qubits grows. Barren plateaus are however only the tip of the iceberg. Unlike gradients of classical neural networks-which can be computed at the same cost as the loss function-estimating gradients of quantum circuits is more costly than loss function estimation by a factor that scales with the number of circuit parameters 1 (Wierichs et al., 2022; Abbas et al., 2024). For circuits with thousands of parameters, this requires sampling from thousands of different circuits to obtain a single gradient vector. On top of this, the properties of quantum computers add additional burdens which translate to a large constant factor slowdown compared to classical neural networks. In particular, the sample rates of quantum computers are expected to be orders of magnitude slower than clock rates of modern CPUs and GPUs (Hoefler et al., 2023) and-unlike classical neural networks-quantum processing units are inherently stochastic, which means they need to be sampled from in order to estimate any values used for training.
+
+The situation is particularly concerning when one looks at the actual numbers involved: to perform a single epoch of gradient descent 2 on the MNIST handwritten digits dataset for a circuit with 10000 parameters (far below the overparameterisation threshold) would require collecting on the order of 1015 samples from the quantum computer, which translates to 38 years of continual operation using a quantum computer operating at a MHz sampling rate. Given that models often also have to be trained many times in an initial hyperparameter search phase, and that the number of quantum computers will be (at least initially) limited, it seems inevitable that the standard approach of variational quantum machine learning will always be restricted to training small models on small datasets. In our opinion, this uncomfortable and often unrecognised reality thus severely limits the potential of variational quantum machine learning to deliver real societal value, and there is an urgent need to properly address the issue of scalability.
+
+## 1.2 Overview of results: A new path to scalability
+
+In this work we theoretically and empirically demonstrate that, despite these barriers, a path to scalability exists, and can enable the use of large-scale circuits and datasets. Our approach (see Fig. 1) applies specifically to generative machine learning, where the quantum generative models correspond to parameterized instances of instantaneous quantum polynomial (IQP) circuits (Fig. 2). The possibility to train such circuits at scale follows from the combination of two ingredients. First, Rudolph et al. (2024) have shown that the maximum mean discrepancy (MMD) loss function (Gretton et al., 2012), which can be used to train quantum generative models, can be efficiently cast as a classical mixture of expectation values of Pauli-Z words. Second, results by den Nest (2010) imply that expectation values of Pauli-Z words of IQP circuits can be estimated efficiently by a classical algorithm. Using the classical simulation algorithm of den Nest (2010) within the decomposition of the MMD loss function, one arrives at an efficient method to train parameterized IQP circuits with classical hardware alone. Crucially for generative learning, sampling from IQP circuits is expected to be hard 3 (Marshall et al., 2024; Bremner et al., 2016, 2011) for classical algorithms. For this reason, although the training can be offloaded to classical hardware, a quantum computer is needed to deploy and sample from the trained circuit at inference time, where real computational advantages may be present.
+
+1 Note that some examples of circuit structures with favorable gradient estimation are known however (Bowles et al., 2023a; Chinzei et al., 2024; Coyle et al., 2024).
+
+2 Here we are assuming a loss function bounded in [0, 1] that we estimate using the parameter shift method to a precision ϵ ≈ 0.001 using 1/ϵ2 = 106 circuit samples.
+
+> *Generated caption of `2503.02934_-_Train_on_classical_deploy_on_quantum__scaling_generative_quantum_machine_learning_to_a_thousand_qubits_assets/figure-001.png` (ollama:gemma4:26b, prompt sci-v1):* This is a schematic diagram illustrating a quantum machine learning workflow. On the far left, a quantum circuit component is labeled $q_{\theta}(x)$ and consists of a square box with a blue center, connected to several vertical lines with circular nodes. An arrow points from this circuit to a dark blue vertical rectangle, which then leads via a large arrow labeled "classical sim" to a computer monitor icon. The monitor displays the expression $\langle Z_a \rangle$. An arrow from the monitor points to a light-blue rectangular box containing the text $\{\langle Z_{a_1} \rangle, \langle Z_{a_2} \rangle, \dots \}$, labeled "expvals" above it. To the right, another light-blue rectangular box contains a $4 \times 5$ matrix of binary values: $\begin{bmatrix} 1 & 0 & 1 & 1 & 1 & 0 & 1 \\ 0 & 1 & 1 & 1 & 0 & 1 & 0 \\ 0 & 0 & 1 & 0 & 1 & 1 & 0 \\ 0 & 0 & 0 & 1 & 0 & 1 & 1 \end{bmatrix}$, labeled "data" above it. Next to the data box are illustrations of a DNA double helix and a chemical structure, with an arrow pointing toward the data box from an icon of a line graph with a dollar sign and a red circle, labeled $p(x)$. Arrows from both the "expvals" box and the "data" box point down into a light-blue box labeled $\text{MMD}(p, q)$. From this box, a line goes down to a final quantum circuit component containing a blue square box, labeled with $\theta^*$ and accompanied by the text "deploy and sample". Next to this final circuit is a partial column of binary digits: $\begin{bmatrix} 1 & 0 \\ 0 & 1 \\ 1 & 0 \\ 0 & 1 \\ 1 & 0 \\ 0 & 1 \\ 1 & \dots \end{bmatrix}$. An arrow labeled $\nabla_{\theta}$ and "autodif" points from the $\text{MMD}(p, q)$ box back to the computer monitor.
+
+The resulting classical algorithm implementing the MMD loss can be written in an efficient form that exploits basic linear algebra subroutines, which we implement in JAX (Bradbury et al., 2018) and train via automatic differentiation using the recently released software package IQPopt (Recio-Armengol and Bowles, 2025). This results in an algorithm that features linear scaling with respect to both the number of qubits and the number of gates, which can scale to circuits with thousands of qubits and millions of parameters using a single compute node of a computing cluster. The reliance on linear algebra subroutines also means that, like neural networks, the approach is a winner of the 'hardware lottery' (Hooker, 2021). The algorithm can therefore benefit from hardware accelerators such as graphics processing units or tensor processing units, and can in principle leverage the same multi-node distributed training methods that have been developed in the context of training large neural network models.
+
+Although our models are similar to neural networks in terms of training hardware requirements, they differ from common classical generative models in a number of important ways. First, due to the use of qubit circuits, our generative models most naturally parameterise distributions over bitstrings rather than continuous vectors or large discrete alphabets. Second, since our models can be understood as implicit generative models 4
+
+3 More specifically, inverse polynomial additive error sampling would imply collapse of the polynomial hierarchy to its second level, subject to either one of two additional assumptions (Marshall et al., 2024).
+
+4 We note that even though inverse polynomial additive error estimates of probabilities are possible
+
+(Mohamed and Lakshminarayanan, 2016), we must train them using a suitable loss function, which we choose to be the MMD loss. This loss function has had some success in the classical literature (Li et al., 2015, 2017; Bińkowski et al., 2018), but is not a common choice for modern models such as diffusion models or transformers, which train on loss functions more closely related to the log-likelihood. Third, it is still unclear what the limits of expressivity of the model class are, and we will show in Sec. 5 that-at least if no ancilla qubits are used-the model is not a universal approximator of probability distributions over bitstrings.
+
+To understand the potential of the approach we therefore conducted a number of numerical studies in which we trained circuits with up to one thousand qubits (Sec. 8). In order to evaluate the performance of the trained models we make use of two methods: the MMD with respect to a test set (O'Bray et al., 2021; Lueckmann et al., 2021; Sutherland et al., 2016) and the kernel generalised empirical likelihood (Ravuri et al., 2023), both of which we can estimate at scale on classical hardware using the same mathematical tools used for training. As a comparison we also train two energy-based classical models: a restricted Boltzmann machine, and an energy based model whose energy function is a feedforward neural network. Encouragingly, the results show that it is possible to successfully train large-scale quantum models and obtain results that compete with or outperform the classical models when a similar amount of hyperparameter optimisation is performed on each model. For larger problems, the superior results of the quantummodels are largely due to issues the classical models encountered during training, such as mode collapse or model imbalance. While much better results are likely possible for the classical models with further hyperparameter optimisation or tailored initialization strategies, this finding does suggest that parameterized IQP circuits can be trained with relative ease. We also compared the quantum models to trained classical generative models that are published in the genomics literature (Yelmen et al. (2021)), which provides an additional independent comparison. Training on the same data, our quantum model performs similarly to the published classical models when evaluating the MMD with respect a test set. Although this is not an entirely fair comparison since we also train on the MMD, visual observation of the two-body correlations of the quantum model show that it has successfully learned a lot of the structure present in the data.
+
+Despite training large circuits, we were not hindered by problems of barren plateaus (McClean et al., 2018; Ragone et al., 2024; Arrasmith et al., 2022). This may have been because we employed a data-dependent parameter initialisation strategy in which parameters of two-qubit gates are initialised proportional to the corresponding covariance of the training data. Another possibility is that the model does not suffer from barren plateaus for the regime in which we trained, however this is still unclear (see Sec. 9.3 for more discussion on this point). We also show how the quantum model can be adapted in two ways. First, in Sec. 5.2 we show that it is possible to remove coherence from the quantum model, which results in an analogous classical model that we can also train at scale with a similar method. Despite undergoing identical hyperparameter optimisation and training strategies, we see that the decohered model fails to train on all but the smallest datasets, suggesting that coherence plays a critical role in the performance of the quantum model. Second, in Sec. 6 we show how to encode a specific global bitflip related symmetry into the model which matches the bias of one of the datasets we train on. The approach we use can most likely be generalized to construct quantum generative models whose distributions are invariant with respect to bitflip-type symmetries corresponding to powers of the group Z2.
+
+for our model class (Pashayan et al., 2020), this is not precise enough to estimate log probabilities to a suitable precision which effectively renders the model implicit.
+
+We believe our work offers a fresh perspective on the potential of variational approaches to quantum machine learning, and hopefully injects some much needed optimism regarding the prospect of scaling such models to large circuits. Aside from providing a scalable method for training, our work also opens up the possibility of heuristic studies into the behavior of quantum machine learning models at large scales, which may uncover insights beyond what is possible with purely theoretical analysis.
+
+## 2 Related work
+
+The idea to use the maximum mean discrepancy to train (classical) generative models was first proposed in Li et al., 2015 (see also Li et al., 2017; Bińkowski et al., 2018,), and was subsequently adapted to the quantum setting by Liu and Wang, 2018. A recent in-depth study of the performance of the MMD for quantum generative models, as well as a discussion on the challenges of training quantum generative models can be found in Rudolph et al., 2024. A general overview of learning in implicit generative models (a class to which our models belong) can be found in Mohamed and Lakshminarayanan, 2016.
+
+A number of works have investigated using tools from classical simulability of quantum circuits to reduce the cost of training quantum generative models. Kasture et al., 2023 proposed a similar idea to ours, but relied on classical simulations of probabilities rather than expectation values, which limited them to training circuits of at most 30 qubits. Rudolph et al., 2023 propose to use classical tensor network simulations in the initial stage of training, however this method still requires training on quantum hardware in order to reach models that cannot be simulated classically. Gince et al., 2024 propose to parameterise a class of matchgate circuits to construct scalable models (for classification) in a similar spirit to us, however the models they train are strongly simulable so cannot lead to a quantum advantage. Finally, the work of Bakó et al., 2024 shares some similarities with ours since they train a similarly structured circuit with the MMD, and encode graph based correlation structures as we also do in Sec. 8.4, however training must be done on quantum hardware.
+
+Regarding other approaches to scalability, a modern approach is to use the quantum computer for an initial data acquisition phase only, for example, in order to estimate a classical shadow (Basheer et al., 2023) or a decomposition of the initial state in terms of the circuit's dynamical Lie algebra (Goh et al., 2023). Like ours, these approaches improve scalability by offloading the burden of training to a classical computer, however it is unclear how useful these methods can be. Classical shadows (Huang et al., 2020) are limited to low body information, which may limit their use for high dimensional problems, and circuits with a suitably small dynamical Lie algebra are rare. Other approaches, like quantum kernel methods (Schuld, 2021) or quantum principal component analysis (Lloyd et al., 2014), also avoid variational optimisation on the quantum computer but encounter issues with scalability (with respect to the dataset size) and dequantisation algorithms (Tang, 2021) respectively.
+
+## 3 Generative learning with parameterised IQP circuits
+
+In this section we outline the setting of generative learning, introduce the class of quantum circuits that comprise our generative models, and describe the loss function we use to train the models.
+
+> *Generated caption of `2503.02934_-_Train_on_classical_deploy_on_quantum__scaling_generative_quantum_machine_learning_to_a_thousand_qubits_assets/figure-002.png` (ollama:gemma4:26b, prompt sci-v1):* This image shows a quantum circuit diagram on the left and a mathematical definition of a gate component on the right. The circuit consists of five horizontal wires, each labeled with a ket state on the left: $|0\rangle$, $|0\rangle$, $|0\rangle$, $|0\rangle$, and $|0\rangle$. Vertical grey rectangular gates are placed across the wires as follows: a gate labeled $\theta_1$ acting on the first wire, a gate labeled $\theta_2$ on the second, a gate labeled $\theta_3$ on the third, and a gate labeled $\theta_4$ on the fourth. A second set of gates follows: $\theta_5$ acts on wires 1 and 2, $\theta_6$ acts on wires 2 and 3, $\theta_7$ acts on wires 1, 2, 3, and 4, $\theta_8$ acts on wires 2 and 3, $\theta_9$ acts on wires 4 and 5, $\theta_{10}$ acts on wires 1 and 2, $\theta_{11}$ acts on wires 3 and 4, and $\theta_{12}$ acts on wires 4 and 5. To the right, a single grey rectangular gate with a $\theta$ symbol inside and two horizontal lines passing through it is set equal to the equation $\theta = \exp(i\theta X \otimes X)$.
+
+## 3.1 Generative learning
+
+The framework we consider in this work is that of generative learning. We assume access to a dataset X = {xi} of vectors xi, called the training data, where the xi are sampled i.i.d. from a ground truth distribution p(x). Since we will be working with qubit-based quantum computers, we further assume the vectors xi are bitstrings; xi ∈ {0, 1}n. A generative model is a parameterised conditional distribution qθ(x) ≡ q(x|θ), where θ is a vector of parameters to be inferred from the training data. The general aim of generative learning is to find a choice of parameters so that samples drawn from qθ closely resemble those of p. This is an intentionally vague definition, since the precise notion of 'closeness' is not unique and may vary depending on the specific task the generative model is intended to solve. We will return to this issue when discussing model evaluation in Sec. 7.
+
+## 3.2 Parameterised IQP circuits
+
+We will work with a class of quantum generative models that we call parameterised IQP circuits due to their close connection with instantaneous quantum polynomial-time circuits (Bremner et al., 2016; Nakata and Murao, 2014).
+
+Definition 3.1 (parameterised IQP circuit) A parameterised IQP circuit on n qubits is a circuit comprised of the following:
+
+- (i) State initialisation in |0⟩
+- (ii) Parameterised gates of the form exp(iθjXgj ), where Xgj is a tensor product of Pauli X operators acting on a subset of qubits specified by the nonzero entries of gj ∈ {0, 1}n
+- (iii) Measurement in the computational basis
+
+The full parameterised unitary is thus U(θ) = ∏j exp(iθjXgj ) where θ = (θ1, · · · , θm) denotes the vector of trainable parameters. These circuits are particularly interesting from the standpoint of generative learning, since there exist examples of such circuits for which there is no efficient classical algorithm to sample from the output distribution up to either additive (Bremner et al., 2016; Marshall et al., 2024) or multiplicative (Bremner et al., 2011) error, assuming plausible conjectures in complexity theory hold. It therefore seems unlikely that it is possible to construct classical generative models that closely emulate the behavior of these circuits, which opens the possibility of uniquely quantum advantages.
+
+## 3.3 The maximum mean discrepancy
+
+A common approach to training generative models is to define a differentiable loss function that quantifies the performance of the model on training data, and infer parameters via a gradient-descent based method. This is the approach we will adopt to train our quantum models. However, unlike many classical generative models, our models are implicit generative models (Mohamed and Lakshminarayanan, 2016), meaning that we cannot estimate probabilities to high precision, and we therefore need to use a loss function that is compatible with such models.
+
+The loss function we will use is is based on the maximum mean discrepancy (MMD) (Gretton et al., 2012). This loss has had some success in the classical machine learning literature (Li et al., 2015; Sutherland et al., 2016), is suitable for implicit generative models, and is one of the few scalable methods known for training quantum generative models (Rudolph et al., 2024). The MMD is a type of distance function between distributions (called an integral probability metric), and corresponds to the 2-norm between the expected feature vectors under a feature map ϕ defined via a kernel function k(x, y) = ⟨ϕ(x)|ϕ(y)⟩:
+
+$$
+\underline { M M D ( p , q _ { \theta } ) } = | | \mathbb { E } _ { x \sim p } [ \phi ( x ) ] - \mathbb { E } _ { y \sim q _ { \theta } } [ \phi ( y ) ] | | ,
+$$
+
+where ||x|| = √x∗ · x. To obtain our loss function, we take the square of the MMD, and substitute the kernel function from the resulting inner products.
+
+Definition 3.2 (MMD loss function) The squared maximummean discrepancy between distributions p and qθ is
+
+$$
+M M D ^ { 2 } ( p , q _ { \theta } ) = \mathbb { E } _ { x , y \sim p } \left [ k ( x , y ) \right ] - 2 \mathbb { E } _ { x \sim p , y \sim q _ { \theta } } \left [ k ( x , y ) \right ] + \mathbb { E } _ { x , y \sim q _ { \theta } } \left [ k ( x , y ) \right ] . \quad ( 2 ) \\ \\ \intertext { M M D ^ { 2 } ( p , q _ { \theta } ) = \mathbb { E } _ { x , y \sim p } \left [ k ( x , y ) \right ] - 2 \mathbb { E } _ { x \sim p , y \sim q _ { \theta } } \left [ k ( x , y ) \right ] + \mathbb { E } _ { x , y \sim q _ { \theta } } \left [ k ( x , y ) \right ] . \quad ( 2 ) } \\
+$$
+
+We will work with a common choice of kernel function, namely the Gaussian kernel (or radial basis function kernel):
+
+$$
+k ( x , y ) = \exp \left ( \frac { - | | x - y | | ^ { 2 } } { 2 \sigma ^ { 2 } } \right ) .
+$$
+
+Since this kernel is characteristic, it follows that one has MMD2 = 0 iff p = qθ (Gretton et al., 2012). The parameter σ, called the bandwidth, should be chosen carefully from data to provide a meaningful comparison 5 (Sutherland et al., 2016). A popular choice that we will make use of is the median heuristic (Garreau et al., 2017).
+
+Definition 3.3 (median heuristic) Given a dataset {xi}, the median heuristic ˆσ is the median value of pairwise distances of the points:
+
+$$
+\hat { \sigma } = \text {med} ( \{ | | x _ { i } - x _ { j } | | \} _ { i , j } ) .
+$$
+
+The most widely used way to compute unbiased estimates of the MMD2 is to sample batches of vectors X = {xi ∼ p} and Y = {yj ∼ qθ} and use the estimator (see Gretton et al., 2012)
+
+$$
+\hat { M } \hat { M } ^ { 2 } ( \mathcal { X } , \mathcal { Y } ) & = \frac { 1 } { | \mathcal { X } | ( | \mathcal { X } | - 1 ) } \sum _ { i \neq j } k ( x _ { i } , x _ { j } ) - \frac { 2 } { | \mathcal { X } | | \mathcal { Y } | } \sum _ { i , j } k ( x _ { i } , y _ { j } ) \\ & + \frac { 1 } { | \mathcal { Y } | ( | \mathcal { Y } | - 1 ) } \sum _ { i \neq j } k ( y _ { i } , y _ { j } ) . \\ \frac { 5 \text { we mark that we choose } \sigma \circ \text { correspond to the standard deviation of the (unnormalized) Gaussian} } { \delta }
+$$
+
+5 We remark that we choose σ to correspond to the standard deviation of the (unnormalized) Gaussian distribution given by (3), however in some works (such as Rudolph et al., 2024) σ corresponds instead to the variance.
+
+This estimator can be shown to be unbiased so that its expected value coincides with the true MMD2 , i.e. we have
+
+$$
+\mathbb { E } _ { \{ x _ { i } \sim p \} , \{ y _ { j } \sim q _ { \theta } \} } \left [ M \hat { M } D ^ { 2 } ( \{ x _ { i } \} , \{ y _ { j } \} ) \right ] = M M D ^ { 2 } ( p , q _ { \theta } ) .
+$$
+
+Unbiased estimates of the gradient of the MMD2 for parameterised quantum circuits can be found by differentiating the expression (2) and using the parameter shift rule (see Liu and Wang, 2018 App. A), which can be used to train the model. Estimating the gradient in this way however requires sampling from at least two circuits for every trainable parameter (Wierichs et al., 2022; Kyriienko and Elfving, 2021; Vidal and Theis, 2018), making scaling to very large circuits prohibitively expensive in practice.
+
+## 4 Efficient training on classical hardware
+
+In this section we will see that, when the quantum generative model is a parameterised IQP circuit, it is possible to construct unbiased estimators of the MMD2 and its gradient using an efficient classical algorithm. This will follow from the combination of two ingredients: (i) a proof by den Nest (2010) showing how to classically estimate expectation values of Pauli Z words for IQP circuits, and (ii) a recent observation by Rudolph et al. (2024) showing that the MMD2 can be expressed as a probabilistic mixture of these expectation values. By using the classical estimation algorithm within this form of the MMD2 , we arrive at a classical algorithm to estimate and optimize the loss.
+
+## 4.1 Efficient estimation of expectation values
+
+In this section we concentrate on the problem of estimating expectation values of Pauli Z words applied at the output of parameterised IQP circuits. That is, we wish to estimate quantities.
+
+$$
+\langle Z _ { a } \rangle _ { q _ { \theta } } = \langle 0 | U ^ { \dagger } ( \theta ) Z _ { a } U ( \theta ) \, | 0 \rangle \, ,
+$$
+
+where |ψ(θ)⟩ = U(θ) |0⟩, and Za is a tensor product of Pauli Z operators specified by the non-zero positions of a ∈ {0, 1}n. That is,
+
+$$
+Z _ { a } = \prod _ { i = 1 } ^ { n } ( Z _ { i } ) ^ { a _ { i } } ,
+$$
+
+where Zi denotes a Pauli Z operator acting on qubit i. A classical algorithm for this task is implied by the results of den Nest, 2010 (Thm. 3) but we repeat it here in a simplified form that applies directly to our circuits.
+
+Proposition 1 (den Nest, 2010) Given a parameterised IQP circuit qθ, an expectation value ⟨Za⟩qθ and an error ϵ = poly(n-1 ), there exists a classical algorithm that requires poly(n) time and space, and samples a random variable with standard deviation less than ϵ that is an unbiased estimator of ⟨Za⟩qθ .
+
+Proof : Inserting identities I = H2 , where H is an n-fold tensor product of Hadamard unitaries, between operators in (7) the expression becomes
+
+$$
+\langle 0 | \, H ( H U ^ { \dagger } ( \theta ) H ) ( H Z _ { a } H ) ( H U ( \theta ) H ) H \, | 0 \rangle \\ = \langle + | ^ { \otimes n } \, D ^ { \dagger } ( \theta ) X _ { a } D ( \theta ) \, | + \rangle ^ { \otimes n } \, ,
+$$
+
+with D(θ) a diagonal unitary analogous to U(θ) where the generators are now Pauli Z tensors,
+
+$$
+D ( \theta ) = \prod _ { j } e ^ { i \theta _ { j } Z _ { j } } .
+$$
+
+Since D(θ) is diagonal, its eigenvectors are computational basis states. The corresponding eigenvalues λz are easy to compute since a basis state |z⟩ picks up a phase exp(iθj(-1)gj ·z ) for each gate in (10):
+
+$$
+D ( \theta ) \left | z \right \rangle = \exp ( i \sum _ { j } \theta _ { j } ( - 1 ) ^ { g _ { j } \cdot z } ) \left | z \right \rangle = \lambda _ { z } \left | z \right \rangle .
+$$
+
+Writing |+⟩⊗n = 2-n/2 ∑z |z⟩ in (9) and using the above and Xa |z⟩ = |z ⊕a⟩ we arrive at
+
+$$
+\langle Z _ { a } \rangle _ { q _ { 0 } } = \frac { 1 } { 2 ^ { n } } \sum _ { z } \lambda _ { z \oplus a } ^ { * } \lambda _ { z } = \frac { 1 } { 2 ^ { n } } \sum _ { z } R e \left [ \lambda _ { z \oplus a } ^ { * } \lambda _ { z } \right ] ,
+$$
+
+where we have have taken the real component since ⟨Za⟩qθ is guaranteed to be real. Substituting the expression for λz from (11) and using the fact that (12) is an expectation value with respect to the uniform distribution U over bitstrings we then find
+
+$$
+\langle Z _ { a } \rangle _ { q _ { \theta } } = \mathbb { E } _ { z \sim U } \left [ \cos \left ( \sum _ { j } \theta _ { j } ( - 1 ) ^ { g _ { j } \cdot z } ( 1 - ( - 1 ) ^ { g _ { j } \cdot a } ) \right ) \right ] .
+$$
+
+The above now allows us to compute unbiased estimates of ⟨ZA⟩qθ efficiently by replacing the expectation with an empirical mean. That is, if we sample a batch of bitstrings Z = {zi} from the uniform distribution and compute the sample mean
+
+$$
+\langle \hat { Z } _ { a } \rangle _ { q _ { 0 } } = \frac { 1 } { | \overline { Z } | } \sum _ { i = 1 } ^ { | Z | } \cos \left ( \sum _ { j } \theta _ { j } ( - 1 ) ^ { g _ { j } \cdot z _ { i } } ( 1 - ( - 1 ) ^ { g _ { j } \cdot a } ) \right ) ,
+$$
+
+we obtain an estimate of ⟨Za⟩qθ . One sees this estimate is unbiased since
+
+$$
+\mathbb { E } _ { \mathcal { Z } } [ \langle \hat { Z } _ { a } \rangle _ { q _ { \theta } } ] = \langle Z _ { a } \rangle _ { q _ { \theta } }
+$$
+
+by virtue of (14) being a mean with respect to the elements of Z. Since ⟨Za⟩qθ is an expectation with respect to a random variable bouned in [-1, 1], it follows that the variance of the sample mean (14) is bounded by 1/|Z|. Taking |Z| ≥ 1/ϵ2 = poly(n) we therefore obtain an estimator for ⟨Za⟩qθ with standard deviation less than ϵ. ■
+
+## 4.2 MMD2 as a mixture of expectation values
+
+The second ingredient we need comes from writing the MMD2 in terms of expectation values rather than probabilities. In particular, in the work of Rudolph et al., 2024 (see App. C) they show the following.
+
+Proposition 2 (Rudolph et al., 2024) The squared maximum mean discrepancy between distributions p and qθ can be expressed as
+
+$$
+M M D ^ { 2 } ( p , q _ { \theta } ) = \mathbb { E } _ { \alpha \sim \mathcal { P } _ { \sigma } ( a ) } \left [ \left ( \langle Z _ { a } \rangle _ { p } - \langle Z _ { a } \rangle _ { q _ { \theta } } \right ) ^ { 2 } \right ]
+$$
+
+where a is distributed according to a product of Bernoulli distributions with probability pσ,
+
+$$
+\mathcal { P } _ { \sigma } ( a ) = ( 1 - p _ { \sigma } ) ^ { n - | a | } p _ { \sigma } ^ { | a | } ; \quad p _ { \sigma } = \frac { 1 - e ^ { - \frac { 1 } { 2 \sigma ^ { 2 } } } } { 2 } ,
+$$
+
+and where |a| is the Hamming weight of a.
+
+In the above we have that
+
+$$
+\langle Z _ { a } \rangle _ { p } = \mathbb { E } _ { x \sim p } \left [ ( - 1 ) ^ { x \cdot a } \right ]
+$$
+
+is the usual expectation value of the corresponding ±1 valued variables on the subset of bits where ai ̸= 0. Note that we can construct an unbiased estimate ⟨ Ẑa⟩p of ⟨Za⟩p by sampling a batch of data X = {xi ∼ p} and computing the sample mean:
+
+$$
+\langle \hat { Z } _ { a } \rangle _ { p } = \frac { 1 } { | \mathcal { X } | } \sum _ { i } ( - 1 ) ^ { x _ { i } \cdot a } .
+$$
+
+There are two important things to notice from Prop. 2. First, when minimising the MMD2 one is effectively attempting to match the expectation values of the two distributions, where the importance of given expectation value depends on the probability Pa of it being sampled. Second, the distribution over a is dependent on the bandwidth parameter σ of the kernel, and is such that the value |a| will be peaked around the mean value npσ by virtue of it being distributed binomially. One sees that lower values of σ result in larger average values of |a|, so that lower bandwidths effectively probe higher order correlations. This can have practical implications for training, as we discuss in Sec. 8.1.
+
+## 4.3 Unbiased estimates of the MMD2
+
+With Prop. 1 and 2 in hand we are now ready to construct estimates of the MMD2 for parameterised IQP circuits. A straightforward strategy is the following.
+
+1. Sample batches of bitstrings
+
+$$
+\mathcal { X } = \{ x _ { i } \sim p \} , \, \mathcal { A } = \{ a _ { j } \sim \mathcal { P } _ { \sigma } \} , \, \mathcal { Z } = \{ z _ { k } \sim U \} .
+$$
+
+2. For each aj ∈ A use (14) and (19) to obtain estimates ⟨ Ẑaj ⟩qθ , ⟨ Ẑaj ⟩p of ⟨Zaj ⟩qθ and ⟨Zaj ⟩p.
+3. Estimate the MMD2 by converting (16) to a sample mean, i.e.
+
+$$
+\hat { M M D } ^ { 2 } ( \mathcal { X } , \mathcal { A } , \mathcal { Z } , \theta ) = \frac { 1 } { | \mathcal { A } | } \sum _ { j } \left ( \langle Z _ { a _ { j } } \rangle _ { p } - \langle Z _ { a _ { j } } \rangle _ { q _ { \theta } } \right ) ^ { 2 } .
+$$
+
+This method does not give an unbiased estimator however due to the quadratic nonlinearity. In App. A we show how to modify the expression to arrive at an unbiased estimator M̂MD2u that we use to train our models, which we present in the following proposition.
+
+Proposition 3 (Unbiased estimates of the MMD2 ) Given a dataset X = {xi ∼ p} and batches of bitstrings A = {ai ∼ Pσ}, Z = {zi ∼ U}, the estimator
+
+$$
+a n d \ b a t c h e s \ o f \ b i t s t r i n g s \ \mathcal { A } & = \{ a _ { i } \sim \mathcal { P } _ { \sigma } \} , \xi = \{ z _ { i } \sim U \} , \ t h e \ e s t i m a t o r \\ & \quad M \hat { M } _ { u } ^ { 2 } ( \mathcal { X } , \mathcal { A } , \mathcal { Z } , \theta ) = \frac { 1 } { | \mathcal { A } | | \mathcal { Z } | ( | \mathcal { Z } | - 1 ) } \sum _ { i , j , k \neq j } f ( a _ { i } , z _ { j } , \theta ) f ( a _ { i } , z _ { k } , \theta ) \\ & - \frac { 2 } { | \mathcal { A } | | \mathcal { Z } | \mathcal { X } | \gamma } \sum _ { i , j , k = 1 } f ( a _ { i } , z _ { j } , \theta ) ( - 1 ) ^ { x _ { k } \cdot a _ { i } } \\ & + \frac { 1 } { | \mathcal { A } | | \mathcal { X } | ( | \mathcal { X } | - 1 ) } \sum _ { i , j , k \neq j } ( - 1 ) ^ { x _ { j } \cdot a _ { i } } ( - 1 ) ^ { x _ { k } \cdot a _ { i } } , \quad ( 2 1 ) \\ \text {where}
+$$
+
+where
+
+$$
+f ( a , z , \theta ) = \cos \left ( \sum _ { j } \theta _ { j } ( - 1 ) ^ { g _ { j } \cdot z } ( 1 - ( - 1 ) ^ { g _ { j } \cdot a } ) \right ) ,
+$$
+
+is an unbiased estimator of MMD2 (p, qθ), where qθ is the distribution generated by a parameterised IQP circuit with parameters θ and gates {gj}. That is, we have
+
+$$
+\mathbb { E } _ { \mathcal { X } , \mathcal { A } , \mathcal { Z } } \left [ M \hat { M } D _ { u } ^ { 2 } ( \mathcal { X } , \mathcal { A } , \mathcal { Z } , \theta ) \right ] = M M D ^ { 2 } ( p , q _ { \theta } ) .
+$$
+
+## 4.4 Training via automatic differentiation
+
+Note that the expression (21) is a differentiable function of θ and a deterministic function of A,Z,X (for fixed θ). As a result, we can obtain an estimate of the gradient ∇θMMD2 (p, qθ) by first sampling batches A,Z,X, computing an estimate of M̂MD2u via (21), and then computing its gradient via automatic differentiation 6 (Griewank and Walther, 2008). This results in an unbiased estimate of the gradient since by averaging over the sampling of batches A,Z,X,
+
+$$
+\mathbb { E } _ { \mathcal { A } , \mathcal { Z } , \mathcal { X } } [ \nabla _ { \theta } M \hat { M } D _ { u } ^ { 2 } ( \mathcal { A } , \mathcal { Z } , \mathcal { X } , \theta ) ] = \nabla _ { \theta } \mathbb { E } _ { \mathcal { A } , \mathcal { Z } , \mathcal { X } } [ M \hat { M } D _ { u } ^ { 2 } ( \mathcal { A } , \mathcal { Z } , \mathcal { X } , \theta ) ] = \nabla _ { \theta } M M D ^ { 2 } ( p , q _ { \theta } ) .
+$$
+
+The expression (21) is also a relatively simple mathematical expression that employs basic linear algebra. Because of this, one can exploit fast subroutines for matrix multiplication to evaluate estimates of the MMD2 and its gradient in a way that is highly efficient, and can accelerated with access to graphics processing units. This is implemented in the python package IQPopt (Recio-Armengol and Bowles, 2025), which was developed alongside this project in order train our models. The package is able to compute estimates of the MMD2 and its gradient for parameterised IQP circuits in JAX (Bradbury et al., 2018), and trains the parameters via gradient descent methods implemented via JAXopt (Blondel et al., 2021). For more information about the IQPopt package and the computational techniques employed, we refer the reader to Recio-Armengol and Bowles (2025).
+
+## 5 Stochastic bitflip circuits and the role of coherence
+
+In this section we investigate the role of coherence in parameterised IQP circuits. As we will see, this will lead us to a classical model that can be seen as a decohered version of the quantum circuit, which we can also train with a similar method. We then use these tools to discuss expressivity and universality of the model class.
+
+6 We note one could also differentiate the expression by hand, but we chose to use automatic differentiation to maintain code flexibility.
+
+## 5.1 Expectation values of parameterised IQP circuits
+
+We first derive an expression for expectation values ⟨Za⟩ of parameterised IQP circuits. Note that since Z exp(iθX) = exp(-iθX)Z due to anticommutation of Z,X we have
+
+$$
+\langle Z _ { a } \rangle = \langle 0 | \, U ^ { \dagger } ( \theta ) Z _ { a } U ( \theta ) \, | 0 \rangle = \langle 0 | \, \prod \, \exp ( - 2 i \theta _ { j } X _ { g _ { j } } ) \, | 0 \rangle
+$$
+
+$$
+= \langle 0 | \prod _ { j \in \mathcal { S } _ { \alpha } } ( \cos ( 2 \theta _ { j } ) \mathbb { I } + i \sin ( - 2 \theta _ { j } ) X _ { g _ { j } } ) \, | 0 \rangle \, ,
+$$
+
+$$
+\begin{array} { l } \in \langle 0 | \prod _ { j \in \mathcal { S } _ { a } } ( - 2 i \theta _ { j } X _ { g _ { j } } ) \, | 0 \rangle \\ \langle 0 | \prod _ { j \in \mathcal { S } _ { a } } ( \, \langle 0 \rangle \, \mathbb { T } _ { j } \, \cdot \, \cdot \, \cdot \, ( \, \langle 0 \rangle \\ \langle 0 | \prod _ { j \in \mathcal { S } _ { a } } ( \, \langle 0 \rangle \, \mathbb { T } _ { j } \, \cdot \, \cdot \, \cdot \, ( \, \langle 0 \rangle \end{array}
+$$
+
+where Sa = {j|{Xgj , Za}} = 0 specifies the generators that anticommute with Za. From this we can see that the only terms that survive when expanding the product are those that result in an identity operator. We thus have
+
+$$
+\langle Z _ { a } \rangle = \prod _ { j \in S _ { a } } \cos ( 2 \theta _ { j } ) + \sum _ { \omega \in \Omega } \prod _ { j \not \in \omega } \cos ( 2 \theta _ { j } ) \prod _ { j \in \omega } i \sin ( - 2 \theta _ { j } ) \\
+$$
+
+where Ω = {ω1, ω2, · · · } is the collection of sets of indices ω ⊆ Sa such that ∏j∈ω Xgj = I holds for each ω ∈ Ω. In general, there will be an exponential number of elements (in n) in Ω, which prevents an efficient brute force calculation.
+
+## 5.2 Removing coherence: stochastic bitflip circuits
+
+We now describe a classical model that is equivalent to a parameterised IQP circuit in which one uses decohered classical versions of the parameterised gates. We can also derive a similar expression for the expectation values of these circuits, which will help us to clearly delineate the role of coherence in the quantum models.
+
+To understand the classical model, we first note that the action of the quantum gate exp(iθjXgj ) on a computational state |x⟩ is
+
+$$
+\exp ( i \theta _ { j } X _ { g _ { j } } ) \left | x \right \rangle = \cos ( \theta _ { j } ) \left | x \right \rangle + i \sin ( \theta _ { j } ) \left | x \oplus g _ { j } \right \rangle .
+$$
+
+That is, the gate flips some of the bits of x in coherent superposition such that the probability of observing the flipped bitstring x ⊕ gj from a subsequent measurement is sin2 (θj). We construct our classical model by considering an incoherent version of this gate, which flips the same bits in a classical stochastic manner:
+
+$$
+| x \rangle \langle x | \rightarrow \cos ^ { 2 } ( \theta _ { j } ) \, | x \rangle \, \langle x | + \sin ^ { 2 } ( \theta _ { j } ) \, | x \oplus g _ { j } \rangle \, \langle x \oplus g _ { j } | \, .
+$$
+
+We call circuits constructed from these gates stochastic bitflip circuits, and in analogy to Def. 3.1 define them as follows.
+
+Definition 5.1 (Stochastic bitflip circuit) A stochastic bitflip circuit on n bits is a classical stochastic circuit comprised of the following:
+
+- (i) Initialisation of the all zero bitsting (0, · · · , 0)
+- (ii) Stochastic parameterised gates of the form (29) that flip subsets of bits
+- (iii) Read out of the final bitstring
+
+We can derive an expression for expectation values ⟨Za⟩ for these circuits by noting that they can be constructed as special cases of parameterised IQP circuits. In particular, given a stochastic bitflip circuit on n bits with m gates {gj}, construct a parameterised IQP circuit on n +m qubits that has gate generators Xgj Xn+j (that is, each generator has an X operator on a unique ancilla qubit). Consider expectation values ⟨Za⟩ of this parameterised IQP circuit, where Za acts nontrivially on the first n qubits only. The action of a gate with generator Xgj Xn+j on state |x⟩ |0⟩j is
+
+$$
+\cos ( \theta _ { j } ) \left | x \right \rangle \left | 0 \right \rangle ^ { ( j ) } + i \sin ( \theta _ { j } ) X _ { g _ { j } } \left | x \right \rangle \left | 1 \right \rangle ^ { ( j ) } .
+$$
+
+Since we are interested in expectation values of the first n qubits only, we may trace out the ancilla qubit, so that the action on |x⟩ is
+
+$$
+\cos ^ { 2 } ( \theta _ { j } ) \left | x \right \rangle \left \langle x \right | + \sin ^ { 2 } ( \theta _ { j } ) X _ { g _ { j } } \left | x \right \rangle \left \langle x \right | X _ { g _ { j } } = \cos ^ { 2 } ( \theta _ { j } ) \left | x \right \rangle \left \langle x \right | + \sin ^ { 2 } ( \theta _ { j } ) \left | x \oplus g _ { j } \right \rangle \left \langle x \oplus g _ { j } \right | ,
+$$
+
+i.e. a stochastic bit flip of the form (29). Expectation values evaluated on the first n qubits of this circuit are therefore the same as the corresponding stochastic bitflip circuit, and we may thus use (27). Noting that each of the generators of the constructed parameterised IQP circuit contains an X operator on a unique ancilla qubit, we have that Ω must be the empty set and so
+
+$$
+\langle Z _ { a } \rangle = \prod _ { j | \{ X _ { g _ { j } } , Z _ { a } \} = 0 } \cos ( 2 \theta _ { j } )
+$$
+
+for stochastic bitflip circuits. This makes for a clear exhibition of the role of coherence: in (27) the first term can be understood as a classical term that corresponds to the equivalent stochastic bitflip circuit, whereas the remaining terms are the result of coherence. The form of (32) also means we can estimate the MMD2 and its gradient efficiently in a similar manner to parameterised IQP circuits, which we also implement in the IQPopt package (Recio-Armengol and Bowles, 2025). This allows us to train both the parameterised quantum model and its classical bitflip surrogate model, which can help understand if coherence plays a role in model performance. In the experiments of Sec. 8 we will take this approach and see that indeed coherence appears to dramatically affect model performance. In App. B we also use the above to present a toy example where coherence is provably beneficial for a certain type of expressivity.
+
+## 5.3 Limits of expressivity
+
+An important feature to understand in any class of generative models is expressivity, which relates to the set of possible distributions that can be prepared (or approximately prepared) by instances of models from the class (Schuld et al., 2021; Gil-Fuster et al., 2024; Wu et al., 2021; Shin et al., 2023). In particular, many classical generative model classes are known to exhibit universality, in the sense that any valid probability distribution can be prepared by an appropriate model in the class. Universality is generally a desirable property for a model class to have, since it implies that the class is flexible enough to learn any distribution, although this does not mean that learning will be efficient.
+
+One may wonder whether the class of parameterised IQP circuits is universal for probability distributions over bitstrings. That is, for any valid distribution p(x) over bitstrings x, does there exists a parameterized IQP circuit and choice of parameters such that | ⟨x|U(θ) |0⟩ |2 = p(x). One may suspect this to be the case since the maximum number of free parameters in a parameterised IQP circuit of n qubits is 2n -1 (corresponding to all possible gate choices), which is precisely the same number of free parameters needed to describe a general distribution p(x) of n bits. Despite this, it turns out that the model class is not universal in this sense. More specifically, parameterised IQP circuits on n qubits cannot capture the full space of distributions on n bits. This can in fact be seen already for the case n = 2 (see App. C) by showing that two-qubit parameterised IQP circuits are equivalent to stochastic bitflip circuits, which are easily seen to be non-universal. It is still possible that universality could be achieved via the use of ancillas, that is, by considering marginal distributions of circuits with greater than n qubits, and understanding if this is the case would help evaluate the potential of parameterized IQP circuits as generative learning models.
+
+## 6 Beyond IQP: incorporating symmetry into the ansatz
+
+Constructing a machine learning model with good generalisation capability often relies of the ability to incorporate an inductive bias into the model that mirrors known structures that are present in the data (Bowles et al., 2023b; Adam et al., 2019; Bronstein et al., 2021). The paradigmatic example of this is the convolutional neural network, whose widespread success at computer vision tasks can be attributed to the fact that the convolutional layers are built upon a translation symmetry (translation equivalence) that is often reflected in image data. In this section we show how a particular symmetry can be built into circuits with IQP structures. This will be achieved by modifying the input state, so that technically speaking, the circuits no longer belong to the class of IQP circuits as defined by Def. 3.1.
+
+The symmetry in question is a particular invariance to global bitflips, whose corresponding group is Z2. In particular, we will construct a generative model qθ(x) that respects the probabilistic invariance
+
+$$
+q _ { \theta } ( x ) = q _ { \theta } ( \bar { x } ) \quad \forall \, \theta , x
+$$
+
+where x̄ is obtained from x by flipping all of the bits. In order to achieve this, we change the initial state |0⟩ to a state that is an eigenstate of X̃ =X⊗ · · · ⊗X, the operator that corresponds to flipping all bits. Such a state is the GHZ state
+
+$$
+| \phi \rangle = \frac { 1 } { \sqrt { 2 } } \left ( | 0 ^ { \otimes n } \rangle + | 1 ^ { \otimes n } \rangle \right ) .
+$$
+
+With this choice we see that
+
+$$
+p ( x | \theta ) & = | \langle x | U ( \theta ) | \phi \rangle | ^ { 2 } = | \langle x | U ( \theta ) \tilde { X } | \phi \rangle | ^ { 2 } = | \langle x | \tilde { X } U ( \theta ) | \phi \rangle | ^ { 2 } = | \langle \bar { x } | U ( \theta ) | \phi \rangle | ^ { 2 } \\ & = p ( \bar { x } | \theta ) \quad \forall \theta \pmod { ( 3 5 ) }
+$$
+
+as desired. Although the state |ϕ⟩ cannot be prepared by a parameterised IQP circuit, by expanding the expression and inserting Hadamards as in (9) we have
+
+$$
+\langle \phi | U ^ { \dagger } ( \theta ) Z _ { a } U ( \theta ) | \phi \rangle & = \frac { 1 } { 2 } ( \langle ( 0 | ^ { \otimes n } U ^ { \dagger } ( \theta ) Z _ { a } U ( \theta ) | 0 \rangle ^ { \otimes n } + \langle 1 | ^ { \otimes n } U ^ { \dagger } ( \theta ) Z _ { a } U ( \theta ) | 1 \rangle ^ { \otimes n } \\ & \quad + 2 R e [ \langle 0 | ^ { \otimes n } U ^ { \dagger } ( \theta ) Z _ { a } U ( \theta ) | 1 \rangle ^ { \otimes n } ] ) \\ & = \frac { 1 } { 2 } ( \langle + | ^ { \otimes n } D ^ { \dagger } ( \theta ) X _ { a } D ( \theta ) | + \rangle ^ { \otimes n } + \langle - | ^ { \otimes n } D ^ { \dagger } ( \theta ) X _ { a } D ( \theta ) | - \rangle ^ { \otimes n } \\ & \quad + 2 R e [ \langle + | ^ { \otimes n } D ^ { \dagger } ( \theta ) X _ { a } D ( \theta ) | - \rangle ^ { \otimes n } ] )
+$$
+
+and we can therefore approximate the expectation value by approximating each of the three terms in (36). To do this we first note that since |-⟩⊗n = ∑z (-1)|z| |z⟩ (where |z| is the Hamming weight of z) it follows that
+
+$$
+D ( \theta ) \left | - \right \rangle ^ { \otimes n } = \prod _ { j = 1 } ^ { m } e ^ { i \theta _ { j } Z _ { g _ { j } } } \left | - \right \rangle ^ { \otimes n } = \frac { 1 } { 2 ^ { n / 2 } } \sum _ { \mathfrak { z } } ( - 1 ) ^ { | z | } \prod _ { j = 1 } ^ { m } e ^ { i \theta _ { j } ( - 1 ) ^ { g _ { j } \cdot z } } \left | z \right \rangle
+$$
+
+$$
+= \frac { 1 } { 2 ^ { n / 2 } } \sum _ { z } ( - 1 ) ^ { | z | } \lambda _ { z } \, | z \rangle .
+$$
+
+Carrying this extra minus sign into (36) we find
+
+$$
+\langle \phi | ^ { \otimes n } U ^ { \dagger } ( \theta ) Z _ { a } U ( \theta ) \, | \phi \rangle ^ { \otimes n } & = \frac { 1 } { 2 ^ { n } } \sum _ { z } \left ( \frac { 1 } { 2 } \lambda _ { z } \lambda _ { z \oplus a } ^ { * } + \frac { 1 } { 2 } ( - 1 ) ^ { | z | + | z \oplus a | } \lambda _ { z } \lambda _ { z \oplus a } ^ { * } + R e [ ( - 1 ) ^ { | z | } \lambda _ { z } \lambda _ { z \oplus a } ^ { * } ] \right ) \\ & = \frac { 1 } { 2 ^ { n } } \sum _ { z } \left ( \frac { 1 } { 2 } + \frac { 1 } { 2 } ( - 1 ) ^ { | a | } + ( - 1 ) ^ { | z | } \right ) R e [ \lambda _ { z } \lambda _ { z \oplus a } ] , \\
+$$
+
+where we have taken the real part of the entire expression in the second line since the expectation value is guaranteed to be real. Converting Re[λzλ∗z⊕a] to a cosine we arrive at
+
+$$
+\langle \phi | U ^ { \dagger } ( \theta ) Z _ { a } U ( \theta ) \, | \phi \rangle = \mathbb { E } _ { z \sim U } \left [ \left ( \frac { 1 } { 2 } + \frac { 1 } { 2 } ( - 1 ) ^ { | a | } + ( - 1 ) ^ { | z | } \right ) \cos \left ( \sum _ { j } \theta _ { j } ( - 1 ) ^ { g _ { j } \cdot z } ( 1 - ( - 1 ) ^ { g _ { j } \cdot a } ) \right ] \right ]
+$$
+
+for which we can construct an unbiased estimate via a sample mean in the same fashion as (14). In Sec. 8 we will study a dataset that features the invariance (33) and train a symmetrised model with this method. We note that the above approach suggests a general method to construct ansätze with other symmetries beyond the simple one studied here by the following recipe:
+
+1. Identify a symmetry operator analogous to X̃ that commutes with all IQP gates (i.e. that is diagonal in the X basis)
+2. Construct an initial state that is an eigenstate of the symmetry operator and has an efficient expansion in the computational basis
+3. Expand the expression for expectation values as in (36) and simplify the expression as an expectation over bitstrings
+
+Using this recipe we expect that symmetries corresponding to the groups Zk2 (i.e. bitflipping symmetries) can be constructed if suitable initial states can be found.
+
+## 7 Evaluating model performance
+
+Evaluating the performance of a trained generative model is in general a difficult task due to the difficulty of working in exponentially large spaces (Theis et al., 2015; Betzalel et al., 2022; Stein et al., 2024). There exist a wide variety of metrics (Bischoff et al., 2024; Alaa et al., 2022), however good performance on one metric does not necessarily imply good performance on another (Theis et al., 2015). In this section we cover three evaluation metrics that we will use to evaluate the performance of parameterized IQP circuits in the numerical experiments that follow.
+
+## 7.1 Evaluation metrics
+
+Perhaps the least controversial and widely used metric is the log likelihood of a test set.
+
+Definition 7.1 (log likelihood of a test set) Given a set of test data Xtest = {xi}, the log likelihood with respect to a generative model qθ is
+
+$$
+L L ( \mathcal { X } _ { t e s t } | q _ { \theta } ) = \log \left ( \prod _ { i } q ( x _ { i } | \theta ) \right ) = \sum _ { i } \log \left ( q ( x _ { i } | \theta ) \right ) .
+$$
+
+This has the simple interpretation as the log probability that the generative model produce the test data, and larger values therefore imply better performance from a maximum likelihood perspective. Unfortunately however, this metric requires the ability to accurately estimate log probabilities of the model. This is unlikely to be possible for our circuits (or indeed most circuit families), and so we can only use this evaluation metric when the number of qubits is small enough to allow for tractable computation of probabilities.
+
+Luckily for us, the maximum mean discrepancy with respect to a test set is also a relatively common metric for model evaluation (O'Bray et al., 2021; Lueckmann et al., 2021; Sutherland et al., 2016) and was found by Xu et al. (2018) to have particularly appealing properties compared to other methods.
+
+Definition 7.2 (MMD2 with respect to a test set) Given a generative model qθ the MMD2 with respect to a test set Xtest = {xi} is
+
+$$
+M M D ^ { 2 } ( P _ { \chi _ { t e s t } } , q _ { \theta } )
+$$
+
+where PXtest (x) = 1 |Xtest| ∑xi∈Xtest I(xi = x) is the empirical distribution of the test data.
+
+In the above I(·) is the indicator function that returns 1 if the condition is met and zero otherwise. Since we have shown how to estimate the MMD2 classically, we can use this metric to evaluate parameterised IQP models with large numbers of qubits (i.e. taking X = Xtest in (21) provides an unbiased estimate). If we are able to sample from the generative model, (5) can be used instead. The MMD is a distance metric, so lower values imply better performance.
+
+We also make use of a test recently proposed in Ravuri et al., 2023, called the Kernel Generalized Empirical Likelihood (KGEL). This test serves as a diagnostic tool that can identify mode dropping and mode imbalance in trained generative models, and is the solution to the following convex optimisation problem 7 .
+
+Definition 7.3 (Kernel Generalized Empirical Likelihood) The KGEL with respect to a test set Xtest = {xi} and a set of witness points {tj} is the solution to the following convex optimisation problem:
+
+$$
+K G E L ( \mathcal { X } _ { t e s t } , q _ { \theta } ) & = \min _ { \{ \pi _ { i } \} } D _ { K L } ( P _ { \pi } | | P _ { \mathcal { X } _ { t e s t } } ) \\ \intertext { s u b j c t e t o } \subject t o \sum _ { i = 1 } ^ { n } \pi _ { i } \left [ \begin{array} { c } k ( x _ { i } , t _ { 1 } ) \\ \vdots \\ k ( x _ { i } , t _ { W } ) \end{array} \right ] & = \mathbb { E } _ { y \sim q _ { \theta } } \left [ \begin{array} { c } k ( y , t _ { 1 } ) \\ \vdots \\ k ( y , t _ { W } ) \end{array} \right ] .
+$$
+
+7 In the publication Ravuri et al., 2023, an additional feature map is applied to the data, which can be used to map high dimensional data to a more informative subspace. It is not clear if this can be combined with our techniques for IQP circuits however, so we take the feature map to be the identity here.
+
+$$
+( 4 3 )
+$$
+
+Here Pπ(x) = ∑i=1 πiI(xi = x) (with πi > 0, ∑i πi = 1), DKL is the Kullback-Leibler divergence (or relative entropy), and the points ti are called witness points that (like the points in Xtest) are typically sampled from the ground truth distribution p. The right hand side of (43) can therefore be understood as a vector of expected distances to each of the witness points under the kernel k, which here we take to be the Gaussian kernel with a specified bandwidth. If the generative model qθ has collapsed to a single mode (say close to the point t1), then in order to satisfy the constraint (43), the probabilities πi will be weighted heavily towards those test points xi that belong to the same mode. This results in a larger value of the KL divergence with respect to the empirical distribution PXtest , but more importantly, the mode dropping can be diagnosed by inspecting the solution {πi} returned by the convex optimisation solver. We show in App. D that the right hand side of (43) can be approximated efficiently with a classical algorithm when qθ is a parameterized IQP circuit. As a result, we can evaluate mode dropping of large quantum generative models without the need to sample. Like the MMD2 , the KGEL is implemented in the IQPopt package (Recio-Armengol and Bowles, 2025), which we use to investigate mode imbalance of our models in the following section.
+
+Finally, since we have the ability to estimate expectation values of parameterised IQP circuits we can also estimate the covariance between the ith and j th elements of x.
+
+Definition 7.4 (covariance) The covariance between the ith and j th elements of x for the generative model qθ(x) is
+
+$$
+c o v ( x _ { i } , x _ { j } ) = \langle Z _ { i } Z _ { j } \rangle _ { q _ { \theta } } - \langle Z _ { i } \rangle _ { q _ { \theta } } \langle Z _ { j } \rangle _ { q _ { \theta } } .
+$$
+
+Using this we can construct the covariance matrix of the trained model in order to visually inspect the two body correlations and compare this to the true distribution.
+
+## 8 Experiments
+
+In this section we apply the theoretical work of the previous sections to a number of numerical experiments that investigate the potential of parameterised IQP circuits to serve as useful generative models. The code that was used to produce these results can be found at github.com/XanaduAI/scaling-gqml, along with scripts to generate or download the datasets. We focus on the following six datasets.
+
+1. 2D Ising dataset: A dataset of bitstrings of length 16, that are sampled from a 16-spin classical Ising distribution with a square lattice Hamiltonian.
+2. Binary blobs dataset: A dataset of bitstrings of length 16 that are sampled close in Hamming distance to one of eight pre-specified patterns.
+3. D-Wave dataset : A dataset of bitstrings of length 484 that are sampled from quenching 484-qubits in a D-Wave Advantage system with a Pegasus lattice topology, taken from Scriva et al., 2023.
+4. Binarized MNIST dataset: A dataset of bitstrings of length 784 constructed by binarizing the full-pixel MNIST handwritten digits dataset.
+5. Scale free network dataset: A dataset of bitstrings of length 1000 sampled from a classical Ising distribution on a 1000-spin system whose Hamiltonian connectivity corresponds to a scale-free network.
+
+6. Genomic dataset: A real-world genomic dataset of bitstrings of length 805 that correspond to single nucleotide polymorphisms of a highly variable section of the human genome of length 805, taken from Yelmen et al., 2021.
+
+As well as training parameterized IQP circuits, we also train two energy-based classical generative models as well as the stochastic bitflip model of Sec. 5.2 to serve as comparisons. We thus consider a total of four models:
+
+- IQP model : A quantum generative model corresponding to a parameterised IQP circuit.
+- Bitflip model : A stochastic bitflip model, as described in Sec. 5.2.
+- RBM model : A restricted Boltzmann machine, implemented via sci-kit learn's BernoulliRBM class.
+- EBM model : An energy based model whose energy function is given by a feedforward neural network.
+
+Compute intensive operations were performed with the aid of the digital research alliance of Canada's Niagara cluster (40 core, 202GB RAM per node) or an in-house server featuring NVIDIA's Grace Hopper G200 superchip (72 core, 480GB + H100 GPU). All calculations were performed on CPU, with the exception of the EBM training for the D-Wave dataset, which used the Grace Hopper GPU.
+
+## 8.1 Training strategy for the IQP model
+
+Here we describe the specific training strategy we adopted to train the IQP model. An identical strategy was used to train the bitflip model.
+
+## 8.1.1 Choice of loss function
+
+The parameterised IQP circuits are trained via the squared maximum mean discrepancy loss of (16). We use the average of a number of MMD2 values for different values of the bandwidth σ. That is, our loss takes the form
+
+$$
+\mathcal { L } = \frac { 1 } { L } \sum _ { i = 1 } ^ { L } M M D _ { \sigma _ { i } } ^ { 2 } ( P _ { \chi _ { \text {train} } } , q _ { \theta } )
+$$
+
+for a choice {σ1, · · · , σL} of bandwidths and PXtrain the empirical training distribution. For experiments 1 and 2 (which involve 16 qubit models), the specific choice {σ1, σ2} = {0.6, 0.3} was used, which corresponds to sampling observables Za in (16) with an average Pauli weight of 2 and 6 respectively. For all other experiments, we used a choice of three bandwidths {σ1, σ2, σ3}, where σ1 is such that the average Pauli weight of Za is 2, σ3 is the square root of the median heuristic, and σ2 is given by σ2 = √(σ2 1 + σ2 3 )/2. The values and implied average Pauli weights of Za for each experiment are shown in Table 1, which can be used to understand the order of correlations probed by each bandwidth. In practice, it can be beneficial to consider several bandwidths (as was done in Li et al., 2015), since gradient information may only be possible for low body correlations at the start of training (Rudolph et al., 2024); terms in L focusing on higher order correlations therefore become more significant the model is trained.
+
+Table 1: The number of qubits of the IQP model (column n) and the values of the bandwidths used for training and evaluation. The parentheses show the corresponding average operator weights (the average Pauli weight of Za in (16), rounded to the nearest integer).
+
+|              |    n | σ1       | σ2      | σ3       |
+|--------------|------|----------|---------|----------|
+| 2D Ising     |   16 | 1.3 (2)  | 0.6 (6) | n/a      |
+| Binary Blobs |   16 | 1.3 (2)  | 0.6 (6) | n/a      |
+| D-wave       |  484 | 7.8 (2)  | 6.1 (4) | 3.9 (8)  |
+| MNIST        |  784 | 9.9 (2)  | 7.4 (4) | 3.4 (17) |
+| Scale free   | 1000 | 11.2 (2) | 8.3 (4) | 3.8 (17) |
+| Genomic      |  805 | 10.0 (2) | 7.7 (4) | 4.2 (11) |
+
+## 8.1.2 Data-dependent parameter initialisation
+
+We found that a wise choice of parameter initialisation is crucial to obtain good solutions for larger problems. Choosing to initialize all parameters uniformly at random typically leads to a situation where the loss does not decrease, which may due to the presence of barren plateaus in the loss landscape (McClean et al., 2018) (see Sec. 9 for a more in depth discussion on this issue). To mitigate these issues we adopted a technique in which the magnitude of the initial parameters are dependent on the training data. In particular, for single qubit gates with X generator acting on qubit j, we initialize parameters to values arcsin(√⟨xj⟩), where ⟨xj⟩ is the mean value of the j th dimension of the training data. This choice ensures that if all other parameters are set to zero, the model is equivalent to a product distribution with the same single qubit marginal distributions as the training data. Parameters of two-qubit gates acting on qubits j, k are initialized proportional to the covariance between the j th and kth dimensions of the training data (the specific constant of proportionality is left as a free hyperparameter), where we convert the training data to ±1 values rather than binary. The logic here is similar: if two features are highly correlated, then it is likely the corresponding parameter will be relatively large since parameterised IQP gates enact a coherent bitflip. All other parameters (if there are any) are initialized via independent zero-mean normal distributions, whose standard deviation is another hyperparameter.
+
+## 8.1.3 Training via stochastic gradient descent
+
+For each training update step, we compute an unbiased estimate of the loss via (21), setting |A| = |Z| = 1000 and taking X to be the set of training data. Gradients are estimated from this via automatic differentiation in JAX and used via the ADAM update to train the model using the IQPopt package (Recio-Armengol and Bowles, 2025), and training is stopped after a predetermined number of steps or when a convergence criterion is met. Training in this way appears to be smooth and convergence is achieved in a relatively small number of steps. In Fig. 3 we show the loss plots resulting from training the model for each of the above experiments.
+
+## 8.2 Classical generative models
+
+In this section we describe each of the classical generative models in greater detail.
+
+1 Figure 3: Training loss plots from training the parameterised IQP model on each of the six datasets.
+
+> *Generated caption of `2503.02934_-_Train_on_classical_deploy_on_quantum__scaling_generative_quantum_machine_learning_to_a_thousand_qubits_assets/figure-003.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a collection of six line plots arranged in a single row, each showing a "Loss value" on the y-axis against "Training step" on the x-axis. All plots share the same y-axis label, "Loss value," but have different x-axis scales and titles. Each plot shows a rapidly decreasing line that starts at a high loss value and levels off toward a low, fluctuating value as the training steps increase. From left to right, the plots are: 1) "2D_ising" with an x-axis from 0 to 500; 2) "Binary blobs" with an x-axis from 0 to 1000; 3) "D-wave" with an x-axis from 0 to 2000; 4) "MNIST" with an x-axis from 0 to 2000; 5) "Scale free" with an x-axis from 0 to 2000; and 6) "Genomic" with an x-axis from 0 to 1000. Each plot contains a vertical gray line near the beginning of the training process.
+
+## 8.2.1 Bitflip model
+
+The bitflip model has an identical structure to the IQP model, differing only in the form of the expectation values as given by (32). We therefore use an identical strategy to the IQP model to train this model, which allows for a clean and fair comparison between the two. As with the IQP model, the training was performed via the IQPopt package.
+
+## 8.2.2 Energy based models
+
+The remaining two classical models are both instances of energy based generative models. These models parameterise probability distributions over bitstrings s of the form
+
+$$
+P _ { \theta } ( s ) = \frac { \exp ( - E _ { \theta } ( s ) ) } { Z _ { \theta } } ,
+$$
+
+where Eθ(s) is the energy function and Zθ = ∑s (exp(-Eθ(s))) is a normalisation constant know as the partition function.
+
+RBM Model-For the RBM model, s contains the data vector x as well as another binary vector h whose elements are called hidden neurons. The energy function is equivalent to a classical Ising energy where the Hamiltonian has a bipartite structure between the data and hidden neurons:
+
+$$
+E _ { \theta } ( s ) = E _ { \theta } ( x , h ) = - \alpha \cdot x - \beta \cdot h - x ^ { T } W h ,
+$$
+
+where θ = (α, β,W) contains the trainable parameters of the model. To obtain the generative model over the data, one marginalizes the distribution over the hidden units:
+
+$$
+q _ { \theta } ( x ) = \sum _ { h } P _ { \theta } ( x , h ) = \sum _ { h } \frac { \exp ( - E _ { \theta } ( x , h ) ) } { Z _ { \theta } } .
+$$
+
+The RBM is trained with persistent contrastive divergence, as implemented by the fit method of sci-kit learn's BernoulliRBM class. Parameter initialisation follows the default behavior of sci-kit learn, which corresponds to a a Xavier initialisation (Glorot and Bengio, 2010).
+
+EBM Model-The EBM model has a simpler structure and uses a neural network to parameterise the energy function directly, without the use of additional stochastic neurons. That is, for the EBM we have s = x and the function Eθ(x) is given by a deterministic feedforward neural network with a specified number of hidden layers with corresponding parameters θ. The EBM model is trained via the standard contrastive divergence algorithm, which we implement in JAX (Bradbury et al., 2018) and Flax (Heek et al., 2024). Parameter initialisation follows the default behavior of Flax, which corresponds to a LeCun normal initialisation (Klambauer et al., 2017).
+
+Table 2: Hyperparameters used in a preliminary grid search for each model. The experiments column shows for which of the six experiments the hyperparameter was varied. In the case that all the specified experiments searched over the same values the range is stated as a list; otherwise the range shown is the total range over all experiments in which the hyperparameter was varied (for precise values for each experiment can be found in the accompanying repository). The values shown in rounded parentheses correspond to the default values that were used if the hyperparameter was not varied.
+
+| Hyperparameter (IQP/Bitflip model)                       | Experiments   | Range                   |
+|----------------------------------------------------------|---------------|-------------------------|
+| Largest Pauli weight of gate generators                  | 1,2           | [2,4,6] (2)             |
+| Number of ancilla qubits                                 | 1,2           | [0,8] (0)               |
+| Initial learning rate                                    | 1,2,3,4,5,6   | 0.0001 - 0.1            |
+| Parameter initialisation scale factor (two- qubit gates) | 1,2,3,4,5,6   | 0.0001 - 1.0            |
+| Parameter initialisation scale factor (>2 qubit gates)   | 1,2           | [0, 0.0001] (0)         |
+| Hyperparameter (RBM model)                               | Experiments   | Range                   |
+| Number of hidden units                                   | 1,2,3,5       | 4-1024                  |
+| Learning rate                                            | 1,2,3,5       | 0.00001 - 0.01          |
+| Batch size                                               | 1,2,3,5       | 16-64                   |
+| Hyperparameter (EBM model)                               | Experiments   | Range                   |
+| Neural network layer structure                           | 1,2,3,5       | variable                |
+| Initial learning rate                                    | 1,2,3,5       | [0.00001, 0.001, 0.001] |
+| Contrastive divergence steps                             | 1,2,3,5       | [1,10]                  |
+| Batch size                                               | 1,2,3,5       | 16-128                  |
+
+To generate samples from both models we need to use Markov chain Monte Carlo methods to attempt to sample from the distribution Pθ(s). This is known to be computationally expensive, since the typical length of the Markov chain needed to reach the equilibrium distribution is generally unknown and can be long, especially for energy functions that contain deep local minima. For the RBM model, the bipartite structure of the energy function allows for a Gibbs sampling procedure to update the all data or hidden neurons in parallel. For the EBM model, this is generally not possible, and so bits are updated individually using the standard Metropolis Hastings algorithm, which therefore requires more computational effort. In order to obtain the highest quality samples for evaluation, we seed an independent Markov chain for every sample, selecting the last bitstring after a large number of MCMC steps (see Table 3 for precise values). The two models were implemented via the RestrictedBoltzmannMachine and DeepEBM classes of the qml-benchmarks package (github.com/XanaduAI/qml-benchmarks).
+
+Table 3: Training and sampling steps for experiments 1 to 5 (k = 103 , m = 106 ). For all models except RBM, the value for train is the number of gradient steps to train the model. For RBM, it is the number of epochs of training (so the number of steps is much larger). For EBM, the sample column shows the number of MCMC steps to obtain each sample used for evaluation. For RBM, it is the number of Gibbs steps between the data and hidden units of the model to obtain each sample. For the bitflip model and IQP model (below 16 qubits) sampling can be achieved exactly without the need for MCMC. For the genomic dataset (not shown here), both the IQP and bitflip models were trained for 1000 steps.
+
+| Model   | Ising - train   | Ising - sample   | Blobs - train   | Blobs - sample   | D-Wave - train   | D-Wave - sample   | MNIST - train   | MNIST - sample   | scale free - train   | scale free - sample   |
+|---------|-----------------|------------------|-----------------|------------------|------------------|-------------------|-----------------|------------------|----------------------|-----------------------|
+| IQP     | 700             | exact            | 1750            | exact            | 2500             | n/a               | 3000            | n/a              | n/a                  | n/a                   |
+| Bitflip | 2500            | exact            | 2500            | exact            | 2500             | exact             | 3000            | exact            | 2600                 | exact                 |
+| RBM     | 10k             | 3200             | 10k             | 3200             | 5000             | 300k              | n/a             | n/a              | 5000                 | 150k                  |
+| EBM     | 500k            | 64k              | 500k            | 64k              | 5m               | 4.5m              | n/a             | n/a              | 2m                   | 1m                    |
+
+Table 4: Number of trainable parameters in each of the models we trained, as selected by the hyperparameter grid search.
+
+|         |   Ising |   Blobs |   D-Wave | MNIST   |   Scale free | Genomic   |
+|---------|---------|---------|----------|---------|--------------|-----------|
+| IQP     |    2516 |   14892 |   117370 | 307720  |       500500 | 324415    |
+| Bitflip |   14892 |    2516 |   117370 | 307720  |         3991 | 324415    |
+| RBM     |    4368 |    1104 |   497124 | n/a     |       251250 | n/a       |
+| EBM     |    1800 |     348 |   235224 | n/a     |          484 | n/a       |
+
+## 8.3 Hyperparameter optimisation pipeline
+
+For each dataset and model, a hyperparameter grid search was performed to identify the most promising choice of hyperparameters on which to train the models for evaluation. As is always the case, the specific choice of hyperparameter grid, as well as the relative effort and computational budget spent on each model can greatly affect the final results (Bowles et al., 2024). We strove to be as fair as possible in our experiments, and put a comparable effort into both training and searching hyperparameters for each model. For high dimensional datasets, limits of the hyperparameter search space and the total training time were often dictated by computational requirements, i.e. by the job time of single node jobs on the compute clusters. In Table 2 we detail the different hyperparameters that were searched over for each model.
+
+For each choice of hyperparameters, the corresponding model was trained and evaluated on a single train/validation split of the training data. We did not perform multiple cross validations, opting to use the available computational resources to enlarge the search grid rather than perform multiple training runs (and our initial investigations suggested performance was largely independent of the particular split). The validation set was used to evaluate the hyperparameter choice: to select the best hyperparameters, the average MMD2 across a number of bandwidths (the same ones as shown in Table 1) was estimated, and the hyperparameter choice with the lowest value was selected. These hyperparameters were then used to train the model again, this time using the full training data. Typically, the number of training steps was significantly increased in this final training to achieve the best possible results.
+
+The hyperparameter grids, choice of best parameters, loss plots from training, trained parameters, as well as instructions on how to load and sample from the trained models can be found in the accompanying code repository. The total steps used to train and sample from the models is shown in Table 3, and the number of parameters of the models as selected by the grid search are shown in Table 4.
+
+> *Generated caption of `2503.02934_-_Train_on_classical_deploy_on_quantum__scaling_generative_quantum_machine_learning_to_a_thousand_qubits_assets/figure-004.png` (ollama:gemma4:26b, prompt sci-v1):* This is a composite image containing two side-by-side line plots. The left plot has a y-axis labeled "MMD test loss" on a logarithmic scale ranging from $10^{-6}$ to $10^{-1}$ and an x-axis labeled "MMD bandwidth ($\sigma$)" with values from $0.6$ to $1.3$. The data series consist of points with vertical error bars. A series of orange circular points starts at approximately $10^{-2}$ and trends slightly upward toward $10^{-1}$. A series of green circular points remains constant around $10^{-3}$. A series of blue circular points remains constant around $10^{-4}$. A series of red circular points with large error bars oscillates around $10^{-4}$. The right plot has a y-axis labeled "Cumulative probability" ranging from $0.0$ to $1.0$ and an x-axis labeled "Ground truth data index" ranging from $0$ to $2000$. The plot contains five colored lines: a black line labeled "True" follows a straight diagonal from $(0,0)$ to $(2000,1.0)$; a green line labeled "RBM" and a dark teal line labeled "IQP" both follow the same straight diagonal path as the "True" line; a dark red line labeled "DeepEBM" follows a convex curve starting at $(0,0)$ and ending at $(2000,1.0)$; and a light blue line labeled "Bitflip" follows a concave curve starting at $(0,0)$ and ending at $(2000,1.0)$; a gold line labeled "Random" follows a very steep convex curve that stays near $0.0$ until approximately $x=1500$ and then rises sharply to $(2000,1.0)$. A legend in the top left of the right plot identifies these five series.
+
+## 8.4 Dataset descriptions and results
+
+In this section we describe the datasets in further detail and interpret the obtained results. Scripts to generate or download each of the datasets can be found in the datasets directory of the accompanying repository. The synthetic data for experiments 1,2 and 5 was generated using the ising (experiments 1 and 5) and spin\_blobs functions (experiment 2) of the qml-benchmarks package respectively (github.com/XanaduAI/qml-benchmarks).
+
+## Experiment 1: 2D Ising dataset
+
+This dataset corresponds to a thermal distribution at temperature T = 3/kB of an Ising spin system on a 4 × 4 square lattice with periodic boundary conditions. The coupling weights of the Hamiltonian are sampled independently as uniform random numbers in the range [0, 2], and there are no local bias terms. Since Ising distributions without local biases are invariant with respect to flipping all bits, the distribution satisfies the spin flip symmetry p(x) = p(x̄) described in Sec. 6, and we therefore train the IQP and bitflip models with this symmetry enforced. We generated a total of 800000 configurations by performing Metropolis Hastings Monte Carlo sampling on 8 independent Markov chains, from which we randomly selected 5000 points to form a training set, and 50000 points to form a test set from equally spaced points on the chains.
+
+In Fig. 4 (left) we show the MMD2 evaluated on the test data over the range of bandwidths on which the IQP model was trained. Both the IQP and bitflip models perform very well, resulting in MMD values equal to zero to within 1 standard deviation error. The reason for the superior performance relative to the EBM may be partly due to the fact that unlike the EBM model, the IQP and bitflip models were trained with the MMD loss function: if one calculates the log likelihood of a test set 8 , one finds the EBM (-7.53) performs slightly better than the IQP model (-7.82). Since the IQP and Bitflip models were trained with the spin flip symmetry of Sec. 6 enforced, they also possess a relevant inductive bias not present in the other models, which likely contributed to the good performance as well. The RBM model performs relatively poorly in comparison, which we suspect is due to mode imbalance: in Fig. 5 we see that the distribution of magnetisation is asymmetric, with a preference for negatively aligned spins. This is supported by the corresponding KGEL distribution of Fig. 4 (right), which is further from a uniform distribution (corresponding to a straight line) than other models. The similar performance of the bitflip and IQP models suggests that coherence is playing a small role in this experiment, although the bitflip model does appear to struggle to sample low energy configurations.
+
+8 calculation of the log likelihood for the RBMmodel is computational intractable, and not implemented for the bitflip model.
+
+> *Generated caption of `2503.02934_-_Train_on_classical_deploy_on_quantum__scaling_generative_quantum_machine_learning_to_a_thousand_qubits_assets/figure-005.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a multi-panel figure consisting of two rows of five plots each, displaying probability distributions for different models labeled "True", "IQP", "RBM", "EBM", and "Bitflip". The top row contains five density plots with smooth blue curves overlaid on grey histograms. The x-axes for all top plots represent a numerical range from approximately -30 to 30 (with labels like 30, 20, 10, 0, 10, 20, 30 depending on the specific plot), and the y-axes represent density with values ranging from 0.00 to 0.05. The "True" plot shows a multimodal distribution with peaks near -25 and 10; "IQP" shows a single main peak near 10; "RBM" shows two main peaks near -20 and 5; "EBM" shows peaks near -20 and 10; and "Bitflip" shows a single dominant peak near 10. The bottom row contains five corresponding histograms without smooth curves. The x-axes for all bottom plots range from approximately -20 to 20 (with labels -10, 0, 10), and the y-axes represent frequency/density with values ranging from 0.00 to 0.10. The "True" plot shows peaks at roughly -15 and 15; "IQP" shows a peak at roughly -15 and a smaller one at 15; "RBM" shows a wide distribution with a peak near -15; "EBM" shows peaks at approximately -15 and 15; and "Bitflip" shows peaks at approximately -15 and 15. All plots use a light grey color for histograms and a teal blue color for the lines in the top row.
+
+## Experiment 2: Binary blobs dataset
+
+This dataset was constructed as a bitstring analog to the commonly used 'Gaussian blobs' datasets that are comprised of real vectors. To generate the data, one of eight specified bitstrings of length 16 (shown at the top of Fig. 6) was randomly chosen and each pixel was independently flipped with probability 0.05. This creates a distribution over bitstrings that features eight clearly separated modes that can be visually identified. This process was used to create train and test datasets of sizes 5000 and 10000; samples from this distribution can be seen in the 'True' row at the top of Fig. 6.
+
+As for the 2D Ising data, the RBM model faces issues with mode imbalance, resulting in poor values of the test MMD2 . This can be seen from the results of the KGEL test, where there is a clear preference to sample the first configuration (which can also be seen from the generated samples above). The EBM performs exceptionally well here, achieving results that are indistinguishable from the test data. The IQP model is able to capture all of the patterns and does not appear to suffer from extreme mode imbalance, however sometimes produces configurations that are far from the ground truth distribution. This can be seen from the fourth example configuration from Fig. 6 that has a Hamming weight of 11. This is despite the model using all gates acting on six qubits or less, resulting in a total of 14892 parameters (significantly more than the EBM's 1700 parameters). The superior performance of the EBM is further supported by a higher log likelihood score of -5.34, compared to -6.35 for the IQP model. The bitflip model performed badly, often producing bitstings far from the ground truth. The MMD2 values of the bitflip model are better than those of the RBM, despite the RBM's samples being arguably more visually pleasing. We suspect that this is because the MMD2 metric does not only reflect how visually pleasing a sample is, but is dependent on other factors such as mode imbalance. Indeed, in the machine learning literature, even evaluation metrics designed to select visually pleasing samples can still lead to strange results (Barratt and Sharma, 2018).
+
+> *Generated caption of `2503.02934_-_Train_on_classical_deploy_on_quantum__scaling_generative_quantum_machine_learning_to_a_thousand_qubits_assets/figure-006.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains a multi-panel scientific figure titled "Patterns" at the top. The top section shows several rows of 8x8 grayscale-style patterns represented by black and yellow pixels. The rows are labeled on the left as "True", "IQP", "RBM", "EBM", and "Bitflip". The "True" row serves as the baseline, and subsequent rows show patterns generated by different models. Below these rows are two plots. The left plot is a line graph titled "MMD test loss" on the y-axis and "MMD bandwidth ($\sigma$)" on the x-axis. The y-axis uses a logarithmic scale ranging from $10^{-5}$ to $10^{-1}$. The x-axis is linear with values from 0.6 to 1.3 in increments of 0.06 or 0.07. Three data series are shown: a blue line (IQP) starting around $10^{-3}$ and increasing slightly; a yellow line (Bitflip) starting around $10^{-2}$ and increasing; and a green line (RBM) starting near $10^{-2}$ and increasing. A series of dark red bars with error bars is plotted along the bottom of this graph, centered around $10^{-4}$. The right plot is a bar chart with "Cumulative probability" on the y-axis and "Ground truth data index" on the x-axis. The x-axis shows integer indices from 0 to 7. The y-axis ranges from 0.00 to 0.30. A legend in the top right specifies four series: "IQP (0.08)" in blue, "RBM (0.22)" in green, "Bitflip (0.78)" in cyan, and "True (0.01)" in dark red. For index 0, the green bar is very high, near 0.30, while the blue and cyan bars are near 0.13. For index 5, the green bar is elevated to approximately 0.17. For all other indices, the bars for all four series are roughly equal, hovering around 0.13.
+
+## Experiment 3: D-Wave dataset
+
+This dataset was generated from spin configurations sampled from a D-Wave Advantage processor. The dataset appeared in Scriva et al. (2023), where it was used to generate configurations to seed and accelerate Markov chain Monte Carlo methods to sample from thermal distributions of a spin glass model at low temperatures. We focus on data that was obtained by annealing a 484-qubit spin system coupled via D-Wave's Pegasus graph topology, that underwent quantum annealing for 100µs. The training and test data consists of 10000 points and 60000 points respectively, taken from the data available from the paper's code repository. This results in a dataset which features correlations over relatively large distances, which can be seen from the covariance matrix plot of the data shown in Fig. 7. Both the IQP and bitflip models were trained using all two-qubit and single-qubit gates on the 484 qubits of the model, resulting in models with over 100000 parameters.
+
+Interestingly, although no model managed to capture the distribution very well, the IQP model excelled at this problem compared to the classical models. From the covariance matrix plot of Fig. 7 one sees that the overall structure of the two body correlations have been well captured, however are significantly weaker than those of the true distribution. The RBM model has likely suffered issues of mode collapse since many of the diagonal elements of the covariance matrix (i.e. the variances of each bit of the distribution) are close to zero, meaning some bits are effectively constant. Despite intense training and sampling, the EBM model produced poor results, with only some faint short range correlations visible from the covariance matrix. Both the RBM and EBM models scored worse than a random distribution for the test MMD2 . We remark that this is not a contradiction, since the models are trained on a different metric which doesn't necessarily minimize the test MMD2 , and so unsuccessful training and extreme mode imbalance may result in such values. The bitflip model failed to train significantly and produced a covariance matrix that was indistinguishable from the random distribution, which we do not show.
+
+> *Generated caption of `2503.02934_-_Train_on_classical_deploy_on_quantum__scaling_generative_quantum_machine_learning_to_a_thousand_qubits_assets/figure-007.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains four distinct scientific plots arranged in a grid. The top left plot is a line graph showing "MMD test loss" on a logarithmic y-axis ranging from $10^{-5}$ to $10^{-1}$ and "MMD bandwidth ($\sigma$)" on a linear x-axis with values $3.93, 4.35, 4.78, 5.21, 5.63, 6.06, 6.48, 6.91, 7.34, 7.76$. The series are: "IQP" (blue circles), "Bitflip" (orange circles), "True" (grey circles with error bars), "Random" (yellow circles), "RBM" (green circles), and "DeepEBM" (red circles). All series show a general upward trend as bandwidth increases, with the "True" series maintaining the lowest loss. The top right plot is a line graph showing "Cumulative probability" on a linear y-axis from $0.0$ to $1.0$ and "Ground truth data index" on a linear x-axis from $0$ to $2000$. The series are: "Bitflip" (light blue line), "IQP" (dark blue line), "True" (dark grey line), and "RBM" (teal line). The "True" line is a straight diagonal from $(0,0)$ to $(2000,1)$, while the other curves stay near zero for much of the x-axis before rising sharply near the end. The bottom row consists of four heatmaps titled "True", "IQP", "RBM", and "EBM" from left to right. Each heatmap has x and y axes labeled from $0$ to $400$ in increments of $100$. The "True" and "IQP" heatmaps show a dense, speckled pattern of purple and pink hues with a visible diagonal trend. The "RBM" heatmap shows a much lighter, sparser pattern. The "EBM" heatmap is mostly light grey with a single thin, dark diagonal line.
+
+## Experiment 4: Binarized MNIST digits
+
+The MNIST handwritten digits dataset is probably the most famous dataset in the machine learning literature and is often used as a sanity check to test if a model is performing well. We convert the standard dataset to binary images by thresholding the pixel values, and then flatten the images, resulting in a dataset of bitstrings of length 784. We use the standard train/test split that consists of 50000 training points and 10000 test points. Given that the MNIST dataset has been extensively trained in the machine learning literature, we trained only the IQP and bitflip models on this dataset. The corresponding circuits have 784 qubits and the gate sets consist of all-to-all two-qubit gates, resulting in models with 307720 trainable parameters.
+
+> *Generated caption of `2503.02934_-_Train_on_classical_deploy_on_quantum__scaling_generative_quantum_machine_learning_to_a_thousand_qubits_assets/figure-008.png` (ollama:gemma4:26b, prompt sci-v1):* A scientific figure containing several plots. The top-left plot is a line graph titled "MMD test loss" on the y-axis (log scale, ranging from $10^{-3}$ to $10^{-1}$) and "MMD bandwidth ($\sigma$)" on the x-axis (linear scale, from 3.38 to 9.89). The legend contains: "Noise 0.1" (dark grey line with circles), "Noise 0.2" (medium grey line with circles), "Noise 0.3" (light grey line with circles), "Noise 0.4" (black line with circles), "IQP" (blue line with squares), "Bitflip" (cyan line with triangles), "True" (orange line with stars), and "Random" (yellow line with diamonds). The "Random" series shows the highest loss, increasing from approximately $3 \times 10^{-2}$ to $6 \times 10^{-2}$. The "True" series shows a loss around $10^{-2}$. The "Noise" series show increasing loss with higher noise levels, ranging from approximately $1.5 \times 10^{-3}$ to $5 \times 10^{-3}$. The "IQP" and "Bitflip" series are grouped between $5 \times 10^{-3}$ and $10^{-2}$. The top-right plot is a bar chart titled "Cumulative probability" on the y-axis (linear scale, 0.00 to 0.14) and "Ground truth data index" on the x-axis (integers 0 through 9). The legend contains: "Bitflip (0.13)" (cyan bar), "IQP (0.12)" (blue bar), "Noise 0.1 (0.02)" (dark grey bar), "Noise 0.2 (0.05)" (medium grey bar), "Noise 0.3 (0.11)" (light grey bar), "Noise 0.4 (0.19)" (black bar), and "True (0.05)" (horizontal black line at 0.05). The bars vary in height across the index, with "Noise 0.4" and "Noise 0.3" generally showing higher probabilities than the "True" baseline. The bottom row contains three heatmaps arranged horizontally. The first heatmap is labeled "True" and shows a red/white patterned correlation-like matrix on a white background, with axes from 0 to 700. The second heatmap is labeled "IQP Model" and shows a similar red/white pattern, with axes from 0 to 700 and an inset at the bottom left showing three small digit images labeled "Noise = 0.3". The third heatmap is labeled "Bitflip model" and shows a much sparser pattern, mostly white with very faint red diagonal lines, with axes from 0 to 700. A color bar on the far right ranges from -1.00 (dark blue) to 0.00 (white) to 1.00 (dark red).
+
+> *Generated caption of `2503.02934_-_Train_on_classical_deploy_on_quantum__scaling_generative_quantum_machine_learning_to_a_thousand_qubits_assets/figure-009.png` (ollama:gemma4:26b, prompt sci-v1):* This image consists of four separate subfigures. The top-left subfigure is a network graph consisting of numerous grey nodes connected by a dense web of thin grey lines, forming a complex, roughly circular cluster. The top-right subfigure is a line plot showing "MMD test loss" on the y-axis versus "MMD bandwidth ($\sigma$)" on the x-axis. The y-axis is on a logarithmic scale ranging from $10^{-6}$ to $10^{0}$. The x-axis shows discrete values: 3.82, 4.64, 5.46, 6.27, 7.09, 7.9, 8.72, 9.54, 10.35, and 11.17. A legend indicates five data series: IQP (blue diamonds), RBM (dark red diamonds), DeepGraphEBM (orange diamonds), True (black circles with error bars), Random (yellow diamonds), and Bitflip (teal diamonds). The "True" series shows a low loss starting near $10^{-6}$ and increasing slightly towards $10^{-5}$ as $\sigma$ increases. The other series (IQP, RBM, DeepGraphEBM, Random, and Bitflip) all cluster between $10^{-2}$ and $10^{-1}$, showing relatively flat trends with slight increases as $\sigma$ increases. The bottom row contains four heatmaps labeled "True", "IQP", "RBM", and "Bitflip" from left to right. Each heatmap has an x and y axis labeled from 0 to 800. A color bar on the far right indicates a scale from -1.00 (blue) to 1.00 (red), with 0.00 being white. The "True" heatmap is a light red, textured square with a dark red diagonal line from top-left to bottom-right. The "IQP" heatmap is a very pale red square with a faint diagonal line. The "RBM" and "Bitflip" heatmaps are mostly white, with only very faint, barely visible reddish diagonal lines.
+
+The results suggest that the IQP model has been able to learn a lot of the structure in the dataset. The clearest evidence for this is in the covariance matrix plot, which mirrors the general structure of the true distribution albeit with slightly weaker correlations. We also compare the results to four noisy distributions. A noisy distribution with noise parameter p corresponds to the following procedure: (i) sampling a point x from the ground truth distribution then (ii) for each pixel in x, set the pixel to 0 with probability p · p0, to 1 with probability p · (1-p0), and otherwise leave the pixel unchanged, where p0 is the probability that that pixel takes the value zero over all points in the training data. For p = 1 the noise distribution is therefore equal to a a product Bernoulli distribution where each pixel is sampled according to its average value. From the test MMD2 plots, the IQP model scores similarly to data with p = 0.3. In the bottom left of the central covariance matrix plot, we show the covariances for this noisy data, as well as some typical images. The results suggest the quantum model is capable of producing images with enough structure to clearly distinguish the digits by eye, although one would need to sample the quantum circuit to confirm this. The bitflip model fails to learn a lot of structure, as can be seen from the sampled images in the corresponding covariance matrix plot and poor test MMD2 scores.
+
+To plot the KGEL distribution, we take 10 witness points, where each witness point corresponds to a unique digit from the test set. The plot suggests that no mode has been severely dropped, since the magnitude of variations from the uniform probability are of the same order as those from the true distribution.
+
+## Experiment 5: Scale free dataset
+
+This dataset corresponds to a thermal distribution at temperature 1 of a 1000 spin Ising system. The graph describing the two-body interactions of the Ising Hamiltonian corresponds to a scale free network, which is constructed via the Barabasi-Albert algorithm (Albert and Barabási, 2002) with connectivity parameter 2 (see Fig. 9 for a plot). The Ising energy has a local bias that is dependent on the degree of the corresponding node, which biases the values of that bit towards zero. This gives a crude statistical model of a 1000 person social network in which a value of 0 indicates a user is active: the bias ensures users with more connections are more active, and users that are connected are more likely to be active at the same time. The data was generated via a Metropolis Hastings algorithm by sampling a million configurations on eight independent Markov chains, and then selecting 20000 train and test points randomly from equally spaced points on the chain. The result is a data set which features positive correlations only, as can be seen from the covariance plot of Fig. 9.
+
+The gate sets for the IQP and bitflip models were first taken to reflect the structure of the graph: for the initial grid search, gate sets with two-qubit gates between either nearest neighbors, or nearest and next nearest neighbors on the graph were used. Only the IQP model produced results distinguishable from random by this process; we then retrained the IQP model with the same hyperparameters, but with all-to-all two-qubit gates, which resulted in better results (we did not do this for the bitflip model due to its poor initial performance). For the RBM, the grid search selected a model with 250 hidden components, but the trained model suffered from extreme mode collapse, as can be seen from the fact that many of the diagonal elements of the covariance matrix are zero. For the EBM model, we attempted to build the graph structure into the energy function by masking and symmetrizing the layer weights so that the layers are equivalent to graph convolution layers with node feature dimension 1. The grid search selected a very simple linear neural network architecture with only 484 parameters, resulting in a covariance matrix that is indistinguishable from random (not shown here), although there is some improvement over random data for the test MMD loss.
+
+As a result, the IQP model was the only model that was able to produce reasonable results for this dataset. As before, the two body correlations shown in the covariance matrix mirror the overall structure of the true distribution, albeit with significantly weaker correlations. Surprisingly, for the smallest bandwidth (which probes correlations between 17 bits on average), the bitflip model achieves the best test MMD score, although it is unclear to use why this is the case. It was not possible to obtain KGEL plots for this experiment (the solver could not find solutions), likely because no model produced a distribution sufficiently close to the ground truth.
+
+## Experiment 6: Genomic dataset
+
+This dataset was taken from the work of Yelmen et al. (2021), which trains classical generative models to learn the distribution of alleles at 805 highly differentiated biallelic single nucleotide polymorphisms (SNPs) of the human genome. Since the alleles take one of two values, this results in a distribution over bitstrings, with the presence of a 1 at a given location marking the presence of the variant allele. The dataset was constructed from genetic data from 2504 individuals from the human genome project, which results in a dataset of size 5008 (since each individual has two haplotypes) of bitstrings of length 805. We split this data into train and test sets with a test set ratio of 1/3. In Yelmen et al. (2021), the authors train an RBM model and a general adversarial network (GAN) model to learn the distribution, and provide samples from the trained models in a corresponding repository (gitlab.inria.fr/ml \_genetics/public/artificial \_genomes). This allows us to compare our results to theirs via the corresponding MMD values and KGEL test.
+
+> *Generated caption of `2503.02934_-_Train_on_classical_deploy_on_quantum__scaling_generative_quantum_machine_learning_to_a_thousand_qubits_assets/figure-010.png` (ollama:gemma4:26b, prompt sci-v1):* This is a line plot showing the relationship between "MMD bandwidth ($\sigma$)" on the x-axis and "MMD test loss" on the y-axis. The x-axis is a linear scale ranging from 4.26 to 10.02 with increments labeled: 4.26, 4.9, 5.54, 6.18, 6.82, 7.46, 8.1, 8.74, 9.38, 10.02. The y-axis is a logarithmic scale ranging from $10^{-6}$ to $10^{-1}$ with labels: $10^{-6}$, $10^{-5}$, $10^{-4}$, $10^{-3}$, $10^{-2}$, $10^{-1}$. There are six data series represented by colored circles with error bars: IQP (blue), Bitflip (orange), GAN (red), RBM (green), True (dark teal), and Random (yellow). All series show an upward trend as the bandwidth increases. The "Random" series has the highest loss, starting near $10^{-3}$ and ending near $10^{-2}$. The "True" series has the lowest loss, starting near $10^{-5}$ and ending slightly below $10^{-3}$. The other series—IQP, Bitflip, GAN, and RBM—are clustered between the "True" and "Random" lines, with their loss values generally increasing from approximately $10^{-4}$ to between $10^{-3}$ and $10^{-2}$.
+
+We trained an IQP and bitflip model with all-to-all connected two-qubit gates, resulting in models with 324415 parameters. The trained IQP model produced results that were competitive with the published results for the RBM and GAN, with the values for the test MMD2 generally lying in between the two classical models. The covariance plots (Fig. 11) show that the IQP model can capture the overall structure of the data, but again shows slightly weaker correlations than the ground truth. It is worth noting that the classical models in Yelmen et al. (2021) appear to have be trained on the entire data (train plus test), which obviously gives these models an unfair advantage for this particular experiment. We also discovered that the samples from the RBM model are correlated (as may be expected when sampling the RBM from via Markov chain Monte Carlo methods), since shuffling the samples before estimating the mean and variance of the test MMDs resulted in very different scores. We therefore cannot fully trust the shown MMD2 values for the RBM since we cannot guarantee i.i.d. samples as required by the estimator (5). To produce the shown values, we first shuffled and batched the RBM samples before using (5) to estimate means and variances. The MCMC sampling of the RBM model was also seeded by additional genomic data, which was not available to us.
+
+## 9 Discussion of results: a glimmer of hope?
+
+Do the above results suggest that parameterised IQP circuits offer a fruitful path towards useful generative quantum machine learning? In the following we present a number of reflections with this question in mind.
+
+## 9.1 Scalable training is a reality
+
+The quantum machine learning literature is full of doubts about the ability to scale models beyond the small scale numerical examples that appear in many works (McClean et al., 2018; Bittel and Kliesch, 2021; Cerezo et al., 2023; Anschuetz and Kiani, 2022; Cerezo et al., 2021; Rudolph et al., 2024; Sweke et al., 2021). Our results clearly demonstrate however that there exist scenarios in which it is possible to train large quantum circuits to non-trivial parameter configurations in a matter of hours. We therefore suspect that the training of large parameterized quantum circuits may be much easier in practice than is widely assumed, and that theoretical results that rest on broad and mathematically convenient assumptions should be taken with a healthy dose of skepticism regarding their practical implications. Without this we risk repeating history: the early literature on neural networks was also filled with similar concerns about the possibility of training large neural networks (Bengio et al., 1994; Blum and Rivest, 1988; Judd, 1990; Auer et al., 1995), and the pessimistic predictions of Minsky and Papert (2017) are believed by many to have been a significant contributor to the well-known AI winter of the 1980s.
+
+> *Generated caption of `2503.02934_-_Train_on_classical_deploy_on_quantum__scaling_generative_quantum_machine_learning_to_a_thousand_qubits_assets/figure-011.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains two sets of heatmaps organized in two separate panels. The first panel consists of six square heatmaps arranged in two rows and three columns, labeled "True", "IQP", "Bitflip", "RBM", "GAN", and "Random". Each heatmap has axes ranging from 0 to 800 with increments of 100. A colorbar to the right of the panel indicates values from -0.6 (dark blue) to 0.6 (dark red), with 0 represented by light gray. The "True", "IQP", "RBM", and "GAN" heatmaps show a dense grid of subtle colored patterns with a prominent red diagonal line. The "Bitflip" and "Random" heatmaps are predominantly light gray with only a thin red diagonal line. The second panel consists of four rectangular heatmaps arranged vertically, labeled "True", "IQP", "RBM", and "GAN" on the left. These heatmaps have axes ranging from 0 to approximately 95 on the x-axis (with markers at 0, 20, 40, 60, and 80) and 0 to 15 on the y-axis. A colorbar to the right of this panel indicates values from -0.6 (dark blue) to 0.6 (dark red), with 0 represented by light gray. All four heatmaps in this panel show a similar pattern of colored pixels, with a prominent red diagonal line near the top-left corner and various blue and red patches distributed across the grids.
+
+Regarding the specific scaling of our approach, it is likely possible to push far beyond the circuit sizes considered in this work. In particular, as we show in Recio-Armengol and Bowles (2025), the computational cost of estimating expectation values (to fixed precision) scales linearly with both the number of qubits and the number of circuit parameters. With the current version of the IQPopt package, it is possible to estimate the MMD loss (to the same precision considered in our experiments) for circuits with ten thousand qubits and one million gates in roughly one minute on a single CPU compute node. Improving the way the code deals with sparse objects and combining this with GPU-accelerated basic linear algebra subroutines like cuSparse, we expect to be able to go well beyond even these limits (see Recio-Armengol and Bowles (2025) for more details).
+
+## 9.2 The IQP model can compete with established classical models
+
+The IQP model achieved the best MMD test scores in three of the four experiments in which all models were trained. While for the 2D Ising dataset this was in part due to the fact that the IQP model was trained to minimize the MMD loss on the training data (unlike the EBM or RBMmodels), for the two large datasets (D-Wave and scale free), the IQP model clearly outperformed the classical models, which failed to produce convincing results. The reasons why the classical energy based models failed to train are still not fully clear. Our RBM model appears to have suffered from either mode imbalance or mode collapse in every experiment. This seems to have been much less of a problem for the IQP model, and it would be interesting to investigate further the behavior of the IQP model when learning highly multi-mode data. The failures of the EBM might have been due to insufficient sampling from the model during training and/or evaluation, since energy based models are known to be computational intensive to train. Even if this is the case, it suggests that parameterized IQP circuits have a training efficiency advantage, since both models used a similar amount of compute during training. We stress that although the results of the IQP circuit are generally better than the classical models, we are not claiming that better classical results could not be obtained with a wiser choice of hyperparameter grids or initialisation strategies. However, we believe that the ease in which we obtained superior results with the IQP model is a promising sign that warrants further attention.
+
+We chose an RBM and EBM as our classical comparisons due to the fact that they both work naturally on binary datasets, and because graph based correlation structures can be encoded naturally into both an EBM (through the energy function) and the IQP model (through the choice of gate set). Furthermore, the sci-kit learn implementation of the RBM is an established model that has been used extensively and therefore provides a basic sanity check. Nevertheless, neither model could be described as state-of-the-art. Certainly, there are other models that suit binary data and could serve as worthy comparisons, such as variational autoencoders (VAEs) with Bernoulli decoder networks, Markov random fields, diffusion models (with a Bernoulli diffusion process), generative adversarial networks and autoregressive models (such as transformers). There are aspects of the IQP model which may be advantageous with respect to each of these however. Unlike energy-based models
+
+(Markov random fields, diffusion models) and VAEs, which due to finite MCMC sampling or the use of the evidence lower bound (ELBO) both train on biased versions of the desired log likelihood function, the IQP model is trained on provably unbiased gradients of the MMD loss. Autoregressive models have a rigid sequential structure, which makes it unnatural to encode undirected graph correlation structures, as can be done naturally in gate based quantum models (Bakó et al., 2024). Finally, GANs share many similarities with quantum models since they are also implicit models (and have also been trained via MMD loss functions, (Li et al., 2017)), however the need to backpropagate continuous gradients through the network means that are not naturally suited to binary data, whereas the IQP model is natively binary. All of this suggests that structured, high dimensional binary datasets may be well suited to parameterized IQP models. It would be interesting to understand if and how the use of the Gaussian kernel can be adapted to other kernel choices, since the use of task dependent kernel functions is likely necessary to mitigate the curse of dimensionality and achieve genuine utility for problems of interest.
+
+## 9.3 Barren plateaus do not appear to be a problem
+
+One of the biggest surprises from our experiments was how easy it was to train the IQP circuits, with convergence being reached smoothly in a small number of steps for all problems (Fig. 3). Curiously, although our circuits were very large, we did not encounter problems related to barren plateaus (McClean et al., 2018; Ragone et al., 2024; Arrasmith et al., 2022). It is still unclear however whether this is due to our choice of parameter initialisation or because the anstaz is inherently free from barren plateaus. We remark that, even though the dynamical Lie algegras (DLAs) of our circuits are of size poly(n) (since all gate generators commute), diagnostics from Ragone et al. (2024) cannot be applied since the input state and observables are diagonal in the Z basis and are therefore not contained in the DLA.
+
+Nevertheless, from (27) we can still see that for the observable Z1 (a Pauli Z on the first qubit), the partial derivatives ∂⟨Z1⟩/∂θj will concentrate exponentially around zero as the circuit size is increased. For example, considering circuits with all-to-all connected two-qubit gates, one finds that Ω in (27) is the empty set, since any gate generators that anticommute with Z1 must act non-trivially on distinct qubits. The expectation value is therefore ⟨Z1⟩ = ∏k cos(2θk), where the product is over all k such that the corresponding generator acts non-trivially on the first qubit. One sees that under random initialisation the variance of ⟨Z1⟩
+
+$$
+V a r [ \langle Z _ { 1 } \rangle ] = \mathbb { E } _ { \theta } \left [ \prod _ { k } \cos ^ { 2 } ( 2 \theta _ { k } ) \right ] - \mathbb { E } _ { \theta } \left [ \prod _ { k } \cos ( 2 \theta _ { k } ) \right ] ^ { 2 }
+$$
+
+must decay exponentially to zero with n since there are n terms in each product. Initializing the θj uniformly at random therefore leads to exponential concentration of ⟨Z1⟩, and therefore of the gradient too (Arrasmith et al., 2022).
+
+For higher order expectation values such as ⟨Z1Z2⟩ the situation is not as clear. For gate sets with single qubit and all-to-all connected two-qubit gates we see that there are a total of 2n - 2 generators that anticommute with Z1Z2, however the set Ω is now exponentially large since there are many ways to multiply these operators to the identity. The value of ⟨Z1Z2⟩ is therefore not necessarily exponentially small, and a similar argument to above does not work. Since the MMD2 is comprised of such expectation values, it is therefore possible that gradients do not concentrate exponentially for this loss. Note that for the bitflip model, concentration does occur however. Since for this model the expectation values are given simply by (32),
+
+> *Generated caption of `2503.02934_-_Train_on_classical_deploy_on_quantum__scaling_generative_quantum_machine_learning_to_a_thousand_qubits_assets/figure-012.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a scientific figure consisting of a $2 \times 6$ grid of histograms. The top row contains six subplots, each with a title, and the bottom row contains six subplots corresponding to the same categories. The figure caption reads: "Figure 12: Histogram showing the distribution of the (estimated) magnitudes of gradient components for each of the datasets under either our data-dependent initialisation or a random initialisation (the y-axis is the number of components with magnitude in the given bin). For large datasets, we suspect that the variance of the distribution for the random initialisation is due to the error in the estimator (21) rather than the presence of large components." A legend in the bottom-right plot indicates "data init" (blue) and "random init" (brown). Top Row: - Subplot 1: Title "2D Ising". Y-axis is logarithmic from $10^0$ to $10^3$. X-axis is from $0.000$ to $0.002$. Two distributions: a tall blue spike near $0$ and a smaller, wider brown distribution around $0.0015$. - Subplot 2: Title "blobs". Y-axis is logarithmic from $10^0$ to $10^4$. X-axis is from $0.000$ to $0.004$. A tall blue spike near $0$ and a wider brown distribution centered near $0.001$. - Subplot 3: Title "D-Wave". Y-axis is logarithmic from $10^0$ to $10^3$. X-axis is from $0$ to $2 \times 10^{-4}$. A blue distribution centered near $0$ and a brown distribution centered near $0.5 \times 10^{-4}$. - Subplot 4: Title "MNIST". Y-axis is logarithmic from $10^0$ to $10^5$. X-axis is from $0$ to $2 \times 10^{-4}$. A tall blue spike at $0$ and a wider brown distribution centered near $0.5 \times 10^{-4}$. - Subplot 5: Title "scale free". Y-axis is logarithmic from $10^0$ to $10^5$. X-axis is from $0.0$ to $1.0$. A tall blue spike at $0$ and a wide brown distribution centered near $0.5$. - Subplot 6: Title "genomic". Y-axis is logarithmic from $10^0$ to $10^6$. X-axis is from $0.0$ to $1.0 \times 10^{-4}$. A tall blue spike at $0$ and a wider brown distribution centered near $0.5 \times 10^{-4}$. Bottom Row: The bottom row shows the same datasets but with different y-axis scales and x-axis multipliers. - Subplot 1: Y-axis linear $0$ to $150$. X-axis $0.000$ to $0.002$. - Subplot 2: Y-axis linear $0$ to $3$. X-axis $0$ to $0.004$ (labeled $\times 10^{-3}$). - Subplot 3: Y-axis linear $0$ to $1.25$. X-axis $0$ to $2 \times 10^{-4}$ (labeled $\times 10^{-4}$). - Subplot 4: Y-axis linear $0$ to $10$. X-axis $0$ to $2 \times 10^{-4}$ (labeled $\times 10^{-4}$). - Subplot 5: Y-axis linear $0$ to $6$. X-axis $0.0$ to $1.0$ (labeled $\times 10^{-5}$). - Subplot 6: Y-axis linear $0$ to $0.2$. X-axis $0.0$ to $1.0 \times 10^{-4}$ (labeled $\times 10^{-5}$).
+
+$$
+\langle Z _ { a } \rangle = \prod _ { j | \{ X _ { g _ { j } } , Z _ { a } \} = 0 } \cos ( 2 \theta _ { j } )
+$$
+
+exponential concentration of ⟨Za⟩ will always occur by the same argument as above when initializing the parameters at random with all-to-all connected two-qubit gates.
+
+To investigate things further, we estimated the gradient vector via (21) for the IQP model for each of the six experiments, initializing the parameters either uniformly at random in [0, 2π] or via our data-dependent strategy (see Fig. 12). Interestingly, we see that the data-dependent initialisation results in a small fraction of gradient components that have relatively large magnitudes, which is likely why we are able to train the model. We note that although Rudolph et al. (2024) suggest to train logarithmic depth circuits with a maximum bandwidth σ = √n/4 in order to avoid barren plateaus, we successfully train outside of this regime, since our gate sets have linear depth, and the bandwidths we use are significantly smaller than √n/4 (thus probing higher order correlations). Even though the random initialisation appears also to produce some relatively large gradient components, we suspect that this is an artifact of the finite precision of the estimator (21) rather than a lack of barren plateaus, and it may be that the true gradients are much smaller than this. Indeed, with further analysis we were unable to demonstrate that any of the 'large' gradient components were different from zero in a statistically significant manner. Moreover, the fact that we failed to train large models with random initialisation also supports the idea that the true gradients are much smaller.
+
+It therefore appears that our data-dependent initialisation strategy was crucial to obtain good results, and may have successfully mitigated problems of barren plateaus. If this is the case, it suggests that much of the pessimism regarding the trainability of parameterized quantum circuits may be unfounded, and that the presence or absence of barren plateaus should not be used as a litmus test for whether or not a particular circuit structure is deemed trainable. Rather, we suspect that-as was the case for deep neural networks (Glorot and Bengio, 2010; Klambauer et al., 2017)-novel parameter initialisations will be crucial to achieve good performance for large parameterized quantum circuits even if they exhibit barren plateaus under random initialisation (see Patti et al., 2021; Grant et al., 2019; Zhang et al., 2022; Kulshrestha and Safro, 2022; Sack et al., 2022 for some proposed solutions). We remark that we did not employ data-dependent initialisation strategies for the two energy-based models, and so part of the relative success of the IQP model may be due to this. It would be interesting to see whether datadependent initialisations (for example, Béreux et al., 2025) would lead to significantly improved results on the classical side. In any case, we stress that the fact that a simple, scalable and effective data-dependent parameter initialisation exists for the IQP model is a strength that may not be generally be present in other models.
+
+## 9.4 Coherence helps
+
+Another clear signal that can be seen from the results is that coherence appears crucial to obtain good results, since the bitflip model produced very poor results on all but the low dimensional datasets. Indeed, since the IQP and bitflip models had identical hyperparameter grids and initialisation and training strategies, the only thing differentiating these models is the form of the expectation values given by either (27) or (32). We therefore expect that additional terms appearing in the (27) are critical in either increasing expressivity of the model or improving the loss landscape, although we have not investigated this. An answer to this question would help understand not only the IQP model, but may give hints about differences between quantum and classical models more generally.
+
+## 9.5 Do we need more expressivity?
+
+In all experiments the IQP models seem to have captured the general structure of the data without serious mode imbalance, but tend to produce weaker correlations than the true distributions, as can be seen from the covariance matrix plots. This suggests that stronger results might have be obtained with more expressivity. The most straightforward way to achieve this would be to add more gates to the circuits (for example, including some three or more qubit gates), however it is not clear how to do this for high dimensional datasets since the number of gates on more than two qubits becomes extremely large. Even this may not be enough however, since despite using all gate generators with weight of 6 or less (nearly fifteen thousand parameters), the IQP model for the binary blobs dataset still failed to learn the distribution well. This suggests that there may be more fundamental issues with the expressivity of the model class, which is supported by the lack of universality that occurs already for two-qubit circuits. We do expect however that the model class could be enlarged by extending the simulation algorithm to a larger class of states and/or measurements however, and a natural next step would be to attempt this in order to improve the performance on the blobs dataset, and ideally prove universality (in the sense of Sec. 5.3).
+
+## 9.6 Quantum models for quantum data?
+
+A commonly repeated mantra in the quantum machine learning community is that quantum models are best suited to 'quantum data' , that is, data that originates from an inherently quantum process. Interestingly, our results appear to support this, since the IQP model performed far better than any of the classical models on the only dataset (DWave) related to a quantum process. We stress however that this is just one experiment, and it is still unclear whether the D-Wave distribution is a genuinely difficult distribution for classical models to capture, or whether our classical models failed for other reasons. In our opinion it would not be surprising if further hyperparameter exploration or alternative classical models lead to significantly better classical results, and more investigation in this direction is needed before making any serious claims of quantum advantages.
+
+## 10 Outlook: Should we prioritize scalable training?
+
+Building a successful machine learning model invariably requires a combination of two things: a suitable inductive bias that incorporates knowledge of the problem, and an architecture that scales to large parameter counts and dataset sizes. Both can be seen as remedies to the curse of dimensionality, in the former case by constraining the possible models to a smaller, more relevant space, and in the latter case by allowing for training with larger datasets and more expressive models. If the recent successes of deep learning have taught us anything it is that scaling might be the most critical of these two ingredients, with such an enormous push for scalability (Bahri et al., 2024) that we might even be running out of internet data on which to train large language models (Sutskever, 2024).
+
+Given this, it is extraordinary that-despite a significant drive to understand and encode biases in quantum models (Larocca et al., 2022; East et al., 2023; Chinzei et al., 2024; Wakeham and Schuld, 2024; Wiersema et al., 2025; Meyer et al., 2023; Bowles et al., 2023b; Kübler et al., 2021; Le et al., 2025; Gili et al., 2024; Klus et al., 2021)-the vast majority of variational quantum machine learning works either ignore the issue of scalability, or equate it to the presence of barren plateaus. In particular, little attention is given to what may be the most fundamental barrier to scalability in quantum machine learning: the fact that extracting gradient information from quantum circuits appears in general to be very costly (Abbas et al., 2024; Bowles et al., 2023a) and effectively forbids training most circuit structures at scale.
+
+We therefore hope that more effort will be directed to understanding how to build quantum models that can scale in practice. This does raise an interesting question however: since both scalability and useful inductive bias are needed for powerful quantum models, should we prioritize one over the other? In our opinion, since scalable models appear to be both necessary and rare, then it may be best to first understand what approaches can be scaled, and only then concentrate on how to encode biases into the corresponding models 9 . This is the situation we are faced with in this work, and one central challenge now is to better understand what biases are either present or can be encoded into parameterized IQP circuits. At the same time, we imagine that we are only touching the surface of models that can be scaled in a similar way, and we hope our approach inspires other works that eventually culminate in both useful and scalable models. Ironically, it may be that generative learning-typically the most compute-hungry setting-provides the most promising route to achieve this since it opens the possibility of training on classical hardware alone.
+
+## 11 Acknowledgments
+
+We thank the authors of the package rsmf that we used when creating figures. JB acknowledges useful comments and conversations with David Wakeham, Maria Schuld, Alexia Salavrakos and Patrick Huembeli. JB thanks Lee O'Riordan and Sanchit Bapat for help with HPC resources. This work has been supported by the Government of Spain (Severo Ochoa CEX2019-000910-S, FUNQIP and European Union NextGenerationEU PRTR-C17.I1), Fundació Cellex, Fundació Mir-Puig, Generalitat de Catalunya (CERCA program) and European Union (PASQuanS2.1, 101113690). ER is a fellow of Eurecat's Vicente López PhD grant program.
+
+9 As an example of the reverse approach, note that capsule networks (Sabour et al., 2017), widely regarded as having a superior inductive bias than convolutional neural networks, never took off because of the relative difficulty in scaling.
+
+## References
+
+- A. Abbas, R. King, H. -Y. Huang, W. J. Huggins, R. Movassagh, D. Gilboa, and J. McClean. On quantum backpropagation, information reuse, and cheating measurement collapse. Advances in Neural Information Processing Systems, 36, 2024.
+- S. P. Adam, S. -A. N. Alexandropoulos, P. M. Pardalos, and M. N. Vrahatis. No free lunch theorem: A review. Approximation and optimization: Algorithms, complexity and applications, pages 57-82, 2019.
+- A. Alaa, B. Van Breugel, E. S. Saveliev, and M. van der Schaar. How faithful is your synthetic data? sample-level metrics for evaluating and auditing generative models. In International Conference on Machine Learning, pages 290-306. PMLR, 2022.
+- R. Albert and A. -L. Barabási. Statistical mechanics of complex networks. Reviews of modern physics, 74(1):47, 2002.
+- E. R. Anschuetz and B. T. Kiani. Quantum variational algorithms are swamped with traps. Nature Communications, 13(1):7760, 2022.
+- A. Arrasmith, Z. Holmes, M. Cerezo, and P. J. Coles. Equivalence of quantum barren plateaus to cost concentration and narrow gorges. Quantum Science and Technology, 7 (4):045015, 2022.
+- P. Auer, M. Herbster, and M. K. Warmuth. Exponentially many local minima for single neurons. Advances in neural information processing systems, 8, 1995.
+- Y. Bahri, E. Dyer, J. Kaplan, J. Lee, and U. Sharma. Explaining neural scaling laws. Proceedings of the National Academy of Sciences, 121(27):e2311878121, 2024.
+- B. Bakó, D. T. Nagy, P. Hága, Z. Kallus, and Z. Zimborás. Problem-informed graphical quantum generative learning. arXiv preprint arXiv:2405.14072, 2024.
+- S. Barratt and R. Sharma. A note on the inception score. arXiv preprint arXiv:1801.01973, 2018.
+- A. Basheer, Y. Feng, C. Ferrie, and S. Li. Alternating layered variational quantum circuits can be classically optimized efficiently using classical shadows. In Proceedings of the AAAI Conference on Artificial Intelligence, volume 37, pages 6770-6778, 2023.
+- Y. Bengio, P. Simard, and P. Frasconi. Learning long-term dependencies with gradient descent is difficult. IEEE transactions on neural networks, 5(2):157-166, 1994.
+- N. Béreux, A. Decelle, C. Furtlehner, L. Rosset, and B. Seoane. Fast training and sampling of restricted boltzmann machines. In 13th International Conference on Learning Representations-ICLR 2025, 2025.
+- E. Betzalel, C. Penso, A. Navon, and E. Fetaya. A study on the evaluation of generative models. arXiv preprint arXiv:2206.10935, 2022.
+- M. Bińkowski, D. J. Sutherland, M. Arbel, and A. Gretton. Demystifying mmd gans. arXiv preprint arXiv:1801.01401, 2018.
+- S. Bischoff, A. Darcher, M. Deistler, R. Gao, F. Gerken, M. Gloeckler, L. Haxel, J. Kapoor, J. K. Lappalainen, J. H. Macke, et al. A practical guide to statistical distances for evaluating generative models in science. arXiv preprint arXiv:2403.12636, 2024.
+
+- L. Bittel and M. Kliesch. Training variational quantum algorithms is np-hard. Physical review letters, 127(12):120502, 2021.
+- M. Blondel, Q. Berthet, M. Cuturi, R. Frostig, S. Hoyer, F. Llinares-López, F. Pedregosa, and J. -P. Vert. Efficient and modular implicit differentiation. arXiv preprint arXiv:2105.15183, 2021.
+- A. Blum and R. Rivest. Training a 3-node neural network is np-complete. Advances in neural information processing systems, 1, 1988.
+- J. Bowles, D. Wierichs, and C. -Y. Park. Backpropagation scaling in parameterised quantum circuits. arXiv preprint arXiv:2306.14962, 2023a.
+- J. Bowles, V. J. Wright, M. Farkas, N. Killoran, and M. Schuld. Contextuality and inductive bias in quantum machine learning. arXiv preprint arXiv:2302.01365, 2023b.
+- J. Bowles, S. Ahmed, and M. Schuld. Better than classical? the subtle art of benchmarking quantum machine learning models. arXiv preprint arXiv:2403.07059, 2024.
+- J. Bradbury, R. Frostig, P. Hawkins, M. J. Johnson, C. Leary, D. Maclaurin, G. Necula, A. Paszke, J. VanderPlas, S. Wanderman-Milne, and Q. Zhang. JAX: composable transformations of Python+NumPy programs, 2018. URL http://github.com/jax-ml/ jax.
+- M. J. Bremner, R. Jozsa, and D. J. Shepherd. Classical simulation of commuting quantum computations implies collapse of the polynomial hierarchy. Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences, 467(2126):459-472, 2011.
+- M. J. Bremner, A. Montanaro, and D. J. Shepherd. Average-case complexity versus approximate simulation of commuting quantum computations. Physical review letters, 117 (8):080501, 2016.
+- M. M. Bronstein, J. Bruna, T. Cohen, and P. Veličković. Geometric deep learning: Grids, groups, graphs, geodesics, and gauges. arXiv preprint arXiv:2104.13478, 2021.
+- M. Cerezo, A. Sone, T. Volkoff, L. Cincio, and P. J. Coles. Cost function dependent barren plateaus in shallow parametrized quantum circuits. Nature communications, 12(1):1791, 2021.
+- M. Cerezo, M. Larocca, D. García-Martín, N. L. Diaz, P. Braccia, E. Fontana, M. S. Rudolph, P. Bermejo, A. Ijaz, S. Thanasilp, et al. Does provable absence of barren plateaus imply classical simulability? or, why we need to rethink variational quantum computing. arXiv preprint arXiv:2312.09121, 2023.
+- K. Chinzei, S. Yamano, Q. H. Tran, Y. Endo, and H. Oshima. Trade-off between gradient measurement efficiency and expressivity in deep quantum neural networks. arXiv preprint arXiv:2406.18316, 2024.
+- B. Coyle, E. A. Cherrat, N. Jain, N. Mathur, S. Raj, S. Kazdaghli, and I. Kerenidis. Training-efficient density quantum machine learning. arXiv preprint arXiv:2405.20237, 2024.
+- M. V. den Nest. Simulating quantum computers with probabilistic methods, 2010. URL https://arxiv.org/abs/0911.1624.
+
+- R. D. East, G. Alonso-Linaje, and C. -Y. Park. All you need is spin: Su (2) equivariant variational quantum circuits based on spin networks. arXiv preprint arXiv:2309.07250, 2023.
+- W. Fedus, B. Zoph, and N. Shazeer. Switch transformers: Scaling to trillion parameter models with simple and efficient sparsity. Journal of Machine Learning Research, 23 (120):1-39, 2022.
+- E. Fontana, D. Herman, S. Chakrabarti, N. Kumar, R. Yalovetzky, J. Heredge, S. H. Sureshbabu, and M. Pistoia. Characterizing barren plateaus in quantum ansätze with the adjoint representation. Nature Communications, 15(1):7171, 2024.
+- D. Garreau, W. Jitkrittum, and M. Kanagawa. Large sample analysis of the median heuristic. arXiv preprint arXiv:1707.07269, 2017.
+- E. Gil-Fuster, J. Eisert, and V. Dunjko. On the expressivity of embedding quantum kernels. Machine Learning: Science and Technology, 5(2):025003, 2024.
+- K. Gili, G. Alonso, and M. Schuld. An inductive bias from quantum mechanics: learning order effects with non-commuting measurements. Quantum Machine Intelligence, 6(2): 67, 2024.
+- J. Gince, J. -M. Pagé, M. Armenta, A. Sarkar, and S. Kourtis. Fermionic machine learning. arXiv preprint arXiv:2404.19032, 2024.
+- X. Glorot and Y. Bengio. Understanding the difficulty of training deep feedforward neural networks. In Proceedings of the thirteenth international conference on artificial intelligence and statistics, pages 249-256. JMLR Workshop and Conference Proceedings, 2010.
+- M. L. Goh, M. Larocca, L. Cincio, M. Cerezo, and F. Sauvage. Lie-algebraic classical simulations for variational quantum computing. arXiv preprint arXiv:2308.01432, 2023.
+- E. Grant, L. Wossnig, M. Ostaszewski, and M. Benedetti. An initialization strategy for addressing barren plateaus in parametrized quantum circuits. Quantum, 3:214, 2019.
+- A. Gretton, K. M. Borgwardt, M. J. Rasch, B. Schölkopf, and A. Smola. A kernel twosample test. Journal of Machine Learning Research, 13(25):723-773, 2012. URL http: //jmlr.org/papers/v13/gretton12a.html.
+- A. Griewank and A. Walther. Evaluating derivatives: principles and techniques of algorithmic differentiation. SIAM, 2008.
+- J. Heek, A. Levskaya, A. Oliver, M. Ritter, B. Rondepierre, A. Steiner, and M. van Zee. Flax: A neural network library and ecosystem for JAX, 2024. URL http://github.com/ google/flax.
+- G. E. Hinton and R. R. Salakhutdinov. Reducing the dimensionality of data with neural networks. science, 313(5786):504-507, 2006.
+- T. Hoefler, T. Häner, and M. Troyer. Disentangling hype from practicality: On realistically achieving quantum advantage. Communications of the ACM, 66(5):82-87, 2023.
+- S. Hooker. The hardware lottery. Communications of the ACM, 64(12):58-65, 2021.
+
+- H. -Y. Huang, R. Kueng, and J. Preskill. Predicting many properties of a quantum system from very few measurements. Nature Physics, 16(10):1050-1057, 2020.
+- J. S. Judd. Neural network design and the complexity of learning, volume 2. MIT press, 1990.
+- S. Kasture, O. Kyriienko, and V. E. Elfving. Protocols for classically training quantum generative models on probability distributions. Physical Review A, 108(4):042406, 2023.
+- G. Klambauer, T. Unterthiner, A. Mayr, and S. Hochreiter. Self-normalizing neural networks. Advances in neural information processing systems, 30, 2017.
+- S. Klus, P. Gelß, F. Nüske, and F. Noé. Symmetric and antisymmetric kernels for machine learning problems in quantum physics and chemistry. Machine Learning: Science and Technology, 2(4):045016, 2021.
+- A. Krizhevsky, I. Sutskever, and G. E. Hinton. Imagenet classification with deep convolutional neural networks. Advances in neural information processing systems, 25, 2012.
+- J. Kübler, S. Buchholz, and B. Schölkopf. The inductive bias of quantum kernels. Advances in Neural Information Processing Systems, 34:12661-12673, 2021.
+- A. Kulshrestha and I. Safro. Beinit: Avoiding barren plateaus in variational quantum algorithms. In 2022 IEEE international conference on quantum computing and engineering (QCE), pages 197-203. IEEE, 2022.
+- O. Kyriienko and V. E. Elfving. Generalized quantum circuit differentiation rules. Physical Review A, 104(5):052417, 2021.
+- M. Larocca, F. Sauvage, F. M. Sbahi, G. Verdon, P. J. Coles, and M. Cerezo. Groupinvariant quantum machine learning. PRX quantum, 3(3):030341, 2022.
+- I. N. M. Le, O. Kiss, J. Schuhmacher, I. Tavernelli, and F. Tacchino. Symmetry-invariant quantum machine learning force fields. New Journal of Physics, 27(2):023015, 2025.
+- C. -L. Li, W. -C. Chang, Y. Cheng, Y. Yang, and B. Póczos. Mmd gan: Towards deeper understanding of moment matching network. Advances in neural information processing systems, 30, 2017.
+- Y. Li, K. Swersky, and R. Zemel. Generative moment matching networks. In International conference on machine learning, pages 1718-1727. PMLR, 2015.
+- J. -G. Liu and L. Wang. Differentiable learning of quantum circuit born machines. Physical Review A, 98(6):062324, 2018.
+- S. Lloyd, M. Mohseni, and P. Rebentrost. Quantum principal component analysis. Nature physics, 10(9):631-633, 2014.
+- J. -M. Lueckmann, J. Boelts, D. Greenberg, P. Goncalves, and J. Macke. Benchmarking simulation-based inference. In International conference on artificial intelligence and statistics, pages 343-351. PMLR, 2021.
+- S. C. Marshall, S. Aaronson, and V. Dunjko. Improved separation between quantum and classical computers for sampling and functional tasks. arXiv preprint arXiv:2410.20935, 2024.
+
+- J. R. McClean, S. Boixo, V. N. Smelyanskiy, R. Babbush, and H. Neven. Barren plateaus in quantum neural network training landscapes. Nature communications, 9(1):4812, 2018.
+- J. J. Meyer, M. Mularski, E. Gil-Fuster, A. A. Mele, F. Arzani, A. Wilms, and J. Eisert. Exploiting symmetry in variational quantum machine learning. PRX quantum, 4(1): 010328, 2023.
+- M. Minsky and S. A. Papert. Perceptrons, reissue of the 1988 expanded edition with a new foreword by Léon Bottou: an introduction to computational geometry. MIT press, 2017.
+- S. Mohamed and B. Lakshminarayanan. Learning in implicit generative models. arXiv preprint arXiv:1610.03483, 2016.
+- Y. Nakata and M. Murao. Diagonal quantum circuits: their computational power and applications. The European Physical Journal Plus, 129:1-14, 2014.
+- L. O'Bray, M. Horn, B. Rieck, and K. Borgwardt. Evaluation metrics for graph generative models: Problems, pitfalls, and practical solutions. arXiv preprint arXiv:2106.01098, 2021.
+- H. Pashayan, S. D. Bartlett, and D. Gross. From estimation of quantum probabilities to simulation of quantum circuits. Quantum, 4:223, 2020.
+- T. L. Patti, K. Najafi, X. Gao, and S. F. Yelin. Entanglement devised barren plateau mitigation. Physical Review Research, 3(3):033090, 2021.
+- M. Ragone, B. N. Bakalov, F. Sauvage, A. F. Kemper, C. Ortiz Marrero, M. Larocca, and M. Cerezo. A lie algebraic theory of barren plateaus for deep parameterized quantum circuits. Nature Communications, 15(1):7172, 2024.
+- S. Ravuri, M. Rey, S. Mohamed, and M. Deisenroth. Understanding deep generative models with generalized empirical likelihoods, 2023. URL https://arxiv.org/abs/2306. 09780.
+- E. Recio-Armengol and J. Bowles. Iqpopt: Fast optimization of instantaneous quantum polynomial circuits in jax. arXiv preprint arXiv:2501.04776, 2025.
+- M. S. Rudolph, J. Miller, D. Motlagh, J. Chen, A. Acharya, and A. Perdomo-Ortiz. Synergistic pretraining of parametrized quantum circuits via tensor networks. Nature Communications, 14(1):8367, 2023.
+- M. S. Rudolph, S. Lerch, S. Thanasilp, O. Kiss, O. Shaya, S. Vallecorsa, M. Grossi, and Z. Holmes. Trainability barriers and opportunities in quantum generative modeling. npj Quantum Information, 10(1):116, 2024.
+- D. E. Rumelhart, G. E. Hinton, and R. J. Williams. Learning representations by backpropagating errors. nature, 323(6088):533-536, 1986.
+- S. Sabour, N. Frosst, and G. E. Hinton. Dynamic routing between capsules. Advances in neural information processing systems, 30, 2017.
+- S. H. Sack, R. A. Medina, A. A. Michailidis, R. Kueng, and M. Serbyn. Avoiding barren plateaus using classical shadows. PRX Quantum, 3(2):020365, 2022.
+
+- M. Schuld. Supervised quantum machine learning models are kernel methods. arXiv preprint arXiv:2101.11020, 2021.
+- M. Schuld, R. Sweke, and J. J. Meyer. Effect of data encoding on the expressive power of variational quantum-machine-learning models. Physical Review A, 103(3):032430, 2021.
+- G. Scriva, E. Costa, B. McNaughton, and S. Pilati. Accelerating equilibrium spin-glass simulations using quantum annealers via generative deep learning. SciPost Physics, 15 (1):018, 2023.
+- N. Shazeer, A. Mirhoseini, K. Maziarz, A. Davis, Q. Le, G. Hinton, and J. Dean. Outrageously large neural networks: The sparsely-gated mixture-of-experts layer. arXiv preprint arXiv:1701.06538, 2017.
+- S. Shin, Y. -S. Teo, and H. Jeong. Exponential data encoding for quantum supervised learning. Physical Review A, 107(1):012422, 2023.
+- G. Stein, J. Cresswell, R. Hosseinzadeh, Y. Sui, B. Ross, V. Villecroze, Z. Liu, A. L. Caterini, E. Taylor, and G. Loaiza-Ganem. Exposing flaws of generative model evaluation metrics and their unfair treatment of diffusion models. Advances in Neural Information Processing Systems, 36, 2024.
+- D. J. Sutherland, H. -Y. Tung, H. Strathmann, S. De, A. Ramdas, A. Smola, and A. Gretton. Generative models and model criticism via optimized maximum mean discrepancy. arXiv preprint arXiv:1611.04488, 2016.
+- I. Sutskever. Sequence to sequence learning with neural networks, 2024. Test of time talk at NeurIPS 2024.
+- R. Sutton. The bitter lesson. Incomplete Ideas (blog), 13(1):38, 2019.
+- R. Sweke, J. -P. Seifert, D. Hangleiter, and J. Eisert. On the quantum versus classical learnability of discrete distributions. Quantum, 5:417, 2021.
+- E. Tang. Quantum principal component analysis only achieves an exponential speedup because of its state preparation assumptions. Physical Review Letters, 127(6):060503, 2021.
+- L. Theis, A. v. d. Oord, and M. Bethge. A note on the evaluation of generative models. arXiv preprint arXiv:1511.01844, 2015.
+- A. Uvarov and J. D. Biamonte. On barren plateaus and cost function locality in variational quantum algorithms. Journal of Physics A: Mathematical and Theoretical, 54 (24):245301, 2021.
+- A. Vaswani. Attention is all you need. Advances in Neural Information Processing Systems, 2017.
+- J. G. Vidal and D. O. Theis. Calculus on parameterized quantum circuits. arXiv preprint arXiv:1812.06323, 2018.
+- D. Wakeham and M. Schuld. Inference, interference and invariance: How the quantum fourier transform can help to learn from data. arXiv preprint arXiv:2409.00172, 2024.
+
+- D. Wierichs, J. Izaac, C. Wang, and C. Y. -Y. Lin. General parameter-shift rules for quantum gradients. Quantum, 6:677, 2022.
+- R. Wiersema, A. F. Kemper, B. N. Bakalov, and N. Killoran. Geometric quantum machine learning with horizontal quantum gates. Physical Review Research, 7(1):013148, 2025.
+- Y. Wu, J. Yao, P. Zhang, and H. Zhai. Expressivity of quantum neural networks. Physical Review Research, 3(3):L032049, 2021.
+- Q. Xu, G. Huang, Y. Yuan, C. Guo, Y. Sun, F. Wu, and K. Weinberger. An empirical study on evaluation metrics of generative adversarial networks. arXiv preprint arXiv:1806.07755, 2018.
+- B. Yelmen, A. Decelle, L. Ongaro, D. Marnetto, C. Tallec, F. Montinaro, C. Furtlehner, L. Pagani, and F. Jay. Creating artificial human genomes using generative neural networks. PLoS genetics, 17(2):e1009303, 2021.
+- K. Zhang, L. Liu, M. -H. Hsieh, and D. Tao. Escaping from the barren plateau via gaussian initializations in deep variational quantum circuits. Advances in Neural Information Processing Systems, 35:18612-18627, 2022.
+
+## A Unbiased estimates of the MMD2
+
+Here we prove the unbiasedness of the estimators that appear in the main text. We first cover the estimate (5), which uses samples from both distributions, and then construct an unbiased estimator for the case where one distribution is a parameterised IQP circuit for which we do not have sample access. We recall from Def. (3.2) the definition of the MMD2 for distributions p and q:
+
+$$
+M M D ^ { 2 } ( p , q ) = \mathbb { E } _ { x , y \sim p } \left [ k ( x , y ) \right ] - 2 \mathbb { E } _ { x \sim p , y \sim q } \left [ k ( x , y ) \right ] + \mathbb { E } _ { x , y \sim q } \left [ k ( x , y ) \right ] .
+$$
+
+## A.1 Case 1: samples are available from both distributions
+
+We start by showing why the expression (5)-which uses samples from p and q-is an unbiased estimate of the MMD2 (following Gretton et al., 2012). Suppose we have a set of samples X = (x1 · · · , xN) with xi ∼ p(x) and set of samples Y = (y1 · · · , yM) with yi ∼ q(y). It is claimed that the expression
+
+$$
+M \hat { M } ^ { 2 } = \frac { 1 } { N ( N - 1 ) } \sum _ { i \neq j } k ( x _ { i } , x _ { j } ) - \frac { 2 } { N M } \sum _ { i , j } k ( x _ { i } , y _ { j } ) + \frac { 1 } { M ( M - 1 ) } \sum _ { i \neq j } k ( y _ { i } , y _ { j } ) \quad ( 5 2 )
+$$
+
+of Eq. 5 is an unbiased estimator of MMD2 (p, q). To see why this is the case, let us look at the first term
+
+$$
+\frac { 1 } { N ( N - 1 ) } \sum _ { i \neq j } k ( x _ { i } , x _ { j } ) .
+$$
+
+Taking the expectation with respect to sampling the set X we find
+
+$$
+\mathbb { E } _ { \chi } [ \frac { 1 } { N ( N - 1 ) } \sum _ { i \neq j } k ( x _ { i } , x _ { j } ) ] = \frac { 1 } { N ( N - 1 ) } \sum _ { i \neq j } \mathbb { E } _ { \chi } [ k ( x _ { i } , x _ { j } ) ] = \mathbb { E } _ { x , y \sim p } [ k ( x , y ) ] .
+$$
+
+The last equality above follows because given an X, xi and xj are i.i.d. samples from p if i ̸= j, and so averaging a specific k(xi, xj) over sampling of the sets X is equivalent to averaging k(x, y) with x, y being sampled i.i.d. from p. We see it was necessary to remove the terms k(xi, xi) from the sum since EX [K(xi, xi)] = Ex∼p[k(x, x)] = 1, which leads us to a denominator N(N - 1) rather than N 2 . An analogous situation occurs for the last term, hence its analogous form. For the cross term
+
+$$
+\frac { 2 } { N M } \sum _ { i , j } k ( x _ { i } , y _ { j } )
+$$
+
+We see that it is an unbiased estimator of 2Ex∼py∼q[k(x, y)] since
+
+$$
+\mathbb { E } _ { \mathcal { X } , y } \left [ \frac { 2 } { N M } \sum _ { i , j } k ( x _ { i } , y _ { j } ) \right ] = \frac { 2 } { N M } \sum _ { i , j } \mathbb { E } _ { \mathcal { X } , y } [ k ( x _ { i } , y _ { j } ) ] = \frac { 2 } { N M } \sum _ { i , j } \mathbb { E } _ { x \sim p , y \sim q } [ k ( x , y ) ] \\
+$$
+
+$$
+= 2 \mathbb { E } _ { x \sim p , y \sim q } [ k ( x , y ) ] .
+$$
+
+A similar situation to this happens when constructing an unbiased estimator for the parameterised IQP model, which we cover in the following section.
+
+## A.2 Case 2: One of the distributions is a parameterised IQP circuit
+
+We now construct the unbiased estimator that we use to train our models. From Prop. 2 and (13) we know that
+
+$$
+\mathbb { E } _ { x \sim p _ { 1 } , y \sim p _ { 2 } } [ k ( x , y ) ] = \mathbb { E } _ { a \sim \mathcal { P } ( a ) } \mathbb { E } _ { z _ { 1 } \sim U } \left [ f _ { p _ { 1 } } ( a , z _ { 1 } ) \right ] \mathbb { E } _ { z _ { 2 } \sim U } \left [ f _ { p _ { 2 } } ( a , z _ { 2 } ) \right ]
+$$
+
+where the functions fpk , k = 1, 2 take the form
+
+$$
+f _ { p _ { k } } ( a , z _ { k } ) = \cos \sum _ { j } \theta _ { j } ( - 1 ) ^ { g _ { j } \cdot z _ { k } } ( 1 - ( - 1 ) ^ { g _ { j } \cdot a } )
+$$
+
+if pk corresponds to a parameterised IQP quantum model, and
+
+$$
+f _ { p _ { k } } ( a , z _ { k } ) = \mathbb { E } _ { x \sim p _ { k } } \left [ ( - 1 ) ^ { x \cdot a } \right ] = \langle Z a \rangle _ { p _ { k } }
+$$
+
+if pk corresponds to a classical distribution from which we can sample. Note that there is no dependence on zk in this case. We will work through the terms in (51) one by one for clarity.
+
+## A.2.1 The last term
+
+We start with the last term in (51):
+
+Our estimator for this term is
+
+$$
+\frac { 1 } { | \mathcal { A } | | \mathcal { Z } | ( | \mathcal { Z } | - 1 ) } \sum _ { i } \sum _ { j } f _ { q _ { 0 } } ( a _ { i } , z _ { j } ) \sum _ { k \neq j } f _ { q _ { 0 } } ( a _ { i } , z _ { k } ) ,
+$$
+
+$$
+\mathbb { E } _ { x , y \sim q _ { \theta } } [ k ( x , y ) ] .
+$$
+
+where {ai ∼ Pσ} = A is a batch of bitstrings specifying the observables and {zi ∼ U} = Z a batch of uniformly sampled bitstrings. Taking the expectation value with respect to the sampling of sets A,Z we find
+
+$$
+\frac { 1 } { | \mathcal { A } | | \mathcal { Z } | ( | \mathcal { Z } | - 1 ) } \sum _ { i } \sum _ { j } \sum _ { k \neq j } \mathbb { E } _ { \mathcal { A } , \mathcal { Z } } \left [ f _ { q _ { 0 } } ( a _ { i } , z _ { j } ) f _ { q _ { 0 } } ( a _ { i } , z _ { k } ) \right ] \\ \intertext { \frac { 1 } { | \mathcal { A } | | \mathcal { Z } | ( | \mathcal { Z } | - 1 ) } \sum _ { i } \sum _ { j } \sum _ { k \neq j } \mathbb { E } _ { \mathcal { A } , \mathcal { Z } } \left [ f _ { q _ { 0 } } ( a _ { i } , z _ { j } ) f _ { q _ { 0 } } ( a _ { i } , z _ { k } ) \right ] } \\
+$$
+
+$$
+= & \frac { 1 } { | \mathcal { A } | | \mathcal { Z } | ( | \mathcal { Z } | - 1 ) } \sum _ { i } \sum _ { j } \sum _ { k \neq j } \mathbb { E } _ { \mathcal { A } } \mathbb { E } _ { z _ { j } \sim U } [ f _ { q } ( a _ { i } , z _ { j } ) ] \mathbb { E } _ { z _ { k } \sim U } [ f _ { q } ( a _ { i } , z _ { k } ) ] \\ & 1
+$$
+
+$$
+& = & \frac { 1 } { | \mathcal { A } | | \mathcal { Z } | ( | \mathcal { Z } | - 1 ) } \sum _ { i } \sum _ { j } \sum _ { k \neq j } \mathbb { E } _ { a \sim \mathcal { P } _ { \sigma } ( a ) } \mathbb { E } _ { z \sim U } [ f _ { q _ { \theta } } ( a , z ) ] \mathbb { E } _ { z \sim U } [ f _ { q _ { \theta } } ( a , z ) ] \\ & - & \mathbb { F } _ { \quad p _ { \theta } ( \Omega ) \ \mathbb { F } _ { \quad w _ { \theta } [ f _ { q _ { \theta } } ( a , z ) ] \mathbb { F } _ { \quad w _ { \theta } [ f _ { q _ { \theta } } ( a , z ) ] } }
+$$
+
+$$
+= & \mathbb { E } _ { a \sim \mathcal { P } _ { \sigma } ( a ) } \mathbb { E } _ { z \sim U } [ f _ { q _ { \theta } } ( a , z ) ] \mathbb { E } _ { z \sim U } [ f _ { q _ { \theta } } ( a , z ) ]
+$$
+
+since zj, zk are i.i.d. samples for any Z. From (58) it follows this is equal to the first term (67).
+
+## A.2.2 The second term
+
+The second term
+
+$$
+\mathbb { E } _ { x \sim p , y \sim q _ { \theta } } [ k ( x , y ) ] .
+$$
+
+does not pose any problems. We see from (58) that this is equal to
+
+$$
+\mathbb { E } _ { x \sim p , y \sim q _ { \theta } } [ k ( x , y ) ] = \mathbb { E } _ { a \sim \mathcal { P } _ { \sigma } ( a ) } \mathbb { E } _ { z \sim U } \left [ f _ { q _ { \theta } } ( a , z ) \right ] \langle Z _ { a } \rangle _ { p }
+$$
+
+an empirical estimate from batches A, Z and X = {xk ∼ p} is
+
+$$
+\frac { 1 } { | \mathcal { A } | | \mathcal { Z } | | \mathcal { X } | } \sum _ { i } \sum _ { j } \sum _ { k } f _ { q _ { \theta } } ( a _ { i } , z _ { j } ) ( - 1 ) ^ { x _ { k } \cdot a _ { i } } .
+$$
+
+The expectation of this with respect to sampling batches X,A,Z is the same as (68). Explicitly;
+
+$$
+\mathbb { E } _ { \mathcal { X } , \mathcal { A } , \mathcal { Z } } \left [ \frac { 1 } { | \mathcal { A } | | \mathcal { Z } | | \mathcal { X } | } \sum _ { i } \sum _ { j } \sum _ { k } f _ { q _ { \theta } } ( a _ { i } , z _ { j } ) ( - 1 ) ^ { x _ { k } \cdot a _ { i } } \right ] \\
+$$
+
+$$
+= & \mathbb { E } _ { \mathcal { A } , Z } \left [ \frac { 1 } { | \mathcal { A } | | \mathcal { Z } | } \sum _ { i } \sum _ { j } f _ { q _ { \theta } } ( a _ { i } , z _ { j } ) \mathbb { E } _ { \mathcal { X } } \left [ \frac { 1 } { | \mathcal { X } | } \sum _ { k } ( - 1 ) ^ { x _ { k } \cdot a _ { i } } \right ] \right ]
+$$
+
+$$
+= & \frac { 1 } { | \mathcal { A } | | \mathcal { Z } | } \sum _ { i } \sum _ { j } \mathbb { E } _ { \mathcal { A } , \mathcal { Z } } \left [ f _ { q _ { \theta } } ( a _ { i } , z _ { j } ) \langle Z _ { a _ { i } } \rangle _ { p } \right ] = \mathbb { E } _ { a \sim \mathcal { P } _ { \sigma } } \mathbb { E } _ { z \sim U } \left [ f _ { q _ { \theta } } ( a , z ) \langle Z _ { a } \rangle _ { p } \right ] \\
+$$
+
+as required.
+
+## A.3 The first term
+
+For the first term we need to estimate Ex,y∼p[k(x, y)] using a single set of samples X from p corresponding to the training set. We have already seen how to do this in (53). An unbiased estimate is
+
+$$
+\frac { 1 } { | \mathcal { X } | ( | \mathcal { X } | - 1 ) } \sum _ { i \neq j } k ( x _ { i } , x _ { j } ) .
+$$
+
+We can also construct an estimator that involves sampling over a. From (58) and (60) we have:
+
+$$
+\mathbb { E } _ { x , y \sim p } [ k ( x , y ) ] = \mathbb { E } _ { a \sim \mathcal { P } ( a ) } \left [ \langle Z _ { a } \rangle _ { p } \langle Z _ { a } \rangle _ { p } \right ] = \mathbb { E } _ { a \sim \mathcal { P } ( a ) } \left [ \mathbb { E } _ { x \sim p } [ ( - 1 ) ^ { x \cdot a } ] \mathbb { E } _ { y \sim p } [ ( - 1 ) ^ { y \cdot a } ] \right ] .
+$$
+
+An unbiased estimator is
+
+$$
+\frac { 1 } { | \mathcal { A } | | \mathcal { X } | ( | \mathcal { X } | - 1 ) } \sum _ { i } \sum _ { j } \sum _ { k \neq j } ( - 1 ) ^ { x _ { j } a _ { i } } ( - 1 ) ^ { x _ { k } a _ { i } } .
+$$
+
+Taking the expectation with respect to sampling A and X we find
+
+$$
+\mathbb { E } _ { \mathcal { A } , x } \left [ \frac { 1 } { | \mathcal { A } | | \mathcal { X } | ( | \mathcal { X } | - 1 ) } \sum _ { i } \sum _ { j } \sum _ { k \neq j } ( - 1 ) ^ { x _ { j } \cdot a _ { i } } ( - 1 ) ^ { x _ { k } \cdot a _ { i } } \right ] \\ 1
+$$
+
+$$
+= & \frac { 1 } { | \mathcal { A } | | \chi | ( | \chi | - 1 ) } \sum _ { i } \sum _ { j } \sum _ { k \neq j } \mathbb { E } _ { \mathcal { A } , \chi } [ ( - 1 ) ^ { x _ { j } \cdot a _ { i } } ( - 1 ) ^ { x _ { k } \cdot a } ] \\ & 1
+$$
+
+$$
+= & \frac { 1 } { | \mathcal { A } | | \chi | ( | \chi | - 1 ) } \sum _ { i } \sum _ { j } \sum _ { k \neq j } \mathbb { E } _ { \mathcal { A } } [ \langle Z _ { a _ { i } } \rangle _ { p } \langle Z _ { a _ { i } } \rangle _ { p } ] = \mathbb { E } _ { a \sim \mathcal { P } _ { \sigma } } [ \langle Z _ { a } \rangle _ { p } \langle Z _ { a } \rangle _ { p } ] \\
+$$
+
+as required.
+
+## A.4 The full expression
+
+Putting all this together we arrive at the full estimator for the MMD2 :
+
+$$
+M M D _ { u } ^ { 2 } ( \mathcal { A } , \mathcal { Z } , \mathcal { X } , \theta ) & = \frac { 1 } { | \mathcal { A } | | \mathcal { Z } | ( | \mathcal { Z } | - 1 ) } \sum _ { i } \sum _ { j } f _ { q _ { \theta } } ( a _ { i } , z _ { j } ) \sum _ { k \neq j } f _ { q _ { \theta } } ( a _ { i } , z _ { k } ) \\ & - \frac { 2 } { | \mathcal { A } | | \mathcal { Z } | | \mathcal { X } | } \sum _ { i } \sum _ { j } \sum _ { k } f _ { q _ { \theta } } ( a _ { i } , z _ { j } ) ( - 1 ) ^ { x _ { k } \cdot a _ { i } } \\ & + \frac { 1 } { | \mathcal { A } | | \mathcal { X } | ( | \mathcal { X } | - 1 ) } \sum _ { i } \sum _ { j } \sum _ { k \neq j } ( - 1 ) ^ { x _ { j } \cdot a _ { i } } ( - 1 ) ^ { x _ { k } \cdot a _ { i } } \ ( 7 9 ) \\ \text {where } f _ { q _ { \theta } } ( a , z ) = \cos \sum _ { j } \theta _ { j } ( - 1 ) ^ { g _ { j } \cdot z } ( 1 - ( - 1 ) ^ { g _ { j } \cdot a } ) . \ \text {From the above sections it follows that}
+$$
+
+where fqθ (a, z) = cos ∑j θj(-1)gj·z (1-(-1)gj·a). From the above sections it follows that
+
+$$
+\mathbb { E } _ { \mathcal { A } , \mathcal { Z } , \mathcal { X } } \left [ M M D _ { u } ^ { 2 } ( \mathcal { A } , \mathcal { Z } , \mathcal { X } , \theta ) \right ] = M M D ^ { 2 } ( p , q _ { \theta } )
+$$
+
+which completes the proof.
+
+## B A toy example exploiting coherence
+
+Here we give a concrete example where interference is beneficial to prepare particular distributions. The aim is to give some intuition as to how coherence can be beneficial, but much more work is necessary to have a clearer understanding.
+
+We consider a parameterised IQP circuit of the form in figure 13 where each qubit has a single qubit gate, and every triple of adjacent qubits share a gate (and we have periodic boundary conditions). Our aim will be to prepare a distribution with ⟨Zi⟩ = 0 (that is, locally random), while aiming to maximize the values of ⟨Zi-1⊗Zi⊗Zi+1⟩ ≡ ⟨Z(i-1,i,i+1)⟩. To keep things simple, we consider a translationally invariant model and distribution, with the same parameter ϕ for each single qubit gate and same parameter θ for each three qubit gate (see Fig. ??). We first consider the condition ⟨Zi⟩ = 0. Considering all generators that anticommute with Zi and using (27) we can see that Ω is the empty set so
+
+> *Generated caption of `2503.02934_-_Train_on_classical_deploy_on_quantum__scaling_generative_quantum_machine_learning_to_a_thousand_qubits_assets/figure-013.png` (ollama:gemma4:26b, prompt sci-v1):* This is a diagram of a quantum circuit consisting of five qubits (horizontal lines) represented by $|0\rangle$ states on the left and ellipses ($\vdots$) at the top and bottom to indicate additional qubits. From left to right, each of the five qubits first passes through a single-qubit gate labeled with the Greek letter $\phi$. Following these gates, a series of multi-qubit gates are applied in a cascading structure. The first two-qubit gate is a vertical rectangle spanning the first and second qubits, labeled with $\theta$. The next gate spans the second and third qubits and is also labeled $\theta$. The third gate spans the third and fourth qubits and is labeled $\theta$. The fourth gate spans the fourth and fifth qubits and is labeled $\theta$. Finally, the fifth qubit passes through a single-qubit gate represented by an unlabelled rectangle at the far right.
+
+$$
+\langle Z _ { i } \rangle = \cos ( 2 \phi ) \cos ^ { 3 } ( 2 \theta )
+$$
+
+for both IQP and bitflip models. For ⟨Zi-1ZiZi+1⟩, Ω is not empty however since we have
+
+$$
+Z _ { i - 1 } Z _ { i } Z _ { i + 1 } Z _ { ( i - 1 , i , i + 1 ) } = \mathbb { I }
+$$
+
+and each single qubit operator anti-commutes with Z(i-1,i,i+1). The expectation value for the IQP circuit is therefore
+
+$$
+\langle Z _ { ( i - 1 , i , i + 1 ) } \rangle & = \cos ^ { 3 } ( 2 \phi ) \cos ^ { 3 } ( 2 \theta ) + \cos ^ { 2 } ( 2 \theta ) \sin ( 2 \theta ) \sin ^ { 3 } ( 2 \phi ) \\ & = \cos ^ { 2 } ( 2 \theta ) [ \zeta \rangle _ { + } \ \dot { \omega } \, ; _ { - } \dot { \omega } \rangle _ { + } \, ; _ { 0 } \, \dot { \omega } \rangle _ { + } \, ,
+$$
+
+$$
+= \cos ^ { 2 } ( 2 \theta ) [ \langle Z _ { i } \rangle + \sin ( 2 \theta ) \sin ^ { 3 } ( 2 \phi ) ] .
+$$
+
+To maximize this we set ϕ = π/4 (so ⟨Zi⟩ = 0 as required), and maximize cos2 (2θ) sin(2θ). We find a maximum 2/(3√3) ≈ 0.385 for the value
+
+$$
+\theta = \arctan \sqrt { 5 - 2 \sqrt { 6 } } \approx 0 . 3 0 8 .
+$$
+
+If we consider a stochastic bitflip circuit with the same structure, we see from (32) that we must have ⟨Z(i-1,i,i+1)⟩ = 0 since the second term in (84) does not contribute and we require ⟨Zi⟩ = 0. Thus, for this type of distribution we have an advantage relative to classically flipping the same bits, which is likely advantageous when learning from data with a similar bias.
+
+## C Non-universality for n qubit circuits
+
+Here we show that the model class is not universal if the number of qubits is equal to the number of bits in the set of distributions we aim to parameterise. This follows from a simple argument for the case n = 2.
+
+For two qubits, there are only three gates given by the generators X1, X2 and X1X2 (with parameters θ1, θ2, θ12). Since exp(iθG) = cos(θ)I+i sin(θ)G for generators satisfying G2 = I (as in our case), we have that
+
+$$
+| \langle x | U ( \theta ) | 0 | ^ { 2 } & = | \langle x | e ^ { i \theta _ { 1 } X _ { 1 } X _ { 2 } } ( \cos \theta _ { 1 } | 0 ) + i \sin \theta _ { 1 } | 1 \rangle ( \cos \theta _ { 2 } | 0 ) + i \sin \theta _ { 2 } | 1 \rangle ) | ^ { 2 } \\ & = | \langle x | \left [ \cos \theta _ { 1 } \cos \theta _ { 2 } ( \cos \theta _ { 1 2 } | 0 0 ) + i \sin \theta _ { 1 2 } | 1 1 ) - \sin \theta _ { 1 } \sin \theta _ { 2 } ( \cos \theta _ { 1 2 } | 1 1 ) + i \sin \theta _ { 1 2 } | 0 0 \rangle \right ) \\ & + i \cos \theta _ { 1 } \sin \theta _ { 2 } ( \cos \theta _ { 1 2 } | 0 1 ) + i \sin \theta _ { 1 2 } \left | 1 0 \right \rangle + i \sin \theta _ { 1 } \cos \theta _ { 2 } ( \cos \theta _ { 1 2 } | 1 0 ) + i \sin \theta _ { 1 2 } \left | 0 1 \right \rangle \right ] | ^ { 2 } . \\ & \quad \text {From this we see that}
+$$
+
+From this we see that
+
+$$
+p ( 0 0 ) = q _ { 1 } q _ { 2 } q _ { 1 2 } + ( 1 - q _ { 1 } ) ( 1 - q _ { 2 } ) ( 1 - q _ { 1 2 } )
+$$
+
+$$
+p ( 1 0 ) = q _ { 1 } ( 1 - q _ { 2 } ) ( 1 - q _ { 1 2 } ) + ( 1 - q _ { 1 } ) q _ { 2 } q _ { 1 2 }
+$$
+
+$$
+p ( 0 1 ) = ( 1 - q _ { 1 } ) q _ { 2 } ( 1 - q _ { 1 2 } ) + q _ { 1 } ( 1 - q _ { 2 } ) q _ { 1 2 }
+$$
+
+$$
+p ( 1 1 ) = ( 1 - q _ { 1 } ) ( 1 - q _ { 2 } ) q _ { 1 2 } + q _ { 1 } q _ { 2 } ( 1 - q _ { 1 2 } )
+$$
+
+where q1, q2, q12 are probabilities given by
+
+$$
+q _ { 1 } = \cos ^ { 2 } \theta _ { 1 } , \ \ q _ { 2 } = \cos ^ { 2 } \theta _ { 2 } , \ \ q _ { 1 2 } = \cos ^ { 2 } \theta _ { 1 2 } .
+$$
+
+Note that these are the exact same probabilities we would arrive at if we replace the quantum circuit by a classical stochastic circuit where we flip subsets of bits with probabilities q1, q2, q12. For two qubits, the circuit therefore does not make use of interference to go beyond the classical limits of expressivity. Mathematically, this is due to the fact that branches of the wavefunction that result in the same outcome differ by a phase factor of i, which prevents interference due to these components being squared independently when computing probabilities. For larger numbers of qubits interference is possible between branches with the same phase, however.
+
+It remains to show that there are distributions that cannot be written in the above form. Consider the distribution
+
+$$
+( p ( 0 0 ) , p ( 0 1 ) , p ( 1 0 ) , p ( 1 1 ) ) = ( \frac { 1 } { 3 } , \frac { 1 } { 3 } , \frac { 1 } { 3 } , 0 ) .
+$$
+
+With a little thought one sees that this can't be achieved by classically flipping subsets of bits independently, and thus also cannot be done with the IQP circuit, but we will prove it for completeness. The condition p(11) = 0 implies
+
+$$
+( 1 - q _ { 1 } ) ( 1 - q _ { 2 } ) q _ { 1 2 } = - q _ { 1 } q _ { 2 } ( 1 - q _ { 1 2 } ) .
+$$
+
+We see that we must ensure the right hand size is zero or a contradiction will be reached due to positivity of probabilities. We have three possibilities:
+
+$$
+1 . \ q _ { 1 } = 0 \implies \ q _ { 2 } = 1 \text { or } q _ { 1 2 } = 0
+$$
+
+$$
+2 . \ q _ { 2 } = 0 \implies q _ { 1 } = 1 \text { or } q _ { 1 2 } = 0
+$$
+
+$$
+3 . \ q _ { 1 2 } = 1 \implies q _ { 1 } = 1 \text { or } q _ { 2 } = 1
+$$
+
+Considering 1, we see that q1 = 0, q2 = 1 implies p(00) = 0 and q1 = 0, q12 = 0 implies p(10) = 0, so these are not valid solutions. A similar line of argument works for 2. Taking 3, we find
+
+$$
+p ( 0 0 ) = q _ { 0 } q _ { 1 } = \frac { 1 } { 3 }
+$$
+
+and so either (q0, q1) = (1, 13 ) or (q0, q1) = ( 1 3 , 1). Finally we have
+
+$$
+p ( 1 0 ) = ( 1 - q _ { 1 } ) q _ { 2 }
+$$
+
+which must be equal to either 0 or 2 3 thus leading to a contradiction with the condition p(10) = 1/3.
+
+## D Approximation of the KGEL
+
+The formula that we will use to calculate this metric comes from Ravuri et al., 2023 (Eq. 6), which we repeat here:
+
+$$
+K G E L ( \mathcal { X } _ { \text {test} } , q _ { \theta } ) = \min _ { \pi _ { i } } D _ { K L } ( P _ { \pi } | | P _ { \mathcal { X } _ { \text {test} } } )
+$$
+
+$$
+\ subject to \ \sum _ { i = 1 } ^ { n } \pi _ { i } \begin{bmatrix} k ( x _ { i } , t _ { 1 } ) \\ \vdots \\ k ( x _ { i } , t _ { W } ) \end{bmatrix} = \mathbb { E } _ { y \sim q _ { \theta } } \begin{bmatrix} k ( y , t _ { 1 } ) \\ \vdots \\ k ( y , t _ { W } ) \end{bmatrix} .
+$$
+
+Since we don't have access to samples for the IQP circuit, we need another method to estimate the expectation value on the right hand side of the equation. Note that we have
+
+$$
+\mathbb { E } _ { y \sim q _ { \theta } } [ k ( y , t ) ] & = \mathbb { E } _ { y \sim q _ { \theta } } [ k ( y , t ) ] \\ & \quad \sum _ { \substack { \Gamma \sim 0 \\ \Gamma \sim 0 } } ( k ( y , t ) )
+$$
+
+$$
+= \sum _ { y } q _ { \theta } ( y ) k ( y , t )
+$$
+
+$$
+= \sum _ { y } t r [ | y \rangle \langle y | \, \rho _ { \theta } ] k ( y , t )
+$$
+
+$$
+= t r [ \sum _ { y } | y \rangle \langle y | \, k ( y , t ) \rho _ { \theta } ]
+$$
+
+$$
+= t r [ O _ { K G E L } ( t ) \rho _ { \theta } ]
+$$
+
+Next, we write the observable OKGEL(t) in terms of Pauli Z observables (taking inspiration from Rudolph et al., 2024):
+
+$$
+O _ { K G E L } ( t ) = \sum _ { y } | y \rangle \, \langle y | \, k ( y , t ) = \sum _ { y } | y \rangle \, \langle y | \, e ^ { \frac { - \sum _ { i } ( y _ { i } - t _ { i } ) ^ { 2 } } { 2 \sigma ^ { 2 } } }
+$$
+
+$$
+= \sum _ { y } \bigotimes _ { i = 1 } ^ { n } \left [ | y _ { i } \rangle \left \langle y _ { i } | \, e ^ { \frac { - ( y _ { i } - t _ { i } ) ^ { 2 } } { 2 \sigma ^ { 2 } } } \right ] \\
+$$
+
+$$
+& \quad
+$$
+
+$$
+& i = \sum _ { i = 1 } ^ { n } \left [ | 0 \rangle \left \langle 0 | e ^ { \frac { - t _ { i } ^ { 2 } } { 2 \sigma ^ { 2 } } } + | 1 \rangle \left \langle 1 | e ^ { \frac { - ( 1 - t _ { i } ) ^ { 2 } } { 2 \sigma ^ { 2 } } } \right ] \\ & = \sum _ { i = 1 } ^ { n } \left [ | 0 \rangle \left \langle 0 | e ^ { \frac { - t _ { i } ^ { 2 } } { 2 \sigma ^ { 2 } } } + | 1 \rangle \left \langle 1 | e ^ { \frac { - ( 1 - t _ { i } ) ^ { 2 } } { 2 \sigma ^ { 2 } } } \right ]
+$$
+
+$$
+& \quad \frac { t - 1 } { n } \\ & = \bigotimes _ { i = 1 } ^ { n } \left [ \frac { \mathbb { I } + Z } { 2 } e ^ { \frac { - t _ { i } } { 2 \sigma ^ { 2 } } } + \frac { \mathbb { I } - Z } { 2 } e ^ { \frac { t _ { i } - 1 } { 2 \sigma ^ { 2 } } } \right ] \\
+$$
+
+$$
+& \quad = \bigotimes _ { i = 1 } ^ { n } \left [ \frac { e ^ { \frac { - t _ { i } } { 2 \sigma ^ { 2 } } } + e ^ { \frac { t _ { i } - 1 } { 2 \sigma ^ { 2 } } } } { 2 } \mathbb { I } + \frac { e ^ { \frac { - t _ { i } } { 2 \sigma ^ { 2 } } } - e ^ { \frac { t _ { i } - 1 } { 2 \sigma ^ { 2 } } } } { 2 } Z \right ] \\
+$$
+
+$$
+= \bigotimes _ { i = 1 } ^ { n } \left [ \frac { 1 + e ^ { \frac { - 1 } { 2 \sigma ^ { 2 } } } } { 2 } \mathbb { I } + ( - 1 ) ^ { t _ { i } } \frac { 1 - e ^ { \frac { - 1 } { 2 \sigma ^ { 2 } } } } { 2 } Z \right ] ^ { 2 }
+$$
+
+$$
+i = \coprod _ { i = 1 } ^ { n } \left [ ( 1 - p _ { \sigma } ) \mathbb { I } + ( - 1 ) ^ { t _ { i } } p _ { \sigma } Z \right ] \\
+$$
+
+$$
+= \sum _ { a \in \{ 0 , 1 \} ^ { n } } ( 1 - p _ { \sigma } ) ^ { n - | a | } p _ { \sigma } ^ { | a | } ( - 1 ) ^ { a \cdot t } Z _ { a } .
+$$
+
+Note that in several lines we have used the fact that ti ∈ {0, 1}. This means that
+
+$$
+\mathbb { E } _ { y \sim q } [ k ( y , t ) ] & = \text {tr} [ O _ { K G E L } ( t ) \rho _ { \theta } ] & & \quad ( 1 1 2 ) \\
+$$
+
+$$
+= \sum _ { a \in \{ 0 , 1 \} ^ { n } } ( 1 - p _ { \sigma } ) ^ { n - | a | } p _ { \sigma } ^ { | a | } ( - 1 ) ^ { a \cdot t } \langle Z _ { a } \rangle & & ( 1 1 3 ) \\ \sum _ { \substack { \Gamma \subset ( \Gamma ) ( \Gamma ) \subset ( Z _ { \Gamma } ) \subset ( Z _ { \Gamma } ) } } ( 1 - p _ { \sigma } ) ^ { n } ( a t ) \langle Z _ { \Gamma } \rangle & &
+$$
+
+$$
+& = \sum _ { a \in \{ 0 , 1 \} ^ { n } } \mathcal { P } _ { \sigma } ( a ) ( - 1 ) ^ { a \cdot t } \langle Z _ { a } \rangle , \\ & = \mathbb { F } _ { \ } r = [ ( 1 , 1 ) ^ { a \cdot t } / Z _ { 1 } \ ]
+$$
+
+$$
+= \mathbb { E } _ { a \sim \mathcal { P } _ { \sigma } } [ ( - 1 ) ^ { a \cdot t } \langle Z _ { a } \rangle ] .
+$$
+
+Since this is an expectation with repsect to a bounded random variable, inverse polynomial additive errors can be obtained by sampling a batch |A| and computing an empirical mean, as we did for the the MMD loss. We can therefore estimate the vector on the right hand side of (96) to the same error.

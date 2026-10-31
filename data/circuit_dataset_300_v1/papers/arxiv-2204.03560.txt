@@ -1,0 +1,1719 @@
+## 1 Introduction
+
+Fault-tolerant quantum computers promise to solve some computational problems much faster than classical machines, such as quantum chemistry simulation [1], prime factorization [2], solving linear systems of equations [3]. However, quantum information carried by current noisy intermediate-scale quantum (NISQ) systems is highly fragile and can be easily altered by the environment. The aforementioned tasks are so far out of reach.
+
+The most promising technique to maintain coherence and protect the quantum information from noise is quantum error-correcting codes [48]. The main idea of quantum error correction is to encode the low-dimensional quantum state in a larger system such that errors occurring during the computation can be corrected due to the physical redundancy. As long as the noise rate p is below a specific threshold, QECCs can correct the error and reduce the error probability from O(p) to higher orders. In recent years, the intrinsic connections between QECCs and other areas of physics, such as quantum gravity [9], have also been noticed.
+
+Knill and Laflamme devised sufficient and necessary conditions (known as the Knill-Laflamme conditions) for quantum error correction [10]. In principle, we can find any QECC as long as we find solutions to the Knill-Laflamme conditions. However, solving these systems of equations is extremely difficult in the general case. Therefore many open problems in this field remain unsolved, e.g., do all degenerate QECCs obey the Hamming bound? Which QECC has the highest error threshold? In practice, researchers usually analyze QECCs under the Pauli framework and have developed various QECC families, such as surface codes [11, 12], Calderbank-Shor-Steane (CSS) codes [13, 14], stabilizer codes [5], codeword stabilized (CWS) codes [15, 16], quantum low-density parity-check codes [17, 18].
+
+Up till now, no logical qubit/operation with useful fidelity was realized in experiments since current gate noise rates are still much larger than the requirements. Very recently, Egan et al. [19] prepared a Bacon-Shor logical qubit with 13 trapped-ion qubits and demonstrated a logical single-qubit Clifford gate. Further, Postler et al. [20] demonstrated a logical T-gate based on the 7-qubit color code. However, the fidelities of these state-of-the-art logical qubits are even lower than those of the physical qubits. From a theoretical perspective, the codes used in those experiments are not device-tailored and may not be optimal for the system. The noise channels on different physical platforms differ significantly [2123]. Symmetric QECC constructions under the Pauli framework can not be directly adapted to non-Hermitian/non-unitary noise channels. It is highly desirable to design asymmetric or channeladaptive QECCs with a hardware-efficient encoder. Such device-tailored codes can protect logical information more efficiently.
+
+Besides analytical constructions, researchers have been trying to find QECCs with computational methods for a long time. Refs. [16, 2426] designed classical algorithms for finding quantum codes associated with graphs. Ref. [27] used numerical greedy search for finding stabilizer codes. These algorithms, however, cannot find arbitrary codes and are extremely timeconsuming. With the popularity of artificial intelligence, researchers also started to design and optimize quantum codes with neural networks [28-31]. These classical black-box models perform pretty well for certain problems. In this work, we add a new general method to this toolbox. We devise a hybrid quantum-classical algorithm called VarQEC for finding quantum errorcorrecting codes. The cost functions therein are based on the Knill-Laflamme conditions. We iteratively update the parameters in a variational quantum circuit (VQC) with stochastic gradient descent. If the final cost functions are sufficiently small, we obtain an approximate quantum code whose inaccuracy is bounded. Compared with the classical iterative algorithm introduced in Ref. [32], our method yields the encoding circuit, not merely the encoding isometry. After finding a QECC and its encoder, the decoding operation can be found via various methods like semidefinite programming [33], convex optimization [34], or classical/quantum machine learning [35-37].
+
+VarQEC allows for non-Hermitian or nonunitary errors and is surprisingly effective. We numerically verify its effectiveness up to 14 qubits. For symmetric Pauli errors, we successfully rediscover many good quantum codes, e.g., ((5, 2, 3))2, ((5, 6, 2))2, ((6, 2, 3))2, ((7, 2, 3))2, ((8, 8, 3))2, ((9, 8, 3))2, ((10, 2 4 , 3))2, ((11, 2 5 , 3))2, ((12, 2 6 , 3))2, ((13, 2 7 , 3))2, ((14, 2 8 , 3))2, ((10, 4, 4))2. Some of the ((6, 2, 3))2, ((7, 2, 3))2 codes we find are not locally equivalent to any CWS code. It is an open question of whether there is a quantum code with parameters ((7, 3, 3))2, our numerical evidence suggests that it is non-existent. Then we apply VarQEC to search for asymmetric codes (which detect more Pauli-X/Y errors than Pauli-Z errors or vice versa) and make new discoveries. Furthermore, we search for channeladaptive codes for nearest-neighbor collective amplitude damping and nearest-neighbor collective phase-flips, and find eligible new codes with a hardware-efficient encoding circuit for various connectivity graphs. Since VarQEC is capable to find a QECC with the shallowest possible encoding circuit, it is promising to design codes with sufficient fidelity that can be tested and implemented on near-term devices. Although only relatively small systems were investigated in this paper, hierarchical concatenation can construct good quantum codes with large code lengths and distances [5, 38, 39].
+
+The paper is organized as follows. In Sec. 2, we introduce some background of quantum error correction. In Sec. 3, we introduce our cost functions and present propositions to support our definitions. In Sec. 4, we explain the VarQEC algorithm in detail. In Sec. 5, we show quantum codes (re)discovered thereby, including symmetric, asymmetric, and channel-adaptive codes for nearest-neighbor collective amplitude damping and nearest-neighbor collective phase-flips. Sec. 6 discusses the noise resilience feature of VarQEC. Sec. 7 discusses the barren plateaus and the noise-induced barren plateaus in VarQEC optimization. In Sec. 8, we verify our algorithm by an experiment on an IBM quantum device. The conclusions and future directions are summarized and discussed in Sec. 9. The appendices give some proof details, a discussion on overparameterization, an alternative variational ansatz, some non-CWS quantum codes, and a list of the quantum weight enumerators of quantum codes discovered by VarQEC.
+
+## 2 Preliminaries
+
+In classical computation and communication, redundancy is added when encoding a message such that the errors can be detected and corrected. Although each bit may flip with some probability, the encoded message can be recovered with high probability. The philosophy behind quantum error correction is the same. We use several lowfidelity physical qudits (e.g., qubits) to encode the logical quantum information redundantly and nonlocally. Then quantum errors can be detected through syndrome measurements and corrected through a unitary operation. A q-ary QECC C is a K-dimensional subspace of the qn-dimensional Hilbert space (Cq )⊗n, where n is the number of physical qudits (referred to as the code length). For qubit systems, q = 2, C ⊂ (C2 )⊗n. When K = 1, the code is a fixed quantum state without computational use. Throughout this paper, we only discuss K ≥ 2.
+
+Knill and Laflamme developed a general theory of quantum error correction. They obtained the sufficient and necessary conditions for an exact QECC [10]: a quantum code with orthonormal basis states {|ψj〉} corrects the error set E = {Eα} if and only if
+
+$$
+P _ { c } E _ { \alpha } ^ { \dagger } E _ { \beta } P _ { c } = \lambda _ { \alpha \beta } P _ { c } ,
+$$
+
+holds for all Eα,Eβ ∈ E. Here, Pc = ∑j |ψj〉〈ψj| is the orthogonal projector onto the code space, and each λαβ is a complex number. Moreover, we say the quantum code is non-degenerate if the matrix λαβ has full rank [40].
+
+We can understand these conditions intuitively. When i ̸= j, 〈ψi|E†αEβ|ψj〉 = 0 for any error product E†αEβ. This means orthogonal logical states remain orthogonal after the noise channel, the logical information is not corrupted. When i = j, 〈ψj|E†αEβ|ψj〉 = λαβ with λαβ being a constant only determined by the error product. This indicates that the projections between subspaces induced by different errors are information-preserving, the errors have an orthogonal decomposition. Therefore, we can correct the error without knowing or destroying the quantum superposition state.
+
+The quantum error detection conditions have a similar form: a quantum code with code space projector Pc can detect the error set E = {Eµ} if and only if
+
+$$
+P _ { c } E _ { \mu } P _ { c } = \lambda _ { \mu } P _ { c }
+$$
+
+holds for all Eµ ∈ E.
+
+In experiments, most quantum errors are uncorrelated single-qudit errors. A natural measure of the capability of a QECC is the number of single-qudit errors that it can detect. This motivated the concept of "code distance": the distance of a QECC is the largest possible integer d such that the code can detect any error non-trivially acting on at most d-1 qudits. Researchers usually denote the code parameters of a q-ary QECC with code length n, code dimension K, and code distance d as ((n,K, d))q.
+
+Comparing the Knill-Laflamme conditions and quantum error detection conditions, we know that a distance-d QECC can correct any error set E = {Eα} with each Eα non-trivially acting on at most ⌊(d-1)/2⌋ qudits.
+
+For convenience, 2-ary quantum codes are usually constructed and analyzed in the Pauli framework. Consider an n-fold Pauli tensor product
+
+$$
+O _ { \alpha } \in \{ X , Y , Z , I \} ^ { \otimes n } .
+$$
+
+Denote the number of X factors, Y factors and Z factors in Oα as wtX(Oα), wtY(Oα), and wtZ(Oα). The weight of Oα is
+
+$$
+\ w t ( O _ { \alpha } ) = w t _ { X } ( O _ { \alpha } ) + w t _ { Y } ( O _ { \alpha } ) + w t _ { Z } ( O _ { \alpha } ) .
+$$
+
+An equivalent definition of the code distance of a QECC with projector Pc is the largest possible integer d such that
+
+$$
+P _ { c } O _ { \alpha } P _ { c } = \lambda _ { \alpha } P _ { c }
+$$
+
+holds for all Pauli tensor product Oα with wt(Oα) < d.
+
+In practical scenarios, Pauli-Z errors are usually more prevalent than Pauli-X and PauliY [41]. Accordingly, we use a parameter cZ to characterize this noise bias and define the following cZ-effective weight and cZ-effective distance.
+
+Definition 1 The cZ-effective weight of a Pauli tensor product Oα is
+
+$$
+\ w t _ { e } ( O _ { \alpha } , c _ { Z } ) = \ w t _ { X } ( O _ { \alpha } ) + \mathbf w
+$$
+
+(6)
+
+where cZ > 0. The cZ-effective distance of a quantum code with projector Pc is the largest possible integer de(cZ) such that
+
+$$
+P _ { c } O _ { \alpha } P _ { c } =
+$$
+
+(7)
+
+holds for all Pauli tensor product Oα with wte(Oα, cZ) < de(cZ).
+
+This definition is a generalization of the concept of "effective distance" introduced in Ref. [42]. An asymmetric code with code parameters ((n,K, de(cZ)))2 can correct arbitrary Pauli error with cZ-effective weight smaller than de(cZ)/2, and detect arbitrary Pauli error with cZ-effective weight smaller than de(cZ). When Pauli-Z errors occur more frequently than Pauli-X/Y errors, 0 < cZ < 1; when the relaxation times (T1) are much smaller than the dephasing times (T2), Pauli-X/Y errors occur more frequently, cZ > 1.
+
+Quantum codes with relatively small distances can be concatenated to construct a code with large code length and distance, as illustrated in Fig. 1. Suppose we have an outermost code with parameters ((n1,K, d1))q, other outer codes
+
+with parameters ((n2, q, d2))q, ((n3, q, d3))q, . . . , ((nl-1, q, dl-1))q, and an inner code with parameters ((nl, q, dl))q. We can construct a large code through several levels of concatenation: the logical data is first encoded using the outermost code, each physical qudit therein is further encoded using the ((n2, q, d2))q code, and so forth. The hierarchically concatenated quantum code has parameters
+
+$$
+( ( \prod _ { j } n _ { j } , K , \prod _ { j } d _ { j } ) _ { q } . & & ( 8 )
+$$
+
+Likewise, we can concatenate asymmetric codes. A distance lower bound is given as follows.
+
+Theorem 1 Consider asymmetric outer codes with parameters ((n1,K, de(cZ) = δ1))2, ((n2, 2, de(cZ) = δ2))2, ((n3, 2, de(cZ) = δ3))2, . . . , ((nl-1, 2, δl-1))2, and an inner code with parameters ((nl, 2, δl))2. Concatenating these codes yields a new code with parameters
+
+$$
+( ( \prod _ { j } n _ { j } , K , d _ { e } ( c _ { Z } ) = \delta ) ) _ { 2 } & & ( 9 ) & & A \\
+$$
+
+## 3 Theoretical Basis
+
+A lot of methods for constructing QECCs are using the stabilizer formalism, but there are not
+
+> *Generated caption of `2204.03560_-_Quantum_variational_learning_for_quantum_error-correcting_codes_assets/figure-001.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a diagram of a quantum circuit represented by vertical lines for wires and rounded rectangular boxes for gates. From left to right, the circuit consists of the following components: On the far left, two input wires are labeled $|j\rangle$ (top) and $|0\rangle$ (bottom). These two wires enter a light gray gate labeled $U_1$. The output of $U_1$ splits into two wires: the upper output wire is labeled $|0\rangle$ and the lower output wire is labeled $|0\rangle$. The upper output wire from $U_1$ becomes the top input for a medium gray gate labeled $U_2$, while the lower output wire from $U_1$ becomes the bottom input for a second medium gray gate labeled $U_2$. The output of the upper $U_2$ gate splits into two wires, both labeled $|0\rangle$, which serve as inputs for a dark gray gate labeled $U_3$. The output of the lower $U_2$ gate also splits into two wires, both labeled $|0\rangle$, which serve as inputs for a second dark gray gate labeled $U_3$, and a third dark gray gate labeled $U_3$ is connected to the output of the middle $U_2$ gate's branch. The diagram shows a cascading structure of gates $U_1$, $U_2$, and $U_3$ where the number of gates increases at each stage.
+
+where
+
+$$
+\delta \geq \min \{ 1 , c _ { Z } \} \prod _ { j } \left \lceil \frac { \delta _ { j } } { \max \{ 1 , c _ { Z } \} } \right \rceil .
+$$
+
+Proof Assume the concatenated code cannot detect a Pauli tensor product Oα. For the outer code, errors occur on at least ⌈δ1/max{1, cZ}⌉ qubits. Each of these qubits is connected to a block of the first inner code ((n2, 2, de(cZ) = δ2))2 and for every such block, errors occur on at least ⌈δ2max{1, cZ}⌉ qubits. From similar arguments, errors occur on at least ⌈δj max{1, cZ}⌉ qubits in the j-th block. The weight of Oα is bounded by
+
+$$
+\ w t ( O _ { \alpha } ) \geq \prod _ { j } \lceil \delta _ { j } / \max \{ 1 , c _ { Z } \} \rceil \, . \quad ( 1 1 )
+$$
+
+Hence, the cZ-effective weight of Oα is at least
+
+$$
+\min \{ 1 , c _ { Z } \} \prod _ { j } \lceil \delta _ { j } / \max \{ 1 , c _ { Z } \} \rceil \, . \quad ( 1 2 )
+$$
+
+The concatenated code can detect any Pauli tensor product with cZ-effective weight smaller than this value, we conclude
+
+$$
+\delta \geq \min \{ 1 , c _ { Z } \} \prod _ { j } \left \lceil \frac { \delta _ { j } } { \max \{ 1 , c _ { Z } \} } \right \rceil .
+$$
+
+■
+
+that many outside the Pauli framework. This work aims to search for quantum codes based on the most fundamental principle, i.e., the KnillLaflamme conditions and the quantum error detection conditions. A crucial tool in our scheme is the variational quantum circuit which consists of multiple layers of parameterized quantum gates.
+
+The primary ingredient of a variational algorithm is the cost function(s). We define the cost functions of VarQEC as follows.
+
+Definition 2 (Cost functions) Consider an error set E = {Eµ} and a length-n quantum code with parameterized orthogonal basis states
+
+$$
+\{ | \psi _ { 1 } ( \theta ) \rangle , | \psi _ { 2 } ( \theta ) \rangle , \dots , | \psi _ { K } ( \theta ) \rangle \} .
+$$
+
+We define the ℓ1-norm cost function
+
+$$
+C _ { n , K , \mathcal { E } } ^ { \ell _ { 1 } } ( \theta ) & \equiv \sum _ { E _ { \mu } \in \mathcal { E } } \left ( \sum _ { 1 \leq i < j \leq K } | \langle \psi _ { i } | E _ { \mu } | \psi _ { j } \rangle | \\ & + \sum _ { j = 1 } ^ { K } | \langle \psi _ { j } | E _ { \mu } | \psi _ { j } \rangle - \overline { \langle E _ { \mu } \rangle } | 2 \right ) \\
+$$
+
+and the ℓ2-norm cost function
+
+$$
+C _ { n , K , \mathcal { E } } ^ { \ell _ { 2 } } ( \theta ) & \equiv \sum _ { E _ { \mu } \in \mathcal { E } } \left ( \sum _ { 1 \leq i < j \leq K } | \langle \psi _ { i } | E _ { \mu } | \psi _ { j } \rangle | ^ { 2 } \right ) ^ { 2 } \\ & + \sum _ { j = 1 } ^ { K } | \langle \psi _ { j } | E _ { \mu } | \psi _ { j } \rangle - \overline { \langle E _ { \mu } \rangle } | ^ { 2 } / 4 \right ) ^ { \ w h e r } \\ \ w h e r & \ \overline { \langle E _ { \mu } \rangle } = \sum _ { i = 1 } ^ { K } | \langle \psi _ { i } | E _ { \mu } | \psi _ { i } \rangle / K . \\
+$$
+
+where 〈Eµ〉 = ∑Kj=1〈ψj|Eµ|ψj〉/K.
+
+Clearly, C ℓ1 n,K,E and C ℓ2 n,K,E are always nonnegative and have the same zero-points. When C ℓ1 n,K,E ≤ 1, C ℓ2 n,K,E ≤ (C ℓ1 n,K,E ) 2 . When C ℓ1 n,K,E = 0, the quantum code can perfectly detect the error set E.
+
+To find symmetric codes with code parameters ((n,K, d))2, we use the Pauli error model and choose
+
+$$
+\mathcal { E } = \{ O _ { \alpha } | \, \text {wt} ( O _ { \alpha } ) < d \} , \quad ( 1 7 ) \quad \underset { \mathcal { C } } { \overset { n C } { m } }
+$$
+
+where Oαs are Pauli tensor products. Likewise, when searching for asymmetric codes with code parameters ((n,K, de(cZ)))2, we choose
+
+$$
+\mathcal { E } = \{ O _ { \alpha } | \, w t _ { e } ( O _ { \alpha } , c _ { Z } ) < d _ { e } ( c _ { Z } ) \} . \quad ( 1 8 ) \quad \mathcal { E }
+$$
+
+To find channel-adaptive codes for a general noise channel N(ρ) = ∑α EαρE†α, we choose
+
+$$
+\mathcal { E } = \{ E _ { \alpha } ^ { \dagger } E _ { \beta } | E _ { \alpha } , E _ { \beta } \text { are Kraus operators of } \mathcal { N } \} .
+$$
+
+Note that the error set E in principle can include non-unitary and non-Hermitian errors. For such errors, we can either twirl them to Pauli errors or simulate them directly by adding ancilla qubits and performing positive-operator valued measures (POVMs).
+
+In practice, due to the inexact realization of an encoding isometry, quantum error correction/detection conditions are not exactly satisfied, and QECCs cannot protect the information from errors perfectly. Nevertheless, QECCs can still detect and correct most errors. Such approximate quantum error correction schemes hold great promise [43, 44]. A parameter ε characterizes the inaccuracy of an approximate code. If a QECC is ε-correctable for a noise channel N, its worst-case entanglement fidelity is greater than 1 - ε with appropriate recovery [45]. Bény et al. proposed an approximate version of the KnillLaflamme conditions for such approximate codes.
+
+Lemma 1 (Corollary 2, Ref. [46]) A code defined by the projector Pc is ε-correctable under a noise channel N(ρ) = ∑αEαρE†α, if and only if
+
+$$
+P _ { c } E _ { \alpha } ^ { \dagger } E _ { \beta } P _ { c } = \lambda _ { \alpha \beta } P _ { c } + P _ { c } B _ { \alpha \beta } P _ { c } ,
+$$
+
+where λαβ are the components of a non-negative Hermitian operator with trace one, Bαβ is a Hermitian operator, and the Bures distance [47] between two channels Λ(ρ) = ∑αβ λαβ Tr(ρ)|α〉〈β| and (Λ + B)(ρ) = Λ(ρ) + ∑αβ Tr (ρBαβ) |α〉〈β| satisfies
+
+$$
+d ( \Lambda + \mathcal { B } , \Lambda ) \leq \varepsilon .
+$$
+
+Based on this lemma, we modify Corollary 5 of Ref. [45] and give a proposition to support our definitions.
+
+Proposition 2 Consider an n-qubit noise channel N(ρ) = ∑αEαρE†α, and a quantum errorcorrecting code
+
+$$
+\mathcal { C } = s p a n \{ | \psi _ { 1 } \rangle , | \psi _ { 2 } \rangle , \dots , | \psi _ { K } \rangle \} .
+$$
+
+We choose the error product set E = {E†αEβ|Eα,Eβ are Kraus operators of N}. Denote the cost function Eq. (15) of the basis states as C ℓ1 n,K,E . Then the code C is ε-correctable under N with ε bounded by
+
+$$
+\varepsilon \leq K \sqrt { 2 C _ { n , K , \mathcal { E } } ^ { \ell _ { 1 } } } .
+$$
+
+Proof Let λαβ = ∑j〈ψj|E†αEβ|ψj〉/K. To satisfy Eq. (20), we set
+
+$$
+B _ { \alpha \beta } = & \sum _ { i \neq j } \langle \psi _ { i } | E _ { \alpha } ^ { \dagger } E _ { \beta } | \psi _ { j } \rangle | \psi _ { i } \rangle \langle \psi _ { j } | \\ & + \sum _ { j } \left ( \langle \psi _ { j } | E _ { \alpha } ^ { \dagger } E _ { \beta } | \psi _ { j } \rangle - \lambda _ { \alpha \beta } \right ) | \psi _ { j } \rangle \langle \psi _ { j } | . \quad \varepsilon \ b o d { 1 } \\ & \\
+$$
+
+Then
+
+$$
+T h e n \\ d ( \Lambda + \mathcal { B } , \Lambda ) \leq K \| \mathcal { B } \| _ { 1 } ^ { 1 / 2 } & & \prod _ { \alpha , \beta } & \prod _ { \substack { \alpha , \beta \\ \leq K ( \sum _ { \alpha , \beta } \left ( \sum _ { i \neq j } | \langle \psi _ { i } | E _ { \alpha } ^ { \dagger } E _ { \beta } | \psi _ { j } \rangle | + \cdots + \\ \sum _ { j } | \langle \psi _ { j } | E _ { \alpha } ^ { \dagger } E _ { \beta } | \psi _ { j } \rangle - \lambda _ { \alpha \beta } | ) \right ) ^ { 1 / 2 } } } & \prod _ { \substack { \alpha , \beta \\ \leq K \sqrt { 2 C _ { n , K , \varepsilon } ^ { \ell _ { 1 } } } } } & & \frac { \prod _ { \alpha , \beta } } { 4 } & & \frac { \prod _ { \alpha , \beta } } { 4 } \\ & = K \sqrt { 2 C _ { n , K , \varepsilon } ^ { \ell _ { 1 } } } & & \text {wide} & & \text {wide} \\ & \text {according to Lemma 1, the inaccuracy } \varepsilon \text { of code } & & \text {ratio} & & \text {ratio} \\ \mathcal { C } \text { is upper bounded by } K _ { \sqrt { 2 C _ { 1 } ^ { \ell _ { 1 } } } } & & & & \text {variations}
+$$
+
+According to Lemma 1, the inaccuracy ε of code C is upper bounded by K√2C ℓ1 n,K,E . ■
+
+In short, given a noise channel N, as long as we minimize the channel-adaptive cost function to a sufficiently small value, we rigorously find an approximate channel-adaptive code with small inaccuracy. Similar bounds for symmetric or asymmetric quantum codes are given as follows.
+
+Proposition 3 Consider an n-qubit noise channel N(ρ) = ∑αEαρE†α where each Eα non-trivially acts on no more than ⌊(d - 1)/2⌋ qubits, and a quantum error-correcting code
+
+$$
+\mathcal { C } = s p a n \{ | \psi _ { 1 } \rangle , | \psi _ { 2 } \rangle , \dots , | \psi _ { K } \rangle \} .
+$$
+
+We choose E = {Oα| wt(Oα) < d}, where Oαs are Pauli tensor products. Denote the cost function Eq. (15) of the basis states as C ℓ1 n,K,E , the number of Kraus operators of N as m. Then the code C is ε-correctable under N with ε bounded by
+
+$$
+\varepsilon \leq 2 ^ { n / 4 + d / 2 } K \sqrt { m C _ { n , K , \mathcal { E } } ^ { \ell _ { 1 } } } . \quad ( 2 7 ) \quad \begin{matrix} \text {lay} \end{matrix}
+$$
+
+Proof The proof is given in Appendix A. ■
+
+Proposition 4 Consider an n-qubit noise channel N(ρ) = ∑αEαρE†α with each Eα proportional to a Pauli error with cZ-effective weight smaller than de(cZ)/2, and a quantum error-correcting code
+
+$$
+\mathcal { C } = s p a n \{ | \psi _ { 1 } \rangle , | \psi _ { 2 } \rangle , \dots , | \psi _ { K } \rangle \} .
+$$
+
+We choose E = {Oα|wte(Oα, cZ) < de(cZ)}, where Oαs are Pauli tensor products. Denote the cost function Eq. (15) of the basis states as C ℓ1 n,K,E , the number of Kraus operators of N as m. Then the code C is ε-correctable under N with ε bounded by
+
+$$
+\varepsilon \leq K \sqrt { 2 m C _ { n , K , \mathcal { E } } ^ { \ell _ { 1 } } } .
+$$
+
+Proof The proof is given in Appendix B. ■ Note that Propositions 3 and 4 give pretty loose bounds. The true code inaccuracy, which depends on the particular noise channel, is usually significantly smaller.
+
+## 4 Algorithm
+
+Variational quantum circuits (VQCs) have been widely used in near-term quantum algorithms for various tasks [48, 49], such as ground state preparation [50, 51], eigenenergy estimation [52, 53], quantum data compression [54, 55], quantum circuit compiling [56, 57]. Give a pure product state as input, one iteratively updates the circuit parameters based on measurement results, and finally outputs the desired state. In VarQEC, the output states serve as the basis states of a quantum code, and its encoder is given by the quantum circuit. The structure of our algorithm is illustrated in Fig. 2.
+
+Suppose we have a NISQ device with a hardware connectivity graph G. The vertices denote qubits, and the edges denote adjacent qubit pairs. One can apply single-qubit rotations to each qubit and two-qubit gates to adjacent qubits. We aim to find a K-dimensional QECC that can detect an error set E = {Eµ}, and the encoding circuit should be as shallow as possible.
+
+Before running the algorithm, we design a multilayered VQC which is hardware-efficient for the connectivity graph. Denote the number of VQC layers as L, the maximum acceptable number of layers as Lmax, the evolution of the VQC as U(θ) where θ are the circuit parameters. We start from L = 1 and sample the initial θ randomly. Also, we delicately select k = ⌈log(K)⌉ physical qubits to prepare the logical data, where the logarithm is with respect to base 2. These k qubits should be scattered instead of concentrated since we hope the remaining qubits are connected to them by very few edges.
+
+> *Generated caption of `2204.03560_-_Quantum_variational_learning_for_quantum_error-correcting_codes_assets/figure-002.png` (ollama:gemma4:26b, prompt sci-v1):* This is a diagram of a quantum machine learning or variational quantum algorithm process. The diagram is split into two main stages connected by arrows. The top stage shows a quantum circuit where three input states, $|j\rangle$, $|0\rangle$, and $|0\rangle$, enter a blue rectangular block labeled $U(\theta)$. An arrow labeled "Update $\theta$" points from a set of red circular nodes back to the top of the $U(\theta)$ block. To the right of the circuit, a small box contains a measurement symbol with a person icon and a Greek letter $\beta$. Next to this, a large oval contains several red circles labeled $E_1, E_2, E_3, E_4, E_5$ arranged in a cluster. A large arrow labeled "Sample" points from the top stage down to the bottom stage. The bottom stage shows a similar quantum circuit where the three input states $|j\rangle$, $|0\rangle$, and $|0\rangle$ enter a blue rectangular block labeled $U(\theta)$. After this block, there are two red circles labeled $E_{\beta}$ and $E_{\alpha}^{\dagger}$. These circles then lead into a second blue rectangular block labeled $U^{\dagger}(\theta)$. At the end of the $U^{\dagger}(\theta)$ block, there are three small boxes, each containing a measurement symbol and a person icon. An arrow labeled "Update $\theta$" points from the end of the bottom circuit back to the first $U(\theta)$ block.
+
+First, we initialize the selected qubits to one of the K binary strings |0〉, |1〉, . . . , |K-1〉, and initialize the remaining qubits to |0〉⊗(n-k) . These product states span the input code space
+
+$$
+\mathcal { C } _ { i n } & = \text {span} \{ | 0 \rangle | 0 \rangle ^ { \otimes ( n - k ) } , \dots , | K - 1 \rangle | 0 \rangle ^ { \otimes ( n - k ) } \} . \\ \\
+$$
+
+Cin is a QECC with distance d = 1.
+
+The cost functions can be estimated by running specific circuits and doing measurements. To estimate 〈ψj|Eµ|ψj〉, we prepare the initial state |j - 1〉|0〉⊗(n-k) , evolve the system with the VQC U(θ), then measure the local observable Eµ. If errors Eµ1, Eµ2, . . . commute, they can be measured simultaneously in a single shot. To estimate ∣∣〈ψi|Eµ|ψj〉∣∣, we start from |j - 1〉|0〉⊗(n-k) , then sequentially evolve the system with U(θ), Eµ, and U † (θ), then measure the final state in the computational basis. The measurements are assisted by post-selection: we first measure the n - k auxiliary qubits, and if the result is |0〉n-k , we measure the remaining k qubits. Denote the probability of obtaining the binary string |i -1〉|0〉⊗(n-k) as pij, ∣∣〈ψi|Eµ|ψj〉∣∣ = √pij. Theoretically, this step will also yield 〈ψj|Eµ|ψj〉. However, since VarQEC is a NISQ algorithm, we prefer to use a shallower circuit to estimate cost function terms whenever possible.
+
+In the above description, we assume the error set E only consists of Pauli errors. It does not matter if E includes non-unitary or nonHermitian terms. Adding ancilla qubits or Pauli twirling can handle it. See Sec. 5.3.1 for a detailed example.
+
+The optimization of θ consists of two stages. The first and the main stage is mini-batch learning. After sampling the initial θ, we minimize C ℓ2 n,K,E with mini-batch gradient descent. The schematic is shown in Fig. 2. Within each iteration, we sample a subset ES ⊂ E, estimate the corresponding partial ℓ2-norm cost function
+
+$$
+C _ { n , K , \mathcal { E } _ { S } } ^ { \ell _ { 2 } } ( \theta ) & \equiv \sum _ { E _ { \mu } \in \mathcal { E } _ { S } } \left ( \sum _ { 1 \leq i < j \leq K } | \langle \psi _ { i } | E _ { \mu } | \psi _ { j } \rangle | ^ { 2 } \right ) \\ & + \sum _ { j = 1 } ^ { K } | \langle \psi _ { j } | E _ { \mu } | \psi _ { j } \rangle - \overline { \langle E _ { \mu } \rangle } | ^ { 2 } / 4 \right ) \\ \intertext { l e } \text { and its gradient }
+$$
+
+and its gradient
+
+$$
+\nabla \theta = \frac { \partial C _ { n , K , \mathcal { E } _ { S } } ^ { \ell _ { 2 } } ( \theta ) } { \partial \theta }
+$$
+
+via measurements, then perform a single gradient descent step with a learning rate η:
+
+$$
+\theta = \theta - \eta \nabla \theta .
+$$
+
+The required number of measurements to estimate C ℓ2 n,K,ES (θ) up to additive error ϵ is of order O(K2 |ES|2/ϵ2 ). The gradient can be estimated through finite-differencing or by combining the chain rule and the parameter shift rule [58]. Minibatch gradient descent allows for a more robust convergence and avoids being trapped in a local minimum. We repeat sampling and gradient descent until convergence. The reason that we minimize C ℓ2 n,K,E first is because it converges much faster than C ℓ1 n,K,E . In addition, C ℓ2 n,K,E is differentiable but C ℓ1 n,K,E is not.
+
+If the error set E consists of too many terms, a promising alternative method is to construct "classical shadows" [59] for each basis state |ψj〉, then use the shadows to estimate the cost functions classically. The shadow tomography technique can help us implement large-batch optimization with a smaller measurement overhead.
+
+After adequate mini-batch learning, if C ℓ2 n,K,E is relatively small (e.g., C ℓ2 n,K,E < 0.01), we estimate C ℓ1 n,K,E and fine-tune the parameters θ with respect to it since C ℓ1 n,K,E is directly related to the inaccuracy of the code (see Propositions 2, 3, 4). In this work, we use Powell's method [60], a gradient-free optimizer, for fine-tuning. If C ℓ1 n,K,E is smaller than an acceptable cost tolerance C ℓ1 tol , we stop the optimization and output the final parameters θopt. Throughout this paper, we set the tolerance as
+
+$$
+C _ { t o l } ^ { \ell _ { 1 } } \equiv 1 \times 1 0 ^ { - 6 } .
+$$
+
+In the ideal case, we obtain the optimal parameters
+
+$$
+\theta _ { o p t } = \arg \min _ { \theta } C _ { n , K , \mathcal { E } } ^ { \ell _ { 1 } } ( \theta ) .
+$$
+
+The output QECC
+
+$$
+1 \, \text {the output QEC} \\ \mathcal { C } _ { \text {out} } ( \theta _ { \text {opt} } ) = & \text {span} \{ \\ | \psi _ { 1 } \rangle = U ( \theta _ { \text {opt} } ) | 0 \rangle | 0 \rangle ^ { \otimes ( n - k ) } , \\ | \psi _ { 2 } \rangle = U ( \theta _ { \text {opt} } ) | 1 \rangle | 0 \rangle ^ { \otimes ( n - k ) } , \\ & \cdots , \\ | \psi _ { K } \rangle = U ( \theta _ { \text {opt} } ) | K - 1 \rangle | 0 \rangle ^ { \otimes ( n - k ) } . \\ & \} . \\
+$$
+
+is the target approximate quantum code with small inaccuracy. The variational quantum circuit U(θopt) serves as the encoding circuit. Further, we can remove redundant gates from the VQC.
+
+If C ℓ1 n,K,E is greater than C ℓ1 tol , we increase the circuit depth L and repeat the optimization steps. If C ℓ1 n,K,E is always greater than the tolerance even when L = Lmax, we fail to find an eligible code. The detailed procedure is illustrated in Algorithm 1.
+
+A natural question arises: can a fixed-depth VQC find any ((n,K))2 quantum code? Haug et al. used the quantum Fisher information matrix to assess the expressive power of a VQC with a fixed input state |0〉⊗n [61]. We generalize this notion to multiple inputs to assess the expressive power of a VQC in VarQEC. If a VQC is capable of finding any ((n,K))2 quantum code, we say it is overparameterized with respect to code parameters ((n,K))2. See Appendix C for more details. When the VQC U(θ) is underparameterized for ((n,K))2, the set of reachable output codes forms a low-dimensional submanifold of the complex Grassmannian Gr(K, 2n),
+
+$$
+\{ \mathcal { C } _ { o u t } ( \theta ) | \theta \} \subseteq \text {Gr} ( K , 2 ^ { n } ) . \quad ( 3 7 ) \quad \text {co}
+$$
+
+## Algorithm 1: VarQEC
+
+```
+Input: Error set E, hardware-efficient
+VQC U(θ) with L layers,
+acceptable number of layers Lmax,
+acceptable cost tolerance C ℓ1 tol .
+Output: An approximate quantum code
+with a hardware-efficient
+encoder that detects E.
+L ← 1.
+while L ≤ Lmax and C ℓ1 n,K,E (θ) > Cℓ1 tol do
+while C ℓ2 n,K,E (θ) has not converged do
+Sample a subset ES ⊂ E.
+Prepare the K input strings.
+Run U(θ), output {|ψj〉}.
+Measure observables Eµ ∈ ES.
+Prepare the K input strings.
+Run U † (θ)EµU(θ) for Eµ ∈ ES.
+Do projective measurements.
+Estimate C ℓ2 n,K,ES (θ).
+Vary θ, repeat the above steps to
+estimate ∂Cℓ2 n,K,E (θ)/∂θ.
+Perform a gradient descent step,
+update θ.
+end
+if C ℓ2 n,K,E (θ) < 0.01 then
+while C ℓ1 n,K,E (θ) has not converged
+do
+Prepare the K input strings.
+Run U(θ), output {|ψj〉}.
+Measure observables Eµ ∈ E.
+Prepare the K input strings.
+Run U † (θ)EµU(θ) for Eµ ∈ E.
+Do projective measurements.
+Estimate C ℓ1 n,K,ES (θ).
+Vary θ, repeat the above steps
+to estimate ∂Cℓ1 n,K,E (θ)/∂θ.
+Minimize C ℓ1 n,K,E (θ), update θ.
+end
+end
+L ← L + 1.
+end
+θopt ← θ.
+Return: θopt, C ℓ1 n,K,E (θopt).
+```
+
+The VarQEC algorithm searches this submanifold for an eligible code. When U(θ) is overparameterized for ((n,K))2, it can explore all relevant directions and the set of reachable output codes is equivalent to Gr(K, 2n), i.e., VarQEC is capable to find arbitrary ((n,K))2 quantum code. The required number of periodic bounded real parameters to overparameterize a VQC is at least 2K(2n -K) since the complex dimension of Gr(K, 2n) is K(2n -K).
+
+In Ref. [62], Johnson et al. proposed a related algorithm named QVECTOR, which samples a random 2-design unitary and optimizes parameterized encoding and decoding circuits simultaneously to improve the quantum average fidelity. Compared with QVECTOR, VarQEC can find not only channel-adaptive codes but also quantum codes with specific code parameters. VarQEC does not need a deep random circuit, which is a daunting challenge on NISQ devices, to sample a bunch of input states. We train the encoder without considering the decoder. The optimization is less likely to be trapped in a local minimum. The cost functions are estimated by measuring some local observables. We can rigorously obtain an ε-correctable approximate QECC with arbitrarily small ε. The noise models in our methods are also flexible and can be artificially assigned.
+
+## 5 Results
+
+## 5.1 Symmetric codes
+
+We verify the validity of our algorithm by rediscovering some symmetric codes with well-known code parameters. The cost functions are defined in Eqs. (15), (16). For code parameters ((n,K, d))2, the total number of Pauli errors Oα to consider is
+
+$$
+| \{ O _ { \alpha } \} | = \sum _ { j = 0 } ^ { d - 1 } \left ( \begin{array} { c } n \\ j \end{array} \right ) 3 ^ { j } .
+$$
+
+Without loss of generality, we use the complete bipartite connectivity graph: denote the qubits selected for the input as {Q0,Q1, . . . ,Qk-1} (k = ⌈log(K)⌉), the unselected qubits as {Qk,Qk+1, . . . ,Qn-1}, the graph consists of k(n- k) edges that connect every selected qubit and every unselected qubit, qubits in the same set are not directly connected. For such graphs, the initial logical data can spread to each qubit rapidly since the graph diameter is only 2. The variational quantum circuit has alternating layers of single-qubit rotations Rx-Rz acting on all qubits and Ising-type interactions Rzz acting on adjacent qubits. Denote the number of layers as L. The VQC evolution is of the form
+
+$$
+U ( \theta ) = U _ { E } ( \theta _ { E } ) \prod _ { l = 1 } ^ { L } U _ { l } ( \theta _ { l } ) ,
+$$
+
+where θl and θE are elements in θ, Ul(θl) denotes the l-th layer evolution, UE(θE) denotes the rightmost Rx-Rz rotations which are used to search the manifold of locally equivalent quantum codes. Since Rz and Rzz gates in the last layer commute, and Rz-Rx-Rz rotations can realize arbitrary single-qubit unitary, locally equivalent QECCs can be found by the same VQC. In principle, any n-qubit unitary evolution can be realized by this ansatz with a sufficiently large number of layers since {Rx,Rz,Rzz} is a universal quantum gate set. The connectivity graph and the periodic-structured VQC ansatz for n = 5, k = 2 are shown in Fig. 3(a,b). In general, with the increase of L, the achievable quantum codes form a higher dimensional submanifold of Gr(K, 2n), as shown in Fig. 3(c). When the VQC is overparameterized (L is no less than a critical number Lcrit) for code parameters ((n, K))2, VarQEC can explore the whole Gr(K, 2n) manifold.
+
+An alternative variational circuit for finding additive quantum codes is discussed in Appendix D.
+
+We apply our algorithm to search for ((n,K, d))2 codes where the code length n ranges from 3 to 12, the code dimension K ranges from 2 to 8, the code distance d ranges from 2 to 4. Fig. 4 shows C ℓ1 n,K,E (θopt) as a function of code parameters n, K, d. We rediscover quantum codes with parameters
+
+$$
+\begin{array} { c } ( ( 4 , 4 , 2 ) ) _ { 2 } , ( ( 5 , 6 , 2 ) ) _ { 2 } , \\ ( ( 5 , 2 , 3 ) ) _ { 2 } , ( ( 6 , 2 , 3 ) ) _ { 2 } , \\ ( ( 7 , 2 , 3 ) ) _ { 2 } , ( ( 8 , 8 , 3 ) ) _ { 2 } , \\ ( ( 9 , 8 , 3 ) ) _ { 2 } , ( ( 1 0 , 4 , 4 ) ) _ { 2 } , \\ ( ( 1 1 , 4 , 4 ) ) _ { 2 } . \end{array}
+$$
+
+The ((5, 2, 3))2 and ((8, 8, 3))2 codes are nondegenerate, the ((6, 2, 3))2 codes are degenerate, and both cases are possible for ((7, 2, 3))2. There is an obvious phase transition between achievable and (probably) non-achievable code parameters. Further, we fix d = 3 and rediscover larger codes with parameters
+
+$$
+F ^ { ( 1 0 , 2 ^ { 4 } , 3 ) } _ { ( ( 1 0 , 2 ^ { 4 } , 3 ) ) _ { 2 } , ( ( 1 1 , 2 ^ { 5 } , 3 ) ) _ { 2 } , \\ ( ( 1 2 , 2 ^ { 6 } , 3 ) ) _ { 2 } , ( ( 1 3 , 2 ^ { 7 } , 3 ) ) _ { 2 } , \\ ( ( 1 4 , 2 ^ { 8 } , 3 ) ) _ { 2 } .
+$$
+
+(a)
+
+(b)
+
+Q 0
+
+Q 1
+
+Q 2
+
+Q 3
+
+Q 4
+
+(c)
+
+R x
+
+R x
+
+R x
+
+R x
+
+R x R z R z R z R z R z
+
+Gr(K,2 n )
+
+L = 1 L = 2 L = 3 … L = L crit
+
+periodic-structured variational ansatz, and the achiev-
+
+able quantum codes. (a) The bipartite connectivity
+
+graph with five physical qubits. Gray lines connect ad-
+
+jacent qubits. {Q0,Q1} are the selected qubits to pre-
+
+pare the logical data. (b) The corresponding variational
+
+quantum circuit (VQC) with L layers. Within each
+
+layer, we apply Rx-Rz rotations to each qubit and ap-
+
+ply Rzz gates to adjacent qubits. (c) With the increase
+
+of L, VarQEC is capable to find quantum codes in a
+
+higher-dimensional manifold until overparameterization
+
+All these codes can be found by a shallow
+
+VQC, e.g., a 5-layer VQC can encode ((5, 2, 3))2,
+
+((12, 2 6 , 3))2, ((14, 2 8 , 3))2; a 4-layer VQC can en-
+
+code ((6, 2, 3))2, ((8, 8, 3))2; a 3-layer VQC suf-
+
+fices to encode ((7, 2, 3))2. In our experiments, ei-
+
+ther C ℓ1
+
+n,K,E (θopt) < 1×10-6 or C ℓ1
+
+n,K,E (θopt) ≥ 1
+
+holds. Fig. 5 shows some cost curves at the mini-
+
+batch learning stage. Within each iteration, we
+
+sample 20% of {Oα} as the batch and perform
+
+a stochastic gradient descent with learning rate
+
+η = 1 × 10-2 .
+
+In the following, we verify the local equivalence (LE) between two quantum codes with Kdimensional projectors Pc and P ′ c by sampling permutations of qubits Πq and numerically min-
+
+> *Generated caption of `2204.03560_-_Quantum_variational_learning_for_quantum_error-correcting_codes_assets/figure-003.png` (ollama:gemma4:26b, prompt sci-v1):* This image consists of a series of ten heatmaps, labeled (a) through (j), arranged vertically. All heatmaps share the same axes and color scale. The vertical axis of each heatmap is labeled $d$ with values 2, 3, and 4. The horizontal axis is labeled $K$ with values 2, 3, 4, 5, 6, 7, and 8. A common color bar at the bottom indicates the scale from $10^{-6}$ to $10^2$ using shades of blue, where lighter colors represent lower values and darker blue represents higher values. The heatmaps show the following patterns: (a) all cells are dark blue; (b) $d=4$ and $d=3$ are dark blue, $d=2$ is light for $K \in \{2,3,4\}$ and dark blue for $K \ge 5$; (c) $d=4$ is dark blue, $d=3$ is light for $K \in \{2,3\}$ and dark blue for $K \ge 4$, and $d=2$ is light for $K \in \{2,3,4,5\}$ and dark blue for $K \ge 6$; (d) $d=4$ is dark blue, $d=3$ is light for $K \in \{2,3\}$ and dark blue for $K \ge 4$, and $d=2$ is light for $K \ge 2$; (e) $d=4$ is dark blue, $d=3$ is light for $K \in \{2,3\}$ and dark blue for $K \ge 4$, and $d=2$ is dark blue for $K \ge 2$; (f) $d=4$ is dark blue, $d=3$ is medium blue, and $d=2$ is white; (g) $d=4$ is dark blue, $d=3$ is white, and $d=2$ is white; (h) $d=4$ is dark blue for $K \ge 5$ and white otherwise, $d=3$ is white, and $d=2$ is white; (i) $d=4$ is dark blue for $K \ge 5$ and white otherwise, $d=3$ is white, and $d=2$ is white; (j) all cells are white.
+
+| j 0 ⟩
+
+| j 1 ⟩
+
+| 0⟩
+
+| 0⟩
+
+| 0⟩
+
+Q 0
+
+Q 1
+
+Q 2
+
+Q 3
+
+Q 4
+
+R x
+
+R x
+
+R x
+
+R x
+
+R x R z R z R z R z R z R zz R zz × L
+
+R zz
+
+R zz
+
+R zz
+
+R zz R zz R zz R zz R zz R zz imizing the LE-cost function
+
+> *Generated caption of `2204.03560_-_Quantum_variational_learning_for_quantum_error-correcting_codes_assets/figure-004.png` (ollama:gemma4:26b, prompt sci-v1):* This is a composite image consisting of nine individual plots labeled (a) through (i) arranged in two rows. The x-axis for all plots is "Iterations". The y-axis for plots (a) through (h) is $C_{\text{n,}\mathcal{K},\mathcal{E}}^{l_2}$ on a logarithmic scale, and the y-axis for plot (i) is $C_{\text{n,}\mathcal{K},\mathcal{E}}^{l_2}$ on a logarithmic scale. Plots (a) through (h) share a common y-axis label on the left, $C_{\text{n,}\mathcal{K},\mathcal{E}}^{l_2}$, with ranges varying: (a) $10^{-6}$ to $10^2$, (b) $10^{-6}$ to $10^2$, (c) $10^{-6}$ to $10^2$, (d) $10^{-6}$ to $10^2$, (e) $10^{-3}$ to $10^3$, (f) $10^{-3}$ to $10^3$, (g) $10^{-3}$ to $10^3$, and (h) $10^{-1}$ to $10^3$. Plot (i) has its y-axis label on the right, $C_{\text{n,}\mathcal{K},\mathcal{E}}^{l_2}$, with a range from $10^{-1}$ to $10^4$. Each plot shows a single descending curve, typically starting high and decreasing as iterations increase. Plot (a) decreases smoothly, then drops sharply around iteration 1000. Plot (b) follows a similar pattern but drops more gradually after iteration 1000. Plot (c) shows a decrease with significant noise/fluctuations after iteration 1000. Plot (d) shows a sharp drop around iteration 500. Plot (e) shows a gradual decline until iteration 2000. Plot (f) shows a sharp drop around iteration 1500. Plot (g) shows a steady decline throughout. Plot (h) shows a decline with high-frequency noise starting around iteration 3500. Plot (i) contains several blue-shaded curves of varying intensities, all showing a step-like decrease and then plateauing at different levels between $10^0$ and $10^4$ within 2000 iterations.
+
+$$
+C _ { L E } = | \text {Tr} ( U ( \phi ) \Pi _ { q } P _ { c } \Pi _ { q } ^ { - 1 } U ^ { \dagger } ( \phi ) P _ { c } ^ { \prime } ) - K | ^ { 2 } , \ ( 4 2 ) \quad s t a b { ( 2 ) }
+$$
+
+where
+
+$$
+\text {where} & & g _ { 1 } & g _ { 1 } \\ U ( \phi ) = & \exp ( - i \sum _ { j = 1 } ^ { n } \phi _ { j , 1 } Z _ { j } ) \exp ( - i \sum _ { j = 1 } ^ { n } \phi _ { j , 2 } X _ { j } ) & & g _ { 3 } & \\ & \cdot \exp ( - i \sum _ { j = 1 } ^ { n } \phi _ { j , 3 } Z _ { j } ) & & \text {up to} & \\
+$$
+
+is a product of single-qubit unitaries with 3n parameters φ. If there exist Πq and φ such that CLE < 1 × 10-10 , we say Pc and P ′ c are (locally) equivalent.
+
+The minimum code length that protects a logical qubit against arbitrary one-qubit errors is n = 5. The ((5, 2, 3))2 code we rediscover is equivalent to the perfect code devised in Ref. [63]. This code is unique and translational invariant. The ((5, 6, 2))2 code we rediscover is equivalent to the original non-additive CWS code devised in Ref. [64]. For parameters ((6, 2, 3))2, we sample different initial VQC parameters θ and find a mass of non-additive codes that are not mutually equivalent. This is consistent with our observation that an infinite family of nonequivalent ((6, 2, 3))2 codes exist. For parameters ((7, 2, 3))2, we find non-equivalent quantum codes and some of them are not equivalent to CWS codes. See Appendix E for more discussions on
+
+((6, 2, 3))2 and ((7, 2, 3))2. The ((8, 8, 3))2 code we rediscover is equivalent to the additive code stabilized by
+
+$$
+\begin{array} {
+$$
+
+up to permutation of qubits.
+
+It is an open question whether a ((7, 3, 3))2 QECC exists. We have not yet found such a code with VarQEC, even if using an overparameterized VQC (L = 31) that is capable of finding any ((7, 3))2 quantum code and sampling 20000 optimization starting points. This strongly indicates that a quantum code with parameters ((7, 3, 3))2 is nonexistent.
+
+## 5.2 Asymmetric codes
+
+In quantum experiments, the decoherence time of a physical qubit is mainly influenced by two factors: the relaxation time T1 and the dephasing time T2. Relaxation leads to all Pauli errors, whereas dephasing only leads to phaseflips (Pauli-Z errors). Denote the probabilities of X, Y , and Z errors as px, py, pz respectively. Usually, px = py ̸= pz. The asymmetry between X/Y and Z errors motivates people to construct asymmetric QECCs that handle them differently [65, 66]. Asymmetric codes are more resource-efficient since they can detect/correct more Pauli-X/Y errors than PauliZ errors or vice versa in response to demand. Researchers have extended several constructions from symmetric codes to asymmetric codes [6672]. Note that the classification of symmetric and asymmetric codes depends on the error detecting/correcting capability instead of the code construction method.
+
+For a system with X/Y -error probabilities px = py and Z-error probability pz. We set the bias parameter cZ as
+
+$$
+c _ { Z } = \frac { \log p _ { z } } { \log p _ { x } } .
+$$
+
+such that pz = pcZ x .
+
+In most scenarios, dephasing is dominating and phase-flip errors are more prevalent than X/Y errors. Accordingly, 0 < cZ < 1. First, we fix cZ = 1/2 (i.e., pz ≈ p1/2 x ) and apply VarQEC to find ((n,K, de(1/2)))2 codes that encodes one logical qubit (K = 2) or one logical qutrit (K = 3). We discover asymmetric codes
+
+$$
+( ( 6 , 2 , d _ { e } ( \frac { 1 } { 2 } ) = 2 ) ) _ { 2 } , \\ ( ( 7 , 3 , d _ { e } ( \frac { 1 } { 2 } ) = 2 ) ) _ { 2 } .
+$$
+
+They can detect more Z errors than X/Y errors, specifically, detect the error set
+
+$$
+\mathcal { E } _ { 1 / 2 } ^ { \{ 2 \} } = \{ I \} \cup \{ X _ { j } , Y _ { j } , Z _ { j } , X _ { i } Z _ { j } , Y _ { i } Z _ { j } , Z _ { i } Z _ { j } Z _ { k } \} \\ \\
+$$
+
+with indices i, j, k ∈ [1, n].
+
+We now consider the opposite situation where X/Y errors are more prevalent than Z. In the extreme case, T2 →+∞, the only source of decoherence is qubit relaxation. This process at finite temperature is modeled by the generalized amplitude damping channel. Its Kraus representation has operators
+
+$$
+h a s o p e r a t o r s \\ A _ { 0 } = & \sqrt { p } \left ( \begin{array} { c c } 1 & 0 \\ 0 & \sqrt { 1 - \gamma } \end{array} \right ) \\ = & \sqrt { p } I - \frac { \sqrt { p } \gamma } { 4 } ( I - Z ) + \mathcal { O } \left ( \sqrt { p } \gamma ^ { 2 } \right ) , \\ A _ { 1 } = & \sqrt { p } \left ( \begin{array} { c c } 0 & \sqrt { \gamma } \\ 0 & 0 \end{array} \right ) = \frac { \sqrt { p \gamma } } { 2 } ( X + i Y ) , \\ A _ { 2 } = & \sqrt { 1 - p } \left ( \begin{array} { c c } \sqrt { 1 - \gamma } & 0 \\ 0 & 1 \end{array} \right )
+$$
+
+$$
+\begin{array} { r l } { e ^ { \sqrt { 1 - p } I - \frac { \sqrt { 1 - p } \gamma } { 4 } ( I + Z ) } } \\ { \quad + \mathcal { O } \left ( \sqrt { 1 - p } \gamma ^ { 2 } \right ) , } \\ { s } & { A _ { 3 } = \sqrt { 1 - p } \left ( \begin{array} { c c c } { 0 } & { 0 } \\ { \sqrt { \gamma } } & { 0 } \end{array} \right ) = \frac { \sqrt { \gamma - p \gamma } } { 2 } ( X - i Y ) , } \\ { \quad } \\ { t } & { \quad \text {where } \gamma \text { is the damping rate } \ n \text { is a constant } \text {de} - } \end{array}
+$$
+
+where γ is the damping rate, p is a constant determined by the temperature. A0 and A2 introduce Pauli-Z errors of order O(γ), A1 and A3 introduce Pauli-X and -Y errors of order O(√γ). When γ is small, cZ = log pz/ log px ≈ 2.
+
+Now we fix cZ = 2 and apply VarQEC to find asymmetric codes with 2-effective distance 3. We rediscover codes with parameters
+
+$$
+( ( 5 , 2 , d _ { e } ( 2 ) = 3 ) ) _ { 2 } , \\ ( ( 6 , 4 , d _ { e } ( 2 ) = 3 ) ) _ { 2 } , \\ ( ( 7 , 8 , d _ { e } ( 2 ) = 3 ) ) _ { 2 } .
+$$
+
+These codes were introduced in Ref. [42]. They can detect more X/Y errors than Z errors, i.e., the error set
+
+$$
+\mathcal { E } _ { 2 } ^ { \{ 3 \} } = \{ I \} \cup \{ X _ { j } , Y _ { j } , Z _ { j } , X _ { i } X _ { j } , X _ { i } Y _ { j } , Y _ { i } Y _ { j } \} \ \ ( 5 0 )
+$$
+
+with indices i, j ∈ [1, n].
+
+Furthermore, we find new codes with 2effective distance 4 with K = 2 or K = 3, i.e.,
+
+$$
+( ( 6 , 2 , d _ { e } ( 2 ) = 4 ) ) _ { 2 } , \\ ( ( 8 , 3 , d _ { e } ( 2 ) = 4 ) ) _ { 2 } .
+$$
+
+Some ((6, 2, de(2) = 4))2 codes are equivalent to the additive ((6, 2, 3))2 code stabilized by
+
+$$
+\begin{array} {
+$$
+
+They can detect the error set
+
+$$
+\mathcal { E } _ { 2 } ^ { \{ 4 \} } = \mathcal { E } _ { 2 } ^ { \{ 3 \} } \cup \{ X _ { i } Z _ { j } , Y _ { i } Z _ { j } , X _ { i } X _ { j } X _ { k } , X _ { i } X _ { j } Y _ { k } , \\ X _ { i } Y _ { j } Y _ { k } , Y _ { i } Y _ { j } Y _ { k } \} . \\
+$$
+
+with indices i, j, k ∈ [1, n]. For the generalized amplitude damping channel, ((6, 2, de(2) = 4))2 and ((8, 3, de(2) = 4))2 can detect up to three A1/A3 errors or one A0/A2 error, and correct one A1/A3 error. Assisted by post-selection [73], these codes hold the promise to achieve lower logical error rate than codes with de(2) = 3.
+
+## 5.3 Channel-adaptive codes
+
+In the previous sections, we have only discussed uncorrelated errors, symmetric or asymmetric. This section considers quantum channels with correlated noise. We apply VarQEC to find the corresponding channel-adaptive codes.
+
+Correlated errors are ubiquitous in quantum computing experiments. When two adjacent qubits are not sufficiently separated, the errors occurring on them can be highly correlated [22]. These spatially correlated errors invalidate many well-known quantum codes and dim the hope of fault-tolerant quantum computing. Suppose we ignore the exact connectivity graph and the noise type. In that case, we need at least 11 physical qubits to protect one qubit of information from general correlated errors (i.e., the double errorcorrecting ((11, 2, 5))2 code) [74]. Even so, the encoding isometry may not be hardware-efficient. In the following, we investigate two correlated noise channels in detail and introduce channeladaptive codes discovered by VarQEC.
+
+## 5.3.1 Nearest-neighbor collective amplitude damping
+
+The first testbed is the nearest-neighbor collective amplitude damping channel. Suppose we have n qubits in a ring, as shown in Fig. 6. Every two neighboring qubits collectively interact with a single environment and exhibit collective dynamics of amplitude damping [75, 76]. The corresponding Kraus operators are
+
+$$
+\text {names of anpplitude} \, \text {damping} \, [ 7 , 7 6 ] . & \quad \text {the cor} - \quad \text {neec} \\ \text {responding Kraus operators are} \\ K _ { 0 } = & \sqrt { \frac { \gamma _ { 0 1 } } { 2 } } | 0 0 \rangle ( \langle 0 1 | + \langle 1 0 | ) \\ & + \sqrt { \frac { \gamma _ { 1 2 } } { 2 } } ( | 0 1 \rangle + | 1 0 \rangle ) \langle 1 1 | , \\ K _ { 1 } = & \sqrt { \gamma _ { 0 2 } } | 0 0 \rangle \langle 1 1 | , \\ K _ { 2 } = & \sqrt { \frac { 1 - \gamma _ { 0 1 } } { 4 } } ( | 0 1 \rangle + | 1 0 \rangle ) ( \langle 0 1 | + \langle 1 0 | ) \\ & + \sqrt { 1 - \gamma _ { 0 2 } - \gamma _ { 1 2 } | 1 1 \rangle \langle 1 1 | } \\ & + \frac { 1 } { 2 } ( | 0 1 \rangle - | 1 0 \rangle ) ( \langle 0 1 | - \langle 1 0 | ) \\ & + | 0 0 \rangle \langle 0 0 | , \\ \text {where} \, \gamma _ { 0 1 } , \gamma _ { 0 2 } , \gamma _ { 1 2 } \, \text {are damping rates. For a short} \quad \text {PO}
+$$
+
+where γ01, γ02, γ12 are damping rates. For a short decay time τ, γ01 and γ12 are of order O(τ), γ02 is of order O(τ 2 ). Each error acts on two neighbouring qubits Qj-Qj+1. To find quantum codes that approximately correct one nearest-neighbor collective amplitude damping error, we expand the Env 5
+
+> *Generated caption of `2204.03560_-_Quantum_variational_learning_for_quantum_error-correcting_codes_assets/figure-005.png` (ollama:gemma4:26b, prompt sci-v1):* This image consists of two panels, (a) and (b). Panel (a) is a diagram showing a central blue hexagon composed of six connected circles. Each circle has a smaller, dark blue interior. Surrounding the hexagon is a larger, reddish-brown hexagon connected by thin lines between the corresponding circles. The vertices of the blue hexagon are labeled as $Env_1$ through $Env_6$ in an alternating pattern of brown and blue text: $Env_1$ (brown, top left), $Env_2$ (brown, top right), $Env_3$ (blue, right), $Env_4$ (blue, bottom right), $Env_5$ (blue, bottom left), and $Env_6$ (blue, left). Panel (b) is an energy level diagram showing three horizontal black lines representing quantum states. The top line is labeled $|\!11\rangle$, the middle line is labeled $|\!01\rangle + |\!10\rangle$ over $\sqrt{2}$, and the bottom line is labeled $|\!00\rangle$. Two arrows represent transitions between levels: a light red arrow points from $|\!11\rangle$ to the middle level, and then from the middle level to the bottom level $|\!00\rangle$; a dark brown arrow points directly from $|\!11\rangle$ to the bottom level $|\!00\rangle$.
+
+Env 4
+
+above Kraus operators with respect to τ, abandon trivial/high-order terms and obtain
+
+$$
+\text {noise} & \quad \text {don't trivial/high-order terms and obtain} \\ \text {sical} & \quad K _ { 0 } ^ { \prime } = \frac { 1 } { \sqrt { 2 } } | 0 0 \rangle ( \langle 0 1 | + \langle 1 0 | ) + \frac { 1 } { \sqrt { 2 } } ( | 0 1 \rangle + | 1 0 \rangle ) \langle 1 1 | , \\ \text {error} & \quad K _ { 1 } ^ { \prime } = | 0 0 \rangle \langle 1 1 | , \\ \text {, the} & \quad K _ { 2 } ^ { \prime } = \frac { 1 } { 2 } ( | 0 1 \rangle + | 1 0 \rangle ) ( \langle 0 1 | + \langle 1 0 | ) + | 1 1 \rangle \langle 1 1 | . \\ \text {ated} & \quad \\ \text {nne-} & \quad \text {Each } \ K _ { 0 } ^ { \prime } \ \text {contributes  one  factor  of } \ \sqrt { \tau } , \ \text {each}
+$$
+
+Each K′0 contributes one factor of √τ, each K′1/K′2 contributes one factor of τ. Suppose Eα and Eβ are products of the identity, K′0, K′1, and K′2. The target error set (in VarQEC)
+
+$$
+\mathcal { E } = \left \{ E _ { \alpha } ^ { \dagger } E _ { \beta } \right \}
+$$
+
+consists of terms with total order less than τ 3/2 . Note that here, some error products E†αEβ are non-unitary and non-Hermitian. To compute cost functions C ℓ1 n,K,E and C ℓ2 n,K,E (Eqs. (15), (16)), we need to estimate
+
+$$
+\langle \psi _ { j } | E _ { \alpha } ^ { \dagger } E _ { \beta } \ | \psi _ { j } \rangle
+$$
+
+and
+
+$$
+| \langle \psi _ { i } | E _ { \alpha } ^ { \dagger } E _ { \beta } \ | \psi _ { j } \rangle |
+$$
+
+for various i, j, α, β (i ̸= j).
+
+〈ψj|E†αEβ |ψj〉 is a complex number that can be obtained as follows: we prepare the state |ψj〉 and measure two Hermitian observables (E†αEβ +E†β Eα)/2 and (E†αEβ -E†β Eα)/2i. The first expectation value gives the real part of 〈ψj|E†αEβ |ψj〉 and the second expectation value gives its imaginary part.
+
+We estimate ∣∣〈ψi|E†αEβ |ψj〉∣∣ with i ̸= j using POVMs. Specifically, we prepare the state |ψj〉, add an ancilla qubit and implement the operation
+
+$$
+\begin{array} { r l } & { \Lambda _ { \alpha \beta } ( | \psi _ { j } \rangle ) = E _ { \alpha } ^ { \dagger } E _ { \beta } | \psi _ { j } \rangle \langle \psi _ { j } | E _ { \beta } ^ { \dagger } E _ { \alpha } \otimes | 0 \rangle \langle 0 | _ { \text {anc} } } \\ & { \quad + E _ { a u x } | \psi _ { j } \rangle \langle \psi _ { j } | E _ { a u x } ^ { \dagger } \otimes | 1 \rangle \langle 1 | _ { \text {anc} } , } \end{array}
+$$
+
+where Eaux is an auxiliary Kraus operator such that E†β EαE†αEβ +E† auxEaux = I. Then we measure the ancilla qubit in the computational basis and post-select the cases of |0〉. Measuring the ancilla qubit in the |0〉 state indicates that the error E†αEβ has occurred. The corresponding probability is
+
+$$
+p _ { 0 } = \text {Tr} ( E _ { \alpha } ^ { \dagger } E _ { \beta } | \psi _ { j } \rangle \langle \psi _ { j } | E _ { \beta } ^ { \dagger } E _ { \alpha } )
+$$
+
+and the corresponding state is
+
+$$
+\frac { E _ { \alpha } ^ { \dagger } E _ { \beta } | \psi _ { j } \rangle \langle \psi _ { j } | E _ { \beta } ^ { \dagger } E _ { \alpha } } { p _ { 0 } } .
+$$
+
+For these postselected states, we apply the inverse of the VQC and do projective measurements. The conditional probability of obtaining the binary string |i -1〉|0〉⊗(n-k) is
+
+$$
+p _ { i j } = & \frac { \left | \langle \psi _ { i } | E _ { \alpha } ^ { \dagger } E _ { \beta } | \psi _ { j } \rangle \right | ^ { 2 } } { p _ { 0 } } .
+$$
+
+Therefore, we can estimate ∣∣〈ψi|E†αEβ|ψj〉∣∣ by √pijp0.
+
+Suppose 0 or 1 error occurs during a short decay time τ, we apply VarQEC and find quantum codes with length and dimension
+
+$$
+( ( 4 , 3 ) ) _ { 2 } , ( ( 5 , 2 ) ) _ { 2 } \\ ( ( 6 , 5 ) ) _ { 2 } , ( ( 7 , 8 ) ) _ { 2 } \\ ( ( 8 , 9 ) ) _ { 2 } , ( ( 9 , 1 6 ) ) _ { 2 } .
+$$
+
+These codes can reduce the error from O(√τ) to O(τ ).
+
+## 5.3.2 Nearest-neighbor collective phase-flips
+
+The second noise channel we consider is a combined channel of nearest-neighbor collective phase-flips and single-qubit errors. The channel consists of two stages. In the first stage, a local depolarizing error with noise rate p
+
+$$
+\mathcal { N } _ { D P _ { j } } ( \rho ) = ( 1 - \frac { 3 p } { 4 } ) \rho + \frac { p } { 4 } ( X _ { j } \rho X _ { j } + Y _ { j } \rho Y _ { j } + Z _ { j } \rho Z _ { j } ) \quad
+$$
+
+occurs on each qubit. In other words, Pauli errors X, Y, Z occur on each qubit with probability p/4. Different local errors act independently. We denote the corresponding global noise channel as
+
+$$
+\mathcal { N } _ { 1 } = \prod _ { j = 1 } ^ { n } \mathcal { N } _ { D P _ { j } }
+$$
+
+In the second stage, nearest-neighbor collective phase-flip errors ZZ with noise rate pzz
+
+$$
+\mathcal { N } _ { Z _ { i } Z _ { j } } ( \rho ) = ( 1 - p ) \rho + p _ { z z } Z _ { i } Z _ { j } \rho Z _ { i } Z _ { j }
+$$
+
+occur on adjacent qubit pairs Qi-Qj. We denote the corresponding global noise channel as
+
+$$
+\mathcal { N } _ { 2 } = \prod _ { \langle i , j \rangle } \mathcal { N } _ { Z _ { i } Z _ { j } } .
+$$
+
+The overall process is
+
+$$
+\mathcal { N } = \mathcal { N } _ { 2 } \circ \mathcal { N } _ { 1 } .
+$$
+
+Directly applying VarQEC to N is not resource efficient since the Kraus representation of N consists of O(exp(n)) operators. For practical purposes, we apply our algorithm to the following channel instead,
+
+$$
+y \quad \text {channel instead,} \\ \mathcal { N } ^ { \prime } ( \rho ) = & ( 1 - \sum _ { j } \frac { 3 p } { 4 } - \sum _ { \langle i , j \rangle } p _ { z z } ) \rho \\ & + \sum _ { j } \frac { p } { 4 } ( X _ { j } \rho X _ { j } + Y _ { j } \rho Y _ { j } + Z _ { j } \rho Z _ { j } ) \ ( 6 9 ) \\ \text {by} & \quad + \sum _ { \langle i , j \rangle } p _ { z z } Z _ { i } Z _ { j } \rho Z _ { i } Z _ { j } . \\ \text {de-} & \quad \text {The second term takes summation over all subsets}
+$$
+
+The second term takes summation over all qubits. The last term takes summation over all adjacent qubit pairs 〈i, j〉. Its Kraus operators are
+
+$$
+\mathcal { E } ^ { \prime } & = \left \{ \sqrt { ( 1 - \sum _ { j } \frac { 3 p } { 4 } - \sum _ { \langle i , j \rangle } p _ { z z } ) I } , \\ \intertext { t o } \sqrt { \frac { p } { 4 } } X _ { j } , \sqrt { \frac { p } { 4 } } Y _ { j } , \sqrt { \frac { p } { 4 } } Z _ { j } , \sqrt { p _ { z z } } Z _ { i } Z _ { j } \right \} . \\ \intertext { t o } \quad
+$$
+
+where qubit-i and qubit-j are adjacent. N ′ is the first-order approximation of N with respect to the error parameters p and pzz. The Kraus representation of N ′ consists of only poly(n) operators. N and N ′ are equivalent in the zero-noise limit,
+
+$$
+\lim _ { p , p _ { z z } \to 0 } \mathcal { N } ^ { \prime } = \mathcal { N } .
+$$
+
+Suppose for N ′ , we find an ε-correctable approximate code with ε ≪ 1. Namely, with appropriate recovery R, the entanglement fidelity is
+
+$$
+F _ { e } ( \mathcal { R } \mathcal { N } ^ { \prime } ) \geq 1 - \varepsilon .
+$$
+
+Then for the original noise channel N, the entanglement fidelity naturally has the form
+
+$$
+F _ { e } ( \mathcal { R } \mathcal { N } ) = & 1 - \mathcal { O } ( \varepsilon p ) - \mathcal { O } ( \varepsilon p _ { z z } ) \\ & - \mathcal { O } ( p ^ { 2 } ) - \mathcal { O } ( p _ { z z } ^ { 2 } ) .
+$$
+
+> *Generated caption of `2204.03560_-_Quantum_variational_learning_for_quantum_error-correcting_codes_assets/figure-006.png` (ollama:gemma4:26b, prompt sci-v1):* This is a diagram consisting of eight sub-figures labeled (a) through (h), each depicting a different graph structure made of nodes and connecting lines. All nodes are circular and all lines are uniform in thickness. Sub-figures (a) through (d) use solid red nodes and lines, while sub-figures (e) through (h) use dark blue nodes and lines on a white background. Sub-figure (a) shows a hexagon with six nodes and six edges. Sub-figure (b) shows a central node connected to three surrounding nodes, forming a star shape. Sub-figure (c) shows a heptagon with seven nodes and seven edges. Sub-figure (d) shows a complete graph with five nodes, where every node is connected to every other node, creating a pentagram pattern within a pentagon. Sub-figure (e) shows a heptagon with seven nodes and seven edges, where two of the nodes are colored dark blue and the others are white with dark blue outlines. Sub-figure (f) shows a 3D cube represented in 2D, with eight nodes and twelve edges. Sub-figure (g) shows a heptagon with seven nodes and seven edges, where two of the nodes are colored dark blue and the others are white with dark blue outlines. Sub-figure (h) shows a 3D cube represented in 2D, with eight nodes and twelve edges, where the center node of each face is colored dark blue.
+
+The QECC can push the first-order errors down to an extremely small level. To find quantum codes that correct multiple errors, we can choose a higher-order approximation and similarly implement VarQEC.
+
+Given a connectivity graph G with edge number |E(G)| and maximum vertex degree ∆(G). In the following, we set
+
+$$
+p _ { z z } = 0 . 9 9 / ( 3 n + | E ( G ) | ) , \ \ p = 4 p _ { z z } .
+$$
+
+For a generic input state ρ, the probability of receiving the same state after going through the noise channel is about ∼ 0.01. The target error list to detect in VarQEC is
+
+$$
+\mathcal { E } = \left \{ E _ { \alpha } ^ { \dagger } E _ { \beta } | E _ { \alpha } , E _ { \beta } \in \mathcal { E } ^ { \prime } \right \} .
+$$
+
+Still, we use the VQC ansatz with alternating layers of single-qubit rotations Rx-Rz acting on all qubits and Ising-type interactions Rzz acting on adjacent qubits. The circuit depth of a VQC with L layers is of order O(L∆(G)).
+
+After adequate optimization, we find approximate channel-adaptive codes for N = N2 ◦ N1 with hardware connectivity graphs shown in Fig. 7. The codes for graphs (a,b,h) are degenerate, and the others are non-degenerate. Six physical qubits suffice to encode one logical qubit, and eight physical qubits suffice to encode two logical qubits.
+
+Note that up to a local unitary transformation, these codes can correct an arbitrary single-qubit error followed by an adjacent U ⊗U error for any fixed U ∈ U(2) with eigenvalues {-1, 1}.
+
+We investigated the codes for graphs (c,d) in more detail. Clearly, they have code parameters ((7, 2, 3))2. We calculate their quantum weight enumerators [77], which were defined by
+
+$$
+A ( z ) = \sum _ { j = 0 } ^ { n } A _ { j } z ^ { j } , \ \ B ( z ) = \sum _ { j = 0 } ^ { n } B _ { j } z ^ { j } \quad ( 7 6 )
+$$
+
+with coefficients
+
+$$
+A _ { j } = \frac { 1 } { K ^ { 2 } } \sum _ { w t ( O _ { \alpha } ) = j } \text {Tr} ( O _ { \alpha } P _ { c } ) \text {Tr} ( O _ { \alpha } ^ { \dagger } P _ { c } ) ,
+$$
+
+$$
+B _ { j } = \frac { 1 } { K } \sum _ { \ w t ( O _ { \alpha } ) = j } \text {Tr} ( O _ { \alpha } P _ { c } O _ { \alpha } ^ { \dagger } P _ { c } ) .
+$$
+
+These two codes are locally equivalent and therefore have the same weight enumerators, i.e.,
+
+$$
+A ( z ) = 1 + 2 z ^ { 3 } + 9 z ^ { 4 } + 2 4 z ^ { 5 } + 2 2 z ^ { 6 } + 6 z ^ { 7 } ,
+$$
+
+$$
+^ { \text {ox-} } _ { z _ { 0 } \cap \Omega } \quad B ( z ) = 1 + 1 7 z ^ { 3 } + 4 5 z ^ { 4 } + 7 8 z ^ { 5 } + 8 2 z ^ { 6 } + 3 3 z ^ { 7 } .
+$$
+
+Further, we verified that they are locally equivalent to a non-degenerate additive code stabilized by
+
+$$
+\begin{array} {
+$$
+
+up to permutation of qubits. This additive code can correct arbitrary single-qubit errors and 2qubit collective phase-flips occurring on any qubit pairs, i.e., the error set
+
+$$
+\mathcal { E } = \left \{ I , X _ { j } , Y _ { j } , Z _ { j } , Z _ { i } Z _ { j } \right \} .
+$$
+
+with indices i, j ∈ [1, n].
+
+According to the quantum Hamming bound, for one logical qubit, no non-degenerate quantum code with code length n < 7 can correct arbitrary single-qubit errors as well as 2-qubit collective phase-flips since
+
+$$
+2 ^ { n } \geq K ( 3 n + \frac { n ( n - 1 ) } { 2 } ) \quad \quad ( 8 3 ) \quad \stackrel { i n e r } { \ t h }
+$$
+
+with K = 2 only holds when n ≥ 7.
+
+Two ((7, 2, 3))2 stabilizer codes were investigated in detail. One is the famous Steane code [14] based on the Calderbank-Shor-Steane (CSS) construction. The other is a non-CSS code found by numerical greedy search, called the bare code [27]. Their weight enumerators are as follows,
+
+$$
+A ^ { \{ \text {Steam} \} } ( z ) & = 1 + 2 1 z ^ { 4 } + 4 2 z ^ { 6 } , \\ B ^ { \{ \text {Steam} \} } ( z ) & = 1 + 2 1 z ^ { 3 } + 2 1 z ^ { 4 } \\ & + 1 2 6 z ^ { 5 } + 4 2 z ^ { 6 } + 4 5 z ^ { 7 } , \quad ( 8 4 ) \\
+$$
+
+and
+
+$$
+A ^ { \{ b a r \} } ( z ) = & 1 + 5 z ^ { 2 } + 1 1 z ^ { 4 } + 4 7 z ^ { 6 } , \\ B ^ { \{ b a r \} } ( z ) = & 1 + 5 z ^ { 2 } + 3 6 z ^ { 3 } \\ & + 1 1 z ^ { 4 } + 9 6 z ^ { 5 } + 4 7 z ^ { 6 } . \\
+$$
+
+QECCs with different weight enumerators are not locally and translationally equivalent. Our code is different from the Steane and the bare ((7, 2, 3))2 codes. See Appendix F more weight enumerators.
+
+The Steane and the bare codes cannot correct nearest-neighbor collective phase-flips. For the combined channel of nearest-neighbor collective phase-flips with noise rate pzz and single-qubit errors with noise rate p, the entanglement fidelity of our code is of the form
+
+$$
+F _ { e } ( \mathcal { R } \mathcal { N } ) = & 1 - \mathcal { O } ( p ^ { 2 } ) - \mathcal { O } ( p _ { z z } ^ { 2 } )
+$$
+
+whereas the entanglement fidelity of the Steane and the bare codes is of the form
+
+$$
+F _ { e } ( \mathcal { R } \mathcal { N } ) = & 1 - \mathcal { O } ( p _ { z z } ) - \mathcal { O } ( p ^ { 2 } ) - \mathcal { O } ( p _ { z z } ^ { 2 } ) .
+$$
+
+Although our code was written in a quantum simulator that has not been open-sourced yet, we rewrote some example implementations with Qiskit, an open-source software development kit. They are available on GitHub [78].
+
+## 6 Noise Resilience
+
+Although the previously introduced results are obtained by numerical simulation, VarQEC is a hybrid quantum-classical algorithm meant to be run on NISQ devices where quantum gates are inevitably noisy. In this section, we demonstrate that VarQEC is pretty resilient to random gate errors. As long as the error rate pgate is below a reasonable threshold, VarQEC can find an efficient encoding circuit that prepares the correct code. This resilience is essentially analogous to the noise resilience in variational quantum compiling [56].
+
+We start from the simplest noise model, global depolarizing, and introduce the following theorem.
+
+Theorem 5 Suppose the variational quantum circuit in VarQEC is accompanied by global depolarizing noise acting continuously throughout the circuit. If the ideal circuit is capable of finding an eligible quantum code, after adequate optimization with the noisy circuit, the output parameters θ′opt are still correct.
+
+Proof Consider the cost functions in Eqs. (15), (16). Due to the global depolarizing noise, when we run the VQC U(θ) to prepare a basis state |ψj〉, we instead obtain
+
+$$
+\rho _ { j } = ( 1 - \epsilon _ { 1 } ) | \psi _ { j } \rangle \langle \psi _ { j } | + \epsilon _ { 1 } \frac { I } { 2 ^ { n } } ;
+$$
+
+when we apply U † (θ)EµU(θ) to an initial binary string |j -1〉|0〉 to prepare the output state |ψj,µ〉, we instead obtain
+
+$$
+\rho _ { j , \mu } = ( 1 - \epsilon _ { 2 } ) | \psi _ { j , \mu } \rangle \langle \psi _ { j , \mu } | + \epsilon _ { 2 } \frac { I } { 2 ^ { n } } .
+$$
+
+Noise rates ϵ1 and ϵ2 are unknown constants determined by the circuit depth. After adequate optimization with the noisy VQC, we obtain the pseudo-optimal parameters
+
+> *Generated caption of `2204.03560_-_Quantum_variational_learning_for_quantum_error-correcting_codes_assets/figure-007.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a quantum circuit diagram consisting of two horizontal lines representing qubits $Q_i$ and $Q_j$. From left to right, the circuit includes five rectangular blocks connected by horizontal lines. The first block is a large rectangle spanning both qubits, labeled $\mathcal{N}_{ZZ}$ with the text "Correlated Error" above it. The second set consists of two separate rectangles, one on each qubit line, both labeled $\mathcal{N}_{\text{DP}}$ with the text "Error" above them. The third block is a large rectangle spanning both qubits, labeled $\mathbf{R}_{zz}$ with the text "Unitary $R_{zz}$" above it. The fourth set consists of two separate rectangles, one on each qubit line, both labeled $\mathcal{N}_{\text{DP}}$ with the text "Error" above them. The fifth and final block is a large rectangle spanning both qubits, labeled $\mathcal{N}_{ZZ}$ with the text "Correlated Error" above it.
+
+$$
+\ p s e u d o { \text {optimal parameters} } & & \text {compaction} & & \text {or rate} \\ \theta ^ { \prime } _ { \text {opt} } & = \arg \min _ { \theta } & & \text {for box} & \\ & \sum _ { \theta \in \mathcal { E } } \left ( \sum _ { 1 \leq i < j \leq K } \sqrt { \left | i - 1 \right | \left | \rho \right | _ { j , \mu } \left | i - 1 \right \rangle \left | 0 \right \rangle } & & \text {about} & \\ & + \sum _ { j = 1 } ^ { K } \left | \text {Tr} ( \rho _ { j } E _ { \mu } ) - \sum _ { i = 1 } ^ { K } \text {Tr} ( \rho _ { i } E _ { \mu } ) / K | / 2 \right ) & & \text {sup} & \\ & = \arg \min _ { \theta } & & \text {d} \\ & \sum _ { \mu \in \mathcal { E } } \left ( \sum _ { 1 \leq i < j \leq K } \sqrt { ( 1 - \epsilon _ { 2 } ) | \langle \psi _ { i } | E _ { \mu } | \psi _ { j } \rangle | ^ { 2 } + \frac { \epsilon _ { 2 } } { 2 ^ { n } } } & & \text {Howew} & \\ & + \sum _ { j = 1 } ^ { K } \frac { 1 - \epsilon _ { 1 } } { 2 } | \langle \psi _ { j } | E _ { \mu } | \psi _ { j } \rangle - \langle E _ { \mu } \rangle | \right ) . & & \text {summ} \\ \text {Since the ideal variational quantum circuit is ca-} & & \text {Howew} & \\ \text {pable of finding an elliptic quantum code, each} & & \text {to find} &
+$$
+
+Since the ideal variational quantum circuit is capable of finding an eligible quantum code, each term in the cost function Eq. (15) can be minimized to 0 (i.e., ∣∣〈ψi|Eµ|ψj〉∣∣ = 0, ∣∣〈ψj|Eµ|ψj〉 - 〈Eµ〉∣∣ = 0). Comparing Eq. (15) and Eq. (90), we conclude that
+
+$$
+\theta _ { o p t } ^ { \prime } = \theta _ { o p t } .
+$$
+
+■
+
+To sum up, VarQEC is perfectly resilient to global depolarizing noise, i.e., it can find the correct encoding circuit in the presence of global depolarizing.
+
+In practical scenarios, circuit noise is more complicated and single-qubit errors dominate. Now we consider a more realistic model. Suppose each 2-qubit Rzz gate in the VQC is accompanied by local depolarizing noise and collective phase flips, as illustrated in Fig. 8. Before the ideal unitary Rzz, the two qubits goes through N ⊗2 DP ◦ NZZ, after the ideal Rzz, the system goes through NZZ ◦ N ⊗2 DP . In the following, for gate error rate pgate, we set the error rate of each NDP as pgate/2, the error rate of each NZZ as pgate/8.
+
+Still, we use VarQEC to find channel-adaptive codes for noise channel N (Eq. (68)) with hardware connectivity graphs (c,d) shown in Fig. 7. The difference is that this time the VQC is noisy. After optimization, we obtain the pseudo-optimal parameters θ′opt. It is interesting to note that if we transfer θ′opt to an ideal VQC, the corresponding cost function C ℓ1 n,K,N (θ′opt) can be much smaller than the one we estimated with the noisy VQC. Namely, we find a roughly correct encoder even if we use a noisy VQC in our algorithm. The comparison of cost functions for different gate error rates is given in Fig. 9(a). The cost reduction for both graphs is obvious. Two-qubit gate error rates on state-of-the-art NISQ computers are about ∼ 10-2 [79]. One can run our algorithm on current hardware directly.
+
+Suppose the input state of a quantum circuit is |ψin〉, the target unitary evolution is Uideal. The ideal output state is
+
+$$
+| \psi _ { i d e a l } \rangle = U _ { i d e a l } | \psi _ { i n } \rangle .
+$$
+
+However, due to quantum gate errors, the output state ρout is a mixed state. We express ρout as a summation of three terms,
+
+$$
+\rho _ { \text {out} } & = \mathcal { N } _ { \text {circut} } ( | \psi _ { \text {in} } \rangle ) \\ & = \lambda _ { 0 } | \psi _ { \text {ideal} } \rangle \langle \psi _ { \text {ideal} } | + \lambda _ { 1 } \frac { I } { 2 ^ { n } } + \lambda _ { 2 } \rho _ { 2 } ,
+$$
+
+where Ncircuit denotes that channel of the noisy quantum circuit, λ1 is the smallest eigenvalue of ρout multiplied by 2n, I/2n is the maximally mixed state, ρ2 is a density operator orthogonal to |ψideal〉, i.e.,
+
+$$
+\text {Tr} ( \rho _ { 1 } | \psi _ { \text {ideal} } ) \langle \psi _ { \text {ideal} } | ) = 0 .
+$$
+
+The latter two terms of Eq. (93) are both induced by gate errors, but they have different effects on the noise resilience of our algorithm. The second term is a global white noise, as we analyzed in Theorem 5, it does not affect the optimal parameters. However, the third term λ2ρ2 non-trivially alters the optimization landscape and introduces some local minima. Usually, both the second term and the third term are not negligible. Nevertheless, we are certain about the trend: with the increase of circuit depth, the second term will dominate the third term eventually [80, 81].
+
+For VQCs corresponding to graphs (c,d), we fix gate error rate 0.01, and try different numbers of layers with randomly sampled θ. The average value of λ′ s are shown in Fig. 9(b,c). Each point is averaged over 100 samples. Compared with the one-dimensional ring (graph (c)), vertices in the complete graph (graph (d)) are more tightly connected, local errors can be transformed into global white noise more rapidly. For both graphs, λ1 ≪ λ2 when L is relatively small and λ1 ≫ λ2 when L is relatively large. With the decrease of gate error rate and the increase of circuit depth, VarQEC will become more resilient to noise. Additionally, one might also consider estimating cost functions in VarQEC more precisely with error mitigation techniques like virtual distillation [82, 83].
+
+> *Generated caption of `2204.03560_-_Quantum_variational_learning_for_quantum_error-correcting_codes_assets/figure-008.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains three stacked line plots, labeled (a), (b), and (c). Plot (a) is a line graph with a y-axis labeled $C_{n, \mathcal{K}}^{\text{vqc}}(\theta_{\text{opt}}^{\text{vqc}})$ ranging from $0.0$ to $2.5$ in increments of $0.5$, and an x-axis labeled $p_{\text{gate}}$ ranging from $0.000$ to $0.015$ in increments of $0.002$. There are four data series: "Graph c, noisy VQC" (light blue line with open circles) shows a general upward trend starting at $0.0$ and reaching approximately $1.0$; "Graph c, ideal VQC" (red line with open squares) shows an upward trend starting at $0.0$ and reaching approximately $2.2$; "Graph d, noisy VQC" (dark blue line with filled circles) shows a low, slightly fluctuating trend near $0.2$; and "Graph d, ideal VQC" (dark red line with filled triangles) shows an upward trend starting near $0.2$ and reaching approximately $0.8$, with some oscillations. Plot (b) is a line graph with a y-axis labeled "Proportion" ranging from $0.0$ to $1.0$ in increments of $0.2$, and an x-axis labeled $L$ ranging from $0$ to $35$ in increments of $5$. There are three series: $\lambda_0$ (blue line) starts at $0.8$ at $L=0$ and decreases monotonically toward $0$; $\lambda_1$ (red line) starts at $0.0$ and increases monotonically toward $0.8$ at $L=35$; and $\lambda_2$ (green line) starts at $0.0$, reaches a peak of approximately $0.55$ around $L=12$, and then decreases toward $0.15$. Each line is surrounded by a shaded area of the same color. Plot (c) is similar to plot (b), with a y-axis labeled "Proportion" ranging from $0.0$ to $1.0$ in increments of $0.2$, and an x-axis labeled $L$ ranging from $0$ to $20$ in increments of $5$. The three series are: $\lambda_0$ (blue line) starts at $0.8$ and decreases toward $0$ by $L=15$; $\lambda_1$ (red line) starts at $0.0$ and increases toward $1.0$ by $L=20$; and $\lambda_2$ (green line) starts at $0.0$, reaches a peak of approximately $0.65$ around $L=5$, and decreases toward $0$ by $L=20$. Each line is surrounded by a shaded area of the same color.
+
+## 7 Barren Plateaus
+
+The barren plateau (BP) [84, 85] and the noiseinduced barren plateau (NIBP) [86] are two daunting challenges in variational quantum optimization. In this section, we numerically investigate their effects in the VarQEC algorithm.
+
+The barren plateau is a phenomenon where the gradients vanish exponentially with the increasing number of qubits [84]. It occurs when the VQCs form a unitary 2-design, regardless of whether the VQC is noisy or noiseless. Ref. [85] connected the locality of the cost function and the trainability of the corresponding VQC. If the cost function is local and the circuit depth is of order O(log(n)), the BP does not occur (i.e., the VQC is trainable). However, if the cost function is global or the circuit depth is of order O(poly(n)), a BP occurs in the optimization landscape, and the VQC is untrainable.
+
+In near-term quantum computation, dominating errors always only act on several local qubits. Accordingly, the cost functions C ℓ1 n,K,E (Eq. (15)) and C ℓ2 n,K,E (Eq. (16)) are merely influenced by local errors Eµ. Therefore, we expect the same conclusion to hold for VarQEC: the BP does not occur when the circuit depth is of order O(log(n)) and occurs when the circuit depth is of order O(poly(n)).
+
+Without loss of generality, here we use the star connectivity graph Sn-1 (S7 is illustrated in Fig. 10(b) inset) and focus on C ℓ2 n,2,E with E = {Oα | wt (Oα) < 3}, i.e., searching for QECCs that encode one logical qubit information and correct an arbitrary single-qubit error. Fig. 10(a) plots the partial derivative of the off-diagonal cost
+
+$$
+\text {ed} \quad \sum _ { E _ { \mu } \in \mathcal { E } \ 1 \leq i < j \leq K } | \langle \mathbf i | \langle \mathbf 0 | U ^ { \dagger } ( \theta ) E _ { \mu } U ( \theta ) | \mathbf j \rangle | 0 \rangle | ^ { 2 } \quad ( 9 5 )
+$$
+
+and the diagonal cost
+
+$$
+\text {th} \quad \sum _ { E _ { \mu } \in \mathcal { E } } \sum _ { j = 1 } ^ { K } | \langle \mathbf j | \langle 0 | U ^ { \dagger } ( \theta ) E _ { \mu } U ( \theta ) | \mathbf j \rangle | 0 \rangle - \overline { \langle E _ { \mu } \rangle } | ^ { 2 } / 4 .
+$$
+
+> *Generated caption of `2204.03560_-_Quantum_variational_learning_for_quantum_error-correcting_codes_assets/figure-009.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains two plots, labeled (a) and (b). Plot (a) is a line graph with a logarithmic y-axis showing the absolute value of a quantity $|\partial C_2 / \partial \theta_j|$ against $n$ on a linear x-axis. The x-axis ranges from 4 to 22, with increments of 2. The y-axis ranges from $10^{-2}$ to $10^{-1}$, with major tick marks at $10^{-2}$ and $10^{-1}$. There are four data series shown: a dark blue line with solid circles representing "$L=3$, off-diagonal"; a light blue line with open circles representing "$L=3$, diagonal"; a dark red line with solid squares representing "$L=\lceil\log(n)\rceil$, off-diagonal"; and a light red line with open squares representing "$L=\lceil\log(n)\rceil$, diagonal". Additionally, there is a dark green line with solid circles representing "$L=n$, off-diagonal" and a light green line with open circles representing "$L=n$, diagonal". The dark blue and dark red series remain relatively flat near $10^{-1}$, while the light blue and light red series fluctuate between $10^{-2}$ and $10^{-1}$. The dark green series shows a steady downward trend from $10^{-1}$ to approximately $10^{-3}$, and the light green series shows a similar but slightly higher downward trend. Plot (b) is a line graph with a logarithmic y-axis showing $|\partial C_2 / \partial \theta_j|$ against $L$ on a linear x-axis. The x-axis ranges from 0 to 30, with increments of 5. The y-axis ranges from $10^{-6}$ to $10^{0}$, with increments of $10^{-3}$. The plot shows several series of lines, mostly trending downwards as $L$ increases. Darker blue lines with solid circular markers decrease more sharply towards $10^{-6}$, while lighter blue lines with open circular markers decrease more gradually, staying above $10^{-3}$. An inset diagram shows a central node connected to six peripheral nodes by red lines, with each node depicted as a small red circle.
+
+L
+
+with respect to a randomly selected circuit parameter θj. When the number of VQC layers is L = 3 or L = ⌈log(n)⌉, the circuit is trainable. However, when L = n, both off-diagonal and diagonal gradients decay exponentially with the increasing number of qubits.
+
+The noise-induced barren plateau refers to a conceptually different phenomenon where cost gradients vanish exponentially with L due to hardware noise accumulation [86]. Consequently, the gradients vanish exponentially with n if L grows linearly with n. Unlike the noise-free BP, NIPB only occurs when the VQC is noisy, regardless of whether the circuits form a unitary 2-design. Still, we consider the local noise model illustrated in Fig. 8, system size n = 8, number of layers L = 1, 5, 10, 15, 20, 25, 30, noise rate p = 0, 5 × 10-3 , 0.01, 0.02, 0.03, 0.04, 0.05. The numerical results for the gradients are shown in Fig. 10(b). With the increase of L, the partial derivatives of C ℓ2 n,K,E with respect to a random parameter decay exponentially, and the decay factor is determined by the noise rate. This illustrates that although VarQEC can find a roughly correct encoder after adequate training with a noisy VQC (noise resilience), the required training time grows exponentially with the number of circuit layers.
+
+BPs and NIBPs manifest themselves in VarQEC when the circuit depth gets large. Nevertheless, we do not need to worry too much about them. From a practical standpoint, we are more interested in QECCs with a shallow (even constant depth) encoding circuit. The gradients of cost functions tend to be large when searching for these codes. In addition, there are more and more effective strategies to mitigate BPs, e.g., cost function partitioning and meta-learning [87] as well as optimization guided by classical shadows [88]. These protocols can be applied to VarQEC reasonably.
+
+## 8 Experiment on an IBM machine
+
+Now we experimentally demonstrate VarQEC with a real superconducting quantum machine, ibm\_quito [89]. The connectivity graph of ibm\_quito is shown in Fig. 11(a). Our goal is to find a 4-qubit approximate QECC to correct one amplitude damping error [43] using physical qubits Q0, Q1, Q2, Q3.
+
+The Kraus operators of the amplitude damping channel are
+
+$$
+\text {channel are} \\ A _ { 0 } & = \left ( \begin{array} { c c } 1 & 0 \\ 0 & \sqrt { 1 - \gamma } \end{array} \right ) \\ & = I - \frac { \gamma } { 4 } ( I - Z ) + \mathcal { O } \left ( \gamma ^ { 2 } \right ) , \\ A _ { 1 } & = \left ( \begin{array} { c c } 0 & \sqrt { \gamma } \\ 0 & 0 \end{array} \right ) = \frac { \sqrt { \gamma } } { 2 } ( X + i Y ) . \\ \text {Each} \, ( I - Z ) \, \text {term contributes a factor of } & \infty
+$$
+
+Each (I -Z) term contributes a factor of γ and each (X + iY ) term contributes a factor of √γ. To correct a single amplitude damping error, we only need to consider error products with total order less than γ 3/2 :
+
+$$
+\begin{array} { c c c } i a r y & \mathcal { E } = \{ I , X _ { j } + i Y _ { j } , X _ { j } - i Y _ { j } , ( X _ { i } - i Y _ { i } ) ( X _ { j } + i Y _ { j } ) , \\ \text {model} & \quad I _ { j } - Z _ { j } \} . \\ r a t e & \quad \end{array}
+$$
+
+The variational quantum circuit we use is illustrated in Fig. 11(b). When the rotation angle θ = ±π/2, the VQC serves as an exact encoder. Since Q2 and Q3 are not directly connected, the IBM compiler adds 2 additional SWAP gates (each realized by 3 CNOT gates) to implement CNOT between Q2 and Q3). The hardware-efficient VQC after compiling is shown in Fig. 11(c).
+
+Due to hardware constraints, we slightly modify the VarQEC algorithm and enhance it with quantum error mitigation (EM) as follows. Suppose the initial parameter θ = 0.1, we iteratively apply the VQC to input states |0000〉 and |0010〉, do quantum state tomography on the output mixed states and record their density matrices ρ1 and ρ2. Then we classically extract their dominating eigenstates
+
+$$
+| \tilde { \psi } _ { 1 } \rangle = \lim _ { M \to \infty } \frac { \rho _ { 1 } ^ { M } } { \text {Tr} ( \rho _ { 1 } ^ { M } ) } , | \tilde { \psi } _ { 2 } \rangle = \lim _ { M \to \infty } \frac { } { \tilde { \tau } }
+$$
+
+ρM2
+
+Tr(ρM2 ) ,
+
+(99)
+
+n,K,E of
+
+ψ1〉)/c},
+
+estimate the cost functions C ℓ2 n,K,E and C ℓ1 logical basis states {| ˜ ψ1〉, (| ˜ ψ2〉-〈 ˜ ψ1| ˜ ψ2〉| w̃here c is a normalization factor.
+
+The cost gradients are estimated by finite differencing:
+
+$$
+\frac { \partial C _ { 4 , 2 , \mathcal { E } } ( \theta ) } { \partial \theta } & \approx \frac { C _ { 4 , 2 , \mathcal { E } } ( \theta + \delta \theta ) - C _ { 4 , 2 , \mathcal { E } } ( \theta - \delta \theta ) } { 2 \delta \theta } \\ & \quad
+$$
+
+with δθ = 0.05. In the first stage (first 15 iterations), we minimize C ℓ2 n,K,E with learning rate η = 1 until C ℓ2 n,K,E < 0.01. Then we switch to C ℓ1 n,K,E and minimize it with a smaller learning rate η = 0.05. The training curves of the estimated C ℓ2 n,K,E with/without error mitigation and its real value are shown in Fig. 11(d). After adequate training (25 iterations), the parameter θ converges to about 1.63, slightly greater than the ideal angle π/2 (indicated by the dashed line in the inset). Nevertheless, this difference is acceptable, the VQC still encodes an approximate amplitude damping code.
+
+We implement a total of 152 quantum circuits for this experiment: 100 for estimating the gradients and 52 for estimating the cost functions.
+
+## 9 Conclusions and Outlooks
+
+In this work, we proposed VarQEC, an effective variational quantum algorithm for finding various quantum error-correcting codes. VarQEC is capable of finding arbitrary quantum codes since the cost functions therein are based on the most general requirement of a QECC, the Knill-Laflamme conditions. We demonstrated its efficacy by discovering/rediscovering some symmetric, asymmetric, and channel-adaptive codes, e.g., ((5, 2, 3))2, ((5, 6, 2))2, ((6, 2, 3))2, ((7, 2, 3))2, ((12, 2 6 , 3))2, ((14, 2 8 , 3))2, ((10, 4, 4))2, ((6, 2, de(2) = 4))2, ((8, 3, de(2) = 4))2. Some discovered codes are equivalent to stabilizer ones and some are not. We investigated them in detail. In particular, VarQEC provided numerical evidence that a quantum code with parameters ((7, 3, 3))2 does not exist. It is worth mentioning that the channel-adaptive codes with optimized encoding circuits found by our method can then be used as inner codes on the physical level in a concatenation scheme. Stabilizer QECCs for qudits can be used as outer codes.
+
+> *Generated caption of `2204.03560_-_Quantum_variational_learning_for_quantum_error-correcting_codes_assets/figure-010.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a scientific figure consisting of four panels, labeled (a) through (d). Panel (a) is a graph diagram with five nodes labeled $\mathcal{Q}_0$, $\mathcal{Q}_1$, $\mathcal{Q}_2$, $\mathcal{Q}_3$, and $\mathcal{Q}_4$, connected by lines such that $\mathcal{Q}_0$ and $\mathcal{Q}_2$ are connected to $\mathcal{Q}_1$, and $\mathcal{Q}_3$ and $\mathcal{Q}_4$ are connected to $\mathcal{Q}_1$ in a tree-like structure. Panel (b) shows a quantum circuit diagram with four horizontal lines representing qubits, labeled from top to bottom: $|0\rangle$, $|0\rangle$, $|j\rangle$, and $|0\rangle$. The first qubit line starts with $|0\rangle$ and is followed by a CNOT gate where the second qubit is the control and the first is the target. The second qubit line starts with $|0\rangle$, undergoes a rotation gate $R_y(\theta)$, and acts as the control for the first, third, and fourth qubits in a series of CNOT gates. The third qubit line starts with $|j\rangle$ and is the target of a CNOT gate from the second qubit, and the control for the fourth qubit. The fourth qubit line starts with $|0\rangle$ and is the target of CNOT gates from the second and third qubits. At the end of each line, there is a measurement symbol represented by a meter icon. Panel (c) shows a similar quantum circuit diagram with four horizontal lines labeled $|0\rangle$, $|0\rangle$, $|j\rangle$, and $|0\rangle$ from top to bottom. The first qubit is the target of a CNOT gate controlled by the second qubit. The second qubit undergoes $R_y(\theta)$ and acts as a control for CNOT gates on the first, third, and fourth qubits. The third qubit is the target of a CNOT gate controlled by the second and acts as the control for a CNOT gate on the fourth qubit. The fourth qubit is the target of CNOT gates controlled by the second and third qubits. Each line ends with a measurement icon. Panel (d) is a line plot showing three data series: "Estimated $C'^{\ell_2}$ without EM" (blue line with circles), "Estimated $C'^{\ell_2}$ with EM" (red line with squares), and "Real $C'^{\ell_2}$" (solid black line at $0.0$). The y-axis is labeled $C'^{\ell_2}$ and ranges from $0.0$ to $0.5$. The x-axis is labeled "Iterations" and ranges from $0$ to $25$. The blue series starts at approximately $0.46$ and decreases to about $0.22$. The red series starts at $0.27$ and decreases sharply to $0.0$ by iteration $12$, then stays at $0.0$. There is a second series, "Estimated $C'^{\ell_2}$ with EM" (green line with triangles), which follows a similar decreasing trend to the red line but reaches $0.0$ at iteration $13$. An inset plot shows $\theta$ on the y-axis (range $0.0$ to $2.0$) and "Iterations" on the x-axis (range $0$ to $25$), with a gray line and gray triangles showing $\theta$ increasing from near $0$ to approximately $1.5$ between iterations $10$ and $20$.
+
+VarQEC is robust to hardware noise; therefore, it is particularly promising in the NISQ era. A problem worth studying further is how to choose the most resource-efficient variational quantum circuit in VarQEC. There is reason to believe that the optimal VQC ansatz is code-dependent. For example, when the target quantum code is translational-invariant, one may use a VQC with a certain amount of symmetry, where different gates can share the same parameter. If we slightly modify the cost functions, VarQEC can be used for finding some QECC variants like the hybrid quantum-classical codes [90], estimating the zeroerror capacity of noisy quantum channels [91], and solving quantum marginal problems [92].
+
+VarQEC can also be directly revised to a classical algorithm. When a NISQ processor is not accessible, one can replace the VQCs with classical variational ansatzes like tensor networks [9395] or neural network quantum states [96], and then similarly implement optimization and search for eligible quantum codes merely with a classical computer. However, the encoding circuits can not be naturally obtained.
+
+## Acknowledgments
+
+We thank Song Cheng and Sirui Lu for helpful discussions. MG acknowledges support by the Foundation for Polish Science (IRAP project, ICTQT, contract no. MAB/2018/5, co-financed by EU within Smart Growth Operational Programme). BZ is supported by General Research Fund (no. GRF/16305121).
+
+## References
+
+- [1] N. Cody Jones, James D. Whitfield, Peter L. McMahon, Man-Hong Yung, Rodney Van Meter, Alán Aspuru-Guzik, and Yoshihisa Yamamoto. "Faster quantum chemistry simulation on fault-tolerant quantum computers". New Journal of Physics 14, 115023 (2012).
+- [2] Peter W. Shor. "Polynomial-time algorithms for prime factorization and discrete logarithms on a quantum computer". SIAM J. Comput. 26, 1484-1509 (1997).
+- [3] Aram W. Harrow, Avinatan Hassidim, and Seth Lloyd. "Quantum algorithm for linear systems of equations". Phys. Rev. Lett. 103, 150502 (2009).
+- [4] Peter W. Shor. "Scheme for reducing decoherence in quantum computer memory". Phys. Rev. A 52, R2493-R2496 (1995).
+- [5] Daniel Gottesman. "Stabilizer codes and quantum error correction" (1997). arXiv:quant-ph/9705052.
+- [6] Daniel A. Lidar and Todd A. Brun. "Quantum error correction". Cambridge University Press. (2013).
+- [7] Bei Zeng, Xie Chen, Duan-Lu Zhou, and Xiao-Gang Wen. "Quantum information meets quantum matter: From quantum entanglement to topological phases of manybody systems". Springer. (2019).
+- [8] Steven M. Girvin. "Introduction to quantum error correction and fault tolerance" (2021). arXiv:2111.08894.
+- [9] Fernando Pastawski, Beni Yoshida, Daniel Harlow, and John Preskill. "Holographic quantum error-correcting codes: toy models for the bulk/boundary correspondence". Journal of High Energy Physics 2015, 149 (2015).
+- [10] Emanuel Knill and Raymond Laflamme. "Theory of quantum error-correcting codes". Phys. Rev. A 55, 900-911 (1997).
+- [11] A. Yu Kitaev. "Quantum computations: algorithms and error correction". Russian Mathematical Surveys 52, 11911249 (1997).
+- [12] Austin G. Fowler, Matteo Mariantoni, John M. Martinis, and Andrew N. Cleland. "Surface codes: Towards practical largescale quantum computation". Phys. Rev. A 86, 032324 (2012).
+- [13] A. R. Calderbank and Peter W. Shor. "Good quantum error-correcting codes exist". Phys. Rev. A 54, 1098-1105 (1996).
+- [14] Andrew Steane. "Multiple-particle interference and quantum error correction". Proceedings of the Royal Society of London. Series A: Mathematical, Physical and Engineering Sciences 452, 2551-2577 (1996).
+
+- [15] Andrew Cross, Graeme Smith, John A. Smolin, and Bei Zeng. "Codeword stabilized quantum codes". In 2008 IEEE International Symposium on Information Theory. Pages 364-368. (2008).
+- [16] Isaac Chuang, Andrew Cross, Graeme Smith, John Smolin, and Bei Zeng. "Codeword stabilized quantum codes: Algorithm and structure". Journal of Mathematical Physics 50, 042109 (2009).
+- [17] Nikolas P. Breuckmann and Jens Niklas Eberhardt. "Quantum low-density parity-check codes". PRX Quantum 2, 040101 (2021).
+- [18] Pavel Panteleev and Gleb Kalachev. "Asymptotically good quantum and locally testableclassical ldpc codes". In Proceedings of the 54th Annual ACM SIGACT Symposium on Theory of Computing. Pages 375-388. Association for Computing Machinery (2022).
+- [19] Laird Egan, Dripto M. Debroy, Crystal Noel, Andrew Risinger, Daiwei Zhu, Debopriyo Biswas, Michael Newman, Muyuan Li, Kenneth R. Brown, Marko Cetina, and Christopher Monroe. "Fault-tolerant control of an error-corrected qubit". Nature 598, 281-286 (2021).
+- [20] Lukas Postler, Sascha Heußen, Ivan Pogorelov, Manuel Rispler, Thomas Feldker, Michael Meth, Christian D. Marciniak, Roman Stricker, Martin Ringbauer, Rainer Blatt, Philipp Schindler, Markus Müller, and Thomas Monz. "Demonstration of fault-tolerant universal quantum gate operations". Nature 605, 675-680 (2022).
+- [21] Christopher M. Dawson, Henry L. Haselgrove, and Michael A. Nielsen. "Noise thresholds for optical quantum computers". Phys. Rev. Lett. 96, 020501 (2006).
+- [22] C. D. Wilen, S. Abdullah, N. A. Kurinsky, C. Stanford, L. Cardani, G. D'Imperio, C. Tomei, L. Faoro, L. B. Ioffe, C. H. Liu, A. Opremcak, B. G. Christensen, J. L. DuBois, and R. McDermott. "Correlated charge noise and relaxation errors in superconducting qubits". Nature 594, 369373 (2021).
+- [23] Qihao Guo, Yuan-Yuan Zhao, Markus Grassl, Xinfang Nie, Guo-Yong Xiang, Tao Xin, Zhang-Qi Yin, and Bei Zeng. "Test-
+10. ing a quantum error-correcting code on various platforms". Science Bulletin 66, 2935 (2021).
+- [24] Sixia Yu, Qing Chen, and C. H. Oh. "Graphical quantum error-correcting codes" (2007). arXiv:0709.1780.
+- [25] Dan Hu, Weidong Tang, Meisheng Zhao, Qing Chen, Sixia Yu, and C. H. Oh. "Graphical nonbinary quantum errorcorrecting codes". Phys. Rev. A 78, 012306 (2008).
+- [26] Akshaya Jayashankar, Anjala M. Babu, Hui Khoon Ng, and Prabha Mandayam. "Finding good quantum codes using the cartan form". Phys. Rev. A 101, 042307 (2020).
+- [27] Muyuan Li, Mauricio Gutiérrez, Stanley E. David, Alonzo Hernandez, and Kenneth R. Brown. "Fault tolerance with bare ancillary qubits for a [[7,1,3]] code". Phys. Rev. A 96, 032341 (2017).
+- [28] Thomas Fösel, Petru Tighineanu, Talitha Weiss, and Florian Marquardt. "Reinforcement learning with neural networks for quantum feedback". Phys. Rev. X 8, 031084 (2018).
+- [29] Paul Baireuther, Thomas E. O'Brien, Brian Tarasinski, and Carlo W. J. Beenakker. "Machine-learning-assisted correction of correlated qubit errors in a topological code". Quantum 2, 48 (2018).
+- [30] Philip Andreasson, Joel Johansson, Simon Liljestrand, and Mats Granath. "Quantum error correction for the toric code using deep reinforcement learning". Quantum 3, 183 (2019).
+- [31] Hendrik Poulsen Nautrup, Nicolas Delfosse, Vedran Dunjko, Hans J. Briegel, and Nicolai Friis. "Optimizing quantum error correction codes with reinforcement learning". Quantum 3, 215 (2019).
+- [32] M. Reimpell and R. F. Werner. "Iterative optimization of quantum error correcting codes". Phys. Rev. Lett. 94, 080501 (2005).
+- [33] Andrew S. Fletcher, Peter W. Shor, and Moe Z. Win. "Optimum quantum error recovery using semidefinite programming". Phys. Rev. A 75, 012338 (2007).
+- [34] Andrew S. Fletcher. "Channel-adapted quantum error correction" (2007). arXiv:0706.3400.
+
+- [35] Ryan Sweke, Markus S. Kesselring, Evert P. L. van Nieuwenburg, and Jens Eisert. "Reinforcement learning decoders for fault-tolerant quantum computation". Machine Learning: Science and Technology 2, 025005 (2020).
+- [36] Ye-Hua Liu and David Poulin. "Neural belief-propagation decoders for quantum error-correcting codes". Phys. Rev. Lett. 122, 200501 (2019).
+- [37] David F. Locher, Lorenzo Cardarelli, and Markus Müller. "Quantum error correction with quantum autoencoders" (2022). arXiv:2202.00555.
+- [38] Emanuel Knill and Raymond Laflamme. "Concatenated quantum codes" (1996). arXiv:quant-ph/9608012.
+- [39] Markus Grassl, Peter Shor, Graeme Smith, John Smolin, and Bei Zeng. "Generalized concatenated quantum codes". Phys. Rev. A 79, 050306 (2009).
+- [40] Daniel Gottesman. "An introduction to quantum error correction". In Proceedings of Symposia in Applied Mathematics. Volume 58, pages 221-236. (2002).
+- [41] P. Aliferis, F. Brito, D. P. DiVincenzo, J. Preskill, M. Steffen, and B. M. Terhal. "Fault-tolerant computing with biasednoise superconducting qubits: a case study". New Journal of Physics 11, 013061 (2009).
+- [42] Tyler Jackson, Markus Grassl, and Bei Zeng. "Concatenated codes for amplitude damping". In 2016 IEEE International Symposium on Information Theory (ISIT). Pages 2269-2273. (2016).
+- [43] Debbie W. Leung, M. A. Nielsen, Isaac L. Chuang, and Yoshihisa Yamamoto. "Approximate quantum error correction can lead to better codes". Phys. Rev. A 56, 2567-2573 (1997).
+- [44] Benjamin Schumacher and Michael D. Westmoreland. "Approximate quantum error correction". Quantum Information Processing 1, 5-12 (2002).
+- [45] Fernando G. S. L. Brandão, Elizabeth Crosson, M. Burak Şahinoğlu, and John Bowen. "Quantum error correcting codes in eigenstates of translationinvariant spin chains". Phys. Rev. Lett. 123, 110502 (2019).
+- [46] Cédric Bény and Ognyan Oreshkov. "General conditions for approximate quantum error correction and near-optimal recovery channels". Phys. Rev. Lett. 104, 120501 (2010).
+- [47] Donald Bures. "An extension of Kakutani's theorem on infinite product measures to the tensor product of semifinite w*-algebras". Transactions of the American Mathematical Society 135, 199-212 (1969).
+- [48] M. Cerezo, Andrew Arrasmith, Ryan Babbush, Simon C. Benjamin, Suguru Endo, Keisuke Fujii, Jarrod R. McClean, Kosuke Mitarai, Xiao Yuan, Lukasz Cincio, and Patrick J. Coles. "Variational quantum algorithms". Nature Reviews Physics 3, 625644 (2021).
+- [49] Kishor Bharti, Alba Cervera-Lierta, Thi Ha Kyaw, Tobias Haug, Sumner Alperin-Lea, Abhinav Anand, Matthias Degroote, Hermanni Heimonen, Jakob S. Kottmann, Tim Menke, Wai-Keong Mok, Sukin Sim, Leong-Chuan Kwek, and Alán AspuruGuzik. "Noisy intermediate-scale quantum algorithms". Rev. Mod. Phys. 94, 015004 (2022).
+- [50] Alberto Peruzzo, Jarrod McClean, Peter Shadbolt, Man-Hong Yung, Xiao-Qi Zhou, Peter J. Love, Alán Aspuru-Guzik, and Jeremy L. O'Brien. "A variational eigenvalue solver on a photonic quantum processor". Nature Communications 5, 4213 (2014).
+- [51] Abhinav Kandala, Antonio Mezzacapo, Kristan Temme, Maika Takita, Markus Brink, Jerry M. Chow, and Jay M. Gambetta. "Hardware-efficient variational quantum eigensolver for small molecules and quantum magnets". Nature 549, 242246 (2017).
+- [52] Yunseong Nam, Jwo-Sy Chen, Neal C. Pisenti, Kenneth Wright, Conor Delaney, Dmitri Maslov, Kenneth R. Brown, Stewart Allen, Jason M. Amini, Joel Apisdorf, Kristin M. Beck, Aleksey Blinov, Vandiver Chaplin, Mika Chmielewski, Coleman Collins, Shantanu Debnath, Kai M. Hudek, Andrew M. Ducore, Matthew Keesan, Sarah M. Kreikemeier, Jonathan Mizrahi, Phil Solomon, Mike Williams, Jaime David Wong-Campos, David Moehring, Christo-
+
+- pher Monroe, and Jungsang Kim. "Groundstate energy estimation of the water molecule on a trapped-ion quantum computer". npj Quantum Information 6, 33 (2020).
+- [53] Chenfeng Cao, Yunlong Yu, Zipeng Wu, Nic Shannon, Bei Zeng, and Robert Joynt. "Mitigating algorithmic errors in quantum optimization through energy extrapolation". Quantum Science and Technology (2022).
+- [54] Jonathan Romero, Jonathan P Olson, and Alan Aspuru-Guzik. "Quantum autoencoders for efficient compression of quantum data". Quantum Science and Technology 2, 045001 (2017).
+- [55] Chenfeng Cao and Xin Wang. "Noiseassisted quantum autoencoder". Phys. Rev. Applied 15, 054012 (2021).
+- [56] Kunal Sharma, Sumeet Khatri, M. Cerezo, and Patrick J. Coles. "Noise resilience of variational quantum compiling". New Journal of Physics 22, 043006 (2020).
+- [57] Xiaosi Xu, Simon C. Benjamin, and Xiao Yuan. "Variational circuit compiler for quantum error correction". Phys. Rev. Applied 15, 034068 (2021).
+- [58] K. Mitarai, M. Negoro, M. Kitagawa, and K. Fujii. "Quantum circuit learning". Phys. Rev. A 98, 032309 (2018).
+- [59] Hsin-Yuan Huang, Richard Kueng, and John Preskill. "Predicting many properties of a quantum system from very few measurements". Nature Physics 16, 10501057 (2020).
+- [60] M. J. D. Powell. "An efficient method for finding the minimum of a function of several variables without calculating derivatives". The Computer Journal 7, 155-162 (1964).
+- [61] Tobias Haug, Kishor Bharti, and M. S. Kim. "Capacity and quantum geometry of parametrized quantum circuits". PRX Quantum 2, 040309 (2021).
+- [62] Peter D. Johnson, Jonathan Romero, Jonathan Olson, Yudong Cao, and Alán Aspuru-Guzik. "QVECTOR: an algorithm for device-tailored quantum error correction" (2017). arXiv:1711.02249.
+- [63] Raymond Laflamme, Cesar Miquel, Juan Pablo Paz, and Wojciech Hubert
+- Zurek. "Perfect quantum error correcting code". Phys. Rev. Lett. 77, 198-201 (1996).
+- [64] Eric M. Rains, R. H. Hardin, Peter W. Shor, and N. J. A. Sloane. "A nonadditive quantum code". Phys. Rev. Lett. 79, 953-954 (1997).
+- [65] A. M. Steane. "Simple quantum errorcorrecting codes". Phys. Rev. A 54, 47414751 (1996).
+- [66] Lev Ioffe and Marc Mézard. "Asymmetric quantum error-correcting codes". Phys. Rev. A 75, 032345 (2007).
+- [67] Pradeep Kiran Sarvepalli, Andreas Klappenecker, and Martin Rotteler. "Asymmetric quantum LDPC codes". In 2008 IEEE International Symposium on Information Theory. Pages 305-309. (2008).
+- [68] Pradeep Kiran Sarvepalli, Andreas Klappenecker, and Martin Rötteler. "Asymmetric quantum codes: constructions, bounds and performance". Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences 465, 1645-1672 (2009).
+- [69] Martianus Frederic Ezerman, San Ling, and Patrick Sole. "Additive asymmetric quantum codes". IEEE Transactions on Information Theory 57, 5536-5550 (2011).
+- [70] Martianus Frederic Ezerman, Somphong Jitman, San Ling, and Dmitrii V. Pasechnik. "CSS-like constructions of asymmetric quantum codes". IEEE Transactions on Information Theory 59, 6732-6754 (2013).
+- [71] Tyler Jackson, Markus Grassl, and Bei Zeng. "Codeword stabilized quantum codes for asymmetric channels". In 2016 IEEE International Symposium on Information Theory (ISIT). Pages 2264-2268. (2016).
+- [72] J. Pablo Bonilla Ataides, David K. Tuckett, Stephen D. Bartlett, Steven T. Flammia, and Benjamin J. Brown. "The xzzx surface code". Nature Communications 12, 2172 (2021).
+- [73] Prithviraj Prabhu and Ben W. Reichardt. "Distance-four quantum codes with combined postselection and error correction" (2021). arXiv:2112.03785.
+- [74] A. R. Calderbank, E. M. Rains, P. M. Shor, and N. J. A. Sloane. "Quantum error correction via codes over GF(4)". IEEE Transactions on Information Theory 44, 13691387 (1998).
+
+- [75] Yusuke Hama. "Quantum circuits for collective amplitude damping in two-qubit systems" (2020). arXiv:2012.02410.
+- [76] Markus Grassl, Linghang Kong, Zhaohui Wei, Zhang-Qi Yin, and Bei Zeng. "Quantum error-correcting codes for qudit amplitude damping". IEEE Transactions on Information Theory 64, 4674-4685 (2018).
+- [77] Peter Shor and Raymond Laflamme. "Quantum analog of the macwilliams identities for classical coding theory". Phys. Rev. Lett. 78, 1600-1602 (1997).
+- [78] Chenfeng Cao. "VarQEC GitHub repository". https://github.com/ caochenfeng/VarQEC-public (2022).
+- [79] Zijun Chen, Kevin J. Satzinger, Juan Atalaya, Alexander N. Korotkov, Andrew Dunsworth, Daniel Sank, Chris Quintana, Matt McEwen, Rami Barends, Paul V. Klimov, Sabrina Hong, Cody Jones, Andre Petukhov, Dvir Kafri, Sean Demura, Brian Burkett, Craig Gidney, Austin G. Fowler, Alexandru Paler, Harald Putterman, Igor Aleiner, Frank Arute, Kunal Arya, Ryan Babbush, Joseph C. Bardin, Andreas Bengtsson, Alexandre Bourassa, Michael Broughton, Bob B. Buckley, David A. Buell, Nicholas Bushnell, Benjamin Chiaro, Roberto Collins, William Courtney, Alan R. Derk, Daniel Eppens, Catherine Erickson, Edward Farhi, Brooks Foxen, Marissa Giustina, Ami Greene, Jonathan A. Gross, Matthew P. Harrigan, Sean D. Harrington, Jeremy Hilton, Alan Ho, Trent Huang, William J. Huggins, L. B. Ioffe, Sergei V. Isakov, Evan Jeffrey, Zhang Jiang, Kostyantyn Kechedzhi, Seon Kim, Alexei Kitaev, Fedor Kostritsa, David Landhuis, Pavel Laptev, Erik Lucero, Orion Martin, Jarrod R. McClean, Trevor McCourt, Xiao Mi, Kevin C. Miao, Masoud Mohseni, Shirin Montazeri, Wojciech Mruczkiewicz, Josh Mutus, Ofer Naaman, Matthew Neeley, Charles Neill, Michael Newman, Murphy Yuezhen Niu, Thomas E. O'Brien, Alex Opremcak, Eric Ostby, Bálint Pató, Nicholas Redd, Pedram Roushan, Nicholas C. Rubin, Vladimir Shvarts, Doug Strain, Marco Szalay, Matthew D. Trevithick, Benjamin Villalonga, Theodore White, Z. Jamie Yao,
+6. Ping Yeh, Juhwan Yoo, Adam Zalcman, Hartmut Neven, Sergio Boixo, Vadim Smelyanskiy, Yu Chen, Anthony Megrant, Julian Kelly, and Google QuantumAI. "Exponential suppression of bit or phase errors with cyclic error correction". Nature 595, 383-387 (2021).
+- [80] Alexander M. Dalzell, Nicholas HunterJones, and Fernando G. S. L. Brandão. "Random quantum circuits transform local noise into global white noise" (2021). arXiv:2111.14907.
+- [81] Abhinav Deshpande, Bill Fefferman, Alexey V. Gorshkov, Michael J. Gullans, Pradeep Niroula, and Oles Shtanko. "Tight bounds on the convergence of noisy random circuits to uniform" (2021). arXiv:2112.00716.
+- [82] William J. Huggins, Sam McArdle, Thomas E. O'Brien, Joonho Lee, Nicholas C. Rubin, Sergio Boixo, K. Birgitta Whaley, Ryan Babbush, and Jarrod R. McClean. "Virtual distillation for quantum error mitigation". Phys. Rev. X 11, 041036 (2021).
+- [83] Bálint Koczor. "Exponential error suppression for near-term quantum devices". Phys. Rev. X 11, 031057 (2021).
+- [84] JarrodR. McClean, Sergio Boixo, VadimN. Smelyanskiy, Ryan Babbush, and Hartmut Neven. "Barren plateaus in quantum neural network training landscapes". Nature Communications 9, 4812 (2018).
+- [85] M. Cerezo, Akira Sone, Tyler Volkoff, Lukasz Cincio, and Patrick J. Coles. "Cost function dependent barren plateaus in shallow parametrized quantum circuits". Nature Communications 12, 1791 (2021).
+- [86] Samson Wang, Enrico Fontana, M. Cerezo, Kunal Sharma, Akira Sone, Lukasz Cincio, and Patrick J. Coles. "Noise-induced barren plateaus in variational quantum algorithms". Nature Communications 12, 6961 (2021).
+- [87] Taylor L. Patti, Khadijeh Najafi, Xun Gao, and Susanne F. Yelin. "Entanglement devised barren plateau mitigation". Phys. Rev. Research 3, 033090 (2021).
+- [88] Stefan H. Sack, Raimel A. Medina, Alexios A. Michailidis, Richard Kueng, and Maksym Serbyn. "Avoiding barren plateaus
+
+- using classical shadows". PRX Quantum 3, 020365 (2022).
+- [89] 5 qubit backend: IBM Q team. "IBM Q 5 Quito backend specification v1.1.34". Retrieved from https: //quantum-computing.ibm.com (2022).
+- [90] Markus Grassl, Sirui Lu, and Bei Zeng. "Codes for simultaneous transmission of quantum and classical information". In 2017 IEEE International Symposium on Information Theory (ISIT). Pages 1718-1722. (2017).
+- [91] Runyao Duan. "Super-activation of zeroerror capacity of noisy quantum channels" (2009). arXiv:0906.2527.
+- [92] Xiao-Dong Yu, Timo Simnacher, Nikolai Wyderka, H. Chau Nguyen, and Otfried Gühne. "A complete hierarchy for the pure state marginal problem in quantum mechanics". Nature Communications 12, 1012 (2021).
+- [93] Román Orús. "Tensor networks for complex quantum systems". Nature Reviews Physics 1, 538-550 (2019).
+- [94] J. Ignacio Cirac, David Pérez-García, Norbert Schuch, and Frank Verstraete. "Matrix product states and projected entangled pair
+- states: Concepts, symmetries, theorems". Rev. Mod. Phys. 93, 045003 (2021).
+- [95] Song Cheng, Chenfeng Cao, Chao Zhang, Yongxiang Liu, Shi-Yao Hou, Pengxiang Xu, and Bei Zeng. "Simulating noisy quantum circuits with matrix product density operators". Phys. Rev. Research 3, 023005 (2021).
+- [96] Giuseppe Carleo and Matthias Troyer. "Solving the quantum many-body problem with artificial neural networks". Science 355, 602-606 (2017).
+- [97] Carl W. Helstrom. "Quantumdetection and estimation theory". Journal of Statistical Physics 1, 231-252 (1969).
+- [98] Dominik Šafránek. "Simple expression for the quantum Fisher information matrix". Phys. Rev. A 97, 042322 (2018).
+- [99] Jing Liu, Haidong Yuan, Xiao-Ming Lu, and Xiaoguang Wang. "Quantum fisher information matrix and multiparameter estimation". Journal of Physics A: Mathematical and Theoretical 53, 023001 (2019).
+- [100] Johannes Jakob Meyer. "Fisher Information in Noisy Intermediate-Scale Quantum Applications". Quantum 5, 539 (2021).
+- [101] John Milnor and James D Stasheff. "Characteristic classes. annals of mathematics studies, volume 76". Princeton University Press. (2016).
+
+## Appendices
+
+## A Proof of Proposition 3
+
+Proof From the completeness relation of the Kraus operators {Eα},
+
+$$
+\sum _ { \alpha = 1 } ^ { m } E _ { \alpha } ^ { \dagger } E _ { \alpha } = I ,
+$$
+
+we know
+
+$$
+\text {we know} \\ \text {Tr} ( \sum _ { \alpha = 1 } ^ { m } E _ { \alpha } E _ { \alpha } ^ { \dagger } ) = \sum _ { \alpha = 1 } ^ { m } \text {Tr} ( E _ { \alpha } E _ { \alpha } ^ { \dagger } ) \\ = \sum _ { \alpha = 1 } ^ { m } \text {Tr} ( E _ { \alpha } ^ { \dagger } E _ { \alpha } ) \\ = \text {Tr} ( \sum _ { \alpha = 1 } ^ { m } E _ { \alpha } ^ { \dagger } E _ { \alpha } ) \\ = 2 ^ { n } .
+$$
+
+Each EαE†α and E†αEα are positive semidefinite. Denote the eigenvalues of EαE†α as ξα 1 ≥ ξα 2 ≥ · · · ≥ ξα 2n ≥ 0, the eigenvalues of EβE†β as ξ β 1 ≥ ξ β 2 ≥ · · · ≥ ξ β 2n ≥ 0, ∑α,j ξα j = ∑β,j ξ β j = 2n.
+
+Then we have
+
+$$
+\xi _ { 2 } ^ { \beta } & \geq \cdots \geq \xi _ { 2 ^ { m } } ^ { \beta } \geq 0 , \, \sum _ { \alpha , j } \xi _ { j } ^ { \alpha } = \sum _ { \beta , j } \xi _ { j } ^ { \beta } = 2 ^ { n } . \\ \text {Then we have} \\ & \quad \text {Tr} \left ( \sum _ { \beta = 1 } ^ { m } \sum _ { \alpha = 1 } ^ { m } ( E _ { \alpha } ^ { \dagger } E _ { \beta } ) ^ { \dagger } E _ { \alpha } ^ { \dagger } E _ { \beta } \right ) \\ & = \sum _ { \beta = 1 } ^ { m } \sum _ { \alpha = 1 } ^ { m } \text {Tr} ( E _ { \alpha } E _ { \alpha } ^ { \dagger } E _ { \beta } E _ { \beta } ^ { \dagger } ) \\ & \quad m \quad m \ \ 2 ^ { n } \\ & \leq \sum _ { \beta = 1 } ^ { m } \sum _ { \alpha = 1 } ^ { m } \xi _ { j } ^ { \alpha } \xi _ { j } ^ { \beta } \\ & \leq \sum _ { \beta = 1 } ^ { m } \sum _ { \alpha = 1 } ^ { m } \frac { 2 ^ { n } } { 2 ^ { n } } \sum _ { \xi _ { i } ^ { \alpha } } ^ { 2 ^ { n } } \xi _ { i } ^ { \alpha } \xi _ { j } ^ { \beta } \\ & = 2 ^ { 2 n } . \\ \text {The first inequality uses von Neumann's trace in-}
+$$
+
+The first inequality uses von Neumann's trace inequality.
+
+Each Eα non-trivially acts on no more than ⌊(d - 1)/2⌋ qubits, therefore, each error product E†αEβ non-trivially acts on no more than (d-1) qubits. We expand E†αEβ in the Pauli basis,
+
+$$
+E _ { \alpha } ^ { \dagger } E _ { \beta } = \sum _ { \gamma } \chi _ { \gamma } ^ { \alpha \beta } O _ { \gamma } ^ { \alpha \beta } , \quad ( 1 0 4 )
+$$
+
+where each Oαβ γ is a Pauli tensor product with weight less than d, Oαβ† γ Oαβ γ = I, |{Oαβ γ }| ≤ 4d-1m2 . Then
+
+$$
+4 \quad m \colon \text {Then} \\ \text {Tr} \left ( ( E _ { \alpha } ^ { \dagger } E _ { \beta } ) ^ { \dagger } E _ { \alpha } ^ { \dagger } E _ { \beta } \right ) & = \sum _ { \gamma } \text {Tr} \left ( | \chi _ { \gamma } ^ { \alpha \beta } | ^ { 2 } O _ { \gamma } ^ { \alpha \beta \dagger } O _ { \gamma } ^ { \alpha \beta } \right ) \\ & = \sum | \chi _ { \gamma } ^ { \alpha \beta } | ^ { 2 } \text { Tr} ( O _ { \gamma } ^ { \alpha \beta \dagger } O _ { \gamma } ^ { \alpha \beta } ) \\ & = 2 ^ { n } \sum _ { \gamma } | \chi _ { \gamma } ^ { \alpha \beta } | ^ { 2 } , \\ & = 1 0 5 ( 1 0 5 ) \\ \text {Tr} \left ( \sum _ { \gamma } ^ { m } \sum _ { \substack { m \\ m } } ^ { m } | E _ { \alpha } ^ { \dagger } F _ { \alpha } ) ^ { \dagger } F _ { \alpha } F _ { \alpha } \right ) & = 2 ^ { n } \sum _ { \gamma } | \chi _ { \alpha } ^ { \alpha \beta } | ^ { 2 } \\
+$$
+
+$$
+\text {Tr} \left ( \sum _ { \beta = 1 } ^ { m } \sum _ { \alpha = 1 } ^ { m } ( E _ { \alpha } ^ { \dagger } E _ { \beta } ) ^ { \dagger } E _ { \alpha } ^ { \dagger } E _ { \beta } \right ) = 2 ^ { n } \sum _ { \alpha , \beta , \gamma } | \chi _ { \gamma } ^ { \alpha \beta } | ^ { 2 } . \quad \text {prodc} \\ \intertext { T r } \Delta \underset { \alpha = 1 } { \text {according to} } E _ { \alpha } \left ( 1 0 3 \right ) _ { \gamma } \, \underset { \alpha , \beta , \gamma } { \text { have} } \, \underset { 0 } { \text { know} } \\
+$$
+
+According to Eq. (103), we have
+
+$$
+\sum _ { \alpha , \beta , \gamma } | \chi _ { \gamma } ^ { \alpha \beta } | ^ { 2 } \leq 2 ^ { n } . \quad ( 1 0 7 ) \\
+$$
+
+For the basis states {|ψ1〉, |ψ2〉, . . . , |ψK〉},
+
+$$
+\text {For the basis states } \{ | \psi _ { 1 } \rangle , | \psi _ { 2 } \rangle , \dots , | \psi _ { K } \rangle \} , & \quad \text {prop} \\ \sum _ { \alpha , \beta } \sum _ { 1 \leq i < j \leq K } | \langle \psi _ { i } | E _ { \alpha } ^ { \dagger } E _ { \beta } | \psi _ { j } \rangle | \\ = \sum _ { \alpha , \beta , \gamma } \sum _ { 1 \leq i < j \leq K } | \alpha _ { \gamma } ^ { \beta } | | \langle \psi _ { i } | O _ { \gamma } ^ { \beta } | \psi _ { j } \rangle | \\ \leq \sum _ { \alpha , \beta , \gamma } | \chi _ { \gamma } ^ { \alpha \beta } | \sum _ { 1 \leq i < j \leq K \ w t ( O _ { \alpha ^ { \prime } } ) < d } | \langle \psi _ { i } | O _ { \alpha ^ { \prime } } | \psi _ { j } \rangle | \\ \leq 2 ^ { n / 2 + d - 1 } m \sum _ { 1 \leq i < j \leq K \ w t ( O _ { \alpha ^ { \prime } } ) < d } | \langle \psi _ { i } | O _ { \alpha ^ { \prime } } | \psi _ { j } \rangle | . \quad i z a t i n \\ \text {Similarly, we have}
+$$
+
+Similarly, we have
+
+$$
+\sum _ { \alpha , \beta } \sum _ { j = 1 } ^ { K } | \langle \psi _ { j } | E _ { \alpha } ^ { \dagger } E _ { \beta } | \psi _ { j } \rangle - \overline { \langle E _ { \alpha } ^ { \dagger } E _ { \beta } \rangle } | / 2 \\ \leq & 2 ^ { n / 2 + d - 1 } m \sum _ { w t ( O _ { \alpha ^ { \prime } } ) < d } \sum _ { 1 } ^ { K } | \langle \psi _ { j } | O _ { \alpha ^ { \prime } } | \psi _ { j } \rangle - \overline { \langle O _ { \alpha ^ { \prime } } \rangle } | / 2 . \quad = & \sum _ { \alpha , \beta } \\ & \quad ( 1 0 9 ) \\ & \leq \sum
+$$
+
+Denote
+
+E ′ = {E†αEβ|Eα,Eβ are Kraus operators of N}, we have
+
+$$
+C _ { n , K , \mathcal { E } ^ { \prime } } ^ { \ell _ { 1 } } \leq 2 ^ { n / 2 + d - 1 } m C _ { n , K , \mathcal { E } } ^ { \ell _ { 1 } } .
+$$
+
+According to Proposition 2, the code is εcorrectable with ε bounded by
+
+$$
+\begin{array} { c c } \i c t & \varepsilon \leq K \sqrt { 2 C _ { n , K , \varepsilon ^ { \prime } } ^ { \ell _ { 1 } } } \leq 2 ^ { n / 4 + d / 2 } K \sqrt { m C _ { n , K , \varepsilon } ^ { \ell _ { 1 } } } \, . \, ( 1 1 1 ) \\ \end{array}
+$$
+
+## B Proof of Proposition 4
+
+Proof Since each Eα is proportional to a Pauli error, we have
+
+$$
+E _ { \alpha } ^ { \dagger } E _ { \alpha } = E _ { \alpha } E _ { \alpha } ^ { \dagger } .
+$$
+
+Further, from the completeness relation of the Kraus operators {Eα},
+
+$$
+\sum _ { \alpha = 1 } ^ { m } E _ { \alpha } ^ { \dagger } E _ { \alpha } = I ,
+$$
+
+we obtain the completeness relation of the error products, {E†αEβ}
+
+$$
+\sum _ { \beta = 1 } ^ { m } \sum _ { \alpha = 1 } ^ { m } ( E _ { \alpha } ^ { \dagger } E _ { \beta } ) ^ { \dagger } E _ { \alpha } ^ { \dagger } E _ { \beta } & = \sum _ { \beta = 1 } ^ { m } E _ { \beta } ^ { \dagger } E _ { \beta } = I . \ \ ( 1 1 4 )
+$$
+
+The cZ-effective weight of each Eα smaller than de(cZ)/2, therefore, each error product E†αEβ is proportional to a Pauli tensor product with cZeffective weight
+
+$$
+\ w t _ { e } ( E _ { \alpha } ^ { \dagger } E _ { \beta } , c _ { Z } ) < d _ { e } ( c _ { Z } ) .
+$$
+
+Denote
+
+$$
+E _ { \alpha } ^ { \dagger } E _ { \beta } = \chi ^ { \alpha \beta } O ^ { \alpha \beta } ,
+$$
+
+where Oαβ is a Pauli tensor product.
+
+According to Eq. (114), we have the normalization condition
+
+$$
+\sum _ { \alpha , \beta } | \chi ^ { \alpha \beta } | ^ { 2 } = 1 .
+$$
+
+For the basis states {|ψ1〉, |ψ2〉, . . . , |ψK〉},
+
+$$
+\text {For the basis states } \{ | \psi _ { 1 } \rangle , | \psi _ { 2 } \rangle , \dots , | \psi _ { K } \rangle \} , \\ \sum _ { \alpha , \beta } \sum _ { 1 \leq i < j \leq K } | \langle \psi _ { i } | E _ { \alpha } ^ { \dagger } E _ { \beta } | \psi _ { j } \rangle | \\ = \sum _ { \alpha , \beta } \sum _ { 1 \leq i < j \leq K } | \chi ^ { \alpha \beta } | | \langle \psi _ { i } | O ^ { \beta } | \psi _ { j } \rangle | \\ \leq \sum _ { \alpha , \beta } | \chi ^ { \alpha \beta } | \sum _ { 1 \leq i < j \leq K } \sum _ { \ w t _ { e } ( O _ { \alpha ^ { \prime } , c _ { Z } } ) < d _ { e } ( c _ { Z } ) } | \langle \psi _ { i } | O _ { \alpha ^ { \prime } } | \psi _ { j } \rangle | \\ \leq m \sum _ { 1 \leq i < j \leq K } \sum _ { \ w t _ { e } ( O _ { \alpha ^ { \prime } , c _ { Z } } ) < d _ { e } ( c _ { Z } ) } | \langle \psi _ { i } | O _ { \alpha ^ { \prime } } | \psi _ { j } \rangle | . \\
+$$
+
+Similarly, we have
+
+$$
+\sum _ { \alpha , \beta } \sum _ { j = 1 } ^ { K } | \langle \psi _ { j } | E _ { \alpha } ^ { \dagger } E _ { \beta } | \psi _ { j } \rangle - \overline { \langle E _ { \alpha } ^ { \dagger } E _ { \beta } \rangle } | / 2 & & \text {the} \\ \leq & m \sum _ { \ w t _ { e } ( O _ { \alpha ^ { \prime } } , c _ { Z } ) < d _ { e } ( c _ { Z } ) } \sum _ { j = 1 } ^ { K } | \langle \psi _ { j } | O _ { \alpha ^ { \prime } } | \psi _ { j } \rangle - \overline { \langle O _ { \alpha ^ { \prime } } \rangle } | / 2 . & \text {ally} \\ \text {Denote} & & \text {In}
+$$
+
+Denote E ′ = {E†αEβ|Eα,Eβ are Kraus operators of N}, we have
+
+$$
+C _ { n , K , \mathcal { E } ^ { \prime } } ^ { \ell _ { 1 } } \leq m C _ { n , K , \mathcal { E } } ^ { \ell _ { 1 } } .
+$$
+
+According to Proposition 2, the code is εcorrectable with ε bounded by
+
+$$
+\varepsilon \leq K \sqrt { 2 C _ { n , K , \mathcal { E } ^ { \prime } } ^ { \ell _ { 1 } } } \leq K \sqrt { 2 m C _ { n , K , \mathcal { E } } ^ { \ell _ { 1 } } } . \quad ( 1 2 1 ) \quad \text {where}
+$$
+
+■
+
+## C Parameter Dimension and Overparameterization
+
+The quantum Fisher information matrix (QFIM) is an essential concept in quantummetrology [9799]. In recent years, its applications inNISQ algorithms and quantum machine learning have also been noticed [61, 100]. Ref. [61] uses the QFIM to assess the expressive power of a VQC with the fixed input state |0〉⊗n. In VarQEC, however, we use K orthogonal input states to find an ((n, K))2 quantum code. In this section, we generalize the notion of QFIM to multiple input states to quantify the expressive power of a VQC for preparing an ((n,K))2 quantum code. Based on that, we discuss the parameter dimension and the overparameterization of a VQC encoder.
+
+Suppose the VQC encoder has parameters
+
+$$
+\theta = ( \theta _ { 1 } , \theta _ { 2 } , \dots , \theta _ { N } ) . \quad ( 1 2 2 ) \quad j e c
+$$
+
+For a fixed pure input state, one relates the QFIM F(θ) to the distance in the space of pure quantum states by
+
+$$
+\ D i s t ( | \psi ( \theta ) \rangle , | \psi ( \theta + d \theta ) \rangle ) ^ { 2 } = \sum _ { l , m } \mathcal { F } _ { l , m } ( \theta ) d \theta _ { l } d \theta _ { m } , \quad \text {the} \\ \quad \text {we count}
+$$
+
+(123) where Dist(|ψ(θ)〉, |ψ(θ′ )〉) = 1-|〈ψ(θ)|ψ(θ′ )〉|2 . The QFIM is an N by N matrix
+
+$$
+\mathcal { F } _ { l m } ( \theta ) = 4 \, R e \left [ \langle \partial _ { l } \psi | \partial _ { m } \psi \rangle - \langle \partial _ { l } \psi | \psi \rangle \, \langle \psi | \partial _ { m } \psi \rangle \right ] . \quad \text {nect} \\
+$$
+
+where |∂lψ〉 denotes ∂|ψ(θ)〉/∂θl. In this case, the parameter dimension Dc for a VQC is defined as the number of independent parameters that the VQC can express in the space of output states. Numerical evidence shows that Dc is usually equivalent to the rank of QFIM for hardwareefficient VQCs with periodic and non-correlated random parameters θ [61].
+
+In VarQEC, the inputs are K orthogonal pure states. Denote the projector onto the output space as Pc. We relate F(θ) to the distance in the space of K-dimensional projectors,
+
+$$
+\varepsilon \varepsilon - \ D i s t _ { K } ( P _ { c } ( \theta ) , P _ { c } ( \theta + d \theta ) ) ^ { 2 } = \sum _ { l , m } \mathcal { F } _ { l , m } ( \theta ) d \theta _ { l } d \theta _ { m } , \\
+$$
+
+where the distance
+
+$$
+\Delta - \ D i s t _ { K } ( P _ { c } ( \theta ) , P _ { c } ( \theta ^ { \prime } ) ) & = \\ \Delta - \left ( \frac { \text {Tr} \sqrt { \sqrt { P _ { c } ( \theta ) } P _ { c } ( \theta ^ { \prime } ) \sqrt { P _ { c } ( \theta ) } } } { K } \right ) ^ { 2 } \\ \text {is defined as the finality between the normalized}
+$$
+
+is defined as the fidelity between the normalized mixed states of projectors Pc(θ) and Pc(θ′ ). Suppose the projector Pc(θ) has eigen decomposition
+
+$$
+P _ { c } ( \theta ) = \sum _ { j = 1 } ^ { K } | \psi _ { j } \rangle \langle \psi _ { j } | & & ( 1 2 7 )
+$$
+
+and denote the basis of its orthogonal complement as {|ψj〉}j=K+1,K+2,...,2n, the QFIM under our framework is of the form
+
+$$
+\begin{array} { r l } & { u \text {an} - } & { \mathcal { F } _ { l m } ( \theta ) = 2 \frac { \partial ^ { 2 } } { \partial \delta _ { l } \partial \delta _ { m } } \text {Dist} _ { K } ( P _ { c } ( \theta ) , P _ { c } ( \theta + \delta ) ) | _ { \delta = 0 } } \\ & { t , w } & { 2 } & { \sum _ { K ^ { 2 } } \frac { R e ( \langle \psi _ { i } | \partial _ { l } P _ { c } | \psi _ { j } \rangle \langle \psi _ { j } | \partial _ { m } P _ { c } | \psi _ { i } \rangle ) } { \langle \psi _ { i } | P _ { c } | \psi _ { i } \rangle + \langle \psi _ { j } | P _ { c } | \psi _ { j } \rangle } . } \\ & { s } & { ( 1 2 8 ) } \\ & { W e r a m k t h a t h e d i r a v i o n o f Q F I M f o r p o r - } \end{array}
+$$
+
+We remark that the derivation of QFIM for projectors is the same as for density matrices [98]. Therefore, a similar formula can be used to compute the QFIM of a VQC with mixed inputs/outputs.
+
+Through sampling random parameters θ from the interval [0, 2π)N and computing the QFIM, we can estimate the parameter dimension Dc by rank(F(θ)). The VarQEC algorithm searches a Dc-dimensional submanifold of the complex Grassmannian Gr(K, 2n).
+
+Without loss of generality, we consider the connectivity graph shown in Fig. 12. For K = 1, 2, 3, 4, we randomly sample parameters θ and plot rank(F(θ)) as a function of the number of VQC layers L in Fig. 13. Almost no parameterized gate is redundant when the circuit is underparameterized (Dc/N ≈ 1). With the increase of L, rank(F(θ)) increases approximately linearly until achieving its maximum Dmax c . The maximum parameter dimension for code length n and code dimension K is of the form
+
+> *Generated caption of `2204.03560_-_Quantum_variational_learning_for_quantum_error-correcting_codes_assets/figure-011.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a diagram of a graph consisting of seven nodes, each labeled with a $Q$ symbol and a subscript. Six nodes are white circles: $Q_2$ (bottom left), $Q_3$ (bottom center), $Q_4$ (bottom right), $Q_5$ (top left), and $Q_6$ (top right). Two nodes are solid black circles: $Q_0$ (middle left) and $Q_1$ (middle right). The nodes are interconnected by dark grey lines: $Q_0$ is connected to $Q_1$, $Q_2$, $Q_3$, $Q_5$, and $Q_6$; $Q_1$ is connected to $Q_0$, $Q_3$, $Q_4$, $Q_5$, and $Q_6$; $Q_2$ is connected to $Q_0$ and $Q_3$; $Q_3$ is connected to $Q_0$, $Q_1$, $Q_2$, and $Q_4$; $Q_4$ is connected to $Q_1$ and $Q_3$; $Q_5$ is connected to $Q_0$ and $Q_1$; and $Q_6$ is connected to $Q_0$ and $Q_1$.
+
+> *Generated caption of `2204.03560_-_Quantum_variational_learning_for_quantum_error-correcting_codes_assets/figure-012.png` (ollama:gemma4:26b, prompt sci-v1):* This is a line plot with a white background and a black border. The y-axis is labeled $\text{rank}(\mathcal{F})$ and ranges from 100 to 1000 with increments of 200. The x-axis is labeled $L$ and ranges from approximately 5 to 55, with tick marks at 10, 20, 30, 40, and 50. There is a legend in the top-left corner with four entries: $K = 4$ (dark brown), $K = 3$ (medium brown), $K = 2$ (red-brown), and $K = 1$ (light pink). Each series represents a piecewise linear function that increases linearly from $L=5$ and then plateaus at a constant value. For $K=1$, the line starts at approximately $(5, 100)$ and plateaus at $250$ at $L=10$. For $K=2$, the line starts at $(5, 100)$ and plateaus at $500$ at $L=20$. For $K=3$, the line starts at $(5, 100)$ and plateaus at $750$ at $L=30$. For $K=4$, the line starts at $(5, 100)$ and plateaus at $1000$ at $L=40$. All lines maintain their plateau value for all $L >$ their plateau point.
+
+$$
+D _ { c } ^ { \max } = 2 K ( 2 ^ { n } - K ) .
+$$
+
+(129)
+
+This agrees with the fact that the dimension of the complex Grassmannian Gr(K, 2n) is K(2n - K) [101]. When Dc = Dmax c , the VQC can explore the whole Gr(K, 2n) manifold and prepare arbitrary ((n,K))2 quantum code. The required number of layers to saturate the maximum parameter dimension is approximately
+
+$$
+L _ { c r i t } = \lceil \frac { 2 K ( 2 ^ { n } - K ) - 2 n } { 2 n + | E ( G ) | } \rceil ,
+$$
+
+(130)
+
+where |E(G)| is the number of edges of the connectivity graph.
+
+To find a quantum code with parameters ((7, 3, 3))2, we sample 100 different initial values of θ and implement VarQEC with an overparameterized VQC (L = 31). However, the cost function C ℓ1 n,K,E (θ) is always greater than 1. A ((7, 3, 3))2 code is improbable to exist.
+
+## D A variational quantum encoder for additive codes
+
+The VQC with bipartite connectivity performs well in most cases. However, for some code parameters (e.g., ((10, 4, 4))2), it needs a large bunch of samples of the initial θ to find an eligible code. Here we propose AC-VQC, another variational quantum circuit with all-to-all connectivity, to complement the bipartite ansatz.
+
+The AC-VQC is especially resource-efficient in finding encoding circuits of additive codes. The structure of an AC-VQC is similar to the circuit of the quantum Fourier transform, as shown in Fig. 14. We start from two physical qubits (Q0,Q1) and apply a 2-qubit parameterized unitary operator U01 to them. Then, we add another qubit (Q2), apply 2-qubit parameterized unitary operators U02/U12 to the new one and each of the qubits that already exist (Q0-Q2, Q1-Q2). Repeat the steps until the system size equals n. In the end, we apply single-qubit rotations Rz and Rx to all qubits to explore the manifold of locally equivalent codes. The initial k qubits prepare the logical data. The total circuit depth is of order
+
+O(∑n-1
+
+j=1 j) = O(n2 ).
+
+> *Generated caption of `2204.03560_-_Quantum_variational_learning_for_quantum_error-correcting_codes_assets/figure-013.png` (ollama:gemma4:26b, prompt sci-v1):* This is a diagram of a quantum circuit. The circuit consists of five horizontal lines, labeled on the left as $Q_0 |J_0\rangle, Q_1 |J_1\rangle, Q_2 |0\rangle, Q_3 |0\rangle,$ and $Q_4 |0\rangle$. The circuit progresses from left to right with the following components: on the first line ($Q_0$), there are four rectangular boxes labeled $U_{01}, U_{02}, U_{03},$ and $U_{04}$ (noting that $U_{01}$ is actually $J_0$ in the label, but the subsequent boxes are $U_{02}, U_{03}, U_{04}$); however, looking closely at the sequence, the boxes on $Q_0$ are $J_0$ (integrated into the state), $U_{02}, U_{03},$ and $U_{04}$. On the second line ($Q_1$), the boxes are $U_{01}, U_{13}, U_{14}$ and terminal boxes $R_x$ and $R_z$. On the third line ($Q_2$), the boxes are $U_{02}, U_{12}, U_{23}, U_{24}$ and terminal boxes $R_x$ and $R_z$. On the fourth line ($Q_3$), the boxes are $U_{03}, U_{13}, U_{34}$ and terminal boxes $R_x$ and $R_z$. On the fifth line ($Q_4$), the boxes are $U_{04}, U_{14}, U_{24}, U_{34}$ and terminal boxes $R_x$ and $R_z$. Vertical lines connect the boxes across different $Q$ lines, indicating multi-qubit gates. Below the circuit, there is an equation defining the gate $U_{ij}$: $U_{ij} = \begin{array}{c} \text{gate diagram with two lines: top line has } R_x \text{ and } R_z \text{ boxes, bottom line has } R_x \text{ and } R_z \text{ boxes, connected by a vertical line between the } R_x \text{ boxes and another between the } R_z \text{ boxes}\end{array}$. The specific equation is $U_{ij} = \begin{array}{c} \begin{array}{c} \text{---} [R_x] \text{---} [R_z] \text{---} \\ \text{---} [R_x] \text{---} [R_z] \text{---} \end{array} \text{ with vertical connections between the } R_x \text{ gates and between the } R_z \text{ gates.} \end{array}$
+
+## E Non-CWS Quantum Codes with Parameters ((6, 2, 3))2, ((7, 2, 3))2
+
+The ((5, 2, 3))2 code is known to be unique. However, the classification and construction of ((6, 2, 3))2 and ((7, 2, 3))2 quantum codes are unclear. Some are said to be "non-CWS" since they are not locally equivalent to CWS codes. Here we present a general construction of non-CWS quantum codes based on stabilizer ones.
+
+Theorem 6 If there exists a quantum code C with parameters ((n, 2k , d))q, then there exist degenerate ((n′ , 2k , d))q codes {C ′} with n′ > n that are not locally equivalent to a CWS code.
+
+Proof For n′ > n+1, we can directly obtain nonCWS codes by taking the tensor product with a non-stabilizer state.
+
+For n′ = n+1, we take the tensor product of the code C with a fixed (stabilizer) state, then apply a non-Clifford entangling unitary operation to one of the original qudits and the additional qudit. This will conjugate the Pauli-stabilizers to nonlocal stabilizers. The resulting code is a non-CWS degenerate code with parameters ((n′ , 2k , d))q. ■
+
+For example, we start from the ((5, 2, 3))2 code (Q0,Q1,. . . , Q4) and initialize an addition qubit (Q5) in state |0〉, then apply the transformation U on Q5, controlled by Q4 with
+
+$$
+U = \frac { 1 } { 5 } \left ( \begin{array} { c c } 3 & 4 \\ - 4 & 3 \end{array} \right ) . \quad \quad ( 1 3 1 )
+$$
+
+The resulting code is a non-CWS degenerate ((6, 2, 3))2 code with basis states
+
+$$
+( ( 6 , 2 , 3 ) ) _ { 2 } \, \code \, { \text {with basis states} } & & \text {resp.} & & \mathcal { E } \ m a t h s c r { E } \\ | \psi _ { 1 } \rangle = & \frac { \sqrt { 2 } } { 2 0 } ( 5 | 0 0 0 0 0 0 \rangle - 5 i | 0 0 1 1 0 0 \rangle - 3 i | 0 1 0 0 1 0 \rangle & & \text {say} & & \text {code} \\ & + 4 i | 0 1 0 0 1 1 \rangle + 3 | 0 1 1 1 1 1 0 \rangle - 4 | 0 1 1 1 1 1 1 \rangle & & \text {and} & \\ & - 3 | 1 0 0 1 1 0 \rangle + 4 | 1 0 0 1 1 1 \rangle - 3 i | 1 0 1 0 1 0 \rangle & & \text {equiv} & \\ & + 4 i | 1 0 1 0 1 1 \rangle - 5 i | 1 1 0 1 0 0 \rangle - 5 | 1 1 1 0 0 0 \rangle , & & \text {of only} & \\ & ( 1 3 2 ) & & \text {of no} & \\ | \lambda _ { 0 } \rangle = & \frac { \sqrt { 2 } } { 2 } ( 3 | 0 0 1 1 0 \rangle - 4 | 0 0 1 1 1 \rangle - 3 i | 0 1 0 1 0 \rangle & & \text {still} & \\
+$$
+
+$$
++ 4 i | 1 0 1 0 1 1 \rangle - 5 i | 1 1 0 1 0 0 \rangle - 5 | 1 1 1 0 0 0 \rangle , & \quad \text {impute} \\ ( 1 3 2 ) & \quad \text {of no} \\ | \psi _ { 2 } \rangle = & \frac { \sqrt { 2 } } { 2 0 } ( 3 | 0 0 1 1 0 \rangle - 4 | 0 0 1 1 1 \rangle - 3 i | 0 1 0 1 0 \rangle \\ & + 4 i | 0 1 0 1 1 \rangle - 5 i | 1 0 1 0 0 \rangle + 5 | 1 1 0 0 0 \rangle \\ & + 5 | 1 0 0 0 0 \rangle + 5 i | 1 0 1 1 0 0 \rangle + 3 i | 1 1 0 0 1 0 \rangle \\ & - 4 i | 1 1 0 0 1 1 \rangle + 3 | 1 1 1 1 1 0 \rangle - 4 | 1 1 1 1 1 1 \rangle . & \quad \text {or tw} \\ & \quad ( 1 3 3 ) & \quad Q _ { 4 } , \\ & \quad \text {the rest} & \quad \text {the re}
+$$
+
+Its weight enumerators are
+
+$$
+A ( z ) = & 1 + \frac { 9 } { 2 5 } z + \frac { 1 6 } { 2 5 } z ^ { 2 } + \frac { 3 1 1 } { 2 5 } z ^ { 4 } + \frac { 3 9 1 } { 2 5 } z ^ { 5 } + \frac { 4 8 } { 2 5 } z ^ { 6 } , \quad \text {The} \ \ 2 5
+$$
+
+$$
+\begin{array} { c c c } \bar { a } ^ { - } & B ( z ) = & 1 + \frac { 9 } { 2 5 } z + \frac { 1 6 } { 2 5 } z ^ { 2 } + \frac { 6 5 4 } { 2 5 } z ^ { 3 } + \frac { 1 9 3 } { 5 } z ^ { 4 } \\ & & + \frac { 9 3 7 } { 2 5 } z ^ { 5 } + \frac { 5 9 4 } { 2 5 } z ^ { 6 } . \end{array}
+$$
+
+Likewise, non-CWS ((7, 2, 3))2 codes can be constructed based on ((6, 2, 3))2 stabilizer codes.
+
+Another class of non-CWS ((6, 2, 3))2 codes are unitarily related to the additive ((6, 2, 3))2 code stabilized by
+
+$$
+\begin{array} {
+$$
+
+Here "unitarily related" means they can be transformed to this code when allowing permutations of qubits and a unitary transformation of the form U = ⊗5j=1Uj where U1,U2,U3,U4 are single-qubit unitaries and U5 is a 2-qubit unitary. In our numerical experiments, all the ((6, 2, 3))2 codes discovered by VarQEC are unitarily related to this ((6, 2, 3))2 stabilizer code or the ((5, 2, 3))2 perfect code, some are related to both.
+
+Consider a quantum code C that is capable of correcting an error set E. If linearly independent errors in E map C to linearly independent subspaces, we say C is non-degenerate with respect to E. If linearly independent errors in E map C to mutually orthogonal subspaces, we say C is pure with respect to E [74]. A pure code must be non-degenerate. For additive codes and CWS codes, "non-degenerate" and "pure" are equivalent [74]. However, we note that some of our ((7, 2, 3))2 codes are non-degenerate but impure. Here we give a "trivial" construction of non-degenerate and impure ((7, 2, 3))2 codes. Still, we start with the ((5, 2, 3))2 code on qubits Q0, Q1, . . . , Q4 and add two additional qubits Q5, Q6 in a fixed state |00〉. Then we can apply either a three-qubit unitary on, e.g., Q4, Q5, Q6, or two two-qubit unitaries on, e.g., Q3, Q5 and Q4, Q6. When these unitaries are non-Clifford, the resulting code is a non-CWS degenerate and impure code. We give a detailed example here. The following basis states span a non-degenerate but impure ((7, 2, 3))2 code:
+
+$$
+| \psi _ { 1 } \rangle = & \frac { 1 } { 2 0 } ( - 4 \omega ^ { 3 } | 0 0 0 0 1 1 1 \rangle + 3 \omega ^ { 2 } | 0 0 0 1 0 0 0 \rangle - 3 \omega | 0 0 0 1 1 1 0 ) - 4 \omega | 0 0 0 1 1 1 1 \rangle + 3 \omega ^ { 3 } | 0 0 1 0 1 1 0 \rangle \\ & + 4 \omega ^ { 3 } | 0 0 1 0 1 1 1 1 \rangle - 4 \omega | 0 0 1 1 0 1 1 1 \rangle + 3 | 0 0 1 1 1 0 0 \rangle + 3 \omega ^ { 3 } | 0 1 0 0 1 1 1 \rangle - 4 \omega | 0 1 0 1 0 1 1 \rangle \\ & + 3 \omega | 0 1 0 1 1 0 0 \rangle - 4 \omega ^ { 3 } | 0 1 1 0 0 1 1 \rangle + 3 \omega ^ { 2 } | 0 1 1 0 1 0 0 \rangle - 3 \omega | 0 1 1 1 1 1 0 \rangle - 4 \omega | 0 1 1 1 1 1 1 \rangle - 4 \omega ^ { 3 } | 1 0 0 0 0 1 1 \rangle \\ & + 3 \omega ^ { 2 } | 1 0 0 1 1 0 0 \rangle + 3 \omega | 1 0 0 1 1 1 0 \rangle + 4 \omega | 1 0 1 0 1 1 1 \rangle + 3 \omega ^ { 3 } | 1 0 1 0 1 1 0 \rangle - 4 \omega ^ { 3 } | 1 0 1 0 1 1 1 \rangle - 4 \omega | 1 0 1 1 0 1 1 \rangle \\ & - 3 | 1 0 1 1 1 0 0 \rangle - 3 \omega ^ { 3 } | 1 1 0 1 1 0 \rangle - 4 \omega ^ { 3 } | 1 1 0 1 1 1 \rangle \rangle - 4 \omega | 1 1 0 1 0 1 1 \rangle + 3 | 1 0 1 1 0 0 \rangle + 4 \omega ^ { 3 } | 1 1 1 0 0 1 1 \rangle \\ & - 3 \omega ^ { 2 } | 1 1 1 0 1 0 0 \rangle - 3 \omega | 1 1 1 1 1 1 0 \rangle - 4 \omega | 1 1 1 1 1 1 \rangle ) , \\ & \\ | \psi _ { 2 } \rangle = & \frac { 1 } { 2 0 } ( 4 \omega | 0 0 0 0 0 1 1 \rangle - 3 | 0 0 0 1 0 0 \rangle + 3 \omega ^ { 3 } | 0 0 0 1 1 1 0 \rangle + 4 \omega ^ { 3 } | 0 0 0 1 1 1 \rangle + 3 \omega | 0 0 1 1 0 1 0 \rangle + 4 \omega | 0 0 1 0 1 1 \rangle \\
+$$
+
+$$
+- 3 \omega ^ { * } | 1 1 0 1 0 0 \rangle - 3 \omega | 1 1 1 1 1 0 \rangle - 4 \omega | 1 1 1 1 1 1 \rangle ) , \\ | \psi _ { 2 } \rangle = & \frac { 1 } { 2 0 } ( 4 \omega | 0 0 0 0 0 1 1 ) - 3 | 0 0 0 0 1 0 0 \rangle + 3 \omega ^ { 3 } | 0 0 0 1 1 1 0 \rangle + 4 \omega ^ { 3 } | 0 0 0 1 1 1 1 \rangle + 3 \omega | 0 0 1 0 1 1 0 \rangle + 4 \omega | 0 0 1 0 1 1 1 \rangle \\ & - 4 \omega ^ { 3 } | 0 0 1 1 0 1 1 1 \rangle + 3 \omega ^ { 2 } | 0 0 1 1 1 0 0 \rangle - 3 \omega | 0 0 1 0 1 1 0 \rangle - 4 \omega | 0 1 0 0 1 1 1 \rangle + 4 \omega ^ { 3 } | 0 1 0 1 0 1 1 \rangle - 3 \omega ^ { 2 } | 0 1 0 1 1 0 0 \rangle \\ & - 4 \omega | 0 1 1 0 0 1 1 1 \rangle + 3 | 0 1 1 0 1 0 0 \rangle - 3 \omega ^ { 3 } | 0 1 1 1 1 1 0 \rangle - 4 \omega ^ { 3 } | 0 1 1 1 1 1 1 \rangle - 4 \omega | 0 1 0 0 0 1 1 \rangle + 3 | 1 0 0 1 0 0 0 \rangle \\ & + 3 \omega ^ { 3 } | 0 1 0 1 1 1 0 \rangle + 4 \omega ^ { 3 } | 1 0 0 1 1 1 1 \rangle - 3 \omega | 1 0 1 0 1 1 0 \rangle - 4 \omega | 1 0 1 0 1 1 1 \rangle - 4 \omega ^ { 3 } | 1 0 1 1 0 1 1 \rangle + 3 \omega ^ { 2 } | 1 0 1 1 1 0 0 \rangle \\ & - 3 \omega | 1 1 0 0 1 1 0 \rangle - 4 \omega | 1 1 0 0 1 1 1 \rangle - 4 \omega ^ { 3 } | 1 1 0 1 0 1 1 \rangle + 3 \omega ^ { 2 } | 1 1 0 1 1 0 0 \rangle - 4 \omega | 1 1 1 0 0 1 1 \rangle + 3 | 1 1 1 0 1 0 0 \rangle \\ & + 3 \omega ^ { 3 } | 1 1 1 1 1 1 0 \rangle - 4 \omega ^ { 3 } | 1 1 1 1 1 1 1 \rangle ) , \\ & \sqrt { 1 3 }
+$$
+
+$$
+\text {s are } \quad B ^ { \{ 6 , 2 , 3 \} } ( z ) = & 1 + 0 . 2 6 7 z + 0 . 7 3 2 z ^ { 2 } + 2 5 . 6 0 5 z ^ { 3 } \\ & + 3 7 . 6 7 6 z ^ { 4 } + 3 8 . 1 2 6 z ^ { 5 } + 2 4 . 5 9 1 z ^ { 6 } ;
+$$
+
+$$
+A ^ { \{ 7 , 8 , 2 \} } ( z ) & = 1 + 5 z ^ { 4 } + 2 z ^ { 5 } + 2 z ^ { 6 } + 6 z ^ { 7 } , \quad ( 1 4 7 ) \\ B ^ { \{ 7 , 8 , 2 \} } ( z ) & = 1 + 1 7 z ^ { 2 } + 4 0 z ^ { 3 } + 1 9 5 z ^ { 4 } + 3 2 8 z ^ { 5 } \\ & + 2 9 9 z ^ { 6 } + 1 4 4 z ^ { 7 } ; \\ & \\ \text {Now-derivative} \left ( ( 7 \, 2 \, 3 ) \right ) _ { \cdot } & \cdot
+$$
+
+$$
+N o n \text {-degenerate} \left ( ( 7 , 2 , 3 ) \right ) _ { 2 } \colon \\ A ^ { \{ 7 , 2 , 3 \} } ( z ) = & 1 + 1 . 4 3 7 z ^ { 2 } + 1 8 . 1 2 5 z ^ { 4 } + 4 3 . 4 3 7 z ^ { 6 } ,
+$$
+
+$$
+B ^ { \{ 7 , 2 , 3 \} } ( z ) = & 1 + 1 . 4 3 7 z ^ { 2 } + 2 5 . 3 1 1 z ^ { 3 } + 1 8 . 1 2 5 z ^ { 4 } \\ & + 1 1 7 . 3 7 7 z ^ { 5 } + 4 3 . 4 3 7 z ^ { 6 } + 4 9 . 3 1 1 z ^ { 7 } ; \\ \intertext { h e r a - } \text {d by } & \quad \intertext { s o n d a b y }
+$$
+
+$$
+d \text { by } & \quad \text {Degenerate } ( ( 7 , 2 , 3 ) ) _ { 2 } \colon \\ & \quad A ^ { \{ 7 , 2 , 3 \} } ( z ) = 1 + 5 z ^ { 2 } + 1 1 z ^ { 4 } + 4 7 z ^ { 6 } , \\ & \quad B ^ { \{ 7 , 2 , 3 \} } ( z ) = 1 + 5 z ^ { 2 } + 3 6 z ^ { 3 } + 1 1 z ^ { 4 } + 9 6 z ^ { 5 } \\ & \quad + 4 7 z ^ { 6 } + 6 0 z ^ { 7 } ; \\ & \quad \\
+$$
+
+$$
+A ^ { \{ 8 , 2 , 3 \} } ( z ) = & 1 + 0 . 0 1 5 z ^ { 3 } + 1 3 . 9 2 4 z ^ { 4 } + 2 4 . 0 9 1 z ^ { 5 } \\ & + 4 0 . 0 3 0 z ^ { 6 } + 3 9 . 8 9 3 z ^ { 7 } + 9 . 0 4 6 z ^ { 8 } , \\
+$$
+
+$$
+B ^ { \{ 8 , 2 , 3 \} } ( z ) = & 1 + 1 1 . 9 7 0 z ^ { 3 } + 3 8 . 1 5 2 z ^ { 4 } \\ & + 1 1 9 . 8 1 7 z ^ { 5 } + 1 5 9 . 9 3 9 z ^ { 6 } \\ & + 1 2 4 . 2 1 3 z ^ { 7 } + 5 6 . 9 0 9 z ^ { 8 } ;
+$$
+
+$$
+A ^ { \{ 8 , 8 , 3 \} } ( z ) = 1 + 2 8 z ^ { 6 } + 3 z ^ { 8 } ,
+$$
+
+where ω = exp(iπ/4). Its weight enumerators are
+
+$$
+where \omega = \exp ( \imath \pi / 4 ) . \, \text { Its weight enumerators are} \quad B ^ { ( 7 , 4 ) } \\ A ( z ) = & 1 + \frac { 1 0 6 } { 1 2 5 } z + z ^ { 2 } + \frac { 1 4 4 } { 1 2 5 } z ^ { 3 } + \frac { 1 2 9 9 } { 1 2 5 } z ^ { 4 } \\ & + \frac { 3 3 1 8 } { 1 2 5 } z ^ { 5 } + \frac { 2 4 5 1 } { 1 2 5 } z ^ { 6 } + \frac { 4 3 2 } { 1 2 5 } z ^ { \prime } , \\ & B ( z ) = & 1 + \frac { 1 0 6 } { 1 2 5 } z + z ^ { 2 } + + \frac { 6 0 6 } { 2 5 } z ^ { 3 } + \frac { 7 0 7 1 } { 1 2 5 } z ^ { 4 } \\ & + \frac { 9 3 1 8 } { 1 2 5 } z ^ { 5 } + \frac { 8 6 7 9 } { 1 2 5 } z ^ { 6 } + \frac { 3 5 4 6 } { 1 2 5 } z ^ { 7 } . \\ & \quad ( 1 4 0 ) \quad A ^ { \{ 7 , 4 \} }
+$$
+
+## F Quantum Weight Enumerators
+
+This section lists the quantum weight enumerators of some QECCs discovered/rediscovered by VarQEC.
+
+## F.1 Symmetric codes
+
+$$
+A ^ { \{ 5 , 6 , 2 \} } ( z ) = 1 + 1 . 6 6 7 z ^ { 4 } + 2 . 6 6 7 z ^ { 5 } ,
+$$
+
+$$
+B ^ { \{ 5 , 6 , 2 \} } ( z ) = 1 + 2 0 z ^ { 2 } + 5 0 z ^ { 3 } + 7 5 z ^ { 4 } + 4 6 z ^ { 5 } ;
+$$
+
+$$
+( 1 4 2 )
+$$
+
+$$
+A ^ { \{ 5 , 2 , 3 \} } ( z ) = 1 + 1 5 z ^ { 4 } ,
+$$
+
+$$
+B ^ { \{ 5 , 2 , 3 \} } ( z ) = 1 + 3 0 z ^ { 3 } + 1 5 z ^ { 4 } + 1 8 z ^ { 5 } ; \quad ( 1 4 4 ) \\
+$$
+
+$$
+A ^ { \{ 6 , 2 , 3 \} } ( z ) = & 1 + 0 . 2 6 7 z + 0 . 7 3 2 z ^ { 2 } + 1 2 . 0 7 0 z ^ { 4 } \\ & + 1 5 . 7 3 2 z ^ { 5 } + 2 . 1 9 7 z ^ { 6 } , \\
+$$
+
+$$
+B ^ { \{ 8 , 8 , 3 \} } ( z ) = & 1 + 5 6 z ^ { 3 } + 2 1 0 z ^ { 4 } + 3 3 6 z ^ { 5 } + 7 2 8 z ^ { 6 } \\ & + 5 0 4 z ^ { 7 } + 2 1 3 z ^ { 8 } ; \\
+$$
+
+$$
+A ^ { \{ 9 , 8 , 3 \} } ( z ) = & 1 + 0 . 0 4 2 z ^ { 4 } + 5 . 8 7 5 z ^ { 5 } + 1 6 . 0 8 3 z ^ { 6 } \\ & + 2 4 . 0 8 3 z ^ { 7 } + 1 4 . 8 7 5 z ^ { 8 } + 2 . 0 4 2 z ^ { 9 } , \\
+$$
+
+$$
+B ^ { \{ 9 , 8 , 3 \} } ( z ) = & 1 + 4 0 z ^ { 3 } + 1 6 2 . 3 3 2 z ^ { 4 } + 4 7 9 . 0 0 4 z ^ { 5 } \\ & + 9 5 2 . 6 6 4 z ^ { 6 } + 1 2 2 4 . 6 6 4 z ^ { 7 } \\ & + 9 3 2 . 0 0 4 z ^ { 8 } + 3 0 4 . 3 3 2 z ^ { 9 } ; \\ & ( 1 5 8 )
+$$
+
+$$
+A ^ { \{ 1 0 , 1 6 , 3 \} } ( z ) = & 1 + 0 . 1 2 7 z ^ { 5 } + 8 . 5 2 5 z ^ { 6 } + 2 0 . 4 4 3 z ^ { 7 } \\ & + 2 1 . 2 5 3 z ^ { 8 } + 1 1 . 4 3 0 z ^ { 9 } + 1 . 2 2 1 z ^ { 1 0 } , \\ & ( 1 5 9 )
+$$
+
+$$
+B ^ { \{ 1 0 , 1 6 , 3 \} } ( z ) = & 1 + 5 5 . 8 1 0 z ^ { 3 } + 2 7 5 . 9 6 1 z ^ { 4 } \\ & + 9 5 4 . 2 4 1 z ^ { 5 } + 2 3 6 6 . 0 1 4 z ^ { 6 } \\ & + 4 1 2 0 . 9 4 8 z ^ { 7 } + 4 6 2 2 . 2 2 7 z ^ { 8 } \\ & + 3 0 6 1 . 0 0 1 z ^ { 9 } + 9 2 6 . 7 9 7 z ^ { 1 0 } ; \\ & ( 1 6 0 )
+$$
+
+$$
+A ^ { \{ 1 0 , 4 , 4 \} } ( z ) & = 1 + 9 0 z ^ { 6 } + 1 3 5 z ^ { 8 } + 3 0 z ^ { 1 0 } , \quad ( 1 6 1 ) \\ B ^ { \{ 1 0 , 4 , 4 \} } ( z ) & = 1 + 9 0 z ^ { 4 } + 2 1 6 z ^ { 5 } + 7 2 0 z ^ { 6 } + 7 2 0 z ^ { 7 } \\ & + 1 4 8 5 z ^ { 8 } + 6 0 0 z ^ { 9 } + 2 6 4 z ^ { 1 0 } . \\ & \quad ( 1 6 2 ) \quad A ^ { \{ 6 , 2 \} }
+$$
+
+$$
+A ^ { \{ 1 1 , 3 2 , 3 \} } ( z ) = & 1 + 0 . 1 6 0 z ^ { 6 } + 1 2 . 5 2 2 z ^ { 7 } + 2 3 . 3 1 6 z ^ { 8 } \\ & + 1 8 . 3 1 9 z ^ { 9 } + 7 . 5 2 4 z ^ { 1 0 } + 1 . 1 5 8 z ^ { 1 1 } \\
+$$
+
+$$
+B ^ { \{ 1 1 , 3 2 , 3 \} } ( z ) = & 1 + 7 5 . 0 3 z ^ { 3 } + 4 4 3 . 2 6 0 z ^ { 4 } \\ & + 1 7 2 9 . 6 5 4 z ^ { 5 } + 5 2 1 9 . 4 5 6 z \\ & + 1 1 3 4 3 . 6 1 3 z ^ { 7 } + 1 6 9 1 8 . 6 5 4 z ^ { 8 } \\ & + 1 6 8 5 9 . 4 5 6 z ^ { 9 } + 1 0 1 8 5 . 6 3 0 z ^ { 1 0 } \\ & + 2 7 6 0 . 2 7 4 z ^ { 1 1 } \\ & \quad ( 1 6 4 ) \quad B ^ { \{ 7 , 3 \} } \\ & 4 \{ 1 2 6 4 3 \} \, \langle \, \rangle _ { 1 } + 1 0 9 7 \, \langle \, \rangle _ { 2 } + 1 5 \, 8 \, + 9 4 \, \vartheta _ { 2 } \, \cdot 1 \, \cdot 1 0 \,
+$$
+
+$$
+A ^ { \{ 1 2 , 6 4 , 3 \} } ( z ) = & 1 + 2 z ^ { 7 } + 1 5 z ^ { 8 } + 2 4 z ^ { 9 } + 1 6 z ^ { 1 0 } \\ & + 6 z ^ { 1 1 } , \\ & ( 1 6 5 ) \quad A ^ { \{ 5 , 2 \} }
+$$
+
+$$
+B ^ { \{ 1 2 , 6 4 , 3 \} } ( z ) = & 1 + 1 0 4 z ^ { 3 } + 6 4 9 z ^ { 4 } + 2 9 7 6 z ^ { 5 } \\ & + 1 0 4 7 2 z ^ { 6 } + 2 7 1 8 4 z ^ { 7 } + 5 0 6 9 1 z ^ { 8 } \\ & + 6 7 6 1 6 z ^ { 9 } + 6 0 9 5 2 z ^ { 1 0 } + 3 3 1 9 2 z ^ { 1 1 } \\ & + 8 3 0 7 z ^ { 1 2 } . \\ & \quad A ^ { \{ 6 , 4 \} }
+$$
+
+$$
+A ^ { \{ 1 3 , 1 2 8 , 3 \} } ( z ) = & 1 + 5 z ^ { 8 } + 1 6 z ^ { 9 } + 2 4 z ^ { 1 0 } + 1 6 z ^ { 1 1 } \\ & + 2 z ^ { 1 2 } , \\
+$$
+
+$$
+B ^ { \{ 1 3 , 1 2 8 , 3 \} } ( z ) = & 1 + 1 3 8 z ^ { 3 } + 9 2 9 z ^ { 4 } + 4 8 1 4 z ^ { 5 } \\ & + 1 9 5 9 2 z ^ { 6 } + 5 8 6 2 8 z ^ { 7 } + 1 3 1 9 8 7 z ^ { 8 } \\ & + 2 1 9 8 3 6 z ^ { 9 } + 2 6 3 8 6 4 z ^ { 1 0 } \\ & + 2 1 5 9 5 4 z ^ { 1 1 } + 1 0 7 9 2 5 z ^ { 1 2 } \\ & + 2 4 9 1 8 z ^ { 1 3 } . \\ & ( 1 6 8 )
+$$
+
+$$
+A ^ { \{ 1 4 , 2 5 6 , 3 \} } ( z ) = & 1 + 2 z ^ { 8 } + 4 z ^ { 9 } + 1 8 z ^ { 1 0 } + 2 8 z ^ { 1 1 } \\ & + 1 1 z ^ { 1 2 } , \\ 1 z ^ { 1 0 } , \\ 1 5 9 )
+$$
+
+$$
+1 z ^ { 1 0 } , & & B ^ { \{ 1 4 , 2 5 6 , 3 \} } ( z ) = & 1 + 1 8 0 z ^ { 3 } + 1 2 9 5 z ^ { 4 } + 7 4 3 6 z ^ { 5 } \\ & & + 3 4 4 1 8 z ^ { 6 } + 1 1 7 3 2 0 z ^ { 7 } \\ & & + 3 0 7 3 9 1 z ^ { 8 } + 6 1 6 2 8 0 z ^ { 9 } \\ & & + 9 2 3 3 7 2 z ^ { 1 0 } + 1 0 0 7 3 0 0 z ^ { 1 1 } \\ & & + 7 5 5 9 2 1 z ^ { 1 2 } + 3 4 8 6 3 6 z ^ { 1 3 } \\ & & + 7 4 7 5 4 z ^ { 1 4 } . \\ 1 6 1 ) & & ( 1 7 0 ) \\ 0 z ^ { 7 } & &
+$$
+
+## F.2 Asymmetric codes
+
+$$
+A ^ { \{ 6 , 2 , d _ { c } ( \frac { 1 } { 2 } ) = 2 \} } ( z ) & = 1 + 6 z ^ { 2 } + 9 z ^ { 4 } + 1 6 z ^ { 6 } , \\
+$$
+
+$$
+B ^ { \{ 6 , 2 , d _ { e } ( \frac { 1 } { 2 } ) = 2 \} } ( z ) = & 1 + 1 5 z ^ { 2 } + 8 z ^ { 3 } + 3 9 z ^ { 4 } \\ & + 2 4 z ^ { 5 } + 4 1 z ^ { 6 } ;
+$$
+
+$$
+( 1 7 2 )
+$$
+
+$$
+A ^ { \{ 7 , 3 , d _ { e } ( \frac { 1 } { 2 } ) = 2 \} } ( z ) = & 1 + 1 . 1 1 1 z ^ { 2 } + 2 . 6 6 7 z ^ { 3 } \\ & + 4 . 7 7 8 z ^ { 4 } + 1 3 . 3 3 3 z ^ { 5 } \\ & + 1 5 . 4 4 4 z ^ { 6 } + 5 3 . 3 3 3 z ^ { 7 } , \\ & ( 1 7 3 ) \\
+$$
+
+$$
+B ^ { \{ 7 , 3 , d _ { e } ( \frac { 1 } { 2 } ) = 2 \} } ( z ) = & 1 + 3 . 6 6 7 z ^ { 2 } + 2 4 z ^ { 3 } + 6 1 . 6 6 7 z ^ { 4 } \\ & + 1 2 0 z ^ { 5 } + 1 2 5 . 6 6 7 z ^ { 6 } + 4 8 z ^ { 7 } ;
+$$
+
+$$
+A ^ { \{ 5 , 2 , d _ { e } ( 2 ) = 3 \} } ( z ) & = 1 + 4 z ^ { 2 } + 3 z ^ { 4 } + 8 z ^ { 5 } , \quad ( 1 7 5 ) \\ B ^ { \{ 5 , 2 , d _ { e } ( 2 ) = 3 \} } ( z ) & = 1 + 1 2 z ^ { 2 } + 1 0 z ^ { 3 } + 1 9 z ^ { 4 } \\ & + 2 2 z ^ { 5 } ; \\ 2 z ^ { 1 1 }
+$$
+
+$$
+A ^ { \{ 6 , 4 , d _ { e } ( 2 ) = 3 \} } ( z ) = 1 + z ^ { 3 } + 4 z ^ { 4 } + 7 z ^ { 5 } + 3 z ^ { 6 } , \\
+$$
+
+$$
+B ^ { \{ 6 , 4 , d _ { e } ( 2 ) = 3 \} } ( z ) = & 1 + 7 z ^ { 2 } + 3 6 z ^ { 3 } + 7 5 z ^ { 4 } + 9 2 z ^ { 5 } & B ^ { \{ 5 , 2 } \\ & + 4 5 z ^ { 6 } ; \\
+$$
+
+$$
+A ^ { \{ 7 , 8 , d _ { e } ( 2 ) = 3 \} } ( z ) = 1 + z ^ { 4 } + 6 z ^ { 5 } + 6 z ^ { 6 } + 2 z ^ { 7 } ,
+$$
+
+$$
+B ^ { \{ 7 , 8 , d _ { e } ( 2 ) = 3 \} } ( z ) = & 1 + 9 z ^ { 2 } + 6 4 z ^ { 3 } + 1 7 9 z ^ { 4 } \\ & + 3 1 2 z ^ { 5 } + 3 2 3 z ^ { 6 } + 1 3 6 z ^ { 7 } ; \\
+$$
+
+$$
+A ^ { \{ 6 , 2 , d _ { e } ( 2 ) = 4 \} } ( z ) = 1 + z ^ { 2 } + 1 1 z ^ { 4 } + 1 6 z ^ { 5 } + 3 z ^ { 6 } , \quad A ^ { \{ 7 , 8 } \\ B ^ { \{ 7 , 8 }
+$$
+
+$$
+B ^ { \{ 6 , 2 , d _ { e } ( 2 ) = 4 \} } ( z ) = & 1 + z ^ { 2 } + 2 4 z ^ { 3 } + 3 5 z ^ { 4 } + 4 0 z ^ { 5 } \\ & + 2 7 z ^ { 6 } ; \\
+$$
+
+$$
+A ^ { \{ 8 , 3 , d _ { e } ( 2 ) = 4 \} } ( z ) = & 1 + 0 . 2 2 4 z ^ { 2 } + 1 . 7 7 0 z ^ { 3 } \\ & + 4 . 9 1 9 z ^ { 4 } + 1 7 . 7 9 4 z ^ { 5 } \\ & + 2 8 . 1 5 5 z ^ { 6 } + 2 3 . 1 0 3 z ^ { 7 } \\ & + 8 . 3 6 8 z ^ { 8 } , \\ & B ^ { \{ 8 , 9 } \\ B \{ 8 , 3 , d _ { e } ( 2 ) = 4 \} ( \tilde { \alpha } ) = & 1 + 2 0 1 \tilde { \alpha } ^ { 2 } + 1 8 . 6 1 2 \tilde { \alpha } ^ { 3 } \\
+$$
+
+$$
+B ^ { \{ 8 , 3 , d _ { e } ( 2 ) = 4 \} } ( z ) = & 1 + 2 . 0 2 1 z ^ { 2 } + 1 8 . 6 1 2 z ^ { 3 } \\ & + 6 8 . 0 1 6 z ^ { 4 } + 1 5 4 . 7 7 5 z ^ { 5 } \\ & + 2 3 7 . 9 0 4 z ^ { 6 } + 2 1 0 . 6 1 2 z ^ { 7 } \\ & + 7 5 . 0 5 8 z ^ { 8 } . \\ & ( 1 8 4 ) B ^ { \{ 9 , 1 \} }
+$$
+
+## F.3 Channel-adaptive codes
+
+## F.3.1 Nearest-neighbor collective amplitude damping
+
+This part lists the quantum weight enumerators of the channel-adaptive codes for the onedimensional nearest-neighbor collective amplitude damping errors discussed in Sec. 5.3.1.
+
+$$
+A ^ { \{ 4 , 3 \} } ( z ) = & 1 + 0 . 1 1 1 z + 1 . 2 2 2 z ^ { 2 } + 0 . 7 7 8 z ^ { 3 } \\ & + 2 . 2 2 2 z ^ { 4 } , \\ & A ^ { \{ a \} }
+$$
+
+$$
+B ^ { \{ 4 , 3 \} } ( z ) = & 1 + 1 . 6 6 7 z + 1 1 . 6 6 7 z ^ { 2 } + 1 7 z ^ { 3 } \\ & + 1 6 . 6 6 7 z ^ { 4 } ; \\
+$$
+
+$$
+A ^ { \{ 5 , 2 \} } ( z ) = 1 + z + 2 z ^ { 2 } + 2 z ^ { 3 } + 5 z ^ { 4 } + 5 z ^ { 5 } , \quad B ^ { \{ b \} }
+$$
+
+$$
+2 z ^ { 5 } \quad B ^ { \{ 5 , 2 \} } ( z ) = 1 + z + 1 0 z ^ { 2 } + 1 8 z ^ { 3 } + 2 1 z ^ { 4 } + 1 3 z ^ { 5 } ;
+$$
+
+$$
+A ^ { \{ 6 , 5 \} } ( z ) = & 1 + 1 . 3 0 7 z ^ { 2 } + 0 . 0 3 2 z ^ { 3 } + 3 . 8 9 0 z ^ { 4 } \\ & + 0 . 0 9 7 z ^ { 5 } + 6 . 4 7 4 z ^ { 6 } ,
+$$
+
+$$
+B ^ { \{ 6 , 5 \} } ( z ) = & 1 + 1 8 . 5 3 3 z ^ { 2 } + 3 2 . 1 6 2 z ^ { 3 } + 1 0 3 . 4 4 9 z ^ { 4 } \\ & + 9 6 . 4 8 5 z ^ { 5 } + 6 8 . 3 7 1 z ^ { 6 } ; \\
+$$
+
+$$
+A ^ { \{ 7 , 8 \} } ( z ) & = 1 + z ^ { 4 } + 6 z ^ { 5 } + 6 z ^ { 6 } + 2 z ^ { 7 } , \quad ( 1 9 1 ) \\ B ^ { \{ 7 , 8 \} } ( z ) & = 1 + 9 z ^ { 2 } + 6 4 z ^ { 3 } + 1 7 9 z ^ { 4 } + 3 1 2 z ^ { 5 } \\ & + 3 2 3 z ^ { 6 } + 1 3 6 z ^ { 7 } ; \\
+$$
+
+$$
+A ^ { \{ 8 , 9 \} } ( z ) = & 1 + 0 . 0 3 8 z ^ { 2 } + 0 . 1 2 4 z ^ { 3 } + 0 . 8 2 7 z ^ { 4 } \\ & + 5 . 2 8 2 z ^ { 5 } + 1 0 . 0 3 5 z ^ { 6 } + 8 . 8 1 6 z ^ { 7 } \\ & + 2 . 3 2 2 z ^ { 8 } , \\ & \\
+$$
+
+$$
+B ^ { \{ 8 , 9 \} } ( z ) = & 1 + 6 . 1 1 9 z ^ { 2 } + 5 7 . 1 1 9 z ^ { 3 } + 2 0 0 . 7 7 8 z ^ { 4 } \\ & + 4 7 5 . 9 8 5 z ^ { 5 } + 7 1 3 . 8 6 7 z ^ { 6 } + 6 1 8 . 8 9 6 z ^ { 7 } \\ & + 2 3 0 . 2 3 7 z ^ { 8 } ; \\
+$$
+
+$$
+A ^ { \{ 9 , 1 6 \} } ( z ) = & 1 + z ^ { 5 } + 8 z ^ { 6 } + 1 4 z ^ { 7 } + 7 z ^ { 8 } + z ^ { 9 } , \\
+$$
+
+$$
+B ^ { \{ 9 , 1 6 \} } ( z ) = & 1 + 4 z ^ { 2 } + 8 0 z ^ { 3 } + 3 2 6 z ^ { 4 } + 9 3 6 z ^ { 5 } \\ & + 1 9 2 4 z ^ { 6 } + 2 4 6 4 z ^ { 7 } + 1 8 4 1 z ^ { 8 } \\ & + 6 1 6 z ^ { 9 } .
+$$
+
+## F.3.2 Nearest-neighbor collective phase-flips
+
+This part lists the quantum weight enumerators of the channel-adaptive codes for the combined noise channel N (Eq. (68)) with hardware connectivity graphs shown in Fig. 7.
+
+$$
+A ^ { \{ a \} } ( z ) = 1 + z ^ { 2 } + 1 1 z ^ { 4 } + 1 6 z ^ { 5 } + 3 z ^ { 6 } ,
+$$
+
+$$
+B ^ { \{ a \} } ( z ) = 1 + z ^ { 2 } + 2 4 z ^ { 3 } + 3 5 z ^ { 4 } + 4 0 z ^ { 5 } + 2 7 z ^ { 6 } ; \\
+$$
+
+$$
+^ { 1 8 6 ) } \quad A ^ { \{ b \} } ( z ) = 1 + z ^ { 2 } + 1 1 z ^ { 4 } + 1 6 z ^ { 5 } + 3 z ^ { 6 } ,
+$$
+
+$$
+B ^ { \{ b \} } ( z ) = 1 + z ^ { 2 } + 2 4 z ^ { 3 } + 3 5 z ^ { 4 } + 4 0 z ^ { 5 } + 2 7 z ^ { 6 } ; \\ ( 2 0 0 )
+$$
+
+$$
+A ^ { \{ c \} } ( z ) = 1 + 2 z ^ { 3 } + 9 z ^ { 4 } + 2 4 z ^ { 5 } + 2 2 z ^ { 6 } + 6 z ^ { 7 } , \\
+$$
+
+$$
+B ^ { \{ c \} } ( z ) = 1 + 1 7 z ^ { 3 } + 4 5 z ^ { 4 } + 7 8 z ^ { 5 } + 8 2 z ^ { 6 } + 3 3 z ^ { 7 } ;
+$$
+
+$$
+A ^ { \{ d \} } ( z ) = 1 + 2 z ^ { 3 } + 9 z ^ { 4 } + 2 4 z ^ { 5 } + 2 2 z ^ { 6 } + 6 z ^ { 7 } ,
+$$
+
+$$
+B ^ { \{ d \} } ( z ) = 1 + 1 7 z ^ { 3 } + 4 5 z ^ { 4 } + 7 8 z ^ { 5 } + 8 2 z ^ { 6 } + 3 3 z ^ { 7 } ;
+$$
+
+$$
+A ^ { \{ e \} } ( z ) = & 1 + 3 . 9 4 4 z ^ { 4 } + 1 2 . 1 1 2 z ^ { 5 } + 2 4 z ^ { 6 } \\ & + 1 9 . 8 8 8 z ^ { 7 } + 3 . 0 5 6 z ^ { 8 } ,
+$$
+
+$$
+B ^ { \{ e \} } ( z ) = & 1 + 2 7 . 8 8 z ^ { 3 } + 8 6 . 3 3 6 z ^ { 4 } + 2 1 5 . 7 7 6 z ^ { 5 } \\ & + 3 1 9 . 7 7 6 z ^ { 6 } + 2 6 8 . 3 3 6 z ^ { 7 } + 1 0 4 . 8 8 z ^ { 8 } ; \\
+$$
+
+$$
+A ^ { \{ f \} } ( z ) = & 1 + 3 . 9 8 3 z ^ { 4 } + 1 2 . 0 3 3 z ^ { 5 } + 2 4 z ^ { 6 } \\ & + 1 9 . 9 6 7 z ^ { 7 } + 3 . 0 1 7 z ^ { 8 } ,
+$$
+
+$$
+B ^ { \{ f \} } ( z ) = & 1 + 2 7 . 9 6 7 z ^ { 3 } + 8 6 . 1 0 0 z ^ { 4 } + 2 1 5 . 9 3 3 z ^ { 5 } \\ & + 3 1 9 . 9 3 3 z ^ { 6 } + 2 6 8 . 1 0 0 z ^ { 7 } + 1 0 4 . 9 6 7 z ^ { 8 } ;
+$$
+
+$$
+A ^ { \{ g \} } ( z ) = & 1 + 0 . 8 8 6 z ^ { 3 } + 3 . 2 8 2 z ^ { 4 } + 1 1 . 6 0 4 z ^ { 5 } \\ & + 3 0 . 3 5 2 z ^ { 6 } + 4 5 . 2 2 0 z ^ { 7 } + 2 9 . 3 6 6 z ^ { 8 } \\ & + 6 . 2 9 0 z ^ { 9 } ,
+$$
+
+(209)
+
+$$
+B ^ { \{ g \} } ( z ) = & 1 + 2 1 . 6 4 8 z ^ { 3 } + 7 8 . 7 0 4 z ^ { 4 } + 2 3 2 . 5 2 0 z ^ { 5 } \\ & + 4 8 2 . 2 5 5 z ^ { 6 } + 6 1 8 . 3 5 2 z ^ { 7 } + 4 6 2 . 0 4 1 z ^ { 8 } \\ & + 1 5 1 . 4 8 0 z ^ { 9 } ; \\ & ( 2 1 0 )
+$$
+
+$$
+A ^ { \{ h \} } ( z ) = & 1 + 0 . 0 0 4 z ^ { 3 } + 3 . 9 9 6 z ^ { 4 } + 1 0 . 0 0 9 z ^ { 5 } \\ & + 3 5 . 9 7 4 z ^ { 6 } + 4 4 . 0 0 4 z ^ { 7 } + 2 3 . 0 3 0 z ^ { 8 } \\ & + 9 . 9 8 3 z ^ { 9 } , \\ & ( 2 1 1 )
+$$
+
+$$
+B ^ { \{ h \} } ( z ) = & 1 + 1 6 . 0 2 6 z ^ { 3 } + 8 9 . 9 4 8 z ^ { 4 } + 2 2 4 . 0 4 4 z ^ { 5 } \\ & + 4 8 7 . 9 6 5 z ^ { 6 } + 6 2 3 . 9 7 4 z ^ { 7 } + 4 4 5 . 0 8 7 z ^ { 8 } \\ & + 1 5 9 . 9 5 6 z ^ { 9 } . \\
+$$

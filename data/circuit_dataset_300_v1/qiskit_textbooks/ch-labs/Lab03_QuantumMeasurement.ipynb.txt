@@ -1,0 +1,523 @@
+# Lab 3 Quantum Measurements
+
+
+Prerequisite
+- Ch.1.4 Single Qubit Gates
+- Ch.2.2 Multiple Qubits and Entangled States
+- Mitigating Noise on Real Quantum Computers
+
+Other relevant materials
+- Feynman Lectures Ch. III - 12
+- Quantum Operation
+- Interactive Bloch Sphere
+- Ch.5.2 Measurement Error Mitigation
+
+
+[Python source: cell 2]
+from qiskit import *
+import numpy as np
+from numpy import linalg as la
+from qiskit.tools.monitor import job_monitor
+import qiskit.tools.jupyter
+
+
+## Part 1: Measuring the state of a qubit
+
+**Goal**
+
+Determine the Bloch components of a qubit.
+
+Fundamental to the operation of a quantum computer is the ability to compute the Bloch components of a qubit or qubits.  These components correspond to the expectation values of the Pauli operators $X, Y, Z$, and are important quantities for applications such as quantum chemistry and optimization.  Unfortunately, it is impossible to simultaneously compute these values, thus requiring many executions of the same circuit.  In addition, measurements are restricted to the computational basis (Z-basis) so that each Pauli needs to be rotated to the standard basis to access the x and y components.  Here we verify the methods by considering the case of a random vector on the Bloch sphere.
+
+
+### 📓 1. Express the expectation values of the Pauli operators for an arbitrary qubit state $|q\rangle$ in the computational basis.
+
+The case for the expectation value of Pauli Z gate is given as an example.
+
+
+Using the diagonal representation, also known as spectral form or orthonormal decomposition, of Pauli $Z$ gate and the relations among the Pauli gates (see here), expectation values of $ X, Y, Z $ gates can be written as  
+
+$$
+\begin{aligned}
+\langle Z \rangle &=\langle q | Z | q\rangle =\langle q|0\rangle\langle 0|q\rangle - \langle q|1\rangle\langle 1|q\rangle
+=|\langle 0 |q\rangle|^2 - |\langle 1 | q\rangle|^2\\\\
+\langle X \rangle &= \\\\
+\langle Y \rangle &=
+\end{aligned}
+\\
+$$
+, respectively.
+
+Therefore, the expectation values of the Paulis for a qubit state $|q\rangle$ can be obtained by making a measurement in the standard basis after rotating the standard basis frame to lie along the corresponding axis. The probabilities of obtaining the two possible outcomes 0 and 1 are used to evaluate the desired expectation value as the above equations show.
+
+
+### 2. Measure the Bloch sphere coordinates of a qubit using the qasm simulator and plot the vector on the bloch sphere.
+
+
+#### 📓Step A. Create a qubit state using the circuit method, initialize with two random complex numbers as the parameter.
+
+To learn how to use the function `initialize`, check here. ( go to the `arbitrary initialization` section. )
+
+
+[Python source: cell 8]
+qc = QuantumCircuit(1)
+
+#### your code goes here
+
+
+
+
+
+#### 📓Step B. Build the circuits to measure the expectation values of $X, Y, Z$ gate based on your answers to the question 1.  Run the cell below to estimate the bloch sphere coordinates of the qubit from step A using the qasm simulator.
+
+The circuit for $Z$ gate measurement is given as an example.
+
+
+[Python source: cell 10]
+# z measurement of qubit 0
+measure_z = QuantumCircuit(1,1)
+measure_z.measure(0,0)
+
+# x measurement of qubit 0
+measure_x = QuantumCircuit(1,1)
+# your code goes here
+
+
+
+
+
+
+
+# y measurement of qubit 0
+measure_y = QuantumCircuit(1,1)
+# your code goes here
+
+
+
+
+
+
+
+shots = 2**14 # number of samples used for statistics
+sim = Aer.get_backend('qasm_simulator')
+bloch_vector_measure = []
+for measure_circuit in [measure_x, measure_y, measure_z]:
+    
+    # run the circuit with a the selected measurement and get the number of samples that output each bit value
+    counts = execute(qc+measure_circuit, sim, shots=shots).result().get_counts()
+
+    # calculate the probabilities for each bit value
+    probs = {}
+    for output in ['0','1']:
+        if output in counts:
+            probs[output] = counts[output]/shots
+        else:
+            probs[output] = 0
+            
+    bloch_vector_measure.append( probs['0'] -  probs['1'] )
+
+# normalizing the bloch sphere vector
+bloch_vector = bloch_vector_measure/la.norm(bloch_vector_measure)
+
+print('The bloch sphere coordinates are [{0:4.3f}, {1:4.3f}, {2:4.3f}]'
+      .format(*bloch_vector))    
+
+
+#### Step C. Plot the vector on the bloch sphere.
+
+Note that the following cell for the interactive bloch_sphere would not run properly unless you work in IQX. You can either use `plot_bloch_vector` for the non-interactive version or install `kaleidoscope` by running 
+
+```
+pip install kaleidoscope
+
+```
+in a terminal.  You also need to restart your kernel after the installation.  To learn more about how to use the interactive bloch sphere, go here.
+
+
+[Python source: cell 12]
+from kaleidoscope.interactive import bloch_sphere
+
+bloch_sphere(bloch_vector, vectors_annotation=True)
+
+
+[Python source: cell 13]
+from qiskit.visualization import plot_bloch_vector
+
+plot_bloch_vector( bloch_vector )
+
+
+## Part 2: Measuring Energy
+
+**Goal**
+
+Evaluate the energy levels of the hydrogen ground state using qasm simulator.
+
+The energy of a quantum system can be estimated by measuring the expectation value of its hamiltonian, which is a hermitian operator, through the procedure we mastered in part 1.
+
+The ground state of hydrogen is not defined as a single unique state but actually contains four different states due to the spins of the electron and proton. In part 2 of this lab, we evaluate the energy difference among these four states, which is from the `hyperfine splitting`, by computing the energy expectation value for the system of two spins with the hamiltonian expressed in Pauli operators. For more information about `hyperfine structure`, see here
+
+
+Consider the system with two qubit interaction hamiltonian $H = A(XX+YY+ZZ)$ where $A = 1.47e^{-6} eV$ and $X, Y, Z$ are Pauli gates. Then the energy expectation value of the system can be evaluated by combining the expectation value of each term in the hamiltonian.
+In this case, $E = \langle H\rangle = A( \langle XX\rangle + \langle YY\rangle + \langle ZZ\rangle )$.
+
+
+### 📓 1. Express the expectation value of each term in the hamiltonian for an arbitrary two qubit state   $|\psi \rangle$ in the computational basis.
+
+The case for the term $\langle ZZ\rangle$ is given as an example.
+
+$$
+\begin{aligned}
+\langle ZZ\rangle &=\langle \psi | ZZ | \psi\rangle =\langle \psi|(|0\rangle\langle 0| - |1\rangle\langle 1|)\otimes(|0\rangle\langle 0| - |1\rangle\langle 1|) |\psi\rangle
+=|\langle 00|\psi\rangle|^2 - |\langle 01 | \psi\rangle|^2 - |\langle 10 | \psi\rangle|^2 + |\langle 11|\psi\rangle|^2\\\\
+\langle XX\rangle &= \\\\
+\langle YY\rangle &=
+\end{aligned}
+$$
+
+
+### 2. Measure the expected energy of the system using the qasm simulator when two qubits are entangled. Regard the bell basis, four different entangled states.
+
+
+#### 📓Step A. Construct the circuits to prepare four different bell states.
+
+Let's label each bell state as,
+$$
+\begin{aligned}
+Tri1 &= \frac{1}{\sqrt2} (|00\rangle + |11\rangle)\\
+Tri2 &= \frac{1}{\sqrt2} (|00\rangle - |11\rangle)\\
+Tri3 &= \frac{1}{\sqrt2} (|01\rangle + |10\rangle)\\
+Sing &= \frac{1}{\sqrt2} (|10\rangle - |01\rangle)
+\end{aligned}
+$$
+
+
+[Python source: cell 19]
+# circuit for the state Tri1
+Tri1 = QuantumCircuit(2)
+# your code goes here
+
+
+
+
+
+
+# circuit for the state Tri2
+Tri2 = QuantumCircuit(2)
+# your code goes here
+
+
+
+
+
+# circuit for the state Tri3
+Tri3 = QuantumCircuit(2)
+# your code goes here
+
+
+
+
+
+
+# circuit for the state Sing
+Sing = QuantumCircuit(2)
+# your code goes here
+
+
+
+
+
+
+
+
+#### 📓Step B. Create the circuits to measure the expectation value of each term in the hamiltonian based on your answer to the question 1.
+
+
+[Python source: cell 21]
+# <ZZ> 
+measure_ZZ = QuantumCircuit(2)
+measure_ZZ.measure_all()
+
+# <XX>
+measure_XX = QuantumCircuit(2)
+# your code goes here
+
+
+
+
+
+# <YY>
+measure_YY = QuantumCircuit(2)
+# your code goes here
+
+
+
+
+
+
+
+#### Step C. Execute the circuits on qasm simulator by runnng the cell below and evaluate the energy expectation value for each state.
+
+
+[Python source: cell 23]
+shots = 2**14 # number of samples used for statistics
+
+A = 1.47e-6 #unit of A is eV
+E_sim = []
+for state_init in [Tri1,Tri2,Tri3,Sing]:
+    Energy_meas = []
+    for measure_circuit in [measure_XX, measure_YY, measure_ZZ]:
+    
+        # run the circuit with a the selected measurement and get the number of samples that output each bit value
+        qc = state_init+measure_circuit
+        counts = execute(qc, sim, shots=shots).result().get_counts()
+
+        # calculate the probabilities for each computational basis
+        probs = {}
+        for output in ['00','01', '10', '11']:
+            if output in counts:
+                probs[output] = counts[output]/shots
+            else:
+                probs[output] = 0
+            
+        Energy_meas.append( probs['00'] - probs['01'] - probs['10'] + probs['11'] )
+ 
+    E_sim.append(A * np.sum(np.array(Energy_meas)))
+
+
+[Python source: cell 24]
+# Run this cell to print out your results
+
+print('Energy expection value of the state Tri1 : {:.3e} eV'.format(E_sim[0]))
+print('Energy expection value of the state Tri2 : {:.3e} eV'.format(E_sim[1]))
+print('Energy expection value of the state Tri3 : {:.3e} eV'.format(E_sim[2]))
+print('Energy expection value of the state Sing : {:.3e} eV'.format(E_sim[3]))
+
+
+#### Step D. Understanding the result.
+
+If you found the energy expectation values successfully, you would have obtained exactly the same value, $A (= 1.47e^{-6} eV)$, for the trplet tates, $|Tri1\rangle, |Tri2\rangle, |Tri3\rangle$ and one lower energy level, $-3A (= -4.41e^{-6} eV)$ for the singlet state $|Sing\rangle$.   
+
+What we have done here is measuring the energies of the four different spin states corresponding to the ground state of hydrogen and observed `hyperfine structure` in the energy levels caused by spin-spin coupling.  This tiny energy difference between the singlet and triplet states is the reason for the famous 21-cm wavelength radiation used to map the structure of the galaxy.
+
+
+In the cell below, we varify the wavelength of the emission from the transition between the triplet states and singlet state.
+
+
+[Python source: cell 27]
+# reduced plank constant in (eV) and the speed of light(cgs units)
+hbar, c = 4.1357e-15, 3e10
+
+# energy difference between the triplets and singlet
+E_del = abs(E_sim[0] - E_sim[3])
+
+# frequency associated with the energy difference
+f = E_del/hbar
+
+# convert frequency to wavelength in (cm) 
+wavelength = c/f
+
+print('The wavelength of the radiation from the transition\
+ in the hyperfine structure is : {:.1f} cm'.format(wavelength))
+
+
+## Part 3: Execute the circuits on Quantum Computer
+
+**Goal**
+
+Re-run the circuits on a IBM quantum system.  Perform measurement error mitigations on the result to improve the accuracy in the energy estimation.
+
+
+#### Step A. Run the following cells to load your account and select the backend
+
+
+[Python source: cell 30]
+provider = IBMQ.load_account()
+
+
+[Python source: cell 31]
+backend = provider.get_backend('ibmq_athens')
+
+
+#### Step B. Execute the circuits on the quantum system.
+
+In Lab1 when we excuted multiple circuits on a real quantum system, we submitted each circuit as a sperate job which produces the multiple job ids.  This time, we put all the circuits in a list and execute the list of the circuits as one job. In this way, all the circuit execution can happen at once, which would possibly decrease your wait time in the queue.
+
+In addition, `transpile` is not used here as all the circuits that we run consist of one or two qubit gates.  We can still specify the initial_layout and optimization_level through `execute` function.  Without using `transpile`, the transpiled circuits are not accessible which is not a concern for this case.
+
+
+📓 Check the backend configuration information and error map through the widget to determine your initial_layout.
+
+
+[Python source: cell 34]
+# run this cell to get the backend information through the widget
+backend
+
+
+[Python source: cell 35]
+# assign your choice for the initial layout to the list variable `initial_layout`.
+initial_layout = 
+
+
+Run the following cell to execute the circuits with the initial_layout on the backend.
+
+
+[Python source: cell 37]
+qc_all = [state_init+measure_circuit for state_init in [Tri1,Tri2,Tri3,Sing] 
+          for measure_circuit in [measure_XX, measure_YY, measure_ZZ] ]  
+
+shots = 8192
+job = execute(qc_all, backend, initial_layout=initial_layout, optimization_level=3, shots=shots)
+print(job.job_id())
+job_monitor(job)
+
+
+[Python source: cell 38]
+# getting the results of your job
+results = job.result()
+
+
+[Python source: cell 39]
+## To access the results of the completed job
+#results = backend.retrieve_job('job_id').result()
+
+
+#### Step C. Estimate the ground state energy levels from the results of the previous step by executing the cells below.
+
+
+[Python source: cell 41]
+def Energy(results, shots):
+    """Compute the energy levels of the hydrogen ground state.
+    
+    Parameters:
+        results (obj): results, results from executing the circuits for measuring a hamiltonian.
+        shots (int): shots, number of shots used for the circuit execution.
+        
+    Returns:
+        Energy (list): energy values of the four different hydrogen ground states
+    """
+    E = []
+    A = 1.47e-6
+
+    for ind_state in range(4):
+        Energy_meas = []
+        for ind_comp in range(3):
+            counts = results.get_counts(ind_state*3+ind_comp)
+        
+            # calculate the probabilities for each computational basis
+            probs = {}
+            for output in ['00','01', '10', '11']:
+                if output in counts:
+                    probs[output] = counts[output]/shots
+                else:
+                    probs[output] = 0
+            
+            Energy_meas.append( probs['00'] - probs['01'] - probs['10'] + probs['11'] )
+
+        E.append(A * np.sum(np.array(Energy_meas)))
+    
+    return E
+
+
+[Python source: cell 42]
+E = Energy(results, shots)
+
+print('Energy expection value of the state Tri1 : {:.3e} eV'.format(E[0]))
+print('Energy expection value of the state Tri2 : {:.3e} eV'.format(E[1]))
+print('Energy expection value of the state Tri3 : {:.3e} eV'.format(E[2]))
+print('Energy expection value of the state Sing : {:.3e} eV'.format(E[3]))
+
+
+#### Step D. Measurement error mitigation.
+
+The results you obtained from running the circuits on the quantum system are not exact due to the noise from the various sources such as enery relaxation, dephasing, crosstalk between qubits, etc. In this step, we will alleviate the effects of the noise through the measurement error mitigation. Before we start, watch this video.
+
+
+[Python source: cell 44]
+from qiskit.ignis.mitigation.measurement import *
+
+
+📓Construct the circuits to profile the measurement errors of all basis states using the function 'complete_meas_cal'.  Obtain the measurement filter object, 'meas_filter', which will be applied to the noisy results to mitigate readout (measurement) error.
+
+
+For further helpful information to complete this task, check here .
+
+
+[Python source: cell 47]
+# your code to create the circuits, meas_calibs, goes here
+meas_calibs, state_labels = 
+
+
+
+# execute meas_calibs on your choice of the backend
+job = execute(meas_calibs, backend, shots = shots)
+print(job.job_id())
+job_monitor(job)
+cal_results = job.result()
+## To access the results of the completed job
+#cal_results = backend.retrieve_job('job_id').result()
+
+
+# your code to obtain the measurement filter object, 'meas_filter', goes here
+
+
+
+
+
+
+
+[Python source: cell 48]
+results_new = meas_filter.apply(results)
+
+
+[Python source: cell 49]
+E_new = Energy(results_new, shots)
+
+print('Energy expection value of the state Tri1 : {:.3e} eV'.format(E_new[0]))
+print('Energy expection value of the state Tri2 : {:.3e} eV'.format(E_new[1]))
+print('Energy expection value of the state Tri3 : {:.3e} eV'.format(E_new[2]))
+print('Energy expection value of the state Sing : {:.3e} eV'.format(E_new[3]))
+
+
+#### Step E. Interpret the result.
+
+
+📓 Compute the relative errors ( or the fractional error ) of the energy values for all four states with and without measurement error mitigation.
+
+
+[Python source: cell 52]
+# results for the energy estimation from the simulation, 
+# execution on a quantum system without error mitigation and
+# with error mitigation in numpy array format 
+Energy_exact, Energy_exp_orig, Energy_exp_new = np.array(E_sim), np.array(E), np.array(E_new)
+
+
+[Python source: cell 53]
+# Calculate the relative errors of the energy values without error mitigation 
+# and assign to the numpy array variable `Err_rel_orig` of size 4
+Err_rel_orig = 
+
+
+[Python source: cell 54]
+# Calculate the relative errors of the energy values with error mitigation 
+# and assign to the numpy array variable `Err_rel_new` of size 4
+Err_rel_new = 
+
+
+[Python source: cell 55]
+np.set_printoptions(precision=3)
+
+print('The relative errors of the energy values for four bell basis\
+ without measurement error mitigation : {}'.format(Err_rel_orig))
+
+
+[Python source: cell 56]
+np.set_printoptions(precision=3)
+
+print('The relative errors of the energy values for four bell basis\
+ with measurement error mitigation : {}'.format(Err_rel_new))
+
+
+📓 Compare the size of the errors before and after the measurment error mitigation and discuss about the effect of the readout error regarding the error map information of the backend that you selected.
+
+
+**Your answer:**

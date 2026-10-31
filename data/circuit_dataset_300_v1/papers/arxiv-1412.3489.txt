@@ -1,0 +1,1202 @@
+## Introduction
+
+We present quantum algorithms to perform deep learning that outperform conventional, state-of-the-art classical algorithms in terms of both training efficiency and model quality. Deep learning is a recent technique used in machine learning that has substantially impacted the way in which classification, inference, and artificial intelligence (AI) tasks are modeled [1, 2, 3, 4]. It is based on the premise that to perform sophisticated AI tasks, such as speech and visual recognition, it may be necessary to allow a machine to learn a model that contains several layers of abstractions of the raw input data. For example, a model trained to detect a car might first accept a raw image, in pixels, as input. In a subsequent layer, it may abstract the data into simple shapes. In the next layer, the elementary shapes may be abstracted further into aggregate forms, such as bumpers or wheels. At even higher layers, the shapes may be tagged with words like “tire” or “hood”. Deep networks therefore automatically learn a complex, nested representation of raw data similar to layers of neuron processing in our brain, where ideally the learned hierarchy of concepts is (humanly) understandable. In general, deep networks may contain many levels of abstraction encoded into a highly connected, complex graphical network; training such graphical networks falls under the umbrella of deep learning.
+
+Boltzmann machines (BMs) are one such class of deep networks, which formally are a class recurrent neural nets with undirected edges and thus provide a generative model for the data. From a physical perspective, Boltzmann machines model the training data with an Ising model that is in thermal equilibrium. These spins are called units in the machine learning literature and encode features and concepts while the edges in the Ising model’s interaction graph represent the statistical dependencies of the features. The set of nodes that encode the observed data and the output are called the visible units ($v$), whereas the nodes used to model the latent concept and feature space are called the hidden units ($h$). Two important classes of BMs are the restricted Boltzmann machine (RBM) which takes the underlying graph to be a complete bipartite graph, and the deep restricted Boltzmann machine which is composed of many layers of RBMs (see Figure 1). For the purposes of discussion, we assume that the visible and hidden units are binary.
+
+A Boltzmann machine models the probability of a given configuration of visible and hidden units by the Gibbs distribution (with inverse temperature $1$):
+
+$$
+P(v,h)=e^{-E(v,h)}/Z,~ \tag{1}
+$$
+
+where $Z$ is a normalizing factor known as the partition function and the energy $E(v,h)$ of a given configuration $(v,h)$ of visible and hidden units is given by
+
+$$
+E(v,h)=-\sum_{i}v_{i}b_{i}-\sum_{j}h_{j}d_{j}-\sum_{i,j}w^{vh}_{ij}v_{i}h_{j}-\sum_{i,j}w^{v}_{i,j}v_{i}v_{j}-\sum_{i,j}w^{h}_{i,j}h_{i}h_{j}. \tag{2}
+$$
+
+Here the vectors $b$ and $d$ are biases that provide an energy penalty for a unit taking the value $1$ and $w^{v,h}_{i,j}$, $w^{v}_{i,j}$, and $w^{h}_{i,j}$ are weights which assign an energy penalty if the visible and hidden units both take value $1$. We denote $w=[w^{v,h},w^{v},w^{h}]$ and let $n_{v}$ and $n_{h}$ be the numbers of visible and hidden units, respectively.
+
+Given some a priori observed data, referred to as the training set, learning for these models proceeds by modifying the strengths of the interactions in the graph to maximize the likelihood of the Boltzmann machine producing the given observations. Consequently, the training process uses gradient descent to find weights and biases that optimize the maximum–likelihood objective (ML–objective):
+
+$$
+O_{\rm ML}:=\frac{1}{N_{\rm train}}\sum_{v\in x_{\rm train}}\log\left(\sum_{h=1}^{n_{h}}P(v,h)\right)-\frac{\lambda}{2}w^{T}w, \tag{3}
+$$
+
+where $N_{train}$ is the size of the training set, $x_{\rm train}$ is the set of training vectors, and $\lambda$ is an $L2$–regularization term to combat overfitting. The derivative of $O_{\rm ML}$ with respect to the weights is
+
+$$
+\frac{\partial O_{\rm ML}}{\partial w_{i,j}} = \left\langle v_{i}h_{j}\right\rangle_{\rm data}-\left\langle v_{i}h_{j}\right\rangle_{\rm model}-\lambda w_{i,j}, \tag{4}
+$$
+
+where the brackets denote the expectation values over the data and model for the BM. The remaining derivatives take a similar form [5].
+
+Computing these gradients directly from (1) and (4) is exponentially hard in $n_{v}$ and $n_{h}$; thus, classical approaches resort to approximations such as contrastive divergence [5, 6, 7, 8, 3]. Unfortunately, contrastive divergence does not provide the gradient of any true objective function [9], it is known to lead to suboptimal solutions [10, 11, 12], it is not guaranteed to converge in the presence of certain regularization functions [9], and it cannot be used directly to train a full Boltzmann machine. We show that quantum computation provides a much better framework for deep learning and illustrate this by providing efficient alternatives to these methods that are elementary to analyze, accelerate the learning process and lead to better models for the training data.
+
+## GEQS Algorithm
+
+We propose two quantum algorithms: Gradient Estimation via Quantum Sampling (GEQS) and Gradient Estimation via Quantum Ampitude Estimation (GEQAE). These algorithms prepare a coherent analog of the Gibbs state for Boltzmann machines and then draw samples from the resultant state to compute the expectation values in (4). Formal descriptions of the algorithms are given in the appendix. Existing algorithms for preparing these states [13, 14, 15, 16, 17] tend not to be efficient for machine learning applications or do not offer clear evidence of a quantum speedup. The inefficiency of [15, 17] is a consequence of the uniform initial state having small overlap with the Gibbs state. The complexities of these prior algorithms, along with our own, are given in Table 1
+
+Our algorithms address this problem by using a non-uniform prior distribution for the probabilities of each configuration, which is motivated by the fact that we know a priori from the weights and the biases that certain configurations will be less likely than others. We obtain this distribution by using a mean–field (MF) approximation to the configuration probabilities. This approximation is classically efficient and typically provides a good approximation to the Gibbs states observed in practical machine learning problems [18, 19, 7]. Our algorithms exploit this prior knowledge to refine the Gibbs state from copies of the MF state. This allows the Gibbs distribution to be prepared efficiently and exactly if the two states are sufficiently close.
+
+The MF approximation, $Q(v,h)$, is defined to be the product distribution that minimizes the Kullback–Leibler divergence ${\rm KL}(Q||P)$. The fact that it is a product distribution means that it can be efficiently computed and also can be used to find a classically tractable estimate of the partition function $Z$:
+
+$$
+Z_{Q}:=\sum_{v,h}Q(v,h)\log\left(\frac{e^{-E(v,h)}}{Q(v,h)}\right).
+$$
+
+Here $Z_{Q}\leq Z$ and equality is achieved if and only if ${\rm KL}(Q||P)=0$ [18]. Here $Q(v,h)$ does not need to be the MF approximation. The same formula also applies if $Q(v,h)$ is replaced by another efficient approximation, such as a structured mean–field theory calculation [20].
+
+Let us assume that a constant $\kappa$ is known such that
+
+$$
+P(v,h)\leq\frac{e^{-E(v,h)}}{Z_{Q}}\leq\kappa\,Q(v,h), \tag{5}
+$$
+
+and define the following “normalized” probability of a configuration as
+
+$$
+\mathcal{P}(v,h):=\frac{e^{-E(v,h)}}{\kappa\,Z_{Q}\,Q(v,h)}. \tag{6}
+$$
+
+Note that
+
+$$
+Q(v,h)\mathcal{P}(v,h)\propto P(v,h), \tag{7}
+$$
+
+which means that if the state
+
+$$
+\sum_{v,h}\sqrt{Q(v,h)}|v\rangle|h\rangle, \tag{8}
+$$
+
+is prepared and each of the amplitudes are multiplied by $\sqrt{\mathcal{P}(v,h)}$ then the result will be proportional to the desired state.
+
+The above process can be made operational by adding an additional quantum register to compute $\mathcal{P}(v,h)$ and using quantum superpostion to prepare the state
+
+$$
+\sum_{v,h}\sqrt{Q(v,h)}|v\rangle|{h}\rangle|{\mathcal{P}(v,h)}\rangle\left(\sqrt{1-\mathcal{P}(v,h)}|{0}\rangle+\sqrt{\mathcal{P}(v,h)}|{1}\rangle\right). \tag{9}
+$$
+
+The target Gibbs state is obtained if the right–most qubit is measured to be $1$. Preparing (9) is efficient because $e^{-E(v,h)}$ and $Q(v,h)$ can be calculated in time that is polynomial in the number of visible and hidden units. The success probability of preparing the state in this manner is
+
+$$
+P_{\rm success}=\frac{Z}{\kappa\,Z_{Q}}\geq\frac{1}{\kappa}. \tag{10}
+$$
+
+In practice, our algorithm uses quantum amplitude amplification [21] to quadratically boost the probability of success if (10) is small.
+
+The complexity of the algorithm is determined by the number of quantum operations needed in the gradient calculation. Since the evaluation of the energy requires a number of operations that, up to logarithmic factors, scales linearly with the total number of edges in the model the combined cost of estimating the gradient is
+
+$$
+\tilde{O}\left(N_{\rm train}E(\sqrt{\kappa}+\max_{x\in x_{\rm train}}\sqrt{\kappa_{x}})\right), \tag{11}
+$$
+
+here $\kappa_{x}$ is the value of $\kappa$ corresponding to the case where the visible units are constrained to be $x$. The cost of estimating $Q(v,h)$ and $Z_{\rm MF}$ is $\tilde{O}(E)$ (see appendix) and thus does not asymptotically contribute to the cost. In contrast, the number of operations required to classically estimate the gradient using greedy layer–by–layer optimization [3] scales as
+
+$$
+\tilde{O}(N_{\rm train}\ell E), \tag{12}
+$$
+
+where $\ell$ is the number of layers in the dRBM and $E$ is the number of connections in the BM. Assuming that $\kappa$ is a constant, the quantum sampling approach provides an asymptotic advantage for training deep networks. We provide numerical evidence in the appendixshowing that $\kappa$ can often be made constant by increasing $n_{h}$ and the regularization parameter $\lambda$.
+
+The number of qubits required by our algorithm is minimal compared to existing quantum machine learning algorithms [22, 23, 24, 25]. This is because the training data does not need to be stored in a quantum database, which would otherwise require $\tilde{O}(N_{\rm train})$ logical qubits [26, 27]. Rather, if $\mathcal{P}(v,h)$ is computed with $\lceil\log(1/\mathcal{E})\rceil$ bits of precision and can be accessed as an oracle then only
+
+$$
+O(n_{h}+n_{v}+\log(1/\mathcal{E}))
+$$
+
+logical qubits are needed for the GEQS algorithm. The number of qubits required will increase if $\mathcal{P}(v,h)$ is computed using reversible operations, but recent developments in quantum arithmetic can substantially reduce such costs [28].
+
+Furthermore, the exact value of $\kappa$ need not be known. If a value of $\kappa$ is chosen that does not satisfy (5) for all configurations then our algorithm will still be able to approximate the gradient if $\mathcal{P}(v,h)$ is clipped to the interval $[0,1]$. The algorithm can therefore always be made efficient, at the price of introducing errors in the resultant probability distribution, by holding $\kappa$ fixed as the size of the BM increases. These errors emerge because the state preparation algorithm will under–estimate the relative probability of configurations that violate (5); however, if the sum of the probabilities of these violations is small then a simple continuity argument reveals that the fidelity of the approximate Gibbs state and the correct state is high. In particular, if we define “bad” to be the set of configurations that violate (5) then the continuity argument shows that if
+
+$$
+\sum_{(v,h)\in{\rm bad}}P(v,h)\leq\epsilon,
+$$
+
+then the fidelity of the resultant state with the Gibbs state is at least $1-\epsilon$. This is formalized in the appendix.
+
+Our algorithms are not expected to be both exact and efficient for all BMs. If they were then they could be used to learn ground–state energies of non–planar Ising models, implying that ${\rm NP}\subseteq{\rm BQP}$, which is widely believed to be false. Therefore BMs exist for which our algorithm will fail to be efficient and exact, modulo complexity theoretic assumptions. It is unknown how common these hard examples are in practice; however, they are unlikely to be commonplace because of the observed efficacy of the MF approximation for trained BMs [18, 19, 7, 8] and because the weights used in trained models tend to be small.
+
+Table 1: The resource scalings of our quantum algorithms for a dRBM with $\ell$ layers, $E$ edges, and $N_{\rm train}$ training vectors. An algorithm is exact if sampling is the only source of error. GEQS and GEQAE are not exact if (5) is violated. We assume QRAM allows operations on different qubits to be executed simultaneously at unit cost.
+
+|  | Operations | Qubits | Exact |
+|---|---|---|---|
+| ML | $\tilde{O}(N_{\rm train}2^{n_{v}+n_{h}})$ | $0$ | Y |
+| CD–k | $\tilde{O}(N_{\rm train}\ell Ek)$ | $0$ | N |
+| GEQS | $\tilde{O}(N_{\rm train}E(\sqrt{\kappa}+\max_{x}\sqrt{\kappa_{x}}))$ | $O(n_{h}+n_{v}+\log(1/\mathcal{E}))$ | Y |
+| GEQAE | $\tilde{O}(\sqrt{N_{\rm train}}E^{2}(\sqrt{\kappa}+\max_{x}\sqrt{\kappa_{x}}))$ | $O(n_{h}+n_{v}+\log(1/\mathcal{E}))$ | Y |
+| GEQAE (QRAM) | $\tilde{O}(\sqrt{N_{\rm train}}E^{2}(\sqrt{\kappa}+\max_{x}\sqrt{\kappa_{x}}))$ | $O(N_{\rm train}+n_{h}+n_{v}+\log(1/\mathcal{E}))$ | Y |
+
+## GEQAE Algorithm
+
+New forms of training, such as our GEQAE algorithm, are possible in cases where the training data is provided via a quantum oracle, allowing access to the training data in superposition rather than sequentially. The idea behind the GEQAE algorithm is to leverage the data superposition by amplitude estimation [21], which leads to a quadratic reduction in the variance in the estimated gradients over the GEQS algorithm. GEQAE consequently leads to substantial performance improvements for large training sets. Also, allowing the training data to be accessed quantumly allows it to be pre–processed using quantum clustering and data processing algorithms [22, 29, 23, 24, 25].
+
+The quantum oracle used in GEQAE abstracts the access model for the training data. The oracle can be thought of as a stand–in for a quantum database or an efficient quantum subroutine that generates the training data (such as a pre–trained quantum Boltzmann machine or quantum simulator). As the training data must be directly (or indirectly) stored in the quantum computer, GEQAE typically requires more qubits than GEQS; however, this is mitigated by the fact that quantum superposition allows training over the entire set of training vectors in one step as opposed to learning over each training example sequentially. This allows the gradient to be accurately estimated while accessing the training data at most $O(\sqrt{N_{\rm train}})$ times.
+
+Let $U_{O}$ be a quantum oracle that for any index $i$ has the action
+
+$$
+U_{O}|i\rangle|{y}\rangle:=|i\rangle|{y}\oplus{x}_{i}\rangle, \tag{13}
+$$
+
+where $x_{i}$ is a training vector. This oracle can be used to prepare the visible units in the state of the $i^{\rm th}$ training vector. A single query to this oracle then suffices to prepare a uniform superposition over all of the training vectors, which then can be converted into
+
+$$
+\frac{1}{\sqrt{N_{\rm train}}}\sum_{i,h}\sqrt{Q(X_{i},h)}|i\rangle|x_{i}\rangle|{h}\rangle\left(\sqrt{1-\mathcal{P}(x_{i},h)}|{0}\rangle+\sqrt{\mathcal{P}(x_{i},h)}|{1}\rangle\right), \tag{14}
+$$
+
+by repeating the state preparation method given in (9).
+
+GEQAE computes expectations such as $\langle v_{i}h_{j}\rangle$ over the data and model by estimating (a) $P(1)$, the probability of measuring the right–most qubit in (14) to be $1$ and (b) $P(11)$, the probability of measuring $v_{i}=h_{j}=1$ and the right–most qubit in (14) to be $1$. It then follows that
+
+$$
+\langle v_{i}h_{j}\rangle=\frac{P(11)}{P(1)}. \tag{15}
+$$
+
+These two probabilities can be estimated by sampling, but a more efficient method is to learn them using amplitude estimation [21] — a quantum algorithm that uses phase estimation on Grover’s algorithm to directly output these probabilities in a qubit string. If we demand the sampling error to scale as $1/\sqrt{N_{\rm train}}$ (in rough analogy to the previous case) then the query complexity of GEQAE is
+
+$$
+\tilde{O}\left(\sqrt{N_{\rm train}}E({\kappa+\max_{x}\kappa_{x}})\right). \tag{16}
+$$
+
+Each energy calculation requires $\tilde{O}(E)$ arithmetic operations, therefore (16) gives that the number of non–query operations scales as
+
+$$
+\tilde{O}\left(\sqrt{N_{\rm train}}E^{2}({\kappa+\max_{x}\kappa_{x}})\right). \tag{17}
+$$
+
+If the success probability is known to within a constant factor then amplitude amplification [21] can be used to boost the success probability prior to estimating it. The original success probability is then computed from the amplified probability. This reduces the query complexity of GEQAE to
+
+$$
+\tilde{O}\left(\sqrt{N_{\rm train}}E(\sqrt{\kappa}+\max_{x}\sqrt{\kappa_{x}})\right). \tag{18}
+$$
+
+GEQAE is therefore preferable to GEQS if $\sqrt{N_{\rm train}}\gg E$.
+
+## Parallelizing Algorithms
+
+Greedy CD–$k$ training is embarassingly parallel, meaning that almost all parts of the algorithm can be distributed over parallel processing nodes. However, the $k$ rounds of sampling used to train each layer in CD–$k$ cannot be easily parallelized. This means that simple but easily parallelizable models (such as GMMs) can be preferable in some circumstances [30]. In contrast, GEQS and GEQAE can leverage the parallelism that is anticipated in a fault–tolerant quantum computer to train a dRBM much more effectively. To see this, note that the energy is the sum of the energies of each layer, which can be computed in depth $\log(M)=O(\max(n_{v},n_{h})\log(\max(n_{v},n_{h})))$ (see Figure 1) and summed in depth $O(\log(\ell))$. The $O(\sqrt{\kappa+\max_{x}\kappa_{x}})$ MF state preparations can be executed simultaneously and the correct sample(s) located via a log–depth calculation. The depth of GEQS is therefore
+
+$$
+O\left(\log([\kappa+\max_{x}\kappa_{x}]M\ell N_{\rm train})\right). \tag{19}
+$$
+
+Since each of the derivatives output by GEQAE can be computed independently, the depth of GEQAE is
+
+$$
+O\left(\sqrt{N_{\rm train}[\kappa+\max_{x}\kappa_{x}]}\log(M\ell)\right). \tag{20}
+$$
+
+The depth can be reduced, at the price of increased circuit size, by dividing the training set into mini–batches and averaging the resultant derivatives.
+
+Training using $k$–step contrastive divergence (CD-$k$) requires depth
+
+$$
+O(k\ell^{2}\log(MN_{\rm train})). \tag{21}
+$$
+
+The $O(\ell^{2})$ scaling arises because CD-$k$ is a feed–forward algorithm, whereas GEQS and GEQAE are not.
+
+## Numerical Results
+
+We address the following questions regarding the behavior of our algorithms:
+
+1. What are typical values of $\kappa$?
+2. How do models trained using CD-$1$ differ from those trained with GEQS and GEQAE?
+3. Do full BMs yield substantially better models than dRBMs?
+
+To answer these questions, $P(v,h)$ and $O_{\rm ML}$ need to be computed classically, requiring time that grows exponentially with $\max\{n_{v},n_{h}\}$. Computational restrictions therefore severely limit the size of the models that we can study through numerical experiments. In practice, we are computationally limited to models with at most $20$ units. We train the following dRBMs with $\ell\in\{2,3\}$ layers, $n_{h}\in\{2,\ldots,8\}$ hidden units, and $n_{v}\in\{4,\ldots,12\}$ visible units.
+
+Large-scale traditional data sets for benchmarking machine learning, such as MNIST [31], are impractical here due to computational limitations. Consequently, we focus on synthetic training data consisting of four distinct functions:
+
+$$
+{[x_{1}]_{j}} = 1\mbox{ if }j\leq n_{v}/2\mbox{ else }0
+$$
+$$
+{[x_{2}]_{j}} = j\mbox{ mod }2, \tag{22}
+$$
+
+as well as their bitwise negations. We add Bernoulli noise $\mathcal{N}\in[0,0.5]$ to each of the bits in the bit string to increase the size of the training sets. In particular, we take each of the four patterns in (22) and flip each bit with probability $\mathcal{N}$. We use $10,000$ training examples in each of our numerical experiments; each vector contains $4,\ldots,12$ binary features. Our task is to infer a generative model for these four vectors. We provide numerical experiments on sub–sampled MNIST digit data in the appendix. The results are qualitatively similar.
+
+Figure 2 shows that doubling the number of visible units does not substantially increase $\kappa$ for this data set (with $\mathcal{N}=0$), despite the fact that their Hilbert space dimensions differ by a factor of $2^{6}$. This illustrates that $\kappa$ primarily depends on the quality of the MF approximation, rather than $n_{v}$ and $n_{h}$. Similar behavior is observed for full BMs, as shown in the appendix. Furthermore, $\kappa\approx 1000$ typically results in a close approximation to the true Gibbs state. Although $\kappa=1000$ is not excessive, we introduce “hedging strategies” in the appendixthat can reduce $\kappa$ to roughly $50$.
+
+We further examine the scaling of $\kappa$ for random (untrained) RBMs via
+
+$$
+\kappa_{\rm est}=\sum_{v,h}P^{2}(v,h)/Q(v,h). \tag{23}
+$$
+
+Figure 3 shows that for small random RBMs, $\kappa-1\in O(\sigma^{2}(w_{i,j})E)$ for $\sigma^{2}(w_{i,j})E\ll 1$.
+
+This leads to the second issue: determining the distribution of weights for actual Boltzmann machines. Figure 4 shows that for large RBMs trained using contrastive divergence have weights that tend to rapidly shrink as $n_{h}$ is increased. For $\mathcal{N}=0$, the empirical scaling is $\sigma^{2}\in O(E^{-1})$ which suggests that $\kappa-1$ will not diverge as $n_{h}$ grows. Although taking $\mathcal{N}=0.2$ reduces $\sigma^{2}$ considerably, the scaling is also reduced. This may be a result of regularization having different effects for the two training sets. In either case, these results coupled with those of Figure 3 suggest that $\kappa$ should be manageable for large networks.
+
+We assess the benefits of GEQS and GEQAE by comparing the average values of $O_{\rm ML}$ found under contrastive divergence and under our quantum algorithm, for dRBMs. The difference between the optima found is significant for even small RBMs; the differences for deep networks can be on the order of $10\%$. The data in Table 2 shows that ML-training leads to substantial improvements in the quality of the resultant models. We also observe that contrastive divergence can outperform gradient descent on the ML objective in highly constrained cases. This is because the stochastic nature of the contrastive divergence approximation makes it less sensitive to local minima.
+
+Table 2: Mean values of $O_{\rm ML}$ found by greedy training using contrastive divergence and gradient descent optimization of $O_{\rm ML}$ for $3$–layer dRBM with $\mathcal{N}=0$.
+
+| $n_{v}$ | $n_{h1}$ | $n_{h2}$ | CD | ML | $\%$ Improvement |
+|---|---|---|---|---|---|
+| $6$ | $2$ | $2$ | $-2.7623$ | $-2.7125$ | $1.80$ |
+| $6$ | $4$ | $4$ | $-2.4585$ | $-2.3541$ | $4.25$ |
+| $6$ | $6$ | $6$ | $-2.4180$ | $-2.1968$ | $9.15$ |
+| $8$ | $2$ | $2$ | $-2.8503$ | $-3.5125$ | $-23.23$ |
+| $8$ | $4$ | $4$ | $-2.8503$ | $-2.6505$ | $7.01$ |
+| $8$ | $6$ | $4$ | $-2.7656$ | $-2.4204$ | $12.5$ |
+| $10$ | $2$ | $2$ | $-3.8267$ | $-4.0625$ | $-6.16$ |
+| $10$ | $4$ | $4$ | $-3.3329$ | $-2.9537$ | $11.38$ |
+| $10$ | $6$ | $4$ | $-2.9997$ | $-2.5978$ | $13.40$ |
+
+The modeling capacity of a full BM can significantly outperform a dRBM in terms of the quality of the objective function. In fact, we show in the appendixthat a full Boltzmann machine with $n_{v}=6$ and $n_{h}=4$ can achieve $O_{\rm ML}\approx-1.84$. dRBMs with comparable numbers of edges result in $O_{\rm ML}\approx-2.3$ (see Table 2), which is $25\%$ less than the full BM. Since our quantum algorithms can efficiently train full BMs in addition to dRBMs, the quantum framework enables forms of machine learning that are not only richer than classically tractable methods but also potentially lead to improved models of the data.
+
+## Conclusions
+
+A fundamental result of our work is that training Boltzmann machines can be reduced to a problem of quantum state preparation. This state preparation process notably does not require the use of contrastive divergence approximation or assumptions about the topology of the graphical model. We show that the quantum algorithms not only lead to significantly improved models of the data, but also provide a more elegant framework in which to think about training BMs. This framework enables the wealth of knowledge developed in quantum information and condensed matter physics on preparing and approximating Gibbs states to be leveraged during training.
+
+Our quantum deep learning framework enables the refining of MF approximations into states that are close (or equivalent to) the desired Gibbs state. This state preparation method allows a BM to be trained using a number of operations that does not explicitly depend on the number of layers in a dRBM. It also allows a quadratic reduction in the number of times the training data must be accessed and enables full Boltzmann machines to be trained. Our algorithms can also be better parallelized over multiple quantum processors, addressing a major shortcoming of deep learning [30].
+
+While numerical results on small examples are encouraging in advance of having a scalable quantum computer, future experimental studies using quantum hardware will be needed to assess the generalization performance of our algorithm. Given our algorithm’s ability to provide better gradients than contrastive divergence, it is natural to expect that it will perform well in that setting by using the same methodologies currently used to train deep Boltzmann machines [3]. Regardless, the myriad advantages offered by quantum computing to deep learning not only suggests a significant near-term application of a quantum computer but also underscores the value of thinking about machine learning from a quantum perspective.
+
+## Appendix A Quantum algorithm for state preparation
+
+We begin by showing how quantum computers can draw unbiased samples from the Gibbs distribution, thereby allowing the probabilities $P(v,h)$ to be computed by sampling (or by quantum sampling). The idea behind our approach is to prepare a quantum distribution that approximates the ideal probability distribution over the model or data. This approximate distribution is then refined using rejection sampling into a quantum distribution that is, to within numerical error, the target probability distribution [17]. If we begin with a uniform prior over the amplitudes of the Gibbs state, then preparing the state via quantum rejection sampling is likely to be inefficient. This is because the success probability depends on the ratio of the partition functions of the initial state and the Gibbs state [15], which in practice is exponentially small for machine learning problems. Instead, our algorithm uses a mean–field approximation, rather than a uniform prior, over the joint probabilities in the Gibbs state. We show numerically that this extra information can be used to boost the probability of success to acceptable levels. The required expectation values can then be found by sampling from the quantum distribution. We show that the number of samples needed to achieve a fixed sampling error can be quadratically reduced by using a quantum algorithm known as amplitude estimation [21].
+
+We first discuss the process by which the initial quantum distribution is refined into a quantum coherent Gibbs state (often called a coherent thermal state or CTS). We then discuss how mean–field theory, or generalizations thereof, can be used to provide suitable initial states for the quantum computer to refine into the CTS. We assume in the following that all units in the Boltzmann machine are binary valued. Other valued units, such as Gaussian units, can be approximated within this framework by forming a single unit out of a string of several qubits.
+
+First, let us define the mean–field approximation to the joint probability distribution to be $Q(v,h)$. For more details on the mean–field approximation, see Section G. We also use the mean–field distribution to compute a variational approximation to the partition functions needed for our algorithm. These approximations can be efficiently calculated (because the probability distribution factorizes) and are defined below.
+
+**Definition 1.**
+
+Let $Q$ be the mean–field approximation to the Gibbs distribution $P=e^{-E}/Z$ then
+
+$$
+Z_{Q}:=\sum_{v,h}Q(v,h)\log\left(\frac{e^{-E(v,h)}}{Q(v,h)}\right).
+$$
+
+Furthermore for any $x\in x_{\rm train}$ let $Q_{x}$ be the mean–field approximation to the Gibbs distribution found for a Boltzmann machine with the visible units clamped to $x$, then
+
+$$
+Z_{x,Q}:=\sum_{h}Q_{x}(x,h)\log\left(\frac{e^{-E(x,h)}}{Q_{x}(x,h)}\right).
+$$
+
+In order to use our quantum algorithm to prepare $P$ from $Q$ we need to know an upper bound, $\kappa$, on the ratio of the approximation $P(v,h)\approx e^{-E(v,h)}/Z_{Q}$ to $Q(v,h)$. We formally define this below.
+
+**Definition 2.**
+
+Let $\kappa>0$ be a constant that is promised to satisfy for all visible and hidden configurations $(v,h)$
+
+$$
+\frac{e^{-E(v,h)}}{Z_{Q}}\leq\kappa Q(v,h), \tag{24}
+$$
+
+where $Z_{Q}$ is the approximation to the partition function given in Definition 1.
+
+We also define an analogous quantity appropriate for the case where the visible units are clamped to one of the training vectors.
+
+**Definition 3.**
+
+Let $\kappa_{x}>0$ be a constant that is promised to satisfy for $x\in x_{\rm train}$ and all hidden configurations $h$
+
+$$
+\frac{e^{-E(x,h)}}{Z_{{x},Q}}\leq\kappa Q_{x}(x,h), \tag{25}
+$$
+
+where $Z_{{x},Q}$ is the approximation to the partition function given in Definition 1.
+
+**Lemma 1.**
+
+Let $Q(v,h)$ be the mean–field probability distribution for a Boltzmann machine, then for all configurations of hidden and visible units we have
+
+$$
+P(v,h)\leq\frac{e^{-E(v,h)}}{Z_{Q}}\leq\kappa Q(v,h).
+$$
+
+**Proof.**
+
+The mean–field approximation can also be used to provide a lower bound for the log–partition function. For example, Jensen’s inequality shows that
+
+$$
+\log\left(Z\right) =\log\left(\sum_{v,h}\frac{Q(v,h)e^{-E(v,h)}}{Q(v,h)}\right),
+$$
+$$
+\geq\sum_{v,h}Q(v,h)\log\left(\frac{e^{-E(v,h)}}{Q(v,h)}\right)=\log(Z_{Q}). \tag{26}
+$$
+
+This shows that $Z_{Q}\leq Z$ and hence
+
+$$
+P(v,h)\leq e^{-E(v,h)}/Z_{Q}, \tag{27}
+$$
+
+where $Z_{Q}$ is the approximation to $Z$ that arises from using the mean–field distribution. The result then follows from (27) and Definition 2. ∎
+
+The result of Lemma 1 allows us to prove the following lemma, which gives the success probability for preparing the Gibbs state from the mean–field state.
+
+**Lemma 2.**
+
+A coherent analog of the Gibbs state for a Boltzmann machine can be prepared with a probability of success of $\frac{Z}{\kappa Z_{Q}}$. Similarly, the Gibbs state corresponding to the visible units being clamped to a configuration $x$ can be prepared with success probability $\frac{Z_{x}}{\kappa_{x}Z_{x,{Q}}}$.
+
+**Proof.**
+
+The first step in the algorithm is to compute the mean–field parameters $\mu_{i}$ and $\nu_{j}$ using (56). These parameters uniquely specify the mean–field distribution $Q$. Next the mean–field parameters are used to approximate the partition functions $Z$ and $Z_{x}$. These mean–field parameters are then used to prepare a coherent analog of $Q(v,h)$, denoted as $\left|\psi_{Q}\right\rangle$, by performing a series of single–qubit rotations:
+
+$$
+\left|\psi_{Q}\right\rangle:=\prod_{i}R_{y}(2\arcsin(\sqrt{\mu_{i}}))\left|0\right\rangle\prod_{j}R_{y}(2\arcsin(\sqrt{\nu_{j}}))\left|0\right\rangle=\sum_{v,h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle. \tag{28}
+$$
+
+The remaining steps use rejection sampling to refine this crude approximation to $\sum_{v,h}\sqrt{P(v,h)}\left|v\right\rangle\left|h\right\rangle$.
+
+For compactness we define
+
+$$
+\mathcal{P}(v,h):=\frac{e^{-E(v,h)}}{\kappa Z_{Q}Q(v,h)}. \tag{29}
+$$
+
+$\mathcal{P}(v,h)$ can be computed efficiently from the mean–field parameters and so an efficient quantum algorithm (quantum circuit) also exists to compute $\mathcal{P}(v,h)$. Lemma 1 also guarantees that $0\leq\mathcal{P}(v,h)\leq 1$.
+
+Since quantum operations (with the exception of measurement) are linear, if we apply the algorithm to a state $\sum_{v}\sum_{h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\left|0\right\rangle$ we obtain $\sum_{v}\sum_{h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\left|\mathcal{P}(v,h)\right\rangle$. We then add an additional quantum bit, called an ancilla qubit, and perform a controlled rotation of the form $R_{y}(2\sin^{-1}(\mathcal{P}(v,h)))$ on this qubit to enact the following transformation:
+
+$$
+\sum_{v,h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\left|\mathcal{P}(v,h)\right\rangle\left|0\right\rangle\mapsto\sum_{v,h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\left|\mathcal{P}(v,h)\right\rangle\left(\sqrt{1-\mathcal{P}(v,h)}\left|0\right\rangle+\sqrt{\mathcal{P}(v,h)}\left|1\right\rangle\right). \tag{30}
+$$
+
+The quantum register that contains the qubit string $\mathcal{P}(v,h)$ is then reverted to the $\left|0\right\rangle$ state by applying the same operations used to prepare $\mathcal{P}(v,h)$ in reverse. This process is possible because all quantum operations, save measurement, are reversible. Since $\mathcal{P}(v,h)\in[0,1]$, then (30) is a properly normalized quantum state and in turn its square is a valid probability distribution.
+
+If the rightmost quantum bit in (30) is measured and a result of $1$ is obtained (recall that projective measurements always result in a unit vector) then the remainder of the state will be proportional to
+
+$$
+\sum_{v,h}\sqrt{Q(v,h)\mathcal{P}(v,h)}=\sqrt{\frac{Z}{\kappa Z_{Q}}}\sum_{v,h}\sqrt{\frac{e^{-E(v,h)}}{Z}}\left|v\right\rangle\left|h\right\rangle=\sqrt{\frac{Z}{\kappa Z_{Q}}}\sum_{v,h}\sqrt{P(v,h)}\left|v\right\rangle\left|h\right\rangle, \tag{31}
+$$
+
+which is the desired state up to a normalizing factor. The probability of measuring $1$ is the square of this constant of proportionality
+
+$$
+P(1|\kappa,Z_{Q})=\frac{Z}{\kappa Z_{Q}}. \tag{32}
+$$
+
+Note that this is a valid probability because Lemma 1 gives that $\sum_{v,h}\kappa Z_{Q}Q(v,h)\geq\sum_{v,h}e^{-E(v,h)}\Rightarrow\kappa Z_{Q}\geq Z$.
+
+Preparing a quantum state that can be used to estimate the expectation values over the data requires a slight modification to this algorithm. First, for each $x\in x_{\rm train}$ needed for the expectation values, we replace $Q(v,h)$ with the constrained mean–field distribution $Q_{x}(x,h)$. Then using this data the quantum state
+
+$$
+\sum_{h}\sqrt{Q_{x}(x,h)}\left|x\right\rangle\left|h\right\rangle, \tag{33}
+$$
+
+can be prepared. We then follow the exact same protocol using $Q_{x}$ in place of $Q$, $Z_{x}$ in place of $Z$, and $Z_{x,{Q}}$ in place of $Z_{Q}$. The success probability of this algorithm is
+
+$$
+P(1|\kappa,Z_{x,{Q}})=\frac{Z_{x}}{\kappa_{x}Z_{x,{Q}}}. \tag{34}
+$$
+
+∎
+
+```julia
+            
+            
+          Model weights ww, visible biases bb, hidden biases dd, edge set EE and κ\kappa.
+
+            
+            
+          Quantum state that can be measured to obtain the correct Gibbs state for a (deep) Boltzmann machine.
+
+function qGenModelState(w,b,d,E,κw,b,d,E,\kappa)
+
+            
+            
+            Compute vectors of mean-field parameters μ\mu and ν\nu from ww, bb and dd.
+
+            
+            
+            Compute the mean-field partition function ZQZ_{Q}.
+
+            
+            
+            Prepare state ∑v,hQ⁡(v,h)|v⟩|h⟩:=(∏i=1nve−i​μi​Y|0⟩)(∏j=1nhe−i​νj​Y|0⟩)\sum_{v,h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle:=\left(\prod_{i=1}^{n_{v}}e^{-i\sqrt{\mu_{i}}Y}\left|0\right\rangle\right)\left(\prod_{j=1}^{n_{h}}e^{-i\sqrt{\nu_{j}}Y}\left|0\right\rangle\right)
+
+            
+            
+            Add qubit register to store energy values and initialize to zero: ∑v,hQ⁡(v,h)|v⟩|h⟩→∑v,hQ⁡(v,h)|v⟩|h⟩|0⟩\sum_{v,h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\rightarrow\sum_{v,h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\left|0\right\rangle
+
+            
+            
+            for i=1:nvi=1:n_{v} do
+
+            
+            
+             ∑v,hQ⁡(v,h)|v⟩|h⟩|E(v,h)⟩→∑v,hQ⁡(v,h)|v⟩|h⟩|E(v,h)+vibi+ln(μivi(1−μi)1−vi)⟩\sum_{v,h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\left|E(v,h)\right\rangle\rightarrow\sum_{v,h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\left|E(v,h)+v_{i}b_{i}+\ln\left(\mu_{i}^{v_{i}}(1-\mu_{i})^{1-v_{i}}\right)\right\rangle.
+
+            
+            
+             ⊳\triangleright Here an energy penalty is included to handle the bias and the visible units contribution to Q​(v,h)−1Q(v,h)^{-1}.
+
+            
+            
+            end for
+
+            
+            
+            for j=1:nhj=1:n_{h} do
+
+            
+            
+             ∑v,hQ⁡(v,h)|v⟩|h⟩|E(v,h)⟩→∑v,hQ⁡(v,h)|v⟩|h⟩|E(v,h)+hjdj+ln(νjhj(1−νj)1−hj)⟩\sum_{v,h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\left|E(v,h)\right\rangle\rightarrow\sum_{v,h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\left|E(v,h)+h_{j}d_{j}+\ln\left(\nu_{j}^{h_{j}}(1-\nu_{j})^{1-h_{j}}\right)\right\rangle.
+
+            
+            
+            end for
+
+            
+            
+            for (i,j)∈E(i,j)\in E do
+
+            
+            
+             ∑v,hQ⁡(v,h)|v⟩|h⟩|E(v,h)⟩→∑v,hQ⁡(v,h)|v⟩|h⟩|E(v,h)+vihjwi,j⟩\sum_{v,h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\left|E(v,h)\right\rangle\rightarrow\sum_{v,h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\left|E(v,h)+v_{i}h_{j}w_{i,j}\right\rangle.
+
+            
+            
+            end for
+
+            
+            
+            ∑v,hQ⁡(v,h)|v⟩|h⟩|E(v,h)⟩→∑v,hQ⁡(v,h)|v⟩|h⟩|E(v,h)⟩(e−E⁡(v,h)ZQ​κ|1⟩+1−e−E⁡(v,h)ZQ​κ|0⟩).\sum_{v,h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\left|E(v,h)\right\rangle\rightarrow\sum_{v,h}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\left|E(v,h)\right\rangle\left(\sqrt{\frac{e^{-E(v,h)}}{Z_{Q}\kappa}}\left|1\right\rangle+\sqrt{1-\frac{e^{-E(v,h)}}{Z_{Q}\kappa}}\left|0\right\rangle\right).
+
+end function
+```
+
+Algorithm 1 Quantum algorithm for generating states that can be measured to estimate the expectation values over the model.
+
+```julia
+            
+            
+          Model weights ww, visible biases bb, hidden biases dd, edge set EE and κx\kappa_{x}, training vector xx.
+
+            
+            
+          Quantum state that can be measured to obtain the correct Gibbs state for a (deep) Boltzmann machine with the visible units clamped to xx.
+
+function qGenDataState(w,b,d,E,κx,xw,b,d,E,\kappa_{x},x)
+
+            
+            
+            Compute vectors of mean-field parameters ν\nu from ww, bb and dd with visible units clamped to xx.
+
+            
+            
+            Compute the mean-field partition function Zx,QZ_{x,{Q}}.
+
+            
+            
+            for i=1:nvi=1:n_{v} do
+
+            
+            
+             ∑hQ⁡(x,h)|x⟩|h⟩|E(x,h)⟩→∑hQ⁡(x,h)|x⟩|h⟩|E(x,h)+xibi⟩\sum_{h}\sqrt{Q(x,h)}\left|x\right\rangle\left|h\right\rangle\left|E(x,h)\right\rangle\rightarrow\sum_{h}\sqrt{Q(x,h)}\left|x\right\rangle\left|h\right\rangle\left|E(x,h)+x_{i}b_{i}\right\rangle.
+
+            
+            
+            end for
+
+            
+            
+            for j=1:nhj=1:n_{h} do
+
+            
+            
+             ∑hQ⁡(x,h)|x⟩|h⟩|E(x,h)⟩→∑hQ⁡(x,h)|x⟩|h⟩|E(x,h)+hjdj+ln(νjhj(1−νj)1−hj)⟩\sum_{h}\sqrt{Q(x,h)}\left|x\right\rangle\left|h\right\rangle\left|E(x,h)\right\rangle\rightarrow\sum_{h}\sqrt{Q(x,h)}\left|x\right\rangle\left|h\right\rangle\left|E(x,h)+h_{j}d_{j}+\ln\left(\nu_{j}^{h_{j}}(1-\nu_{j})^{1-h_{j}}\right)\right\rangle.
+
+            
+            
+            end for
+
+            
+            
+            for (i,j)∈E(i,j)\in E do
+
+            
+            
+             ∑hQ⁡(x,h)|x⟩|h⟩|E(x,h)⟩→∑hQ⁡(x,h)|x⟩|h⟩|E(x,h)+xihjwi,j⟩\sum_{h}\sqrt{Q(x,h)}\left|x\right\rangle\left|h\right\rangle\left|E(x,h)\right\rangle\rightarrow\sum_{h}\sqrt{Q(x,h)}\left|x\right\rangle\left|h\right\rangle\left|E(x,h)+x_{i}h_{j}w_{i,j}\right\rangle.
+
+            
+            
+            end for
+
+            
+            
+            ∑hQ⁡(x,h)|x⟩|h⟩|E(x,h)⟩→∑hQ⁡(x,h)|x⟩|h⟩|E(x,h)⟩(e−E⁡(x,h)Zx,Q​κx|1⟩+1−e−E⁡(x,h)Zx,Q​κx|0⟩).\sum_{h}\sqrt{Q(x,h)}\left|x\right\rangle\left|h\right\rangle\left|E(x,h)\right\rangle\rightarrow\sum_{h}\sqrt{Q(x,h)}\left|x\right\rangle\left|h\right\rangle\left|E(x,h)\right\rangle\left(\sqrt{\frac{e^{-E(x,h)}}{Z_{x,{Q}}\kappa_{x}}}\left|1\right\rangle+\sqrt{1-\frac{e^{-E(x,h)}}{Z_{x,{Q}}\kappa_{x}}}\left|0\right\rangle\right).
+
+end function
+```
+
+Algorithm 2 Quantum algorithm for generating states that can be measured to estimate the expectation value over the data.
+
+The approach to the state preparation problem used in Lemma 2 is similar to that of [15], with the exception that we use a mean-field approximation rather than the infinite temperature Gibbs state as our initial state. This choice of initial state is important because the success probability of the state preparation process depends on the distance between the initial state and the target state. For machine learning applications, the inner product between the Gibbs state and the infinite temperature Gibbs state is often exponentially small; whereas we find in Section E.3 that the mean–field and the Gibbs states typically have large overlaps.
+
+The following lemma is a more general version of Lemma 2 that shows that if a insufficiently large value of $\kappa$ is used then the state preparation algorithm can still be employed, but at the price of reduced fidelity with the ideal coherent Gibbs state.
+
+**Lemma 3.**
+
+If we relax the assumptions of Lemma 2 such that $\kappa Q(v,h)\geq e^{-E(v,h)}/Z_{Q}$ for all $(v,h)\in{\rm good}$ and $\kappa Q(v,h)<e^{-E(v,h)}/Z_{Q}$ for all $j\in{\rm bad}$ and $\sum_{(v,h)\in{\rm bad}}\left(e^{-E(v,h)}-Z_{Q}\kappa Q(v,h)\right)\leq\epsilon Z$, then a state can be prepared that has fidelity at least $1-\epsilon$ with the target Gibbs state with probability at least $Z(1-\epsilon)/(\kappa Z_{Q})$.
+
+**Proof.**
+
+Let our protocol be that used in Lemma 2 with the modification that the rotation is only applied if $e^{-E(v,h)}/Z_{Q}\kappa\leq 1$. This means that prior to the measurement of the register that projects the state onto the success or failure branch, the state is
+
+$$
+\sum_{(v,h)\in{\rm good}}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\left(\sqrt{\frac{{e^{-E(v,h)}}}{Z_{Q}\kappa Q(v,h)}}\left|1\right\rangle+\sqrt{1-\frac{{e^{-E(v,h)}}}{Z_{Q}\kappa Q(v,h)}}\left|0\right\rangle\right)+\sum_{(v,h)\in{\rm bad}}\sqrt{Q(v,h)}\left|v\right\rangle\left|h\right\rangle\left|1\right\rangle \tag{35}
+$$
+
+The probability of successfully preparing the approximation to the state is then
+
+$$
+\sum_{(v,h)\in{\rm good}}\frac{e^{-E(v,h)}}{\kappa Z_{Q}}+\sum_{(v,h)\in{\rm bad}}Q(v,h)=\frac{Z-(\sum_{(v,h)\in{\rm bad}}e^{-E(v,h)}-\sum_{(v,h)\in{\rm bad}}\kappa Z_{Q}Q(v,h))}{\kappa Z_{Q}}\geq\frac{Z(1-\epsilon)}{\kappa Z_{Q}}. \tag{36}
+$$
+
+The fidelity of the resultant state with the ideal state $\sum_{v,h}\sqrt{e^{-E(v,h)}/Z}\left|v\right\rangle\left|h\right\rangle$ is
+
+$$
+\frac{\sum_{(v,h)\in{\rm good}}e^{-E(v,h)}+\sum_{(v,h)\in{\rm bad}}\sqrt{Q(v,h)Z_{Q}\kappa e^{-E(v,h)}}}{\sqrt{Z(\sum_{(v,h)\in{\rm good}}e^{-E(v,h)}+\sum_{(v,h)\in{\rm bad}}Z_{Q}\kappa Q(v,h))}}\geq\frac{\sum_{(v,h)\in{\rm good}}e^{-E(v,h)}+\sum_{(v,h)\in{\rm bad}}{Z_{Q}\kappa Q(v,h)}}{\sqrt{Z(\sum_{(v,h)\in{\rm good}}e^{-E(v,h)}+\sum_{(v,h)\in{\rm bad}}Z_{Q}\kappa Q(v,h))}}, \tag{37}
+$$
+
+since $Q(v,h)Z_{Q}\kappa\leq e^{-E(v,h)}$ for all $(v,h)\in{\rm bad}$. Now using the same trick employed in (37) and the assumption that $\sum_{(v,h)\in{\rm bad}}\left(e^{-E(v,h)}-Z_{Q}\kappa Q(v,h)\right)\leq\epsilon Z$, we have that the fidelity is bounded below by
+
+$$
+\frac{Z(1-\epsilon)}{Z\sqrt{1-\epsilon}}=\sqrt{1-\epsilon}\geq 1-\epsilon. \tag{38}
+$$
+
+∎
+
+The corresonding algorithms are outlined in Algorithm 1 and Algorithm 2, for preparing the state required to compute the model expectation and the data expectation, respectively.
+
+## Appendix B Gradient calculation by sampling
+
+Our first algorithm for estimating the gradients of $O_{\rm ML}$ involves preparing the Gibbs state from the mean–field state and then drawing samples from the resultant distribution in order to estimate the expectation values required in the expression for the gradient. We refer to this algorithm as GEQS (Gradient Estimation via Quantum Sampling) in the main body. We also optimize GEQS algorithm by utilizing a quantum algorithm known as amplitude amplification [21] (a generalization of Grover’s search algorithm [32]) which quadratically reduces the mean number of repetitions needed to draw a sample from the Gibbs distribution using the approach in Lemma 2 or Lemma 3.
+
+t is important to see that the distributions that this algorithm prepares are not directly related to the mean–field distribution. The mean field distribution is chosen because it is an efficiently computable distribution that is close to the true Gibbs distribution and thereby gives a shortcut to preparing the state. Alternative choices, such as the uniform distribution, will ideally result in the same final distribution but may require many more operations than would be required if the mean–field approximation were used as a starting point. We state the performance of the GEQS algorithm in the following theorem.
+
+**Theorem 1.**
+
+There exists a quantum algorithm that can estimate the gradient of $O_{\rm ML}$ using $N_{\rm train}$ samples for a Boltzmann machine on a connected graph with $E$ edges. The mean number of quantum operations required by algorithm to compute the gradient is
+
+$$
+\tilde{O}\left(N_{\rm train}E\left(\sqrt{\kappa}+\sqrt{\max_{v}\kappa_{v}}\right)\right),
+$$
+
+where $\kappa_{v}$ is the value of $\kappa$ that corresponds to the Gibbs distribution when the visible units are clamped to $v$ and $f\in\tilde{O}(g)$ implies $f\in O(g)$ up to polylogarithmic factors.
+
+**Proof.**
+
+We use Algorithm 3 to compute the required gradients. It is straightforward to see from Lemma 2 that Algorithm 3 draws $N_{\rm train}$ samples from the Boltzmann machine and then estimates the expectation values needed to compute the gradient of the log–likelihood by drawing samples from these states. The subroutines that generate these states, qGenModelState and qGenDataState, given in Algorithm 1 and Algorithm 2, represent the only quantum processing in this algorithm. The number of times the subroutines must be called on average before a success is observed is given by the mean of a geometric distribution with success probability given by Lemma 2 that is at least
+
+$$
+\min\left\{\frac{Z}{\kappa Z_{Q}},\min_{x}\frac{Z_{x}}{\kappa_{x}Z_{x,Q}}\right\}. \tag{39}
+$$
+
+Lemma 1 gives us that $Z>Z_{Q}$ and hence the probability of success satisfies
+
+$$
+\min\left\{\frac{Z}{\kappa Z_{Q}},\min_{v}\frac{Z_{x}}{\kappa_{x}Z_{x,Q}}\right\}\geq\frac{1}{{\kappa+\max_{v}\kappa_{v}}}. \tag{40}
+$$
+
+Normally, (40) implies that preparation of the Gibbs state would require $O(\kappa+\max_{v}\kappa_{v})$ calls to Algorithm 1 and Algorithm 2 on average, but the quantum amplitude amplification algorithm [21] reduces the average number of repetitions needed before a success is obtained to $O(\sqrt{\kappa+\max_{v}\kappa_{v}})$. Algorithm 3 therefore requires an average number of calls to qGenModelState and qGenDataState that scale as $O(N_{\rm train}\sqrt{\kappa+\max_{v}\kappa_{v}})$.
+
+Algorithm 1 and Algorithm 2 require preparing the mean-field state, computing the energy of a configuration $(v,h)$, and performing a controlled rotation. Assuming that the graph is connected, the number of hidden and visible units are $O(E)$. Since the cost of synthesizing single qubit rotations to within error $\epsilon$ is $O(\log(E/\epsilon))$ [33, 34, 35] and the cost of computing the energy is $O(E~{\rm polylog}(E/\epsilon))$ it follows that the cost of these algorithms is $\tilde{O}(E)$. Thus the expected cost of Algorithm 3 is $\tilde{O}(N_{\rm train}E\sqrt{\kappa+\max_{v}\kappa_{v}})\in\tilde{O}(N_{\rm train}E(\sqrt{\kappa}+\sqrt{\max_{v}\kappa_{v}}))$ as claimed. ∎
+
+In contrast, the number of operations and queries to $U_{O}$ required to estimate the gradients using greedy layer–by–layer optimization scales as [3]
+
+$$
+\tilde{O}(N_{\rm train}\ell E), \tag{41}
+$$
+
+where $\ell$ is the number of layers in the deep Boltzmann machine. Assuming that $\kappa$ is a constant, it follows that the quantum sampling approach provides an asymptotic advantage for training deep networks. In practice, the two approaches are difficult to directly compare because they both optimize different objective functions and thus the qualities of the resultant trained models will differ. It is reasonable to expect, however, that the quantum approach will tend to find superior models because it optimizes the maximum-likelihood objective function up to sampling error due to taking finite $N_{\rm train}$.
+
+Note that Algorithm 3 has an important advantage over many existing quantum machine learning algorithms [22, 23, 24, 25]: it does not require that the training vectors are stored in quantum memory. It requires only $n_{h}+n_{v}+1+\lceil\log_{2}(1/\mathcal{E})\rceil$ qubits if a numerical precision of $\mathcal{E}$ is needed in the evaluation of the $E(v,h)-\log(Q(v,h))$. This means that a demonstration of this algorithm that would not be classically simulatable could be performed with fewer than $100$ qubits, assuming that $32$ bits of precision suffices for the energy. In practice though, additional qubits will likely be required to implement the required arithmetic on a quantum computer. Recent developments in quantum rotation synthesis could, however, be used to remove the requirement that the energy is explicitly stored as a qubit string [28], which may substantially reduce the space requirements of this algorithm. Below we consider the opposite case: the quantum computer can coherently access the database of training data via an oracle. The algorithm requires more qubits (space), however it can quadratically reduce the number of samples required for learning in some settings.
+
+```text
+            
+            
+          Initial model weights ww, visible biases bb, hidden biases dd, edge set EE and κ\kappa, a set of training vectors xtrainx_{\rm train}, a regularization term λ\lambda, and a learning rate rr.
+
+            
+            
+          Three arrays containing gradients of weights, hidden biases and visible biases: gradMLw,gradMLb,gradMLd\texttt{gradMLw},\texttt{gradMLb},\texttt{gradMLd}.
+
+for i=1:Ntraini=1:N_{\rm train} do
+
+            
+            
+            success←0{\texttt{success}}\leftarrow 0
+
+            
+            
+            while success=0\texttt{success}=0 do
+
+            
+            
+             |ψ⟩←qGenModelState(w,b,d,E,κ)\left|\psi\right\rangle\leftarrow\texttt{qGenModelState}(w,b,d,E,\kappa)
+
+            
+            
+             success←\texttt{success}\leftarrow result of measuring last qubit in |ψ⟩\left|\psi\right\rangle
+
+            
+            
+            end while
+
+            
+            
+            modelVUnits​[i]←\texttt{modelVUnits}[i]\leftarrow result of measuring visible qubit register in |ψ⟩\left|\psi\right\rangle.
+
+            
+            
+            modelHUnits​[i]←\texttt{modelHUnits}[i]\leftarrow result of measuring hidden unit register in |ψ⟩\left|\psi\right\rangle using amplitude amplification.
+
+            
+            
+            success←0{\texttt{success}}\leftarrow 0
+
+            
+            
+            while success=0\texttt{success}=0 do
+
+            
+            
+             |ψ⟩←qGenDataState(w,b,d,E,κ,xtrain[i])\left|\psi\right\rangle\leftarrow\texttt{qGenDataState}(w,b,d,E,\kappa,x_{\rm train}[i]).
+
+            
+            
+             success←\texttt{success}\leftarrow result of measuring last qubit in |ψ⟩\left|\psi\right\rangle using amplitude amplification.
+
+            
+            
+            end while
+
+            
+            
+            dataVUnits​[i]←\texttt{dataVUnits}[i]\leftarrow result of measuring visible qubit register in |ψ⟩\left|\psi\right\rangle.
+
+            
+            
+            dataHUnits​[i]←\texttt{dataHUnits}[i]\leftarrow result of measuring hidden unit register in |ψ⟩\left|\psi\right\rangle.
+
+end for
+
+for each visible unit ii and hidden unit jj do
+
+            
+            
+            gradMLw​[i,j]←r⁡(1Ntrain​∑k=1Ntrain(dataVUnits​[k,i]​dataHUnits​[k,j]−modelVUnits​[k,i]​modelHUnits​[k,j])−λ​wi,j)\texttt{gradMLw}[i,j]\leftarrow r\left(\frac{1}{N_{\rm train}}\sum_{k=1}^{N_{\rm train}}\left(\texttt{dataVUnits}[k,i]\texttt{dataHUnits}[k,j]-\texttt{modelVUnits}[k,i]\texttt{modelHUnits}[k,j]\right)-\lambda w_{i,j}\right).
+
+            
+            
+            gradMLb​[i]←r⁡(1Ntrain​∑k=1Ntrain(dataVUnits​[k,i]−modelVUnits​[k,i]))\texttt{gradMLb}[i]\leftarrow r\left(\frac{1}{N_{\rm train}}\sum_{k=1}^{N_{\rm train}}\left(\texttt{dataVUnits}[k,i]-\texttt{modelVUnits}[k,i]\right)\right).
+
+            
+            
+            gradMLd​[j]←r⁡(1Ntrain​∑k=1Ntrain(dataHUnits​[k,j]−modelHUnits​[k,j]))\texttt{gradMLd}[j]\leftarrow r\left(\frac{1}{N_{\rm train}}\sum_{k=1}^{N_{\rm train}}\left(\texttt{dataHUnits}[k,j]-\texttt{modelHUnits}[k,j]\right)\right).
+
+end for
+```
+
+Algorithm 3 GEQS algorithm for estimating the gradient of $O_{\rm ML}$.
+
+## Appendix C Training via quantum amplitude estimation
+
+We now consider a different learning environment, one in which the user has access to the training data via a quantum oracle which could represent either an efficient quantum algorithm that provides the training data (such as another Boltzmann machine used as a generative model) or a quantum database that stores the memory via a binary access tree [26, 27], such as a quantum Random Access Memory (qRAM) [27].
+
+If we denote the training set as $\{{x}_{i}|i=1,\ldots,N_{\rm train}\}$, then the oracle is defined as a unitary operation as follows:
+
+**Definition 4.**
+
+$U_{O}$ is a unitary operation that performs for any computational basis state $\left|i\right\rangle$ and any $y\in\mathbb{Z}_{2}^{n_{v}}$
+
+$$
+U_{O}\left|i\right\rangle\left|{y}\right\rangle:=\left|i\right\rangle\left|{y}\oplus{x}_{i}\right\rangle,
+$$
+
+where $\{{x}_{i}|i=1,\ldots,N_{\rm train}\}$ is the training set and $x_{i}\in\mathbb{Z}_{2}^{n_{v}}$.
+
+A single quantum access to $U_{O}$ is sufficient to prepare a uniform distribution over all the training data
+
+$$
+U_{O}\left(\frac{1}{N_{\rm train}}\sum_{i=1}^{N_{\rm train}}\left|i\right\rangle\left|0\right\rangle\right)=\frac{1}{N_{\rm train}}\sum_{i=1}^{N_{\rm train}}\left|i\right\rangle\left|x_{i}\right\rangle. \tag{42}
+$$
+
+The state $\frac{1}{N_{\rm train}}\sum_{i=1}^{N_{\rm train}}\left|i\right\rangle\left|0\right\rangle$ can be efficiently prepared using quantum techniques [25] and so the entire procedure is efficient.
+
+At first glance, the ability to prepare a superposition over all data in the training set seems to be a powerful resource. However, a similar probability distribution can also be generated classically using one query by picking a random training vector. More sophisticated approaches are needed if we wish to leverage such quantum superpositions of the training data. Algorithm 4 utilizes such superpositions to provide advantages, under certain circumstances, for computing the gradient. The performance of this algorithm is given in the following theorem.
+
+**Theorem 2.**
+
+There exists a quantum algorithm that can compute $r\frac{\partial O_{\rm ML}}{\partial w_{ij}}$, $r\frac{\partial O_{\rm ML}}{\partial b_{i}}$ or $r\frac{\partial O_{\rm ML}}{\partial d_{j}}$ for any $(i,j)$ corresponding to visible/hidden unit pairs for a Boltzmann machine on a connected graph with $E$ edges to within error $\delta$ using an expected number of queries to $U_{O}$ that scales as
+
+$$
+\tilde{O}\left(\frac{\kappa+\max_{v}\kappa_{v}}{\delta}\right),
+$$
+
+and a number of quantum operations that scales as
+
+$$
+\tilde{O}\left(\frac{E(\kappa+\max_{v}\kappa_{v})}{\delta}\right),
+$$
+
+for constant learning rate $r$.
+
+Algorithm 4 requires the use of the amplitude estimation [21] algorithm, which provides a quadratic reduction in the number of samples needed to learn the probability of an event occurring, as stated in the following theorem.
+
+**Theorem 3 (Brassard, Høyer, Mosca and Tapp).**
+
+For any positive integer $L$, the amplitude estimation algorithm of takes as input a quantum algorithm that does not use measurement and with success probability $a$ and outputs $\tilde{a}$ $(0\leq\tilde{a}\leq 1)$ such that
+
+$$
+|\tilde{a}-a|\leq\frac{\pi(\pi+1)}{L}
+$$
+
+with probability at least $8/\pi^{2}$. It uses exactly $L$ iterations of Grover’s algorithm. If $a=0$ then $\tilde{a}=0$ with certainty, and if $a=1$ and $L$ is even, then $\tilde{a}=1$ with certainty.
+
+This result is central to the proof of Theorem 2 which we give below.
+
+Proof of Theorem 2. Algorithm 4 computes the derivative of $O_{\rm ML}$ with respect to the weights. The algorithm can be trivially adapted to compute the derivatives with respect to the biases. The first step in the algorithm prepares a uniform superposition of all training data and then applies $U_{O}$ to it. The result of this is
+
+$$
+\frac{1}{\sqrt{N_{\rm train}}}\sum_{p=1}^{N_{\rm train}}\left|p\right\rangle\left|x_{p}\right\rangle, \tag{43}
+$$
+
+as claimed.
+
+Any quantum algorithm that does not use measurement is linear and hence applying qGenDataState (Algorithm 2) to (43) yields
+
+$$
+\frac{1}{\sqrt{N_{\rm train}}}\sum_{p=1}^{N_{\rm train}}\left|p\right\rangle\left|x_{p}\right\rangle\sum_{h}\sqrt{Q(x_{p},h)}\left|h\right\rangle\left|\mathcal{P}(x_{p},h)\right\rangle\left(\sqrt{1-\mathcal{P}(x_{p},h)}\left|0\right\rangle+\sqrt{\mathcal{P}(x_{p},h)}\left|1\right\rangle\right)
+$$
+$$
+\qquad:=\frac{1}{\sqrt{N_{\rm train}}}\sum_{p=1}^{N_{\rm train}}\left|p\right\rangle\left|x_{p}\right\rangle\sum_{h}\sqrt{Q(x_{p},h)}\left|h\right\rangle\left|\mathcal{P}(x_{p},h)\right\rangle\left|\chi(x_{p},h)\right\rangle. \tag{44}
+$$
+
+If we consider measuring $\chi=1$ to be success then Theorem 3 gives us that $\tilde{O}((\kappa+\max_{v}\kappa_{v})/\Delta)$ preparations of (44) are needed to learn $P(\texttt{success})=P(\chi=1)$ to within relative error $\Delta/8$ with high probability. This is because $P(\texttt{success})\geq 1/(\kappa+\max_{v}\kappa_{v})$. Similarly, we can also consider success to be the event where the $i^{\rm th}$ visible unit is $1$ and the $j^{\rm th}$ hidden unit is one and a successful state preparation is measured. This marking process is exactly the same as the previous case, but requires a Toffoli gate. Thus $P(v_{i}=h_{j}=\chi=1)$ can be learned within relative error $\Delta/8$ using $\tilde{O}((\kappa+\max_{v}\kappa_{v})/\Delta)$ preparations. It then follows from the laws of conditional probability that
+
+$$
+\langle v_{i}h_{j}\rangle_{\rm data}=P([x_{p}]_{i}=h_{j}=1|\chi=1)=\frac{P([x_{p}]_{i}=h_{j}=\chi=1)}{P(\chi=1)}, \tag{45}
+$$
+
+can be calculated from these values as claimed.
+
+In order to ensure that the total error in $\langle v_{i}h_{j}\rangle_{\rm data}$ is at most $\Delta$, we need to bound the error in the quotient in (45). It can be seen that for $\Delta<1/2$,
+
+$$
+\left|\frac{P([x_{i}]_{j}=h_{k}=\chi=1)(1\pm\Delta/8)}{P(\chi=1)(1\pm\Delta/8)}-\frac{P([x_{i}]_{j}=h_{k}=\chi=1)}{P(\chi=1)}\right|\leq\frac{\Delta P([x_{i}]_{j}=h_{k}=\chi=1)}{P(\chi=1)}\leq\Delta. \tag{46}
+$$
+
+Therefore the algorithm gives $\langle v_{i}h_{j}\rangle_{\rm data}$ within error $\Delta$.
+
+The exact same steps can be repeated using Algorithm 1 instead of Algorithm 2 as the state preparation subroutine used in amplitude estimation. This allows us to compute $\langle v_{i}h_{j}\rangle_{\rm data}$ within error $\Delta$ using $\tilde{O}(1/\Delta)$ state preparations. The triangle inequality shows that the maximum error incurred from approximating $\langle v_{i}h_{j}\rangle_{\rm data}-\langle v_{i}h_{j}\rangle_{\rm model}$ is at most $2\Delta$. Therefore, since a learning rate of $r$ is used in Algorithm 4, the overall error in the derivative is at most $2\Delta r$. If we pick $\Delta=\delta/(2r)$ then we see that the overall algorithm requires $\tilde{O}(1/\delta)$ state preparations for constant $r$.
+
+Each state preparation requires one query to $U_{O}$ and $\tilde{O}(E)$ operations assuming that the graph that underlies the Boltzmann machine is connected. This means that the expected query complexity of the algorithm is $\tilde{O}((\kappa+\max_{v}\kappa_{v})/\delta)$ and the number of circuit elements required is $\tilde{O}((\kappa+\max_{v}\kappa_{v})E/\delta)$ as claimed. ∎
+
+```text
+            
+            
+          Initial model weights ww, visible biases bb, hidden biases dd, edge set EE and κ\kappa, a set of training vectors xtrainx_{\rm train}, a regularization term λ\lambda, 1/2≥Δ>01/2\geq\Delta>0, a learning rate rr, and a specification of edge (i,j)(i,j).
+
+r​∂OML∂wi​jr\frac{\partial O_{\rm ML}}{\partial w_{ij}} calculated to within error 2​r​Δ2r\Delta.
+
+            
+            
+          Call UOU_{O} once to prepare state |ψ⟩←1Ntrain∑p∈xtrain|p⟩|xp⟩\left|\psi\right\rangle\leftarrow\frac{1}{\sqrt{N_{\rm train}}}\sum_{p\in x_{\rm train}}\left|p\right\rangle\left|x_{p}\right\rangle.
+
+|ψ⟩←qGenDataState(w,b,d,E,κ,|ψ⟩)\left|\psi\right\rangle\leftarrow\texttt{qGenDataState}({w,b,d,E,\kappa,\left|\psi\right\rangle}). ⊳\triangleright Apply Algorithm 2 using a superposition over xpx_{p} rather than a single value.
+
+            
+            
+          Use amplitude estimation on state preparation process for |ψ⟩\left|\psi\right\rangle to learn P⁡([xp]i=hj=success=1)P([x_{p}]_{i}=h_{j}=\texttt{success}=1) within error Δ/8\Delta/8.
+
+            
+            
+          Use amplitude estimation on state preparation process for |ψ⟩\left|\psi\right\rangle to learn P⁡(success=1)P(\texttt{success}=1) within error Δ/8\Delta/8.
+
+⟨vi​hj⟩data←P⁡([xp]i=hj=success=1)P⁡(success=1)\left\langle v_{i}h_{j}\right\rangle_{\rm data}\leftarrow\frac{P([x_{p}]_{i}=h_{j}=\texttt{success}=1)}{P(\texttt{success}=1)}.
+
+            
+            
+          Use amplitude estimation in exact same fashion on qGenModelState​(w,b,d,E,κ)\texttt{qGenModelState}({w,b,d,E,\kappa}) to learn ⟨vi​hj⟩data\left\langle v_{i}h_{j}\right\rangle_{\rm data}.
+
+∂OML∂wi​j←r⁡(⟨vi​hj⟩data−⟨vi​hj⟩model)\frac{\partial O_{\rm ML}}{\partial w_{ij}}\leftarrow r\left(\left\langle v_{i}h_{j}\right\rangle_{\rm data}-\left\langle v_{i}h_{j}\right\rangle_{\rm model}\right)
+```
+
+Algorithm 4 GEQAE algorithm for estimating the gradient of $O_{\rm ML}$.
+
+There are two qualitative differences between this approach and that of Algorithm 3. The first is that the algorithm provides detailed information about one component of the gradient, whereas the samples from Algorithm 3 provide limited information about every direction. It may seem reasonable that if amplitude estimation is used to learn $\langle v_{i}h_{j}\rangle$ then $\langle v_{k}h_{\ell}\rangle$ could be estimated by sampling from the remaining qubits. The problem is that amplitude estimation creates biases in these measurements and so the correct way to use this evidence to update the user’s confidence about the remaining components of the gradient is unclear.
+
+In general, it is not straight forward to blindly use amplitude amplification to provide a quadratic improvement to the scaling with $\kappa$ because a randomized algorithm is typically employed in cases where the success probability is unknown. Since the randomized algorithm uses measurements, it cannot be used in concert with amplitude estimation. However, if an upper bound on the success probability is known then amplitude amplification can be used deterministically to lead to amplify the success probability for the system. Amplitude estimation can then be employed on the amplified version of the original circuit and the inferred success probability can then be backtracked to find the success probability in absentia of the amplification step. This process is explained in the following corollary.
+
+**Corollary 1.**
+
+Assume that $P_{u}:1\geq P_{u}>\frac{Z}{\kappa Z_{Q}}$ is known where $P_{u}\in\Theta(\frac{Z}{\kappa Z_{Q}})$ then there exists a quantum algorithm that can compute $r\frac{\partial O_{\rm ML}}{\partial w_{ij}}$, $r\frac{\partial O_{\rm ML}}{\partial b_{i}}$ or $r\frac{\partial O_{\rm ML}}{\partial d_{j}}$ for any $(i,j)$ corresponding to visible/hidden unit pairs for a Boltzmann machine on a connected graph with $E$ edges to within error $\delta\leq P_{u}$ using an expected number of queries to $U_{O}$ that scales as
+
+$$
+\tilde{O}\left(\frac{\sqrt{\kappa}+\max_{v}\sqrt{\kappa_{v}}}{\delta/P_{u}}\right),
+$$
+
+and a number of quantum operations that scales as
+
+$$
+\tilde{O}\left(\frac{E(\sqrt{\kappa}+\max_{v}\sqrt{\kappa_{v}})}{\delta/P_{u}}\right),
+$$
+
+for constant learning rate $r$.
+
+**Proof.**
+
+The idea behind this corollary is to apply $m$ iterations of Grover’s search to boost the probability of success before estimating the amplitude and then use the resultant probability of success to work backwards to find $P(11):=P([x_{p}]_{i}=h_{j}=\chi=1)$ or $P(1):=P(\chi=1)$.
+
+Let us focus on learning $P(1)$. The case of learning $P(11)$ is identical. Applying $m$ steps of amplitude amplification (without measuring) causes the success probability to become
+
+$$
+P_{s}=\sin^{2}([2m+1]\sin^{-1}(\sqrt{P(1)})). \tag{47}
+$$
+
+This equation cannot be inverted to find $P_{s}$ unless $[2m+1]\sin^{-1}(P(1))\leq\pi/2$. However if $m$ is chosen such that $[2m+1]\sin^{-1}(P_{u})\leq\pi/2$ then we are guaranteed that an inverse exists. Under this assumption
+
+$$
+P(1)=\sin^{2}\left(\frac{\sin^{-1}(\sqrt{P_{s}})}{2m+1}\right). \tag{48}
+$$
+
+Now we need to show that small errors in estimating $P_{s}$ do not propagate to large errors in $P(1)$. In general, large errors can propagate because the derivative of (48) with respect to $P_{s}$ diverges at $P_{s}=1$. Let us assume that $m$ is chosen such that $P_{s}\leq 1/4$. If such an $m$ does not exist, then the success probability is already $O(1)$ and hence the complexity is independent of $\kappa$, so we can safely assume this as it is a worst case assumption. The derivative of $P(1)$ then exists and is
+
+$$
+\frac{\partial P(1)}{\partial P_{s}}=\frac{\sin\left(\frac{2\sin^{-1}(\sqrt{P_{s}})}{2m+1}\right)}{2\sqrt{P_{s}}\sqrt{1-P_{s}}(2m+1)}. \tag{49}
+$$
+
+Using the fact that $\sin(x)\leq x$ this equation becomes
+
+$$
+\frac{\sin\left(\frac{2\sin^{-1}(\sqrt{P_{s}})}{2m+1}\right)}{2\sqrt{P_{s}}\sqrt{1-P_{s}}(2m+1)}\leq\frac{\sin^{-1}(\sqrt{P_{s}})}{\sqrt{P_{s}}\sqrt{1-P_{s}}(2m+1)^{2}}. \tag{50}
+$$
+
+Since the Taylor series of $\sin^{-1}(x)$ has only positive terms and $\sin^{-1}(x)/x=1+O(x^{2})$, $\sin^{-1}(\sqrt{P_{s}})/\sqrt{P_{s}}\geq 1$. Ergo (50) is a monotonically increasing function of $P_{s}$ on $(0,1)$. Thus the extreme value theorem implies
+
+$$
+\frac{\partial P(1)}{\partial P_{s}}\leq\frac{2\pi}{3^{3/2}(2m+1)^{2}}. \tag{51}
+$$
+
+Taylor’s remainder theorem then shows that if phase estimation is used with precision $\Delta_{0}:-P_{s}\leq\Delta_{0}\leq 1/4-P_{s}$ then
+
+$$
+\left|\frac{\sin\left(\frac{2\sin^{-1}(\sqrt{P_{s}})}{2m+1}\right)}{2\sqrt{P_{s}}\sqrt{1-P_{s}}(2m+1)}-\frac{\sin\left(\frac{2\sin^{-1}(\sqrt{P_{s}+\Delta_{0}})}{2m+1}\right)}{2\sqrt{P_{s}+\Delta_{0}}\sqrt{1-P_{s}-\Delta_{0}}(2m+1)}\right|\leq\frac{2\pi\Delta_{0}}{3^{3/2}(2m+1)^{2}}. \tag{52}
+$$
+
+Thus the resultant error is $O(\Delta_{0}/m^{2})$. Hence if overall error $\Delta/8$ is required then it suffices to take $\Delta_{0}\in O(m^{2}\Delta)$. Here $m\in\Theta(\sqrt{1/P_{u}})$ which means that $\Delta_{0}\in O(\Delta/P_{u})$. Thus amplitude estimation requires $O(P_{u}/\Delta)$ repetitions of the amplified circuit used to produce $P(1)$ and $P(11)$. Amplitude amplification results in an overhead of $O(\sqrt{\kappa}+\max_{v}\sqrt{\kappa_{v}})$ assuming $P_{u}\in\Theta(\frac{Z}{\kappa Z_{Q}})$. The total cost is then simply the product of these two costs resulting in the claimed complexities. ∎
+
+The above processes can be repeated for each of the components of the gradient vector in order to perform an update of the weights and biases of the Boltzmann machine.
+
+**Corollary 2.**
+
+Let $N_{\rm op}$ be the number of quantum operations and oracle calls needed to compute a component the gradient of $O_{\rm ML}$ using Algorithm 4 or Corollary 1 for a Boltzmann machine on a connected graph scales as
+
+$$
+\tilde{O}\left(EN_{\rm op}\right),
+$$
+
+if the learning rate $r$ is a constant.
+
+**Proof.**
+
+The proof is a trivial consequence of using the result of Theorem 2 $O(E)$ times to compute each of the components of the gradient vector. ∎
+
+Unlike the prior algorithm, it is difficult to meaningfully compare the costs in Corollary 2 to those incurred with training under contrastive divergence. This is because Algorithm 4 uses quantum superposition to compute the relevant expectation values using all the training data simultaneously. Thus each component of the derivative operator is computed using the entire set of data, and it is better to instead consider the run time as a function of the estimation error rather than the number of training vectors. A natural metric for comparison is to imagine that the training set is drawn from a larger set of training data that could be considered. In that case there is inherent sampling error in the expectation values computed over the training data of $O(1/\sqrt{N_{\rm train}})$. Thus taking $\delta\in O(1/\sqrt{N_{\rm train}})$ is a reasonable choice to compare the two methods, but this is by no means the only way the two costs could be meaningfully compared.
+
+Although the query complexity is independent of the number of training vectors, in order to assess the cost of this algorithm in practical examples we also need to include the costs of instantiating the oracle. We consider three cases. If each oracle implements an efficiently computable function then the space– and time–complexities of implementing the oracle is polylogarithmic in $N_{\rm train}$. On the other hand, if the data can only be accessed via a lookup table (as is true in most machine learning problems) then a quantum computer that allows parallel execution can implement the oracle in time $O({\rm polylog}(N_{\rm train}))$ using memory $O(N_{\rm train})$. If on the other hand the quantum computer only can process information serially then $\Theta(N_{\rm train})$ space and time are required to implement an oracle query using a database of training vectors stored as a qubit string in the quantum computer. The lower bound follows from lower bounds on the parity function that show $\Theta(N)$ queries to the bits in this database are required to determine the parity of a $N$ qubit string. This shows that the dependence on the number of training vectors re–emerges depending on problem– and architecture–specific issues.
+
+The quadratic scaling with $E$ means that Algorithm 4 may not be preferable to Algorithm 3 for learning all of the weights. On the other hand, Algorithm 4 can be used to improve gradients estimated using the prior method. The idea is to begin with a preliminary gradient estimation step using the direct gradient estimation method while using $O({\sqrt{N_{\rm train}}})$ randomly selected training vectors. Then the gradient is estimated by breaking the results into smaller groups and computing the mean and the variance of each component of the gradient vector over each of the subgroups. The components of the gradients with the largest uncertainty can then be learned with error that is comparable to the sampling error incurred by only using $N_{\rm train}$ training examples in contrastive divergence training by using Algorithm 4 with $\delta\sim 1/\sqrt{N_{\rm train}}$ to estimate them. Since the two costs are asymptotically comparable, this approach allows the benefits of both approaches to be used in cases where the majority of the uncertainty in the gradient comes from a small number of components.
+
+## Appendix D Hedging strategies
+
+Large values of $\kappa$ can be an obstacle facing exact state preparation. This problem emerges because $Q(v,h)$ may assign orders of magnitude less probability to configurations than $P(v,h)$. For example, we find examples of Boltzmann machines that require values of $\kappa$ in excess of $10^{20}$ are to exactly prepare the Gibbs state even for small BMs. The root of this problem is that taking $Q(v,h)$ to be the MF distribution does not always adequately reflect the uncertainty we have in $P(v,h)\approx Q(v,h)$. We introduce “hedging strategies” to address this problem. Our strategy is to introduce a hedging parameter $\alpha:1\geq\alpha\geq 0$ that can be adjusted to reduce bias towards the mean–field state. In particular, if $\mu_{i}$ is the mean–field expectation value of $v_{i}$ in the absence of hedging then choosing $\alpha<1$ results in $\mu_{i}\rightarrow\alpha\mu_{i}+(1-\alpha)/2$ and similarly for the hidden units. $Z_{Q}$ retains the same value regardless of $\alpha$.
+
+This strategy can also be thought of from a Bayesian perspective as parameterizing a prior distribution that transitions from complete confidence in the MF ansatz to a uniform prior. Preparing the Gibbs state from this state then corresponds to an update of this prior wherein $\mathcal{P}(v,h)$ is the likelihood function in this language.
+
+State preparation is essentially unchanged by the use of hedging, since the only difference is that the mean–field parameters that specify $Q(v,h)$ are altered. Similar effects can also be obtained by using the method of [36] to prepare linear combinations of the mean–field state and the uniform distribution, but we focus on the former method for simplicity. We see below that hedging does not substantially increase the overhead of the algorithm but can substantially reduce the complexity of GEQS and GEQAE when the MF approximation begins to break down.
+
+## Appendix E Numerical experiments
+
+In this section we quantify the differences between training Boltzmann machines using contrastive divergence (see Section H for a brief review of contrastive divergence) and training them by optimizing $O_{\rm ML}$ using Algorithm 3 or Algorithm 4. Here we present additional data that examines the performance of our algorithms in a wider range of conditions than those considered in the main body. In particular, we present detailed investigation into the quality of $O_{\rm ML}$ and $\kappa$ for both RBMs as well as full BMs. We also present evidence showing that the results in the main body, which involved training on synthetic data sets, are comparable to those attained by training using sub–sampled handwritten digits taken from the MNIST database.
+
+### E.1 Data and Methodology
+
+We train the dRBM model using gradient ascent with (a) contrastive divergence to approximate the gradients and (b) ML–objective optimization (ML) using techniques of Algorithm 3 or Algorithm 4. The objective function in both cases is $O_{\rm ML}$. Since different approximations to the gradient result in learning different local optima, even if the same initial conditions are used in both instances, it is potentially unfair to directly compare the optima vectors found using the two training techniques. We consider two methods of comparison. First, we verify that our results lie approximately in an optima of $O_{\rm ML}$ with high probability by using the approach of Donmez, Svore and Burges [37]. For each proposed optima, we perform many perturbations about the point, fixing all parameters while perturbing one, and repeating many times for each parameter, and then compare the difference in the value of the objective functions at the original and perturbed points. This allows us to say, with fixed confidence, that the probability of the objective function decreasing in a randomly chosen direction is less than a cited value. We repeat this process $459$ times with perturbations of size $10^{-3}$, which is sufficient to guarantee that the objective function will not increase in $99\%$ of all randomly chosen directions for steps of size $10^{-3}$.
+
+Second, we use a methodology similar to that used in [38]. We perform our experiments by running one algorithm until a local optima is found and then use this local optima as the initial configuration for the second algorithm. In this way we can compare the locations and quality of analogous local optima. We list the training combinations in Table 3, which we denote CD–ML, ML–CD, and ML–ML corresponding to the optimizers used in the first and second steps of the comparison. A subtle point in considering such comparisons is determination of convergence. Contrastive divergence and other noisy gradient ascent algorithms (meaning gradient ascent where noise is added to the gradient calculation) do not converge to a single optima, but instead fluctuate about an approximate fixed point. For this reason we consider an algorithm to have converged when the running average of the value of ${O_{\rm ML}}$ varies by less than $0.001\%$ after at least $10,000$ training epochs with a learning rate of $r=0.01$. We apply this stopping condition not only in our contrastive divergence calculations, but also when we determine the effect of introducing sampling noise into the gradient of the ML objective function. We typically optimize the ML objective function in the absence of noise using the Broyden–Fletcher–Goldfarb–Shanno algorithm (BFGS), but also use gradient ascent using discretized derivatives. In both cases, we choose our stopping condition to occur when an absolute error of $10^{-7}$ in the ML objective function is obtained.
+
+Table 3: Numerical experiments.
+
+|  | First Optimizer | Second Optimizer |
+|---|---|---|
+| CD–ML | CD$-1$ | Gradient ascent on ML objective |
+| ML–CD | BFGS on ML objective | CD$-1$ |
+| ML–ML | BFGS on ML objective | Noisy gradient ascent on ML objective. |
+
+### E.2 Effect of noise in the gradient
+
+We first determine whether a sufficiently accurate estimate of the gradient can be obtained from a small number of samples from a quantum device, for example when training using Algorithm 3 or Algorithm 4. Here, we train a single–layer RBM using ML–ML, with $6$ visible units and $4$ hidden units. We then proceed by computing the gradient of the ML objective function and add zero-mean Gaussian noise to the gradient vector. The training data, consisting of $10,000$ training examples. A minimum of $10,000$ training epochs were used for each data point and typically fewer than $20,000$ epochs were required before the stopping condition (given in Section E.1) was met.
+
+Figure 5 shows that the mean error in the values of the objective function scales quadratically with the noise in the gradient. This means that the gradient ascent algorithm is highly resilient to sampling noise in the components in the gradient and a relatively small value of $\delta$, such as $\delta=0.01$, will suffice to yield local optima that are close to those found when $\delta=0$. Therefore, small sampling errors will not be catastrophic for Algorithm 4.
+
+If the sampling error is zero mean then the learning rate can always be adjusted in order to mitigate such sampling errors. This means that if improved gradients are needed then it is not necessary to either increase the size of the training set in GEQS. However, there is no guarantee in GEQAE that the errors are unbiased so reducing the learning rate may not always suffice for reducing such errors. Regardless, multiple strategies exist to reduce such errors to the $10^{-2}$ threshold empirically needed to achieve negligible error in the quality of the trained model.
+
+### E.3 Errors due to mean–field approximation and the scaling of $\kappa$
+
+Our quantum algorithm hinges upon the ability to prepare an approximation to the Gibbs state from a mean–field, or related, approximation. Lemma 2 and Lemma 3 shows that the success probability of the algorithm strongly depends on the value of $\kappa$ chosen and that the accuracy of the derivatives will suffer if a value of $\kappa$ is used that is too small or $Z_{Q}$ differs substantially from $Z$. We analyze the results for random single–layer RBMs with $4,6,8$ visible units and four hidden units. The value of the standard deviation is an important issue because the quality of the mean–field approximation is known to degrade if stronger weights (i.e., stronger correlations) are introduced to the model [39]. We take the weights to be normally distributed in the Boltzmann machine with zero mean and standard deviation a multiple of $0.1325$, which we chose to match the standard deviation of the weight distribution empirically found for a $884$ unit RBM that was trained to perform facial recognition tasks using contrastive divergence. The biases are randomly set according to a Gaussian distribution with zero mean and unit variance for all numerical experiments in this section.
+
+Figure 6 shows that the value of $\kappa$ is not prohibitively large. In fact, $\kappa<10$ suffices to produce the state with near-zero error for all of the cases considered. Furthermore, we see that the value of $\kappa$ is a slowly increasing function of the number of visible units in the RBM and the standard deviation of the weights used in the synthetic models. The fact that $\kappa$ is an increasing function of the standard deviation is not necessarily problematic, however, as regularization often causes the standard deviation of the weights to be less than $1$ in practical machine learning tasks. It is difficult to extract the scaling of $\kappa$ from this data as the value chosen depends sensitively on the cutoff point chosen for the residual probability.
+
+The quantity $\kappa$ is small because the mean–field approximation is very close to the true Gibbs state if the edge weights are small. This can be seen from the Table in Figure 6(d) and Figure 7, which give the mean values of the KL–divergence between the mean–field approximation and the true Gibbs state for the random RBMs. ${\rm KL}(Q||P)$ tends to be less than $0.1$ for realistic weight distributions, implying that the mean–field approximation will often be very close to the actual distribution. The KL–divergence is also the slack in the variational approximation to the log–partition function (see Section G). This means that the data in Figure 6 also shows that $Z_{Q}$ will closely approximate $Z$ for these small synthetic models.
+
+There are two competing trends in the success probability. As the mean–field approximation begins to fail, we expect that $\kappa$ will diverge. On the other hand, we also expect $Z/Z_{Q}$ to increase as the ${\rm KL}$–divergence between $Q$ and $P$ increase. We can better understand the scaling of the error by taking the scaling of $Z/Z_{Q}$ into consideration. $Z_{Q}$ is a variational approximation to the partition function that obeys $\log(Z_{Q})=\log(Z)-{\rm KL}(Q||P)$, which implies
+
+$$
+P_{\rm success}\geq\frac{Z}{Z_{Q}\kappa}=\frac{e^{{\rm KL}(Q||P)}}{\kappa}\geq\frac{1}{\kappa}. \tag{53}
+$$
+
+The data in Figure 6 and Figure 7 shows that ${\rm KL}(Q||P)$ empirically scales as $O(\sigma^{2}(w_{i,j})E)$ ,where $E$ is the number of edges in the graph and $\sigma(w_{i,j})$ is the standard deviation in the weights of the synthetic models. Thus we expect that (a) $P_{\rm success}\approx 1/\kappa$ if $\sigma^{2}(w_{i,j})\in O(1/E)$ and (b) $\kappa-1\in O(\sigma^{2}(w_{i,j})E)$ for $\sigma^{2}(w_{i,j})E\ll 1$. Thus our algorithms should be both exact and efficient if $\sigma^{2}(w_{i,j})E$ is small for models that typically emerge in the training process.
+
+We investigate this issue further, shown in Figure 8, by computing the typical distribution of weights for a RBM with $12,24$ and $48$ visible units and a variable number of hidden units. This allows us to examine the scaling with the number of edges for a relatively large RBM trained using contrastive divergence. Although the weights learned via contrastive divergence differ from those learned using our quantum algorithm, we see in Section E.4 that these differences are often small for RBMs and so contrastive divergence gives us a good estimate of how $\sigma(w_{i,j})$ scales for large models that naturally arise through the training process. We note from Figure 8 that the standard deviation of the weights drops rapidly as more hidden units are added to the model. This is because regularization (i.e., $\lambda>0$) provides a penalty for adding edges to the model. The variance in the weights for $\lambda=0.1$ to $\lambda=0.001$ decays faster than the $\Theta(1/E)$ scaling that is expected to result in both high success probability and $Z_{Q}\approx Z$ for (a)-(c). The results in (d) are qualitatively similar but the necessary scaling only holds for $\lambda=0.1$ to $\lambda=0.01$. These values for regularization constants are typical of values used in practical ML algorithms and so we do not expect that the scaling of $\kappa$ nor the errors that arise from taking $Z\approx Z_{Q}$ will be an obstacle for applying our methods (or natural generalizations thereof) to practical machine learning problems.
+
+Several strategies can be used to combat low success probability for the preparation of the Gibbs state. In the event that the success probability is unacceptably low a more accurate estimate of the partition function than $Z_{Q}$ can be used in the algorithm [20, 40, 41, 8]. Algorithm 3 can be used instead of Algorithm 4 to provide a quadratic advantage in the success probability. The value of $\kappa$ chosen can also be decreased, as per Lemma 3. In extreme cases, the regularization constant can also be adjusted to combat the emergence of large weights in the training process; however, this runs the risk of producing a model that substantially underfits the data.
+
+Hedging can also be used to address the issues posed by values of $\kappa$ that may be impractically large. We observe this in Figure 9 wherein the probability mass of states such that $\mathcal{P}(v,h)\geq 1$ is investigated. We see in such cases that no hedging ($\alpha=1$) is superior if an accurate state is desired with a minimal value of $\kappa$. A modest amount of hedging ($\alpha=0.5$) results in a substantial improvement in the accuracy of the state preparation: $\kappa=50$ is sufficient to achieve perfect state preparation as opposed to $\kappa>1000$ without hedging. The case of $\alpha=1$ is inferior to either $\alpha=0$ or $\alpha=0.5$ except for the fact that $Q(v,h)$ no longer needs to be computed coherently in those cases (the mean–field calculation is still needed classically to estimate $Z$). However, as we see later hedging strategies tend not to be as successful for larger problems, whereas using the mean–field state as the initial distribution $(\alpha=1)$ tends to lead to nearly constant values of $\kappa$ as the size of the systems increases.
+
+### E.4 Comparison of CD$-1$ to ML learning
+
+An important advantage of our quantum algorithms is that they provide an alternative to contrastive divergence for training deep restricted Boltzmann machines. We now investigate the question of whether substantial differences exist between the optima found by contrastive divergence and those found by optimization of the ML objective. We train using CD–ML on single–layer RBMs with up to 12 visible units and up to 6 hidden units and compute the distance between the optima found after first training with CD$-1$ and then training with ML, starting from the optima found using CD. We find that the locations of the optima found using both methods differ substantially.
+
+Figure 10 illustrates that the distances between the contrastive divergence optima and the corresponding ML optima are quite significant. The distances between the models found by ML training and CD training were found by flattening the weight matrix to a vector, concatenating the result with the bias vectors, and computing the Euclidean distance between the two vectors. Differences on the order of a few percent are observed in the limit of no noise. This suggests that the models learned using CD optimization and ML optimization can differ substantially. We see that these differences tend to increase as more hidden units are added to the model and that adding Bernoulli noise to the training data tends to cause the differences in the relative distances that arise from varying $n_{v}$ to shrink.
+
+Figure 11 shows that there are differences in the quality of the ML optima found as a function of the Bernoulli noise added to the training data, where quality is determined based on the value of $O_{\rm ML}$ at that point. The relative errors observed tend to be on the order of $0.1$ percent for these examples, which is small but non–negligible given that differences in classification error on this order are significant in contemporary machine learning applications. The discrepancies in the values of $O_{\rm ML}$ follow similar trends to the data in Figure 10.
+
+These results show, even for small examples, that significant differences exist between the locations and qualities of the CD and ML optima. Thus our quantum algorithms, which closely approximate ML training, are likely to lead to improved models over current state-of-the-art classical methods based on contrastive divergence if a reasonably small value of $\kappa$ suffices. This point also is significant for classical machine learning approaches, wherein the use of more costly variants of contrastive divergence (such as CD$-k$ for $k>1$) may also lead to significant differences in the quality of models [7].
+
+### E.5 Training full Boltzmann machines under $O_{\rm ML}$
+
+The prior examples considered the performance of ML–based learning on single– and multi–layer restricted Boltzmann machines. Here we examine the quality of ML optima found when training a full Boltzmann machine with arbitrary connections between any two units. While classical training using contrastive divergence requires learning over a layered bipartite graph (dRBMs), our quantum algorithms do not need to compute the conditional distributions and can therefore efficiently train full Boltzmann machines given that the mean–field approximation to the Gibbs state has only polynomially small overlap with the true Gibbs state. The main question remaining is whether there are advantages to using a quantum computer to train such complete graphical models, and if such models exhibit superior performance over dRBMs.
+
+Figure 12 shows that the ML objective function found by training a full Boltzmann machine slowly improves the quality of the optima learned as the number of visible units increases. Although this increase is modest over the range of $n_{h}$ considered, it is important to note that the value of the mean ML objective attained via BFGS optimization on a single–layer RBM with six visible and four hidden is approximately $-2.33$. Even the full Boltzmann machine with $7$ units and $21$ edges provided a much better model than an RBM with $10$ units and $24$ edges. Although this numerical example is quite small, it demonstrates the benefit of introducing full connectivity, namely intra–layer connections, to a Boltzmann machine and therefore suggests that our quantum learning algorithm may lead to better models than those that can be efficiently learned using existing methods.
+
+An important limitation of this approach is that the mean-field approximation tends to be much worse for Ising models on the complete graph than it is for layered networks [39]. This means that the value of $\kappa$ needed may also be larger for these systems. Although the results in [39] show acceptable performance in cases of small edge weight, further work is needed to investigate the trade off between model quality and training time for the quantum algorithm.
+
+The remaining question is how does the success probability scale as a function of the standard deviation and number of units in the BM? We examine this in Figure 13 where we find qualitatively similar results to those seen in Figure 6. The most notable difference is that we consider a wider range of visible units and larger standard deviations to illustrate how the algorithm can fail in cases where the mean–field approximation is no longer applicable. This behavior is most notable in (c) of Figure 13, where values of $\kappa>50$ are needed for accurate state preparation. In contrast, we see that in (a) that smaller weights tend to cause the state preparation algorithm to be much more efficient and $\kappa<20$ suffices to have perfect state preparation even for networks with $20$ hidden units.
+
+Although the expectation values seem to indicate that the success probability systematically shrinks as a function of $\sigma$, this is not necessarily true. In our sampling we also find evidence that there are easy as well as hard instances for the state preparation. This point can be seen in Figure 14 where we plot a $95\%$ confidence interval and see, somewhat surprisingly, that many of the models conform to a mean–field distribution for the $\sigma=1$ data. In fact, for small $\kappa$, the $95^{\rm th}$ percentile of $\sigma=1$ actually provides a more accurate approximation to the Gibbs state than the corresponding percentile for $\sigma=0.5$. Conversely, $5^{\rm th}$ percentile for the $\sigma=1$ data has very poor fidelity and does not seem to scale qualitatively the same way with $\kappa$ as the rest of the data considered.
+
+This shows that although the situation here is qualitatively similar to that of the RBM, larger values of $\kappa$ will be required for the full Boltzmann machine to achieve the same fidelity as a RBM could achieve. Small numerical studies, unfortunately, are inadequate to say conclusively whether the models that typically arise during training will conform to these easy cases or the hard cases.
+
+The mean value of $\sum_{(v,h)\in{\rm good}}P(v,h)$ in Figure 14 scales as $1-\kappa^{f(n,\sigma)}$ for some function $f(n,\sigma)$. We find by fitting the data for $n=6,8,\ldots,20$ for $\sigma=0.25,0.5,0.75,1$ that $\sum_{(v,h)\in{\rm good}}P(v,h)-1\in\kappa^{\Theta(-1/\sigma^{1.5}n)}$. Hence if a value of $\kappa$ is sought that causes the error in the final Gibbs state to be $\delta$ then it suffices to take $\kappa\in\delta^{-\Theta(\sigma^{1.5}n)}$. Thus these small numerical experiments suggest that state preparation for the full Boltzmann machine will likely be efficient and exact if $\sigma^{2}\in o(n^{-4/3})$ and that it may be inefficient or approximate otherwise.
+
+## Appendix F Training using sub–sampled MNIST data
+
+An important criticism of the previous numerical results is that they only examine synthetic data sets. In order to provide some insight about whether natural data sets are qualitatively different from the synthetic examples we now consider training examples that are taken from the MNIST database of handwritten digits. The MNIST digits are $16\times 16$ greyscale images and as a result we cannot directly compute $O_{\rm ML}$ for them as computing $P(v,h)$ requires computing $e^{-E(v,h)}$ for a minimum of $2^{256}$ distinct configurations. We instead look at a simpler problem that consists of $3\times 3$ coarse–grained versions of the original images. As the resolution of these examples is low enough that the digits can be very difficult to distinguish, we focus on the training examples that are assigned the label of “1” in order to avoid confusion with other digits that may appear similar on a $9$ pixel grid. The resultant $400$ training examples are found by dividing the image into thirds, computing expectation value of all the pixels within that third of the image and setting the corresponding pixel in the $3\times 3$ image to that value. We then round the pixels to binary values using the mean value of the pixels as a threshold. The results from this subsampling procedure are illustrated in Figure 15.
+
+Figure 16 compares the quality of optima found via CD–1 and gradient ascent on $O_{\rm ML}$ for CD–ML experiments as a function of the number of hidden units ($n_{h}\in\{4,6,8,10\}$). The expectation values were found by using $1000$ random restarts for the training procedure. We observe that the relative differences between the locations of the optima found in these experiments vary by a few percent whereas the difference in $O_{\rm ML}$ varies by as much as half a percent. These differences are comparable to those observed for the relative discrepancies in the trained models and quality of the resultant optima found for the synthetic training sets used in the main body.
+
+We see evidence that the discrepancies between contrastive divergence training and ML training grow approximately linearly with the number of hidden units in the graph. We cannot say with confidence that this constitutes a linear scaling in the asymptotic regime because the discrepancies grow modestly with $n_{h}$ and polynomial or exponential scalings cannot be excluded.
+
+Next we examine the dependence on the quality of the Gibbs state prepared as a function of $\kappa$ and $n_{h}$ for models that are trained using ML optimization. We choose these models as they are typical examples of models inferred towards the end of the training process, whereas the scaling of $\kappa$ found for random models typifies models that arise at the beginning of the training. The results we obtain in Figure 17 show qualitatively similar behavior to those observed for the synthetic examples. We see that, in all cases the mean–field ansatz initially does a surprisingly good job of predicting the probability of a configuration: it under–estimates roughly $10-15\%$ of the probability mass. Also a modest amount of hedging results in substantial improvements in the ability of the system to exactly prepare the Gibbs state, with a value of $\kappa$ that is less than $1000$ needed in the vast majority of the cases considered. The value $\alpha=0.5$ is unlikely to be optimal for the cases considered. In practice, scanning over $\alpha$ to find an appropriate value may be preferable to choosing any of the three values of $\alpha$ given in Figure 17.
+
+The data in Figure 17 shows that the mean–field approximation remains much more stable as we add more nodes to these graphical networks. In particular, the median probability mass of the bad configurations is nearly a constant over all the data considered at $\kappa=2000$. In contrast, we see evidence for slight variation in the median at $\kappa=1$. The scaling of the value of $\kappa$ where the system transitions from imperfect state preparation to exact state preparation for $\alpha=0.5$ is unclear even for these small examples; the data is consistent with both a power–law scaling and an exponential scaling with the number of units. Larger numerical experiments may be needed to distinguish these two possibilities, but in either case the scaling with $\alpha=0.5$ is qualitatively different than that observed for the mean–field initial state $(\alpha=1)$. Most importantly the results show that nothing qualitatively changes when we transition from synthetic training data to subsampled MNIST training data.
+
+Both the real and synthetic examples considered suffer from the fact that very strong correlations emerge in the model owing to the strong patterns that are present in our training data. Such correlations are likely deleterious for the mean–field approximation and so structured mean–field approximations may lead to much better fidelity in the small examples that can be simulated using a classical computer. The issue of how to choose an initial prior distribution for the true likelihoods of the configurations of the system remains an important issue in the field and provides an important way in which our quantum deep learning algorithms can be optimized to improve both the speed of training and the quality of the resultant models.
+
+## Appendix G Review of mean–field theory
+
+The mean–field approximation is a variational approach that finds an uncorrelated distribution, $Q(v,h)$, that has minimal KL–divergence with the joint probability distribution $P(v,h)$ given by the Gibbs distribution. The main benefit of using $Q$ instead of $P$ is that $\left\langle v_{i}h_{j}\right\rangle_{\rm model}$ and $\log(Z)$ can be efficiently estimated using mean–field approximations [18]. A secondary benefit is that the mean–field state can be efficiently prepared using single–qubit rotations. More concretely, the mean–field approximation is a distribution such that
+
+$$
+Q(v,h)=\left(\prod_{i}\mu_{i}^{v_{i}}(1-\mu_{i})^{1-v_{i}}\right)\left(\prod_{j}\nu_{j}^{h_{j}}(1-\nu_{j})^{1-h_{j}}\right), \tag{54}
+$$
+
+where $\mu_{i}$ and $\nu_{j}$ are chosen to minimize ${\rm KL}(Q||P)$. The parameters $\mu_{i}$ and $\nu_{j}$ are called mean–field parameters.
+
+Using the properties of the Bernouli distribution, it is easy to see that
+
+$$
+{\rm KL}(Q||P) =\sum_{v,h}-Q(v,h)\ln(P(v,h))+Q(v,h)\ln(Q(v,h)),
+$$
+$$
+=\sum_{v,h}Q(v,h)\left(\sum_{i}v_{i}b_{i}+\sum_{j}h_{j}d_{j}+\sum_{i,j}w_{i,j}v_{i}h_{j}+\ln Z\right)+Q(v,h)\ln(Q(v,h))
+$$
+$$
+=\sum_{i}\mu_{i}b_{i}+\sum_{j}\nu_{j}d_{j}+\sum_{i,j}w_{i,j}\mu_{i}\nu_{j}+\ln(Z)
+$$
+$$
+\qquad\qquad+\sum_{i}\mu_{i}\ln(\mu_{i})+(1-\mu_{i})\ln(1-\mu_{i})+\sum_{j}\nu_{j}\ln(\nu_{j})+(1-\nu_{j})\ln(1-\nu_{j}). \tag{55}
+$$
+
+The optimal values of $\mu_{i}$ and $\nu_{i}$ can be found by differentiating this equation with respect to $\mu_{i}$ and $\nu_{i}$ and setting the result equal to zero. The solution to this is
+
+$$
+\mu_{i} =\sigma(-b_{i}-\sum_{j}w_{i,j}\nu_{j})
+$$
+$$
+\nu_{j} =\sigma(-d_{j}-\sum_{i}w_{i,j}\mu_{i}), \tag{56}
+$$
+
+where $\sigma(x)=1/(1+\exp(-x))$ is the sigmoid function. These equations can be implicitly solved by fixed point iteration, which involves initializing the $\mu_{i}$ and $\nu_{j}$ arbitrarily and iterate these equations until convergence is reached. Convergence is guaranteed provided that the norm of the Jacobian of the map is bounded above by 1. Solving the mean–field equations by fixed point iteration is analogous to Gibbs sampling with the difference being that here there are only a polynomial number of configurations to sample over and so the entire process is efficient. The generalization of this process to deep networks is straight forward and is discussed in [3].
+
+Mean–field approximations to distributions such as $P(v,h)=\delta_{v,x}\exp^{-E(x,h)}/Z_{x}$ can be computed using the exact same methodology. The only difference is that in such cases the visible units in the mean–field approximation is only taken over the hidden units. Such approximations are needed to compute the expectations over the data that are needed to estimate the derivatives of $O_{\rm ML}$ in our algorithms.
+
+It is also easy to see from the above argument that among all product distributions, $Q$ is the distribution that leads to the least error in the approximation to the log–partition function in (26). This is because
+
+$$
+\log(Z_{Q})=\log(Z)-{\rm KL}(Q||P), \tag{57}
+$$
+
+and the mean–field parameters found by solving (56) minimize the KL–divergence among all product distributions. It is also interesting to note that all such approximations are lower bounds for the log–partition function because ${\rm KL}(Q||P)\geq 0$.
+
+Experimentally, mean–field approximations can estimate the log-partition function within less than $1\%$ error [42] depending on the weight distribution and the geometry of the graph used. We further show in Section E.3 that the mean–field approximation to the partition function is sufficiently accurate for small restricted Boltzmann machines. Structured mean–field approximation methods [20], TAP [40] or AIS [41, 8] can be used to reduce such errors if needed, albeit at a higher classical computational cost.
+
+These results also suggest the following result, which shows that the success probability of our state preparation method approaches $1$ in the limit where the strengths of the correlations in the model vanish.
+
+**Corollary 3.**
+
+The success probability in Lemma 2 approaches $1$ as $\max_{i,j}|w_{ij}|\rightarrow 0$.
+
+**Proof.**
+
+The energy is a continuous function of $w$ and therefore $e^{-E(v,h)}/Z$ is also a continuous function of $w$. Therefore, $\lim_{w\rightarrow 0}P(v,h)=e^{-\sum_{i}b_{i}v_{i}-\sum_{j}b_{j}h_{j}}/\sum_{v,h}e^{-\sum_{i}b_{i}v_{i}-\sum_{j}b_{j}h_{j}}$. Under such circumstances, $P(v,h)$ factorizes and so there exist $\tilde{\mu}_{i}$ and $\tilde{\nu}_{j}$ such that
+
+$$
+\lim_{w\rightarrow 0}P(v,h)=\left(\prod_{i}\tilde{\mu}_{i}^{v_{i}}(1-\tilde{\mu}_{i})^{1-v_{i}}\right)\left(\prod_{j}\tilde{\nu}_{j}^{h_{j}}(1-\tilde{\nu}_{j})^{1-h_{j}}\right). \tag{58}
+$$
+
+Hence it follows from (54) that there exists a mean–field solution such that ${\rm KL}(Q||\lim_{w\rightarrow 0}P)=0$. Since the solution to (56) is unique when $w_{i,j}=0$ it follows that the mean–field solution found must be the global optima and hence there ${\rm KL}(Q||P)$ approaches $0$ as $\max_{i,j}|w_{i,j}|\rightarrow 0$. Therefore (57) implies that $Z_{Q}\rightarrow Z_{x,{Q}}$ in the limit. Hence as $\max_{i,j}|w_{i,j}|\rightarrow 0$ we can take $\kappa=1$ and $Z/Z_{Q}=1$. Therefore the success probability approaches $1$ if the optimal value of $\kappa$ is chosen. The same argument also applies for $Z_{x}/Z_{x,{Q}}$. ∎
+
+## Appendix H Review of contrastive divergence training
+
+The idea behind contrastive divergence is straighforward. The model average in the expression for the gradient of the average log–likelihood given in the main body can be computed by sampling from the Gibbs distribution $P$. This process is not tractable classically, so contrastive divergence samples from an approximation to the Gibbs distribution found by applying a finite number of rounds of Gibbs sampling. The resultant samples drawn from the distribution are then, ideally, drawn from a distribution that is close to the true Gibbs distribution $P$.
+
+Gibbs sampling proceeds as follows. First the visible units are set to a training vector. Then the hidden units are set to $1$ with probability $P(h_{j}=1|v)=\sigma(-d_{j}-\sum_{i}w_{i,j}v_{i})$. Once the hidden units are set, the visible units are reset to $1$ with probability $P(v_{i}=1|h)=\sigma(-b_{i}-\sum_{j}w_{i,j}h_{j})$. This process can then be repeated using the newly generated training vector in place of the original $v$. As the number of rounds of Gibbs sampling increases, the distribution over resultant samples approaches that of the true Gibbs distribution.
+
+The simplest contrastive divergence algorithm, CD$-1$, works by using only one round of Gibbs sampling to reset the visible units. The probability that each of the hidden units is $1$ is then computed using $P(h_{j}=1|v)=\sigma(-d_{j}-\sum_{i}w_{i,j}v_{i})$. These probabilities are stored and the process of Gibbs sampling and probability computation is repeated for each training vector. The probabilities necessary for the model average are then set, for each $w_{i,j}$, to be the average of all the probabilities ${\rm Pr}(v_{i}=1,h_{j}=1)$ computed in the prior samples. Closer approximations to the Gibbs distribution can be found by using more steps of Gibbs sampling [38, 11, 7]. For example, CD$-10$ uses ten steps of Gibbs sampling rather than one and tends to give much better approximations to the true gradient of the objective function.
+
+Contrastive divergence earns its name because it does not try to approximate the gradients of the ML-objective function; rather, CD$-n$ approximately optimizes the difference between the average log–likelihood after zero and $n$ rounds of Gibbs sampling: ${\rm KL}(p_{0}||p_{\infty})-{\rm KL}(p_{n}||p_{\infty})$ [5]. Also as $n\rightarrow\infty$ the contrastive divergence objective becomes the average log–likelihood, which is $O_{\rm ML}$ in the absence of regularization. This means that asymptotically CD$-n$ approximates the correct derivatives. Although contrastive divergence approximates the gradient of the contrastive divergence objective function, the gradients yielded by the algorithm are not precisely the gradients of any objective function [9]. Thus the analogy of contrastive divergence optimizing an objective function that is close to $O_{\rm ML}$ is inexact.
+
+Although it is efficient, there are several drawbacks to contrastive divergence training. The main drawback of CD is that it does not permit interactions between hidden and visible units. This restricts the allowable class of graphical models. Additionally, the training process can take hours to days [7]. Finally, the method does not directly apply to training deep networks. In order to train deep restricted Boltzmann machines, layer-wise training is typically employed, which breaks the undirected structure of the network and potentially leads to sub–optimal models. Parallelism can accelerate the training process for training deep RBMs using contrastive divergence, but only to a limited extent because of the sequential nature of the updates on the (now directed) graph. Our work shows that quantum computing can circumvent such restrictions.
+
+## Appendix I Review of quantum computing
+
+In quantum information processing (QIP), information is stored in a quantum bit, or qubit, which is analogous to a classical bit. Whereas a classical bit has a state value $s\in\{0,1\}$, a qubit state $\left|\psi\right\rangle$ is actually a linear superposition of states:
+
+$$
+\left|\psi\right\rangle=\alpha\left|0\right\rangle+\beta\left|1\right\rangle, \tag{59}
+$$
+
+where the $\{0,1\}$ basis state vectors are represented in Dirac notation (ket vectors) as $\left|0\right\rangle=\begin{bmatrix}1&0\end{bmatrix}^{T}$, and $\left|1\right\rangle=\begin{bmatrix}0&1\end{bmatrix}^{T}$, respectively. The amplitudes $\alpha$ and $\beta$ are complex numbers that satisfy the normalization condition: $|\alpha|^{2}+|\beta|^{2}=1$. Upon measurement of the quantum state $\left|\psi\right\rangle$, either state $\left|0\right\rangle$ or $\left|1\right\rangle$ is observed with probability $|\alpha|^{2}$ or $|\beta|^{2}$, respectively. Note that a $n$-qubit quantum state is a $2^{n}\times 1$-dimensional state vector, where each entry represents the amplitude of the corresponding basis state. Therefore, $n$ qubits live in a $2^{n}$-dimensional Hilbert space, and we can represent a superposition over $2^{n}$ states as:
+
+$$
+\left|\psi\right\rangle=\sum_{i=0}^{2^{n}-1}\alpha_{i}\left|i\right\rangle, \tag{60}
+$$
+
+where $\alpha_{i}$ are complex amplitudes that satisfy the condition $\sum_{i}|\alpha_{i}|^{2}=1$, and $i$ is the binary representation of integer $i$. Note, for example, that the state $\left|0000\right\rangle$ is equivalent to writing the tensor product of the four states: $\left|0\right\rangle\otimes\left|0\right\rangle\otimes\left|0\right\rangle\otimes\left|0\right\rangle=\left|0\right\rangle^{\otimes 4}=\begin{bmatrix}1&0&0&0&0&0&0&0\end{bmatrix}^{T}$. The ability to represent a superposition over exponentially many states with only a linear number of qubits is one of the essential ingredients of a quantum algorithm — an innate massive parallelism.
+
+A quantum computation proceeds through the unitary evolution of a quantum state; in turn, quantum operations are necessarily reversible. We refer to quantum unitary operations as quantum gates. Note that measurement is not reversible; it collapses the quantum state to the observed value, thereby erasing the knowledge of the amplitudes $\alpha$ and $\beta$.
+
+An $n$-qubit quantum gate is a $2^{n}\times 2^{n}$ unitary matrix acting on an $n$-qubit quantum state. For example, the Hadamard gate maps $\left|0\right\rangle\rightarrow\frac{1}{\sqrt{2}}\left(\left|0\right\rangle+\left|1\right\rangle\right)$, and $\left|1\right\rangle\rightarrow\frac{1}{\sqrt{2}}\left(\left|0\right\rangle-\left|1\right\rangle\right)$. An $X$ gate, similar to a classical NOT gate, maps $\left|0\right\rangle\rightarrow\left|1\right\rangle$, and $\left|1\right\rangle\rightarrow\left|0\right\rangle$. The identity gate is represented by $I$. The two-qubit controlled-NOT gate, $CX$, maps $\left|x,y\right\rangle\rightarrow\left|x,x\oplus y\right\rangle$. It is convenient to include a further gate, $T$, which is known as a $\pi/8$–gate and is needed to make the above quantum gate set complete. The corresponding unitary matrices are given by:
+
+$$
+H=\frac{1}{\sqrt{2}}\begin{bmatrix}1&1\\ 1&-1\end{bmatrix},X=\begin{bmatrix}0&1\\ 1&0\end{bmatrix},I=\begin{bmatrix}1&0\\ 0&1\end{bmatrix},CX=\begin{bmatrix}1&0&0&0\\ 0&1&0&0\\ 0&0&0&1\\ 0&0&1&0\end{bmatrix},T=\begin{bmatrix}1&0\\ 0&e^{i\pi/4}\end{bmatrix}. \tag{61}
+$$
+
+The single qubit rotation is an important operation for quantum computation. The single qubit rotation, $R_{y}(2\theta)$, which under the isomorphism between SO(3) and SU(2) corresponds to a rotation of the state vector about the $y$–axis where the states $\left|0\right\rangle$ and $\left|1\right\rangle$ are computational basis states. The gate is defined below.
+
+$$
+R_{y}(2\theta)=\begin{bmatrix}\cos{\theta}&-\sin(\theta)\\ \sin(\theta)&\cos(\theta)\end{bmatrix}. \tag{62}
+$$
+
+Unlike the previous gates, single qubit rotations are not discrete. They can, however, be approximated to within arbitrarily small error using a sequence of fundamental (discrete) quantum operations [33, 34, 35].
+
+## References
+
+[1] Geoffrey Hinton, Simon Osindero, and Yee-Whye Teh. A fast learning algorithm for deep belief nets. Neural computation, 18(7):1527–1554, 2006.
+
+[2] Ronan Collobert and Jason Weston. A unified architecture for natural language processing: Deep neural networks with multitask learning. In Proceedings of the 25th international conference on Machine learning, pages 160–167. ACM, 2008.
+
+[3] Yoshua Bengio. Learning deep architectures for ai. Foundations and trends® in Machine Learning, 2(1):1–127, 2009.
+
+[4] Yann LeCun, Koray Kavukcuoglu, and Clément Farabet. Convolutional networks and applications in vision. In Circuits and Systems (ISCAS), Proceedings of 2010 IEEE International Symposium on, pages 253–256. IEEE, 2010.
+
+[5] Geoffrey E Hinton. Training products of experts by minimizing contrastive divergence. Neural computation, 14(8):1771–1800, 2002.
+
+[6] Ruslan Salakhutdinov, Andriy Mnih, and Geoffrey Hinton. Restricted boltzmann machines for collaborative filtering. In Proceedings of the 24th international conference on Machine learning, pages 791–798. ACM, 2007.
+
+[7] Tijmen Tieleman. Training restricted boltzmann machines using approximations to the likelihood gradient. In Proceedings of the 25th international conference on Machine learning, pages 1064–1071. ACM, 2008.
+
+[8] Ruslan Salakhutdinov and Geoffrey E Hinton. Deep boltzmann machines. In International Conference on Artificial Intelligence and Statistics, pages 448–455, 2009.
+
+[9] Ilya Sutskever and Tijmen Tieleman. On the convergence properties of contrastive divergence. In International Conference on Artificial Intelligence and Statistics, pages 789–795, 2010.
+
+[10] Tijmen Tieleman and Geoffrey Hinton. Using fast weights to improve persistent contrastive divergence. In Proceedings of the 26th Annual International Conference on Machine Learning, pages 1033–1040. ACM, 2009.
+
+[11] Yoshua Bengio and Olivier Delalleau. Justifying and generalizing contrastive divergence. Neural Computation, 21(6):1601–1621, 2009.
+
+[12] Asja Fischer and Christian Igel. Bounding the bias of contrastive divergence learning. Neural computation, 23(3):664–673, 2011.
+
+[13] Daniel A Lidar and Ofer Biham. Simulating ising spin glasses on a quantum computer. Physical Review E, 56(3):3661, 1997.
+
+[14] Barbara M Terhal and David P DiVincenzo. The problem of equilibration and the computation of correlation functions on a quantum computer. arXiv preprint quant-ph/9810063, 1998.
+
+[15] David Poulin and Pawel Wocjan. Sampling from the thermal quantum gibbs state and evaluating partition functions with a quantum computer. Physical review letters, 103(22):220502, 2009.
+
+[16] Misha Denil and Nando De Freitas. Toward the implementation of a quantum rbm. In NIPS Deep Learning and Unsupervised Feature Learning Workshop, 2011.
+
+[17] Maris Ozols, Martin Roetteler, and Jérémie Roland. Quantum rejection sampling. ACM Transactions on Computation Theory (TOCT), 5(3):11, 2013.
+
+[18] Michael I Jordan, Zoubin Ghahramani, Tommi S Jaakkola, and Lawrence K Saul. An introduction to variational methods for graphical models. Machine learning, 37(2):183–233, 1999.
+
+[19] Max Welling and Geoffrey E Hinton. A new learning algorithm for mean field boltzmann machines. In Artificial Neural Networks—ICANN 2002, pages 351–357. Springer, 2002.
+
+[20] Eric P Xing, Michael I Jordan, and Stuart Russell. A generalized mean field algorithm for variational inference in exponential families. In Proceedings of the Nineteenth conference on Uncertainty in Artificial Intelligence, pages 583–591. Morgan Kaufmann Publishers Inc., 2002.
+
+[21] Gilles Brassard, Peter Hoyer, Michele Mosca, and Alain Tapp. Quantum amplitude amplification and estimation. arXiv preprint quant-ph/0005055, 2000.
+
+[22] Esma Aïmeur, Gilles Brassard, and Sébastien Gambs. Machine learning in a quantum world. In Advances in Artificial Intelligence, pages 431–442. Springer, 2006.
+
+[23] Seth Lloyd, Masoud Mohseni, and Patrick Rebentrost. Quantum algorithms for supervised and unsupervised machine learning. arXiv preprint arXiv:1307.0411, 2013.
+
+[24] Patrick Rebentrost, Masoud Mohseni, and Seth Lloyd. Quantum support vector machine for big feature and big data classification. arXiv preprint arXiv:1307.0471, 2013.
+
+[25] Nathan Wiebe, Ashish Kapoor, and Krysta Svore. Quantum nearest-neighbor algorithms for machine learning. QIC, 15:318–358, 2015.
+
+[26] Michael A Nielsen and Isaac L Chuang. Quantum computation and quantum information. Cambridge university press, 2010.
+
+[27] Vittorio Giovannetti, Seth Lloyd, and Lorenzo Maccone. Quantum random access memory. Physical review letters, 100(16):160501, 2008.
+
+[28] Nathan Wiebe and Martin Roetteler. Quantum arithmetic and numerical analysis using repeat-until-success circuits. arXiv preprint arXiv:1406.2040, 2014.
+
+[29] Esma Aïmeur, Gilles Brassard, and Sébastien Gambs. Quantum clustering algorithms. In Proceedings of the 24th international conference on machine learning, pages 1–8. ACM, 2007.
+
+[30] Geoffrey Hinton, Li Deng, Dong Yu, George E Dahl, Abdel-rahman Mohamed, Navdeep Jaitly, Andrew Senior, Vincent Vanhoucke, Patrick Nguyen, Tara N Sainath, et al. Deep neural networks for acoustic modeling in speech recognition: The shared views of four research groups. Signal Processing Magazine, IEEE, 29(6):82–97, 2012.
+
+[31] Yann LeCun and Corinna Cortes. The mnist database of handwritten digits, 1998.
+
+[32] Lov K Grover. A fast quantum mechanical algorithm for database search. In Proceedings of the twenty-eighth annual ACM symposium on Theory of computing, pages 212–219. ACM, 1996.
+
+[33] Vadym Kliuchnikov, Dmitri Maslov, and Michele Mosca. Fast and efficient exact synthesis of single-qubit unitaries generated by clifford and t gates. Quantum Information & Computation, 13(7-8):607–630, 2013.
+
+[34] Neil J Ross and Peter Selinger. Optimal ancilla-free clifford+ t approximation of z-rotations. arXiv preprint arXiv:1403.2975, 2014.
+
+[35] Alex Bocharov, Martin Roetteler, and Krysta M Svore. Efficient synthesis of universal repeat-until-success circuits. arXiv preprint arXiv:1404.5320, 2014.
+
+[36] Andrew M Childs and Nathan Wiebe. Hamiltonian simulation using linear combinations of unitary operations. arXiv preprint arXiv:1202.5822, 2012.
+
+[37] Pinar Donmez, Krysta M Svore, and Christopher JC Burges. On the local optimality of lambdarank. In Proceedings of the 32nd international ACM SIGIR conference on Research and development in information retrieval, pages 460–467. ACM, 2009.
+
+[38] Miguel A Carreira-Perpinan and Geoffrey E Hinton. On contrastive divergence learning. In Proceedings of the tenth international workshop on artificial intelligence and statistics, pages 33–40. Citeseer, 2005.
+
+[39] Martin J Wainwright, Tommi S Jaakkola, and Alan S Willsky. A new class of upper bounds on the log partition function. Information Theory, IEEE Transactions on, 51(7):2313–2335, 2005.
+
+[40] Manfred Opper and Ole Winther. Tractable approximations for probabilistic models: The adaptive thouless-anderson-palmer mean field approach. Physical Review Letters, 86(17):3695, 2001.
+
+[41] Ruslan Salakhutdinov and Iain Murray. On the quantitative analysis of deep belief networks. In Proceedings of the 25th international conference on Machine learning, pages 872–879. ACM, 2008.
+
+[42] Martijn AR Leisink and Hilbert J Kappen. A tighter bound for graphical models. In NIPS, volume 13, pages 266–272, 2000.

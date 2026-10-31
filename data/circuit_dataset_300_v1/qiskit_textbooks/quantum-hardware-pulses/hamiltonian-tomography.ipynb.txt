@@ -1,0 +1,622 @@
+# Hamiltonian Tomography
+
+
+## Contents
+* Introduction
+* Fitting Functions
+* Using the Pulse Simulator
+* Run Experiment on Backend Model Simulation
+* Fitting the Simulated Results
+* Measure ZI (Stark Shift) via CR Ramsey Experiment
+* References
+
+
+## Introduction 
+
+The cross resonance gate for entangling qubits was introduced in this section of the Qiskit Textbook, where it is assumed the transmon is a qubit and the Schrieffer-Wolff transformation is applied to yield an effective Hamiltonian 
+
+$$
+\tilde{H}_{\rm eff}^{\rm CR} = - \frac{\Delta_{12}}{2}\sigma_1^z 
++ \frac{\Omega(t)}{2} \left(\sigma_2^x - \frac{J}{2\Delta_{12}} \sigma_1^z \sigma_2^x \right),
+$$
+
+where $\Delta_{12} = \tilde{\omega}_1-\tilde{\omega}_2$ is the difference between the dressed frequencies of the qubits, $\Omega$ is the cross resonance drive strength, and $J$ is the qubit-qubit coupling. We will use a common simplified notation for these interaction terms where the Pauli matrix is represented by a capital letter (with a hat to denote that it is an operator) and the qubit is represented by its position in a string, so for example we wish to isolate the $\hat{Z}\hat{X} = \hat{Z} \otimes \hat{X} = \sigma_1^z \otimes \sigma_2^x = \sigma_1^z \sigma_2^x$ interaction that is used to build the controlled-NOT gate from the $\hat{Z}\hat{I} = \sigma_1^z \otimes \sigma_2^0$ and $\hat{I}\hat{X} = \sigma_1^0 \otimes \sigma_2^x$ terms. Here the matrix $\sigma_i^0$ represents the identity matrix on qubit $i$. 
+
+In addition to understanding these extra terms, since the transmon has higher energy levels and actual experiments may have other interactions, due to crosstalk for example, when applying an entangling operation, it is not always obvious which Pauli rotations will be generated. Here we assume a cross resonance Hamiltonian of the following form:
+
+$$
+\hat{H} = \frac{\hat{Z} \otimes \hat{A}}{2} + \frac{\hat{I} \otimes \hat{B}}{2} = 
+a_{x} \hat{Z}\hat{X} + a_{y} \hat{Z}\hat{Y} + a_{z} \hat{Z}\hat{Z} + b_{x}  \hat{I}\hat{X} + b_{y} \hat{I}\hat{Y} + b_{z} \hat{I}\hat{Z}  
+$$
+
+where we will omit the Kronecker product symbol $\otimes$ for succinctness.  We refer to the first Pauli operator acting on the control qubit and second operators acting on the target qubits, as in the effective Hamiltonian above.  While the form of the cross resonance Hamiltonian is known, the individual coefficients $a_{\mu}, b_{\nu}$ are not known. Note that these coefficients are also referred to as the strengths of the interaction they correspond to, i.e. $a_x$ is the $ZX$ interaction rate, etc. We must then find a way of extracting the coefficients from measurements made on the system after the cross resonance pulse is applied for different durations. Before we proceed, it should be noted that cross resonance operation also generates a $\hat{Z}\hat{I}$ interaction arising from a Stark shift (off-resonant drive that dressed the qubit frequency). This term can be extracted by preforming a Ramsey experiment on the control qubit. We will discuss this Ramsey procedure later on, so for now let us focus on the Hamiltonian that we wrote down.
+
+The coefficients $a_{\mu}, b_{\nu}$ (interaction rates) will be extracted by taking six different measurements as a function of the duration of the pulse.  The six measurements are of the expectation value of each Pauli term on the target qubit with the control qubit either in the ground or excited state. In the next section we will show how these measurements give us information about the coefficients.
+
+
+## Fitting Functions 
+
+In order to extract the coefficients $a_{\mu}, b_{\nu}$, we need to know what function we expect to fit to the measurement data.  The data we will be looking at will be the expectation value of Pauli operators as a function of pulse duration.  In the Heisenberg picture of quantum mechanics, the evolution of the expectation value of an operator can be given as
+
+$$\langle \hat{O}(t) \rangle = \langle e^{i\hat{H}t} \hat{O} e^{-i\hat{H}t} \rangle$$
+
+Let $dt$ be an infinitesimally small time increment.  Then we have
+
+$$\langle \hat{O}(t+dt) \rangle = \langle (1+i\hat{H} dt)\hat{O}(t)(1-i\hat{H} dt) \rangle = 
+\langle \hat{O}(t) \rangle +i dt \langle \left[\hat{H},\hat{O}\right] \rangle
+\Longrightarrow \frac{d\langle \hat{O} \rangle}{dt} = i \left[\hat{H},\hat{O}\right]$$
+
+to first order in $dt$. We can evaluate the commutator for each of the Pauli operators:
+
+$$
+    &\left[\hat{H}, \hat{I}\hat{X}\right] = 2 i \left(a_{y} \hat{Z}\hat{Z} - a_{z} \hat{Z}\hat{Y} + b_{y} \hat{I}\hat{Z} - b_{z} \hat{I}\hat{Y}\right) \\
+$$
+$$
+    &\left[\hat{H},\hat{I}\hat{Y}\right] = 2 i \left(-a_{x} \hat{Z}\hat{Z} + a_{z} \hat{Z}\hat{X} - b_{x} \hat{I}\hat{Z} + b_{z} \hat{I}\hat{X}\right)\\
+$$
+$$
+    &\left[\hat{H}, \hat{I}\hat{Z}\right] = 2 i \left(a_{x} \hat{Z}\hat{Y} - a_{y} \hat{Z}\hat{X} + b_{x} \hat{I}\hat{Y} - b_{y} \hat{I}\hat{X}\right)
+$$
+
+If we let $n$ be the expectation value of the Pauli $\hat{Z}$ operator on the control qubit, then we can write down these commutators in terms of the expectation values of the target qubit:
+
+$$
+    &i\langle\left[\hat{H},\hat{I}\hat{X} \right]\rangle_{\rm control} = 2 \left(n a_{z} + b_{z}\right)\langle\hat{Y}\rangle - 2 \left(n a_{y} + b_{y}\right)\langle\hat{Z}\rangle
+$$
+$$
+    &i\langle\left[\hat{H}, \hat{I}\hat{Y}\right]\rangle_{\rm control} = 2\left(n a_{x} + b_{x}\right) \langle\hat{Z}\rangle-2  \left(n a_{z} + b_{z}\right) \langle\hat{X}\rangle 
+$$
+$$
+    &i\langle\left[\hat{H}, \hat{I}\hat{Z}\right]\rangle_{\rm control} = 2  \left(n a_{y} + b_{y}\right) \langle\hat{X}\rangle - 2 \left(n a_{x} + b_{x}\right) \langle\hat{Y}\rangle 
+$$
+
+where the expectation values on the right hand side are understood to be those of the target qubit, which will also be the case of the following discussion. Let us define $\vec{r}_n = \{\langle\hat{X}\rangle, \langle\hat{Y}\rangle, \langle\hat{Z}\rangle\}_n$ then we can use these commutators to write down a matrix equation for the time dependence of $\vec{r}$ depending on the Pauli-$Z$ value $n$ of the state of the control qubit. Then putting the above equations together
+
+$$ \frac{d}{dt} \begin{bmatrix}
+\langle \hat{X} \rangle \\ \langle \hat{Y} \rangle \\ \langle \hat{Z} \rangle \end{bmatrix} = 
+2 \begin{bmatrix} 0 & na_z + b_z & -n a_y - b_y \\
+-na_z - b_z & 0 & n a_x + b_x \\
+na_y + b_y & -na_x - b_x & 0 \end{bmatrix} \begin{bmatrix}
+\langle \hat{X} \rangle \\ \langle \hat{Y} \rangle \\ \langle \hat{Z} \rangle \end{bmatrix}
+$$
+
+or more compactly,
+
+$$\frac{d\vec{r}_n(t)}{dt} = G_n \vec{r}_n(t),$$
+
+where 
+
+$$
+G_n = 2 \begin{bmatrix} 0 & na_z + b_z & -n a_y - b_y \\
+-na_z - b_z & 0 & n a_x + b_x \\
+na_y + b_y & -na_x - b_x & 0 \end{bmatrix} \equiv \begin{bmatrix}0 & \Delta^n & -\Omega_y^n\\-\Delta^n & 0 & \Omega_x^n \\ \Omega_y^n & -\Omega_x^n & 0\end{bmatrix}.
+$$
+
+Since $G_n$ is time independent we can easily integrate the differential equation with the initial state corresponding to $t=0$, yielding
+
+$$\vec{r}_n(t) = e^{G_n t} \vec{r}_n(0).$$
+
+We can find the matrix exponential, $e^{G_n t}$, by finding the eigenvalues and eigenvectors of $G_n$.  The eigenvalues of $G_n$ are
+
+$$
+\vec{g}_{n} = \{0, -i\sqrt{\Delta^2+\Omega_x^2+\Omega_y^2} , i\sqrt{\Delta^2+\Omega_x^2+\Omega_y^2}\}_n,
+$$
+
+where for notational simplicity, the subscript $n$ denotes the appropriate values of $\Delta, \Omega_x, \Omega_y,$ given the state of the control qubit. We will not write down the eigenvectors because they are too cumbersome but it is straightforward to find them.  Let $U$ be the transformation into the eigenbasis and let $\hat{D}_n$ be the diagonal matrix of the eigenvalues.  Then we can rewrite the time dependence of $\vec{r}_n(t)$ as
+
+$$\vec{r}_n(t) = U^{\dagger} e^{\hat{D}_n t} U\vec{r}_n(0).$$
+
+Setting $\vec{r}_n(0) = \{0,0,1\}$ (which corresponds the target qubit starting in the $|0\rangle$ state) we have that
+
+$$
+    &\langle \hat{X}(t) \rangle_n = \frac{1}{\Omega^2}\left(-\Delta \Omega_x + \Delta\Omega_x\cos(\Omega t) + \Omega \Omega_y \sin(\Omega t)\right)
+$$
+$$
+    &\langle \hat{Y}(t) \rangle_n = \frac{1}{\Omega^2}\left(\Delta \Omega_y - \Delta\Omega_y\cos(\Omega t) - \Omega \Omega_x \sin(\Omega t)\right)
+$$
+$$
+    &\langle \hat{Z}(t) \rangle_n = \frac{1}{\Omega^2}\left(\Delta^2 + \left(\Omega_x^2+\Omega_y^2\right)\cos(\Omega t) \right)
+$$
+
+where $\Omega = \sqrt{\Delta^2+\Omega_x^2+\Omega_y^2}$ for each control qubit preparation $n$. In the subsequent sections, we will often drop the hat (^) on the operators.
+
+
+## Using the Pulse Simulator
+
+
+We will simulate on a model of a real device using the Pulse Simulator. First, load necessary libraries.
+
+
+### Warning:
+This chapter uses `PulseSimulator` backend in Qiskit Aer. There is a bug in the latest stable version regarding the measurement, and thus this installs `stable/0.7`. See Qiskit/qiskit-aer#1257 for details.
+
+
+[Python source: cell 7]
+!pip install qiskit-aer==0.7
+
+
+[Python source: cell 8]
+from qiskit import circuit, pulse, transpile, QuantumCircuit, schedule
+from qiskit.pulse import Play
+from qiskit.pulse.channels import ControlChannel, DriveChannel
+from qiskit.pulse.library import drag, GaussianSquare
+from qiskit.test.mock import FakeAthens
+import numpy as np
+import matplotlib.pyplot as plt
+
+backend = FakeAthens()
+
+
+Next, save the fake backend configuration and the sampling time $dt$. We will save the Hamiltonian parameters here for building a Duffing oscillator model later.
+
+
+[Python source: cell 10]
+backend_config = backend.configuration()
+ham_params = backend_config.hamiltonian['vars']
+dt = backend_config.dt
+print(f"Sampling time: {dt * 1e9} ns") 
+
+
+First we grab all the pulse-level gate calibrations, then we get the CNOT operation between two qubits. We already know from experience with this particular backend that the CNOT operation contains a CR pulse implemented as a GaussianSquare on a particular channel, ControlChannel(1) . We use this knowledge we have about the form of that instruction to extract it from the overall CNOT pulse.Schedule by using the filter method.
+
+
+[Python source: cell 12]
+qc = 1
+qt = 0
+    
+backend_defaults = backend.defaults()
+inst_sched_map = backend_defaults.instruction_schedule_map 
+cr_pulse = inst_sched_map.get('cx', (0, 1)).filter(channels = [ControlChannel(1)], instruction_types=[Play]).instructions[0][1].pulse
+
+
+
+Cross resonance pulses are of type `GaussianSquare`, a square pulse with a Gaussian rise and fall. Currently, the waveform samples are returned from the `instruction_schedule_map`, so we must elucidate the `GaussianSquare` parameters to easily build our own cross resonance pulses. We can declare parameter as below:
+
+
+[Python source: cell 14]
+pulse_amp = cr_pulse.parameters['amp']  #import amplitude from cr_pulse to match the phase
+
+#declare pulse parameters and build GaussianSquare pulse
+cr_params = {}
+cr_params['duration'] = 688
+cr_params['amp'] = pulse_amp
+cr_params['sigma'] = 64
+cr_params['width'] = 432
+my_cr_pulse = GaussianSquare(**cr_params)
+
+
+Let's build a test schedule to visualize the default cross resonance pulse against the one we just constructed.
+
+
+[Python source: cell 16]
+fig, axes = plt.subplots(nrows=2, sharex=True, figsize=(8, 7))
+
+with pulse.build(backend, name="Default CR") as cr_sched_default:  
+        pulse.play(cr_pulse, ControlChannel(1)) 
+cr_sched_default.draw(backend = backend, axis=axes[0])
+axes[0].set_xlabel("")
+
+with pulse.build(backend, name="Custom CR") as cr_sched_custom:
+    pulse.play(my_cr_pulse, ControlChannel(1))
+cr_sched_custom.draw(backend = backend, axis=axes[1])
+
+
+Pretty good! This will be close enough for the Hamiltonian tomography experiment. Now, this pulse nominally executes $ZX(\theta=\pi/4)$ corresponding to the RZXGate because the cross resonance pulse is echoed: the first half will be a positive rotation dependent on the state of the control qubit, followed by an "echo pulse" that flips the control qubit, followed by a negative rotation dependent on the new state of the control qubit. This turns out to be equivalent to a $ZX(\theta=\pi/2)$, but we are just dealing with the first part of the pulse so that we can observe the full effect of the cross resonance interaction. We keep this in mind because this particular duration of cross resonance pulse will only take us an angle of $\theta=\pi/4$ around the Bloch sphere, and for the Hamiltonian tomography experiment we wish to traverse the Bloch sphere several times.
+
+
+[Python source: cell 18]
+def build_cr_scheds(qc: int, qt: int, cr_times, phase = 0.0, ZI_MHz = 0.0) -> np.array:
+    """Build an array of cross resonance schedules for the Hamiltonian tomography experiment.
+    
+    Args:
+      qc: control qubit index
+      qt: target qubit index
+      cr_times: array of widths of the cross resonance pulses
+      phase: phase offset of the cross resonance pulse (rad)
+      ZI_MHz: ZI interaction rate (in MHz) to correct for with frame change
+    """
+    tomo_circs = []
+    
+    cr_gate = circuit.Gate('cr', num_qubits = 2, params = []) 
+    cr_risefall = (cr_params['duration'] - cr_params['width']) / (2 * cr_params['sigma'])
+    
+    for width in cr_times:
+        tomo_cr_params = cr_params.copy()
+        tomo_cr_params['duration'] = int(width + 2 * cr_risefall * cr_params['sigma'])
+        tomo_cr_params['width'] = width
+        framechange = 2 * np.pi * int(width) * dt * ZI_MHz * 1e6
+        
+        with pulse.build(backend) as cr_sched:
+            uchan = pulse.control_channels(qc, qt)[0]
+            with pulse.phase_offset(phase, uchan):
+                pulse.play(GaussianSquare(**tomo_cr_params), uchan)
+                
+        for basis in ['X', 'Y', 'Z']:
+            for control in ['0', '1']:
+                tomo_circ = circuit.QuantumCircuit(5)  #use all qubits to avoid error
+                if control == '1':
+                    tomo_circ.x(qc)# flip control from |0> to |1>
+                tomo_circ.append(cr_gate, [qc, qt])  #apply custom cr_gate
+                tomo_circ.rz(-framechange, qc)  #apply frame change on the qc
+                tomo_circ.barrier(qc, qt)
+                if basis == 'X':
+                    tomo_circ.h(qt)
+                elif basis == 'Y':
+                    tomo_circ.sdg(qt)
+                    tomo_circ.h(qt)
+                tomo_circ.measure_all()   
+                tomo_circ.add_calibration(gate=cr_gate, qubits=[qc, qt], schedule=cr_sched)
+                tomo_circs.append(tomo_circ)
+                
+    tomo_circs_transpiled = transpile(tomo_circs, backend, optimization_level = 1)            
+    return schedule(tomo_circs_transpiled, backend)
+
+
+[Python source: cell 19]
+# remember samples must be in multiples of 16
+cr_times = 16*np.linspace(0, 500, 21)
+cr_scheds = build_cr_scheds(qc, qt, cr_times)
+cr_scheds[-1].draw(backend = backend)
+
+
+Note how the final schedule consists of the control in the $|1\rangle$ state due to the $\pi$-pulse on `d1` channel before the cross resonance pulse and this is measured in the $Z$-basis.
+
+
+## Run Experiment on Backend Model Simulation  
+
+We will construct a Duffing oscillator model based on the Hamiltonian model of `ibmq_athens` by using `PulseSystemModel`. Then we collect the relevant Hamiltonian from the backend configuration.
+
+
+[Python source: cell 22]
+from qiskit import assemble
+from qiskit.providers.aer import PulseSimulator
+from qiskit.providers.aer.pulse import PulseSystemModel
+
+backend_model= PulseSystemModel.from_backend(backend)
+backend_sim = PulseSimulator()
+qubit_lo_freq = backend_model.hamiltonian.get_qubit_lo_from_drift()
+
+
+[Python source: cell 23]
+def run_pulse(sched): 
+    """Runs the scheduled experiment on the simulated backend.
+    
+    Args:
+      sched: pulse schedule to run
+    """
+    # assemble the qobj
+    test_qobj = assemble(sched,
+                        backend = backend_sim,
+                        qubit_lo_freq = qubit_lo_freq,
+                        meas_level = 1, 
+                        meas_return = 'avg',
+                        shots = 2048)
+    
+    # run simulation
+    sim_result = backend_sim.run(test_qobj, system_model=backend_model).result()
+    return sim_result.get_memory(0)
+
+
+def run_ham_tomo(cr_times, cr_scheds):
+    """Run Hamiltonian tomography experiment and return results.
+    
+    Args:
+      cr_times: widths of cross resonance pulses
+      cr_scheds: array of pulse schedules for Ham Tomo experiment
+    """
+    # expectation values of target conditioned on control
+    avg_t_c = np.zeros((6, len(cr_times)), dtype = complex)
+
+    # sanity check: expectation values of control conditioned on control
+    avg_c_c = np.zeros((6, len(cr_times)), dtype = complex)
+
+    for ii in range(len(cr_scheds)):
+        result = run_pulse(cr_scheds[ii])
+        avg_t_c[ii % 6, ii // 6] = 1 - 2 * result[qt]
+        avg_c_c[ii % 6, ii // 6] = result[qc]
+        print(ii + 1, "/",len(cr_scheds), end = "\r")
+        
+    return np.real(avg_t_c), np.real(avg_c_c)
+
+
+#### **Warning!** The Pulse Simulator is computationally intensive and each experiment consisting of runs of 21 schedules with 6 different options and 2048 shots may take tens of minutes up to hours depending on CPU performance. The schedules with longer cross resonance pulses are more computationally intensive than those with shorter ones.
+
+
+[Python source: cell 25]
+avg_t_c, avg_c_c = run_ham_tomo(cr_times, cr_scheds)
+
+
+## Fitting the Simulated Results 
+
+Using the `scipy` package, the fitting functions below will fit the Hamiltonian tomography data, Pauli expectations of the target qubit $\langle X(t) \rangle, \langle Y(t) \rangle, \langle Z(t) \rangle$, for the control prepared in either the ground or excited state. Note that we must use a trick to concatenate all the data into a single array by `tile`ing the time array and `vstack`ing the data so we can use the `curve_fit` function.
+
+
+[Python source: cell 27]
+from scipy.optimize import curve_fit
+
+def get_omega(eDelta, eOmega_x, eOmega_y):
+    """Return \Omega from parameter arguments."""
+    eOmega = np.sqrt(eDelta**2 + eOmega_x**2 + eOmega_y**2)
+    return eOmega
+
+def avg_X(t, eDelta, eOmega_x, eOmega_y):
+    """Return average X Pauli measurement vs time t"""
+    eOmega = get_omega(eDelta, eOmega_x, eOmega_y)
+    eXt = (-eDelta*eOmega_x + eDelta*eOmega_x*np.cos(eOmega*t) + \
+           eOmega*eOmega_y*np.sin(eOmega*t)) / eOmega**2
+    return eXt
+
+def avg_Y(t, eDelta, eOmega_x, eOmega_y):
+    """Return average Y Pauli measurement vs time t"""
+    eOmega = get_omega(eDelta, eOmega_x, eOmega_y)
+    eYt = (eDelta*eOmega_y - eDelta*eOmega_y*np.cos(eOmega*t) - \
+           eOmega*eOmega_x*np.sin(eOmega*t)) / eOmega**2
+    return eYt
+
+def avg_Z(t, eDelta, eOmega_x, eOmega_y):
+    """Return average Z Pauli measurement vs time t"""
+    eOmega = get_omega(eDelta, eOmega_x, eOmega_y)
+    eZt = (eDelta**2 + (eOmega_x**2 + eOmega_y**2)*np.cos(eOmega*t)) / eOmega**2
+    return eZt
+
+def rt_evol(ts, eDelta, eOmega_x, eOmega_y):
+    """Stack average X,Y,Z Pauli measurements vertically."""
+    return np.vstack([avg_X(ts, eDelta, eOmega_x, eOmega_y), \
+                     avg_Y(ts, eDelta, eOmega_x, eOmega_y), \
+                     avg_Z(ts, eDelta, eOmega_x, eOmega_y)])
+    
+def rt_flat(ts, eDelta, eOmega_x, eOmega_y):
+    """Flatten X,Y,Z Pauli measurement data into 1D array."""
+    return rt_evol(ts[0:len(ts)//3], eDelta, eOmega_x, eOmega_y).flatten()
+
+def fit_rt_evol(ts, eXt, eYt, eZt, p0):
+    """Use curve_fit to determine fit parameters of X,Y,Z Pauli measurements together."""
+    rt_vec = np.asarray([eXt, eYt, eZt])
+    
+    return curve_fit(rt_flat, np.tile(ts, 3), rt_vec.flatten(), p0=p0, method='trf')
+
+
+### Plotting Functions
+
+The above fits provide the parameters $\Omega^i_x, \Omega^i_y$, and $\Delta^i$ for the control qubit prepared in states $i = |0\rangle, |1\rangle$ (corresponding to $n=\pm 1$ in the equations above). The interaction rates (coefficients $a_\mu, b_\nu$ of the operators) are then determined as 
+
+$$
+IX = \frac{1}{2} \left( \Omega^0_x + \Omega^1_x\right) \qquad ZX = \frac{1}{2} \left( \Omega^0_x - \Omega^1_x\right) \\
+IY = \frac{1}{2} \left( \Omega^0_y + \Omega^1_y\right) \qquad ZY = \frac{1}{2} \left( \Omega^0_y - \Omega^1_y\right) \\
+IZ = \frac{1}{2} \left( \Delta^0 + \Delta^1\right) \qquad ZZ = \frac{1}{2} \left( \Delta^0 - \Delta^1\right)
+$$
+
+
+[Python source: cell 29]
+def get_interation_rates_MHz(ground_fit, excited_fit):
+    """Determine interaction rates from fits to ground and excited control qubit data."""
+    Delta0 = (ground_fit[0]/dt)/1e6
+    Omega0_x = (ground_fit[1]/dt)/1e6
+    Omega0_y = (ground_fit[2]/dt)/1e6
+    Delta1 = (excited_fit[0]/dt)/1e6
+    Omega1_x = (excited_fit[1]/dt)/1e6
+    Omega1_y = (excited_fit[2]/dt)/1e6
+    
+    IX = 0.5*(Omega0_x + Omega1_x)
+    IY = 0.5*(Omega0_y + Omega1_y)
+    IZ = 0.5*(Delta0 + Delta1)
+    ZX = 0.5*(Omega0_x - Omega1_x)
+    ZY = 0.5*(Omega0_y - Omega1_y)
+    ZZ = 0.5*(Delta0 - Delta1)
+    
+    return [[IX, IY, IZ], [ZX, ZY, ZZ]]
+
+def plot_cr_ham_tomo(cr_times, avg_t_c, avg_c_c, ground_fit, excited_fit):
+    """Plot Hamiltonian tomography data and curve fits with interaction rates."""
+    coeffs = get_interation_rates_MHz(ground_fit, excited_fit)
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(15,15), sharey = True)
+    ax1.scatter(cr_times, avg_t_c[0,:].real, lw=3.0, color='blue', label='ctrl in |0>')
+    ax1.plot(cr_times, avg_X(cr_times, *ground_fit), lw=3.0, color='blue')
+    ax1.scatter(cr_times, avg_t_c[1,:].real, lw=3.0, color='red', label='ctrl in |1>')
+    ax1.plot(cr_times, avg_X(cr_times, *excited_fit), lw=3.0, color='red')
+    ax1.set_ylabel('<X(t)>', fontsize=20)
+    ax1.set_title('Pauli Expectation Value', fontsize=20)
+    ax1.legend(loc=4, fontsize=14)
+    ax2.scatter(cr_times, avg_t_c[2,:].real, lw=3.0, color='blue', label='ctrl in |0>')
+    ax2.plot(cr_times, avg_Y(cr_times, *ground_fit), lw=3.0, color='blue')
+    ax2.scatter(cr_times, avg_t_c[3,:].real, lw=3.0, color='red', label='ctrl in |1>')
+    ax2.plot(cr_times, avg_Y(cr_times, *excited_fit), lw=3.0, color='red')
+    ax2.set_title('IX = %.3f MHz   IY = %.3f MHz   IZ = %.3f MHz' % \
+              (coeffs[0][0], coeffs[0][1], coeffs[0][2]), fontsize=20)
+    ax2.set_ylabel('<Y(t)>', fontsize=20)
+    ax2.legend(loc=4, fontsize=14)
+    ax3.scatter(cr_times, avg_t_c[4,:].real, lw=3.0, color='blue', label='ctrl in |0>')
+    ax3.plot(cr_times, avg_Z(cr_times, *ground_fit), lw=3.0, color='blue')
+    ax3.scatter(cr_times, avg_t_c[5,:].real, lw=3.0, color='red', label='ctrl in |1>')
+    ax3.plot(cr_times, avg_Z(cr_times, *excited_fit), lw=3.0, color='red')
+    ax3.set_title('ZX = %.3f MHz   ZY = %.3f MHz   ZZ = %.3f MHz' % \
+              (coeffs[1][0], coeffs[1][1], coeffs[1][2]), fontsize=20)
+    ax3.set_ylabel('<Z(t)>', fontsize=20)
+    ax3.set_xlabel('time (dt)', fontsize=20)
+    ax3.legend(loc=4, fontsize=14)
+
+
+### Fit and Plot
+
+
+[Python source: cell 31]
+ground_fit,_ = fit_rt_evol(cr_times, avg_t_c[0,:], avg_t_c[2,:], avg_t_c[4,:], p0=[0.0002, 0.0002, 0.0005])
+excited_fit,_ = fit_rt_evol(cr_times, avg_t_c[1,:], avg_t_c[3,:], avg_t_c[5,:], p0=[0.0002, 0.001, 0.001])
+
+plot_cr_ham_tomo(cr_times, avg_t_c, avg_c_c, ground_fit, excited_fit)
+
+
+Note here that the magnitude of the $ZY$ interaction is a lot larger than the desired $ZX$ interaction. This is because the cross resonance pulse is out of phase with the single-qubit drive $IX$ on the target qubit (not the $IX$ here induced by the cross resonance pulse). We can determine this from the interaction rates and shift the phase of the cross resonance pulse in the next Hamiltonian tomography experiment.
+
+
+[Python source: cell 33]
+coeffs = get_interation_rates_MHz(ground_fit, excited_fit)
+ZX_rate = coeffs[1][0]
+ZY_rate = coeffs[1][1]
+phase = -np.arctan2(ZY_rate, ZX_rate)
+print('Phase from ZY/ZX ratio is '+str(phase))
+
+
+[Python source: cell 34]
+cr_scheds = build_cr_scheds(qc, qt, cr_times, phase=phase)
+avg_t_c_mod, avg_c_c_mod = run_ham_tomo(cr_times, cr_scheds)
+
+
+[Python source: cell 35]
+ground_fit_mod,_ = fit_rt_evol(cr_times, avg_t_c_mod[0,:], avg_t_c_mod[2,:], avg_t_c_mod[4,:], p0=[0, 0, 0.0001])
+excited_fit_mod,_ = fit_rt_evol(cr_times, avg_t_c_mod[1,:], avg_t_c_mod[3,:], avg_t_c_mod[5,:], p0=[0.001, 0.001, 0.0000001])
+
+plot_cr_ham_tomo(cr_times, avg_t_c_mod, avg_c_c_mod, ground_fit_mod, excited_fit_mod)
+
+
+Now we can see that the bulk of the cross resonance pulse provides the $ZX$-interaction that we can use to entangle qubits. Note that the scale of the Pauli expectation graph of $\langle X(t) \rangle$ differs from the other graphs.
+
+
+## Measure ZI (Stark Shift) via CR Ramsey Experiment 
+
+Here we measure the $ZI$ interaction term via a Ramsey experiment, recalling that the resulting oscillation are a result of the difference between the qubit and drive frequency. Since the frequency (Stark) shift and $ZI$ interaction are equivalent because a frequency shift induces a $Z$-rotation on the control qubit, we can measure this shift and compensate for it with a frame change.
+
+
+[Python source: cell 38]
+def build_cr_ramsey_scheds(qc: int, qt: int, cr_times, phase=0.0, ZI_MHz=0.0) -> np.array:
+    """Build array of pulse schedules for CR Ramsey experiment.
+    
+    Args:
+      qc: control qubit index
+      qt: target qubit index
+      cr_times: width of cross resonance pulses (in dt)
+      phase: phase offset of cross resonance pulse (rad)
+      ZI_MHz: Z-rotation rate of control qubit (in MHz) compensated in software by frame change
+    """
+    scheds = []
+
+    cr_gate = circuit.Gate('cr', num_qubits=2, params=[]) 
+    cr_risefall = (cr_params['duration'] - cr_params['width']) / (2 * cr_params['sigma'])
+    
+    for width in cr_times:
+        ramsey_cr_params = cr_params.copy()
+        ramsey_cr_params['duration'] = int(width + 2 * cr_risefall * cr_params['sigma'])
+        ramsey_cr_params['width'] = width
+        framechange = 2 * np.pi * int(width) * dt * ZI_MHz * 1e6
+        with pulse.build(backend) as cr_sched:
+            uchan = pulse.control_channels(qc, qt)[0]
+            with pulse.phase_offset(phase, uchan):
+                pulse.play(GaussianSquare(**ramsey_cr_params), uchan)    
+        ramsey_circ = circuit.QuantumCircuit(5)    
+
+        ramsey_circ.sx(qc)
+        
+        ramsey_circ.append(cr_gate, [qc, qt])
+        ramsey_circ.rz(-framechange, qc)      
+
+        ramsey_circ.sx(qc)
+
+        
+        ramsey_circ.measure_all()   
+        ramsey_circ.add_calibration(gate=cr_gate, qubits=[qc, qt], schedule=cr_sched) 
+        ramsey_circ_transpiled = transpile(ramsey_circ, backend, optimization_level=1)
+        sched = schedule(ramsey_circ_transpiled, backend)       
+        scheds.append(sched)
+    
+    return scheds
+
+
+[Python source: cell 39]
+cr_ramsey_times = 16*np.linspace(0, 100, 21)
+cr_ramsey_scheds = build_cr_ramsey_scheds(qc, qt, cr_ramsey_times)
+cr_ramsey_scheds[-1].draw(backend = backend)
+
+
+[Python source: cell 40]
+cr_ramsey_result = []
+count = 0
+for sched in cr_ramsey_scheds:
+    results = run_pulse(sched)
+    cr_ramsey_result.append(np.real(1 - 2 * results[qc]))
+    count += 1
+    print(count, "/", len(cr_ramsey_scheds), end = "\r")
+
+
+### Fitting Functions for the CR Ramsey Experiment
+
+We will fit the results to a decaying sinusoid, where the frequency of oscillation is the frequency offset. We will also need to take care of the relation between the control and target qubit frequencies, because that will effect whether the control qubit Stark shift is higher or lower in frequency.
+
+
+[Python source: cell 42]
+def decay_sin(t, f, a, phi, tau, offset):
+    """Fit function for exponentially-decaying sinusoid."""
+    return a * np.exp(-t / tau) * np.sin(2 * np.pi * f * t - phi) + offset
+
+def fit_decay_sin(ts, values, p0):
+    """Perform fit of decaying sinusoid."""
+    return curve_fit(decay_sin, ts, values, p0=p0)
+
+
+[Python source: cell 43]
+def plot_cr_ramsey(cr_ramsey_times, cr_ramsey_result, ramsey_fit):
+    """Plot CR Ramsey experiment and fit with ZI interaction rate."""
+    fig, ax = plt.subplots(1, 1, figsize=(15, 5))
+    ax.scatter(cr_ramsey_times, cr_ramsey_result, lw = 3.0, color = 'red')
+    ax.plot(cr_ramsey_times, decay_sin(cr_ramsey_times, *ramsey_fit), lw = 3.0, color = 'red')
+    ax.set_ylabel('<Z(t)>', fontsize = 20)
+    ax.set_title('CR Ramsey Rate (ZI = %.3f MHz)' % ((ramsey_fit[0] / dt) / 1e6), fontsize = 20)
+    ax.set_xlabel('time (dt)', fontsize = 20)
+
+
+[Python source: cell 44]
+ramsey_fit,_ = fit_decay_sin(cr_ramsey_times, cr_ramsey_result, p0 = [0.0025, 1, -np.pi / 2, 300, 0.5])
+plot_cr_ramsey(cr_ramsey_times, cr_ramsey_result, ramsey_fit)
+
+
+[Python source: cell 45]
+oscillator_freqs = [] # qubit transition frequencies
+SF = 1 / (2 * np.pi) # scale factor to convert from angular frequency to Hz
+
+for key in ham_params:
+    if 'wq' in key:
+        oscillator_freqs.append(ham_params[key] * SF)
+
+ZI_rate = np.sign(oscillator_freqs[qc] - oscillator_freqs[qt]) * (ramsey_fit[0] / dt) / 1e6
+print('Shift frame according to ZI rate of %.3f MHz' % ZI_rate)
+
+
+Now we will rebuild the Ramsey schedule to compensate for the Stark shift and rerun the experiment.
+
+
+[Python source: cell 47]
+# run simulation to longer times
+cr_ramsey_times = 16 * np.linspace(0, 250, 21)
+cr_ramsey_scheds = build_cr_ramsey_scheds(1, 0, cr_ramsey_times, phase = 0, ZI_MHz = ZI_rate)
+
+cr_ramsey_result = []
+count = 0
+
+for sched in cr_ramsey_scheds:
+    result = run_pulse(sched)
+    cr_ramsey_result.append(np.real(1 - 2 * result[qc]))
+    count += 1
+    print(count, "/", len(cr_ramsey_scheds), end = "\r")
+
+
+[Python source: cell 48]
+ramsey_fit,_ = fit_decay_sin(cr_ramsey_times, cr_ramsey_result, p0 = [0.00001, 0.1, 0, 300, -0.1])
+plot_cr_ramsey(cr_ramsey_times, cr_ramsey_result, ramsey_fit)
+
+
+We can see that we have substantially (but not totally) reduced the frequency shift (due to higher-order levels, etc.). At this point, we could return to the Hamiltonian tomography experiment
+```
+cr_scheds = build_cr_scheds(qc, qt, cr_times, phase=phase, ZI_MHz=ZI_rate)
+```
+However, since the frame change only affects the control qubit, the results would be identical to the second one.
+
+
+## References 
+
+[1] S Sheldon, E Magesan, JM Chow, and JM Gambetta, "Procedure for systematically tuning up crosstalk in the cross resonance gate," *Phys Rev A* **93**, 060302 (2016) 
+[2] T Alexander, N Kanazawa, DJ Egger, L Capelluto, CJ Wood, A Javadi-Abhari and DC McKay, "Qiskit pulse: programming quantum computers through the cloud with pulses", *Quantum Sci. Technol.* **5** 044006 (2020) 
+[3] DC McKay, CJ Wood, S Sheldon, JM Chow, and JM Gambetta, "Efficient Z-Gates for Quantum Computing," *Phys Rev A* **96**, 022330 (2017)
+
+
+[Python source: cell 51]
+import qiskit.tools.jupyter
+%qiskit_version_table

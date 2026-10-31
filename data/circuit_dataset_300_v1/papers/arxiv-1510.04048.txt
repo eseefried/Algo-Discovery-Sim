@@ -1,0 +1,557 @@
+[]
+
+## 1 Introduction
+
+Recent advances in the field of quantum computing have boosted the hope that one day we might be able to solve complex material-science problems using quantum computers [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]. It was shown that the direct mapping of the molecular wave function to the qubit state allows the unitary operator to be decomposed into a number of gates that only scales polynomially with system size [2]. A quantum computer could then be used for the simulation of chemical systems and their properties, including correlation functions and reaction rates [5]. For example, the hydrogen molecule in a minimal basis was calculated with a photonic quantum computer [4, 8] and a variational eigenvalue solver was demonstrated [16]. Beyond this, it was suggested that a small quantum computer with on the order of 100 qubits will be able to address challenging problems in quantum chemistry that are beyond the reach of classical algorithms [18]. Improvement of quantum algorithms [23], such as the reduction of the number of trotter steps required, might facilitate this. Another path could be the direct application of the quantum adiabatic algorithm to the quantum computation of molecular properties [15].
+
+The physics that govern the electrons in a material can be described by a many-body Hamiltonian written in its second quantization form,
+
+$$
+H=\sum_{ij}h_{ij}c^{\dagger}_{i}c^{\phantom{\dagger}}_{j}+\sum_{ijkl}h_{ijkl}c^{\dagger}_{i}c^{\dagger}_{j}c^{\phantom{\dagger}}_{k}c^{\phantom{\dagger}}_{l}, \tag{1}
+$$
+
+where the symbols $c^{\dagger}_{i}$ ($c_{i}$) represent fermionic creation (annihilation) operators of an electron in the atomic orbital $i$. The number of atomic orbitals $K$ sets the electronic degrees of freedom, and the size of the associated Hilbert space will be $2^{K}$ and the matrix size $2^{K}\times 2^{K}$. The coefficients $h_{ij}$ and $h_{ijkl}$ are the one-body interaction term and the two-body electron-electron interaction term, respectively. They result from overlap integrals that can be precomputed classically [7].
+
+For an efficient quantum simulation of quantum chemistry or other fermionic systems on a quantum computer, first the original Hamiltonian has to be transformed because electrons are fermions [27]. The Jordan–Wigner [28] and the Bravyi–Kitaev [29, 10] transformations are currently the most commonly used ones in the context of electronic-structure Hamiltonians. Here, we employ the Jordan–Wigner transform,
+
+$$
+c^{\phantom{\dagger}}_{j}=\mathop{\Pi}\limits_{i=1}^{j-1}Z_{i}\left(X_{j}+iY_{j}\right)\,\,{\rm and}\,\,\,c^{\dagger}_{j}=\mathop{\Pi}\limits_{i=1}^{j-1}Z_{i}\left(X_{j}-iY_{j}\right)\,, \tag{2}
+$$
+
+where $Z_{i}$ is short-hand for the $\sigma_{z}$ Pauli operator of the qubit $i$ and multiplications are tensor products. The many-body interactions are increased from order 4 to $K$ for the Jordan–Wigner and to $\log_{2}K$ for the Bravyi–Kitaev transformation. However, the size of the Hilbert space of the Hamiltonian remains $2^{K}$. It is therefore highly desirable to develop a new scheme that allows a reduction of the size of the relevant Hilbert space.
+
+Here, we derive such a scheme that reduces the dimensionality of the Hilbert space. A sensible approach is to restrict the Hamiltonian operator to the desired number of electrons $N$ as there is no interaction between the blocks corresponding to different numbers of electrons. The electronic Hamiltonian in second quantization has block diagonal form where each block corresponds to a total electron number $N$ between $0$ and $K$. By restricting the Hilbert space to one block, its dimensionality can be reduced from $2^{K}$ to $K\choose N$. For example, for a system with 10 electrons in 100 orbitals, the Hilbert space can be reduced to 44 qubits. A further reduction can be obtained when enforcing the total spin state of interest. In this case the Hamiltonian operator is restricted to the spaces span by the desired number of spin-up, $N_{\uparrow}$ and spin-down electrons $N_{\downarrow}$, separately. The size of the Hilbert space is therefore reduced from $2^{K}$ to ${K/2\choose N_{\uparrow}}+{K/2\choose N_{\downarrow}}$. In the case of the hydrogen molecule, we then apply the reduction to a single spin state (the singlet). Importantly, in our scheme there is no need to introduce a matrix representation for the Hamiltonian operator: all operations are performed in operator space. The scheme is a pre-computational step that would be performed prior the actual quantum simulation.
+
+This paper is organized in the following way: first, we describe our scheme to reduce the dimension of the Hilbert space associated with the Hamiltonian in Eq. (1) using the projector technique and the necessary qubit reduction operations without going into the basis. Then we will apply the scheme to two examples: the Fermi–Hubbard model with two sites and the hydrogen molecule with two orbitals.
+
+## 2 The General Scheme
+
+To restrict the Hamiltonian in Eq. (1) to a fixed number of electrons $N$, we first project out all other blocks that do not correspond to the desired number of electrons by means of the operator
+
+$$
+P_{N}^{(K)}=\prod_{j\neq N}^{K}P^{(K)}_{N,j}=\prod_{j\neq N}^{K}\frac{N_{\rm tot}-j}{N-j} \tag{3}
+$$
+
+and
+
+$$
+H_{N}^{(K)}=P_{N}^{{(K)}\dagger}H^{(K)}P_{N}^{(K)\phantom{\dagger}}\,. \tag{4}
+$$
+
+The total number of electrons $N_{\rm tot}$ is the sum of occupations $n_{j}$ of all states
+
+$$
+N_{\rm tot}=\sum_{j=1}^{K}n_{j}=\sum_{j=1}^{K}c^{\dagger}_{j}c^{\phantom{\dagger}}_{j}\,. \tag{5}
+$$
+
+The Hilbert space of Hamiltonian $H_{N}^{(K)}$ is not yet reduced, but all blocks other than the block of interest are set to zero. This projection will lead to an increase of terms, which in the worst case, scales exponentially with $2^{K}$. Originally, the projector scales with $K^{K}$, however, the scaling can be reduced to $2^{K}$ by exploiting the idempotency $n_{i}^{2}=n_{i}$ for occupation operator of each single state. In the following two examples we show that the number of terms is clearly smaller due to the sparsity of the Hamiltonian which is system dependent. Generally to keep the number of terms small, it may be beneficial not to evaluate the projector $P_{N}^{(K)}$ from Eq. (3) in one piece but to evaluate it iteratively starting from the innermost factors
+
+$$
+H_{N}^{(K)}=P^{(K)\dagger}_{N,K}\dots\left(P^{(K)\dagger}_{N,2}\left(P^{(K)\dagger}_{N,1}H^{(K)}P_{N,1}^{(K)}\right)P^{(K)}_{N,2}\right)\dots P^{(K)}_{N,K} \tag{6}
+$$
+
+and applying at each step the (anti)-commutation rules associated to the creation and annihilation operators.
+
+The blocks set to zero can now be sequentially removed and the number of qubits reduced one by one. Exploiting the relationship that the tensor product of the reduced Hamiltonian $H_{N}^{(K-1)}$ (of dimension $2^{K-1})$ and the identity operator $1$ is equal to the direct sum of two copies of the reduced Hamiltonian $H_{N}^{(K-1)}$,
+
+$$
+1\otimes H_{N}^{(K-1)}=H_{N}^{(K-1)}\oplus H_{N}^{(K-1)}\,, \tag{7}
+$$
+
+we can finally isolate the reduced Hamiltonian $H_{N}^{(K-1)}$. This operation is accomplished through the action of the shift operators $S_{+}$ and $S_{-}$ (see Appendix B)
+
+$$
+S_{\pm}^{(K)}=\frac{1}{2}X_{K-1}+\frac{1}{2}X_{K-1}X_{K}\mp\frac{i}{2}Y_{K-1}\pm\frac{i}{2}Y_{K-1}X_{K}\,, \tag{8}
+$$
+
+Applying the shift operators leads to the reduced iso-spectral Hamiltonian in the $(K-1)$ qubit space
+
+$$
+1\otimes H_{N}^{(K-1)}=S_{+}^{(K)\dagger}H^{(K)}S_{+}^{(K)}+S_{-}^{(K)\dagger}H^{(K)}S_{-}^{(K)}\,. \tag{9}
+$$
+
+The above operation can be applied iteratively until the number of qubits cannot be reduced further. We will demonstrate our scheme in the following two examples.
+
+## 3 The Fermi–Hubbard Model
+
+As a first example, we examine the two-site Fermi–Hubbard model. Here, the Hamiltonian in second quantization is given by
+
+$$
+H_{\rm HM}^{(4)} = -t\left(c^{\dagger}_{1}c^{\phantom{\dagger}}_{2}+c^{\dagger}_{2}c^{\phantom{\dagger}}_{1}+c^{\dagger}_{3}c^{\phantom{\dagger}}_{4}+c^{\dagger}_{4}c^{\phantom{\dagger}}_{3}\right)+U\left(c^{\dagger}_{1}c^{\phantom{\dagger}}_{1}c^{\dagger}_{4}c^{\phantom{\dagger}}_{4}+c^{\dagger}_{2}c^{\phantom{\dagger}}_{2}c^{\dagger}_{3}c^{\phantom{\dagger}}_{3}\right)\,. \tag{10}
+$$
+
+This model consists of four states (different subscripts of the creation and annihilation operators) that can be assigned in the following way: qubit 1 corresponds to spin-up on the first site, qubit 2 to spin-up on the second site, qubit 3 to spin-down on the first site, and qubit 4 to spin-down on the second site. Using this mapping, applying the Jordan–Wigner transformation and exploiting the properties of the Pauli matrices, we obtain the Hamiltonian
+
+$$
+H_{\rm HM}^{(4)} = -\frac{1}{2}t\left(X_{1}X_{2}+X_{3}X_{4}+Y_{1}Y_{2}+Y_{3}Y_{4}\right) \tag{11}
+$$
+$$
++ \frac{1}{4}U\left(2+Z_{1}Z_{4}+Z_{2}Z_{3}-Z_{1}-Z_{2}-Z_{3}-Z_{4}\right)\,.
+$$
+
+For illustration, we write the matrix representation of this Hamiltonian
+
+$$
+\hskip-71.13188ptH_{\rm HM}^{(4)}=\left(\begin{array}[]{cccccccccccccccc}0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&-t&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&-t&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&-t&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&-t&0&0&-t&0&0&0&0&0&0\\ 0&0&0&0&0&-t&U&0&0&0&-t&0&0&0&0&0\\ 0&0&0&0&0&0&0&U&0&0&0&-t&0&0&0&0\\ 0&0&0&0&-t&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&-t&0&0&0&U&-t&0&0&0&0&0\\ 0&0&0&0&0&0&-t&0&0&-t&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&-t&0&0&0&U&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&U&-t&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&-t&U&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&2U\\ \end{array}\right)\,, \tag{12}
+$$
+
+which has dimension $16\times 16$. Here, the Hamiltonian still contains all blocks corresponding to different numbers of electrons. For example, the element 0 in the top left corner belongs to 0 electrons and the element $2U$ in the bottom right corner belongs to 4 electrons.
+
+Only states with two electrons are non-trivial and of physical interest for us. Therefore, in the next step, we project out all irrelevant states with the number of electrons different from two by using the projector
+
+$$
+P_{2}^{(4)}=-\frac{1}{4}N_{\rm tot}(1-N_{\rm tot})(3-N_{\rm tot})(4-N_{\rm tot})\,. \tag{13}
+$$
+
+This leads to the new Hamiltonian:
+
+$$
+H_{{\rm HM},2}^{(4)}=P_{2}^{(4)\dagger}H_{\rm HM}^{(4)}P_{2}^{(4)}\,. \tag{14}
+$$
+
+With the above-mentioned mapping between states (electrons) and qubits together with the Jordan–Wigner transformation, the projector can be written in terms of the Pauli operators:
+
+$$
+P_{2}^{(4)} = \frac{3}{8}-\frac{1}{8}Z_{1}Z_{2}-\frac{1}{8}Z_{1}Z_{3}-\frac{1}{8}Z_{2}Z_{3}-\frac{1}{8}Z_{1}Z_{4} \tag{15}
+$$
+$$
+- \frac{1}{8}Z_{2}Z_{4}-\frac{1}{8}Z_{3}Z_{4}+\frac{3}{8}Z_{1}Z_{2}Z_{3}Z_{4}\,.
+$$
+
+Applying the projectors $P_{2}^{(4)}$ to Eq. (11) we obtain the following Hamiltonian, which formally operates exclusively on the two-electron subspace
+
+$$
+H_{{\rm HM},2}^{(4)} = -\frac{t}{4}\left(X_{1}X_{2}+X_{3}X_{4}+Y_{1}Y_{2}+Y_{3}Y_{4}-Z_{1}Z_{2}X_{3}X_{4}\right. \tag{16}
+$$
+$$
+- \left.Z_{1}Z_{2}Y_{3}Y_{4}-X_{1}X_{2}Z_{3}Z_{4}-Y_{1}Y_{2}Z_{3}Z_{4}\right)
+$$
+$$
++ \frac{U}{8}\left(1-Z_{1}Z_{2}-Z_{1}Z_{3}+Z_{2}Z_{3}+Z_{1}Z_{4}-Z_{2}Z_{4}\right.
+$$
+$$
+- \left.Z_{3}Z_{4}+Z_{1}Z_{2}Z_{3}Z_{4}\right)\,.
+$$
+
+Concerning the number of terms to compute, we have an increase from 11 to 16. However, moving to the matrix representation, we notice that only a $6\times 6$ block along the diagonal has nonzero entries:
+
+$$
+\hskip-42.67912ptH_{{\rm HM},2}^{(4)}=\left(\begin{array}[]{cccccccccccccccc}0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&-t&0&0&-t&0&0&0&0&0&0\\ 0&0&0&0&0&-t&U&0&0&0&-t&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&-t&0&0&0&U&-t&0&0&0&0&0\\ 0&0&0&0&0&0&-t&0&0&-t&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ \end{array}\right)\,. \tag{17}
+$$
+
+The next step consists in shrinking the Hilbert space and eliminating the sector on which the operator $H_{{\rm HM},2}^{(4)}$ acts trivially as a zero operator. This operation corresponds to the removal of a qubit and the consequent reduction of the size of the Hilbert space from $2^{4}$ to $2^{3}$, and is obtained through the action of the shift operators
+
+$$
+S_{\pm}^{(4)}=\frac{1}{2}X_{3}\pm\frac{1}{2}X_{3}X_{4}\mp\frac{i}{2}Y_{3}\pm\frac{i}{2}Y_{3}X_{4}\,. \tag{18}
+$$
+
+The name shift operator arises from the effect these operators have on the matrix representation of the Hamiltonian, $H_{{\rm HM},2}^{(4)}$: $S_{+}^{(4)}$ shifts a copy of the inner $8\times 8$ block to the upper left corner of the matrix, whereas $S_{-}^{(4)}$ does the same but to the lower right. Applying the shift operators to $H_{{\rm HM},2}^{(4)}$, we get
+
+$$
+1\otimes H_{{\rm HM},2}^{(3)}=S_{+}^{(4)\dagger}H_{{\rm HM},2}^{(4)}S_{+}^{(4)}+S_{-}^{(4)\dagger}H_{{\rm HM},2}^{(4)}S_{-}^{(4)}\,, \tag{19}
+$$
+
+which simplifies to
+
+$$
+H_{{\rm HM},2}^{(3)} = -\frac{t}{2}\left(X_{1}X_{2}+Y_{1}Y_{2}-Z_{1}Z_{2}X_{3}+X_{3}\right) \tag{20}
+$$
+$$
++ \frac{U}{4}\left(1-Z_{1}Z_{2}+Z_{1}Z_{3}-Z_{2}Z_{3}\right)\,
+$$
+
+or, in matrix representation,
+
+$$
+H_{{\rm HM},2}^{(3)}=\left(\begin{array}[]{cccccccc}0&0&0&0&0&0&0&0\\ 0&0&-t&0&0&-t&0&0\\ 0&-t&U&0&0&0&-t&0\\ 0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0\\ 0&-t&0&0&0&U&-t&0\\ 0&0&-t&0&0&-t&0&0\\ 0&0&0&0&0&0&0&0\\ \end{array}\right)\,. \tag{21}
+$$
+
+The inner block of this $8\times 8$ matrix still has the dimension $6\times 6$. To reduce the number of qubits further (going from dimension $2^{3}$ to $2^{2}$), we need to reorder the states and create a non-zero block of dimension $4\times 4$. The reordering (which in the matrix representation corresponds to a swap of the second column and row with the fourth) is achieved through the action of the reorder operator,
+
+$$
+R^{(3)}=\frac{1}{2}\left(1+Z_{1}Z_{3}-Z_{1}X_{2}Z_{3}+X_{2}\right)\,. \tag{22}
+$$
+
+Note that this reorder operator is for this specific system and that for systems with higher dimensionality and a different number of electrons, a generalization has to be found. The new reordered three-qubit Hamiltonian is
+
+$$
+H_{{\rm HM},2,{\rm R}}^{(3)}=R^{(3)\dagger}H_{{\rm HM},2}^{(3)}R^{(3)}\,, \tag{23}
+$$
+
+which, after some algebra, becomes
+
+$$
+H_{{\rm HM},2,{\rm R}}^{(3)} = -\frac{t}{2}\left(X_{2}X_{3}+Y_{2}Y_{3}-X_{1}Z_{2}Z_{3}+X_{1}\right) \tag{24}
+$$
+$$
++ \frac{U}{4}\left(1-Z_{1}Z_{2}+Z_{1}Z_{3}-Z_{2}Z_{3}\right)
+$$
+
+and in matrix form
+
+$$
+H_{{\rm HM},2,{\rm R}}^{(3)}=\left(\begin{array}[]{cccccccc}0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0\\ 0&0&U&-t&-t&0&0&0\\ 0&0&-t&0&0&-t&0&0\\ 0&0&-t&0&0&-t&0&0\\ 0&0&0&-t&-t&U&0&0\\ 0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0\\ \end{array}\right)\,. \tag{25}
+$$
+
+As in the previous dimensional reduction step, we reduce the dimension of the relevant Hilbert space by applying the pair of shift operators,
+
+$$
+S_{\pm}^{(3)}=\frac{1}{2}X_{2}\pm\frac{1}{2}X_{2}X_{3}\mp\frac{i}{2}Y_{2}\pm\frac{i}{2}Y_{2}X_{3}\,, \tag{26}
+$$
+
+to the Hamiltonian $H_{{\rm HM},2,{\rm R}}^{(3)}$. This leads to
+
+$$
+1\otimes H_{{\rm HM},2}^{(2)}=S_{+}^{(3)\dagger}H_{{\rm HM},2,{\rm R}}^{(3)}S_{+}^{(3)}+S_{-}^{(3)\dagger}H_{{\rm HM},2,{\rm R}}^{(3)}S_{-}^{(3)} \tag{27}
+$$
+
+and finally to the two-qubit Hamiltonian
+
+$$
+H_{{\rm HM},2}^{(2)}=-t\left(X_{1}+X_{2}\right)+\frac{U}{2}\left(1+Z_{1}Z_{2}\right)\,. \tag{28}
+$$
+
+In matrix representation this is
+
+$$
+H_{{\rm HM},2}^{(2)}=\left(\begin{array}[]{cccc}U&-t&-t&0\\ -t&0&0&-t\\ -t&0&0&-t\\ 0&-t&-t&U\\ \end{array}\right)\,. \tag{29}
+$$
+
+The final reduced Hamiltonian is iso-spectral to the Hamilton in Eq. (16) and has the following eigenvalues
+
+$$
+E_{1,2,3,4}=0,U,\frac{1}{2}\left(U\pm\sqrt{16t^{2}+U^{2}}\right)\,. \tag{30}
+$$
+
+On a quantum computer this Hamiltonian is very simple to simulate as there is only a $Z_{1}Z_{2}$ interaction between the qubits. The many-body interactions of order 4 of the original Hamiltonian are therefore trivially reduced to order of 2. These interactions can easily be trotterized or even adiabatically simulated on the quantum computer with the correct tunable couplings [30]. We have therefore shown how reduce the Hamiltonian of the Fermi–Hubbard model from four to three to two qubits without having to go into the basis.
+
+## 4 The Hydrogen Molecule
+
+Here, we apply the same dimensional reduction scheme to the hydrogen molecule. The Hamiltonian of the hydrogen molecule with two single-electron molecular orbitals and after the Jordan–Wigner transformation is
+
+$$
+H_{H_{2}}^{(4)} = f_{1}+f_{2}Z_{1}Z_{2}+f_{2}Z_{3}Z_{4}+f_{3}Z_{1}Z_{3} \tag{31}
+$$
+$$
++ f_{3}Z_{2}Z_{4}+f_{4}Z_{2}Z_{3}+f_{5}Z_{1}Z_{4}+f_{6}X_{1}X_{2}X_{3}X_{4}
+$$
+$$
++ f_{6}X_{1}X_{2}Y_{3}Y_{4}+f_{6}Y_{1}Y_{2}X_{3}X_{4}+f_{6}Y_{1}Y_{2}Y_{3}Y_{4}
+$$
+$$
++ f_{7}Z_{1}+f_{7}Z_{4}+f_{8}Z_{2}+f_{8}Z_{3}\,.
+$$
+
+The eight coefficients are simple functions of the one-body and two-body (Coulomb) orbital integrals $h_{ij}$ and $h_{ijkl}$, which define the Hamiltonian in Eq. (1),
+
+$$
+f_{1} = h_{11}-\frac{h_{1212}}{2}+h_{1221}+\frac{h_{1441}}{4}+h_{22}+\frac{h_{2332}}{4}\,,
+$$
+$$
+f_{2} = \frac{h_{1221}}{4}-\frac{h_{1212}}{4}\,,\quad f_{3}=\frac{h_{1221}}{4}\,,
+$$
+$$
+f_{4} = \frac{h_{2332}}{4}\,,\quad f_{5}=\frac{h_{1441}}{4}\,,\quad f_{6}=\frac{h_{1212}}{4}\,,
+$$
+$$
+f_{7} = -\frac{h_{11}}{2}+\frac{h_{1212}}{4}-\frac{h_{1221}}{2}-\frac{h_{1441}}{4}\,,
+$$
+$$
+f_{8} = \frac{h_{1212}}{4}-\frac{h_{1221}}{2}-\frac{h_{22}}{2}-\frac{h_{2332}}{4}\, \tag{32}
+$$
+
+and can be precomputed using a classical computer [7]. To be consistent with the Fermi–Hubbard model, the qubits are mapped in the same way as above: qubit 1 corresponds to a spin-up electron in the first molecular orbital, qubit 2 to a spin-up electron in the second molecular orbital, qubit 3 to a spin-down electron in the first molecular orbital, and finally qubit 4 to a spin-down electron in the second molecular orbital. Note that this mapping differs from the one reported in Refs. [2, 7].
+
+We now apply the same sequence of operations as used in the Fermi–Hubbard case to reduce the number of qubits required for the simulation of the hydrogen molecule. In addition to the reduction of the Hilbert space to a two-electron sector, we will also restrict the system to a spin singlet. The projector then is given by
+
+$$
+P_{2}^{(4)}=N_{\uparrow}(2-N_{\uparrow})N_{\downarrow}(2-N_{\downarrow})\,, \tag{33}
+$$
+
+where
+
+$$
+N_{\uparrow}=n_{1}+n_{2}\quad{\rm and}\quad N_{\downarrow}=n_{3}+n_{4}\,. \tag{34}
+$$
+
+The projector in terms of the Pauli operators is
+
+$$
+P_{2}^{(4)}=\frac{1}{4}-\frac{1}{4}Z_{1}Z_{2}-\frac{1}{4}Z_{3}Z_{4}+\frac{1}{4}Z_{1}Z_{2}Z_{3}Z_{4}\,. \tag{35}
+$$
+
+After applying the projector $P_{2}^{(4)}$, the Hamiltonian is reduced to three qubits first. The resulting Hamiltonian is then reordered and finally reduced to a $2^{2}$ dimensional Hilbert space through the action of the reduction operation, which leads to
+
+$$
+H_{H_{2}}^{(2)} = f_{1}-2f_{2}+4f_{6}X_{1}X_{2}+(-2f_{3}+f_{4}+f_{5})Z_{1}Z_{2} \tag{36}
+$$
+$$
++ (f_{7}-f_{8})Z_{1}+(f_{7}-f_{8})Z_{2}\,.
+$$
+
+In matrix representation this becomes (Appendix C)
+
+$$
+H_{H_{2}}^{(2)}=\left(\begin{array}[]{cccc}{\small\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ -2f_{3}+f_{4}\hfill\\ +f_{5}+2f_{7}\hfill\\ -2f_{8}\hfill\end{array}}&0&0&4f_{6}\\ 0&{\small\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ +2f_{3}-f_{4}\hfill\\ -f_{5}\hfill\end{array}}&4f_{6}&0\\ 0&4f_{6}&{\small\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ +2f_{3}-f_{4}\hfill\\ -f_{5}\hfill\end{array}}&0\\ 4f_{6}&0&0&{\small\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ -2f_{3}+f_{4}\hfill\\ +f_{5}-2f_{7}\hfill\\ +2f_{8}\hfill\end{array}}\\ \end{array}\right)\,. \tag{37}
+$$
+
+Using the parameter from Ref. [7] for the overlap integrals, we obtain the well-known eigenvalues for the hydrogen molecule for this minimal basis set
+
+$$
+E_{1,2,3,4} = -1.85105\,{\rm Ha},-1.24623\,{\rm Ha},-0.88365\,{\rm Ha},-0.23389\,{\rm Ha}\,. \tag{38}
+$$
+
+In contrast to the Fermi–Hubbard model, the Hamiltonian of the hydrogen molecule in Eq. (36) a $X_{1}X_{2}$ interaction is needed in addition to the $Z_{1}Z_{2}$ interaction between the two qubits. Still, this Hamiltonian could be simulated on a current quantum computer with moderate effort.
+
+When reducing from three to two qubits, a reordering has to be performed for both Hamiltonians. This reordering depends on the way the quantum states are mapped onto the qubits. For larger systems, the blocks of the same number of electrons are distributed in the Hamiltonian in a complicated, but, regular fashion. Therefore, with the appropriate book-keeping, it should be possible to generalize the reduction of qubits for larger quantum systems. However, for most Hamiltonians this reordering will exponentially hard and scale with $2^{K}$.
+
+## 5 Conclusion
+
+In conclusion, we have described a scheme to reduce the number of qubits required for the simulation of a fermionic system described by a Hamiltonian with a Hilbert space of $2^{K}$. We exploit the fact that in second quantization the corresponding Hilbert space is given by the direct sum of the subspaces, each corresponding to a fixed number of electrons. Importantly, this scheme can be carried out in operator space. For the Fermi–Hubbard model and the hydrogen molecule, we introduced a scheme to dimension of the Hilbert space to a subspace characterized by a fixed number of electrons. The is achieved at the cost of an increase of the number of terms in the Hamiltonian, which in the worst case scales with $2^{K}$. However, the dimensionality of Hilbert space will be reduced from $2^{K}$ to $K!/((K-N)!N!)$. In both examples shown, the number of qubits was reduced from four to two. Our scheme involves no approximations, and the reduction comes only from identifying the relevant parts of the Hilbert space together with the proper procedure to carry out the reduction. As a result, the two physical systems can successfully be simulated on a quantum computer based on just two qubits with moderate effort. The next step would be to apply the reduction scheme to molecules with a moderate number of 10 to 20 qubits and study the growth of the number of terms in Hamiltonian. Furthermore, for these small system size it should be examined if the reorder operator can be generalized. Even with both mentioned limitations, the proposed scheme still remains a useful tool to reduce the dimensionality of specific quantum systems for quantum simulators with a limited number of resources.
+
+We thank S. Filipp for valuable comments on the manuscript.
+
+## Appendix A Block diagonality of the Hamiltonian
+
+The total number of electrons for each element of a four-state Hamiltonian that corresponds to the cross sum of the state is:
+
+$$
+\left(\begin{array}[]{cccccccccccccccc}0&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&1&1&\circ&1&\circ&\circ&\circ&1&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&1&1&\circ&1&\circ&\circ&\circ&1&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&2&\circ&2&2&\circ&\circ&2&2&\circ&2&\circ&\circ&\circ\\ \circ&1&1&\circ&1&\circ&\circ&\circ&1&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&2&\circ&2&2&\circ&\circ&2&2&\circ&2&\circ&\circ&\circ\\ \circ&\circ&\circ&2&\circ&2&2&\circ&\circ&2&2&\circ&2&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&3&\circ&\circ&\circ&3&\circ&3&3&\circ\\ \circ&1&1&\circ&1&\circ&\circ&\circ&1&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&2&\circ&2&2&\circ&\circ&2&2&\circ&2&\circ&\circ&\circ\\ \circ&\circ&\circ&2&\circ&2&2&\circ&\circ&2&2&\circ&2&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&3&\circ&\circ&\circ&3&\circ&3&3&\circ\\ \circ&\circ&\circ&2&\circ&2&2&\circ&\circ&2&2&\circ&2&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&3&\circ&\circ&\circ&3&\circ&3&3&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&3&\circ&\circ&\circ&3&\circ&3&3&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&4\\ \end{array}\right) \tag{39}
+$$
+
+No electrons are created or annihilated. Only if the number of electrons of both states is the same does the matrix element exists. The other matrix elements are denoted by the symbol $\circ$.
+
+The elements after projection, so that only elements with two electrons and a singlet configuration survive
+
+$$
+\left(\begin{array}[]{cccccccccccccccc}\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&2&2&\circ&\circ&2&2&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&2&2&\circ&\circ&2&2&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&2&2&\circ&\circ&2&2&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&2&2&\circ&\circ&2&2&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ&\circ\\ \end{array}\right)\,. \tag{40}
+$$
+
+## Appendix B Tensor operations to reduce the number of qubits
+
+A generic one-qubit Hamiltonian in matrix form is
+
+$$
+H^{(1)}=\left(\begin{array}[]{cc}H_{11}&H_{12}\\ H_{21}&H_{22}\\ \end{array}\right)\,. \tag{41}
+$$
+
+Enlarging it by one qubit to two qubits gives
+
+$$
+H^{(2)} = 1\otimes H^{(1)} \tag{42}
+$$
+$$
+= 1\otimes\left(\begin{array}[]{cc}H_{11}&H_{12}\\ H_{21}&H_{22}\\ \end{array}\right)
+$$
+$$
+= \left(\begin{array}[]{cccc}H_{11}&H_{12}&0&0\\ H_{21}&H_{22}&0&0\\ 0&0&H_{11}&H_{12}\\ 0&0&H_{21}&H_{22}\\ \end{array}\right)
+$$
+$$
+= H^{(1)}\oplus H^{(1)}\,. \tag{51}
+$$
+
+In our scheme, we want to do the opposite: We want to reduce the Hamiltonian by one qubit. The starting point is a two-qubit Hamiltonian $H_{\rm ib}^{(2)}$ with a $4\times 4$ inner block surrounded by zeros:
+
+$$
+H_{\rm ib}^{(2)}=\left(\begin{array}[]{cccc}0&0&0&0\\ 0&H_{11}&H_{12}&0\\ 0&H_{21}&H_{22}&0\\ 0&0&0&0\\ \end{array}\right)\,. \tag{52}
+$$
+
+This Hamiltonian can be reduced by the following operation, which shifts a copy of the inner block up and a copy down:
+
+$$
+1\otimes H^{(1)} = S_{+}^{(2)\dagger}H_{\rm ib}^{(2)}S_{+}^{(2)}+S_{-}^{(2)\dagger}H_{\rm ib}^{(2)}S_{-}^{(2)}\,. \tag{53}
+$$
+
+The two-qubit operator, which shifts the inner block up and down, is given by
+
+$$
+S_{\pm}^{(2)}=\frac{1}{2}X_{1}\pm\frac{1}{2}X_{1}X_{2}\mp\frac{i}{2}Y_{1}\pm\frac{i}{2}Y_{1}X_{2}\,. \tag{54}
+$$
+
+In matrix form, the shift-up operator is
+
+$$
+S_{+}^{(2)}=\left(\begin{array}[]{cccc}0&0&0&1\\ 1&0&0&0\\ 0&1&0&0\\ 0&0&1&0\\ \end{array}\right)\,, \tag{55}
+$$
+
+and the shift-down operator is
+
+$$
+S_{-}^{(2)}=\left(\begin{array}[]{cccc}0&1&0&0\\ 0&0&1&0\\ 0&0&0&1\\ 1&0&0&0\\ \end{array}\right)\,. \tag{56}
+$$
+
+Inserting the shift operators into Eq. (53) gives
+
+$$
+1\otimes H_{\rm ib}^{(1)} = \left(\begin{array}[]{cccc}H_{11}&H_{12}&0&0\\ H_{21}&H_{22}&0&0\\ 0&0&0&0\\ 0&0&0&0\\ \end{array}\right)+\left(\begin{array}[]{cccc}0&0&0&0\\ 0&0&0&0\\ 0&0&H_{11}&H_{12}\\ 0&0&H_{21}&H_{22}\\ \end{array}\right)
+$$
+$$
+= \left(\begin{array}[]{cccc}H_{11}&H_{12}&0&0\\ H_{21}&H_{22}&0&0\\ 0&0&H_{11}&H_{12}\\ 0&0&H_{21}&H_{22}\\ \end{array}\right)
+$$
+$$
+= 1\otimes\left(\begin{array}[]{cc}H_{11}&H_{12}\\ H_{21}&H_{22}\\ \end{array}\right)\,.
+$$
+
+Finally, the two-qubit Hamiltonian $H_{\rm ib}^{(2)}$ is reduced to a one-qubit Hamiltonian $H_{\rm ib}^{(1)}$.
+
+## Appendix C The intermediate steps of qubit reduction for the hydrogen molecule
+
+Below, all intermediate equations for the reduction of qubits for the hydrogen molecule are shown, which have been omitted. The four-qubit Hamiltonian of the hydrogen molecule in matrix form is
+
+$$
+\hskip-99.58464ptH_{H_{2}}^{(4)}={\footnotesize\left(\begin{array}[]{cccccccccccccccc}{\scriptsize\begin{array}[]{c}\,\,f_{1}+2f_{2}\hfill\\ +2f_{3}+f_{4}\hfill\\ +f_{5}+2f_{7}\hfill\\ +2f_{8}\hfill\end{array}}&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&{\scriptsize\begin{array}[]{c}f_{1}+f_{4}\hfill\\ -f_{5}+2f_{8}\hfill\end{array}}&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&{\scriptsize\begin{array}[]{c}f_{1}-f_{4}\hfill\\ +f_{5}+2f_{7}\hfill\end{array}}&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&{\scriptsize\begin{array}[]{c}f_{1}+2f_{2}\hfill\\ -2f_{3}-f_{4}\hfill\\ -f_{5}\hfill\end{array}}&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&{\scriptsize\begin{array}[]{c}f_{1}-f_{4}\hfill\\ +f_{5}+2f_{7}\hfill\end{array}}&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ +2f_{3}-f_{4}\hfill\\ -f_{5}\hfill\end{array}}&0&0&0&0&4f_{6}&0&0&0&0&0\\ 0&0&0&0&0&0&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ -2f_{3}+f_{4}\hfill\\ +f_{5}+2f_{7}\hfill\\ -2f_{8}\hfill\end{array}}&0&0&4f_{6}&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&{\scriptsize\begin{array}[]{c}f_{1}+f_{4}\hfill\\ -f_{5}-2f_{8}\hfill\end{array}}&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&{\scriptsize\begin{array}[]{c}f_{1}+f_{4}\hfill\\ -f_{5}+2f_{8}\hfill\end{array}}&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&4f_{6}&0&0&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ -2f_{3}+f_{4}\hfill\\ +f_{5}-2f_{7}\hfill\\ +2f_{8}\hfill\end{array}}&0&0&0&0&0&0\\ 0&0&0&0&0&4f_{6}&0&0&0&0&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ +2f_{3}-f_{4}\hfill\\ -f_{5}\hfill\end{array}}&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&{\scriptsize\begin{array}[]{c}f_{1}-f_{4}\hfill\\ +f_{5}-2f_{7}\hfill\end{array}}&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&{\scriptsize\begin{array}[]{c}f_{1}+2f_{2}\hfill\\ -2f_{3}-f_{4}\hfill\\ -f_{5}\hfill\end{array}}&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&{\scriptsize\begin{array}[]{c}f_{1}-f_{4}\hfill\\ +f_{5}-2f_{7}\hfill\end{array}}&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&{\scriptsize\begin{array}[]{c}f_{1}+f_{4}\hfill\\ -f_{5}-2f_{8}\hfill\end{array}}&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&{\scriptsize\begin{array}[]{c}f_{1}+2f_{2}\hfill\\ +2f_{3}+f_{4}\hfill\\ +f_{5}-2f_{7}\hfill\\ -2f_{8}\hfill\end{array}}\\ \end{array}\right)\,.} \tag{74}
+$$
+
+When applying the projector $P_{2}^{(4)}$, which restricts the space to two electrons, we obtain following Hamiltonian:
+
+$$
+H_{H_{2},2}^{(4)} = \frac{f_{1}}{4}-\frac{f_{2}}{2}+\left(-\frac{f_{1}}{4}+\frac{f_{2}}{2}\right)Z_{1}Z_{2}+\left(\frac{f_{3}}{2}-\frac{f_{4}}{4}-\frac{f_{5}}{4}\right)Z_{1}Z_{3} \tag{75}
+$$
+$$
++ \left(-\frac{f_{3}}{2}+\frac{f_{4}}{4}+\frac{f_{5}}{4}\right)Z_{2}Z_{3}+\left(-\frac{f_{3}}{2}+\frac{f_{4}}{4}+\frac{f_{5}}{4}\right)Z_{1}Z_{4}
+$$
+$$
++ \left(\frac{f_{3}}{2}-\frac{f_{4}}{4}-\frac{f_{5}}{4}\right)Z_{2}Z_{4}-\frac{1}{4}f_{1}Z_{3}Z_{4}+\frac{1}{2}f_{2}Z_{3}Z_{4}
+$$
+$$
++ \left(\frac{f_{7}}{4}-\frac{f_{8}}{4}\right)Z_{1}Z_{2}Z_{3}+\left(-\frac{f_{7}}{4}+\frac{f_{8}}{4}\right)Z_{1}Z_{2}Z_{4}
+$$
+$$
++ \left(-\frac{f_{7}}{4}+\frac{f_{8}}{4}\right)Z_{1}Z_{3}Z_{4}+\left(\frac{f_{7}}{4}-\frac{f_{8}}{4}\right)Z_{2}Z_{3}Z_{4}
+$$
+$$
++ f_{6}X_{1}X_{2}X_{3}X_{4}+f_{6}Y_{1}Y_{2}X_{3}X_{4}+f_{6}X_{1}X_{2}Y_{3}Y_{4}+f_{6}Y_{1}Y_{2}Y_{3}Y_{4}
+$$
+$$
++ \left(\frac{f_{1}}{4}-\frac{f_{2}}{2}\right)Z_{1}Z_{2}Z_{3}Z_{4}+\left(\frac{f_{7}}{4}-\frac{f_{8}}{4}\right)Z_{1}+\left(-\frac{f_{7}}{4}+\frac{f_{8}}{4}\right)Z_{2}
+$$
+$$
++ \left(-\frac{f_{7}}{4}+\frac{f_{8}}{4}\right)Z_{3}+\left(\frac{f_{7}}{4}-\frac{f_{8}}{4}\right)Z_{4}\,.
+$$
+
+In matrix form, the Hamiltonian is
+
+$$
+\hskip-71.13188ptH_{H_{2},2}^{(4)}=\left(\begin{array}[]{cccccccccccccccc}0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ +2f_{3}-f_{4}\hfill\\ -f_{5}\hfill\end{array}}&0&0&0&0&4f_{6}&0&0&0&0&0\\ 0&0&0&0&0&0&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ -2f_{3}+f_{4}\hfill\\ +f_{5}+2f_{7}\hfill\\ -2f_{8}\hfill\end{array}}&0&0&4f_{6}&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&4f_{6}&0&0&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ -2f_{3}+f_{4}\hfill\\ +f_{5}-2f_{7}\hfill\\ +2f_{8}\hfill\end{array}}&0&0&0&0&0&0\\ 0&0&0&0&0&4f_{6}&0&0&0&0&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ +2f_{3}-f_{4}\hfill\\ -f_{5}\hfill\end{array}}&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0&0&0&0&0&0&0&0&0\\ \end{array}\right)\,. \tag{76}
+$$
+
+This Hamiltonian, which only exhibits a inner block of a $6\times 6$ matrix, can be reduced to three qubits by applying the shift operators:
+
+$$
+H_{H_{2},2}^{(3)} = \frac{f_{1}}{2}-f_{2}+\left(-\frac{f_{1}}{2}+f_{2}\right)Z_{1}Z_{2}+\left(-f_{3}+\frac{f_{4}}{2}+\frac{f_{5}}{2}\right)Z_{1}Z_{3} \tag{77}
+$$
+$$
++ \left(f_{3}-\frac{f_{4}}{2}-\frac{f_{5}}{2}\right)Z_{2}Z_{3}+2f_{6}X_{1}X_{2}X_{3}+2f_{6}Y_{1}Y_{2}X_{3}
+$$
+$$
++ \left(-\frac{f_{7}}{2}+\frac{f_{8}}{2}\right)Z_{1}Z_{2}Z_{3}+\left(\frac{f_{7}}{2}-\frac{f_{8}}{2}\right)Z_{1}
+$$
+$$
++ \left(-\frac{f_{7}}{2}+\frac{f_{8}}{2}\right)Z_{2}+\left(\frac{f_{7}}{2}-\frac{f_{8}}{2}\right)Z_{3}\,.
+$$
+
+This Hamiltonian corresponds to a $8\times 8$ matrix
+
+$$
+\hskip-71.13188ptH_{H_{2},2}^{(3)}=\left(\begin{array}[]{cccccccc}0&0&0&0&0&0&0\\ 0&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ +2f_{3}-f_{4}\hfill\\ -f_{5}\hfill\end{array}}&0&0&0&0&4f_{6}&0\\ 0&0&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ -2f_{3}+f_{4}\hfill\\ +f_{5}+2f_{7}\hfill\\ -2f_{8}\hfill\end{array}}&0&0&4f_{6}&0&0\\ 0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0\\ 0&0&4f_{6}&0&0&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ -2f_{3}+f_{4}\hfill\\ +f_{5}-2f_{7}\hfill\\ +2f_{8}\hfill\end{array}}&0&0\\ 0&4f_{6}&0&0&0&0&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\hfill\\ +2f_{3}-f_{4}\hfill\\ -f_{5}\hfill\end{array}}&0\\ 0&0&0&0&0&0&0&0\\ \end{array}\right)\,. \tag{78}
+$$
+
+As in the case of the Fermi–Hubbard model, this Hamiltonian has to be reordered to be reduced in size further. The reordered Hamiltonian is
+
+$$
+H_{H_{2},2,{\rm R}}^{(3)} = \frac{f_{1}}{2}-f_{2}+\left(f_{3}-\frac{f_{4}}{2}-\frac{f_{5}}{2}\right)Z_{1}Z_{2}+\left(-f_{3}+\frac{f_{4}}{2}+\frac{f_{5}}{2}\right)Z_{1}Z_{3} \tag{79}
+$$
+$$
++ \left(-\frac{f_{1}}{2}+f_{2}\right)Z_{2}Z_{3}+2f_{6}X_{1}X_{2}X_{3}+2f_{6}X_{1}Y_{2}Y_{3}
+$$
+$$
++ \left(-\frac{f_{7}}{2}+\frac{f_{8}}{2}\right)Z_{1}Z_{2}Z_{3}+\left(\frac{f_{7}}{2}-\frac{f_{8}}{2}\right)Z_{1}
+$$
+$$
++ \left(-\frac{f_{7}}{2}+\frac{f_{8}}{2}\right)Z_{2}+\left(\frac{f_{7}}{2}-\frac{f_{8}}{2}\right)Z_{3}
+$$
+
+and in matrix form
+
+$$
+\hskip-71.13188ptH_{H_{2},2,{\rm R}}^{(3)}=\left(\begin{array}[]{cccccccc}0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0\\ 0&0&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\\ -2f_{3}+f_{4}\hfill\\ +f_{5}+2f_{7}\hfill\\ -2f_{8}\hfill\end{array}}&0&0&4f_{6}&0&0\\ 0&0&0&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\\ +2f_{3}-f_{4}\hfill\\ -f_{5}\hfill\end{array}}&4f_{6}&0&0&0\\ 0&0&0&4f_{6}&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\\ +2f_{3}-f_{4}\hfill\\ -f_{5}\hfill\end{array}}&0&0&0\\ 0&0&4f_{6}&0&0&{\scriptsize\begin{array}[]{c}f_{1}-2f_{2}\\ -2f_{3}+f_{4}\hfill\\ +f_{5}-2f_{7}\hfill\\ +2f_{8}\hfill\end{array}}&0&0\\ 0&0&0&0&0&0&0&0\\ 0&0&0&0&0&0&0&0\\ \end{array}\right)\,. \tag{80}
+$$
+
+This Hamiltonian can now be reduced to two qubits by applying again the shift operators. The two-qubit Hamiltonian of the hydrogen molecule is iso-spectral to the original Hamiltonian. It has the following eigenvalues:
+
+$$
+E_{1,2,3,4} = f_{1}-2f_{2}+2f_{3}-f_{4}-f_{5}-4f_{6}\,, \tag{81}
+$$
+$$
+f_{1}-2f_{2}+2f_{3}-f_{4}-f_{5}+4f_{6}\,,
+$$
+$$
+f_{1}-2f_{2}-2f_{3}+f_{4}+f_{5}-2\sqrt{4f_{6}^{2}+f_{7}^{2}-2f_{7}f_{8}+f_{8}^{2}}\,,
+$$
+$$
+f_{1}-2f_{2}-2f_{3}+f_{4}+f_{5}+2\sqrt{4f_{6}^{2}+f_{7}^{2}-2f_{7}f_{8}+f_{8}^{2}}\,.
+$$
+
+## References
+
+## References
+
+[1] Abrams D S and Lloyd S 1999 Quantum Algorithm Providing Exponential Speed Increase for Finding Eigenvalues and Eigenvectors Phys. Rev. Lett. 83 5162–5165 00240 URL http://link.aps.org/doi/10.1103/PhysRevLett.83.5162
+
+[2] Aspuru-Guzik A, Dutoi A D, Love P J and Head-Gordon M 2005 Simulated Quantum Computation of Molecular Energies Science 309 1704–1707 ISSN 0036-8075, 1095-9203 00214 PMID: 16151006 URL http://www.sciencemag.org/content/309/5741/1704
+
+[3] Brown K L, Munro W J and Kendon V M 2010 Using Quantum Computers for Quantum Simulation Entropy 12 2268–2307 00052 URL http://www.mdpi.com/1099-4300/12/11/2268
+
+[4] Lanyon B P, Whitfield J D, Gillett G G, Goggin M E, Almeida M P, Kassal I, Biamonte J D, Mohseni M, Powell B J, Barbieri M, Aspuru-Guzik A and White A G 2010 Towards quantum chemistry on a quantum computer Nat Chem 2 106–111 ISSN 1755-4330 00172 URL http://www.nature.com/nchem/journal/v2/n2/abs/nchem.483.html
+
+[5] Kassal I, Whitfield J D, Perdomo-Ortiz A, Yung M H and Aspuru-Guzik A 2011 Simulating Chemistry Using Quantum Computers Annual Review of Physical Chemistry 62 185–207 00000 PMID: 21166541 URL http://www.annualreviews.org/doi/abs/10.1146/annurev-physchem-032210-103512
+
+[6] Li Z, Yung M H, Chen H, Lu D, Whitfield J D, Peng X, Aspuru-Guzik A and Du J 2011 Solving Quantum Ground-State Problems with Nuclear Magnetic Resonance Sci. Rep. 1 00018 URL http://www.nature.com/srep/2011/110909/srep00088/full/srep00088.html
+
+[7] Whitfield J D, Biamonte J and Aspuru-Guzik A 2011 Simulation of electronic structure Hamiltonians using quantum computers Molecular Physics 109 735–750 ISSN 0026-8976 URL http://dx.doi.org/10.1080/00268976.2011.552441
+
+[8] Aspuru-Guzik A and Walther P 2012 Photonic quantum simulators Nat Phys 8 285–291 ISSN 1745-2473 URL http://www.nature.com/nphys/journal/v8/n4/abs/nphys2253.html
+
+[9] Jones N C, Whitfield J D, McMahon P L, Yung M H, Meter R V, Aspuru-Guzik A and Yamamoto Y 2012 Faster quantum chemistry simulation on fault-tolerant quantum computers New J. Phys. 14 115023 ISSN 1367-2630 URL http://iopscience.iop.org/1367-2630/14/11/115023
+
+[10] Seeley J T, Richard M J and Love P J 2012 The Bravyi-Kitaev transformation for quantum computation of electronic structure The Journal of Chemical Physics 137 224109 ISSN 0021-9606, 1089-7690 URL http://scitation.aip.org/content/aip/journal/jcp/137/22/10.1063/1.4768229
+
+[11] Tempel D G and Aspuru-Guzik A 2012 Quantum Computing Without Wavefunctions: Time-Dependent Density Functional Theory for Universal Quantum Computation Sci. Rep. 2 00007 URL http://www.nature.com/srep/2012/120502/srep00391/full/srep00391.html?WT.ec_id=SREP-639-20120601
+
+[12] Whitfield J D, Love P J and Aspuru-Guzik A 2012 Computational complexity in electronic structure Phys. Chem. Chem. Phys. 15 397–411 ISSN 1463-9084 URL http://pubs.rsc.org/en/content/articlelanding/2013/cp/c2cp42695a
+
+[13] Yung M H and Aspuru-Guzik A 2012 A quantum–quantum Metropolis algorithm PNAS ISSN 0027-8424, 1091-6490 00013 PMID: 22215584 URL http://www.pnas.org/content/early/2011/12/28/1111758109
+
+[14] Toloui B and Love P J 2013 Quantum Algorithms for Quantum Chemistry based on the sparsity of the CI-matrix arXiv:1312.2579 [quant-ph] ArXiv: 1312.2579 URL http://arxiv.org/abs/1312.2579
+
+[15] Babbush R, Love P J and Aspuru-Guzik A 2014 Adiabatic Quantum Simulation of Quantum Chemistry Sci. Rep. 4 URL http://www.nature.com/srep/2014/141013/srep06603/full/srep06603.html
+
+[16] Peruzzo A, McClean J, Shadbolt P, Yung M H, Zhou X Q, Love P J, Aspuru-Guzik A and O’Brien J L 2014 A variational eigenvalue solver on a photonic quantum processor Nat Commun 5 URL http://www.nature.com/ncomms/2014/140723/ncomms5213/full/ncomms5213.html
+
+[17] Poulin D, Hastings M B, Wecker D, Wiebe N, Doherty A C and Troyer M 2014 The Trotter Step Size Required for Accurate Quantum Simulation of Quantum Chemistry arXiv preprint arXiv:1406.4920 URL http://arxiv.org/abs/1406.4920
+
+[18] Wecker D, Bauer B, Clark B K, Hastings M B and Troyer M 2014 Gate-count estimates for performing quantum chemistry on small quantum computers Phys. Rev. A 90 022305 URL http://link.aps.org/doi/10.1103/PhysRevA.90.022305
+
+[19] Babbush R, Berry D W, Kivlichan I D, Wei A Y, Love P J and Aspuru-Guzik A 2015 Exponentially more precise quantum simulation of fermions II: Quantum chemistry in the CI matrix representation arXiv:1506.01029 [physics, physics:quant-ph] ArXiv: 1506.01029 URL http://arxiv.org/abs/1506.01029
+
+[20] Babbush R, Berry D W, Kivlichan I D, Wei A Y, Love P J and Aspuru-Guzik A 2015 Exponentially more precise quantum simulation of fermions I: Quantum chemistry in second quantization arXiv:1506.01020 [physics, physics:quant-ph] ArXiv: 1506.01020 URL http://arxiv.org/abs/1506.01020
+
+[21] Barends R, Lamata L, Kelly J, García-Álvarez L, Fowler A G, Megrant A, Jeffrey E, White T C, Sank D, Mutus J Y, Campbell B, Chen Y, Chen Z, Chiaro B, Dunsworth A, Hoi I C, Neill C, O’Malley P J J, Quintana C, Roushan P, Vainsencher A, Wenner J, Solano E and Martinis J M 2015 Digital quantum simulation of fermionic models with a superconducting circuit Nat Commun 6 7654 URL http://www.nature.com/ncomms/2015/150708/ncomms8654/full/ncomms8654.html
+
+[22] García-Álvarez L, Heras U L, Mezzacapo A, Sanz M, Solano E and Lamata L 2015 Quantum chemistry and charge transport in biomolecules with superconducting circuits arXiv:1511.09355 [cond-mat, physics:quant-ph] ArXiv: 1511.09355 URL http://arxiv.org/abs/1511.09355
+
+[23] Hastings M B, Wecker D, Bauer B and Troyer M 2015 Improving Quantum Algorithms for Quantum Chemistry Quantum Info. Comput. 15 1–21 ISSN 1533-7146 URL http://dl.acm.org/citation.cfm?id=2685188.2685189
+
+[24] O’Malley P J J, Babbush R, Kivlichan I D, Romero J, McClean J R, Barends R, Kelly J, Roushan P, Tranter A, Ding N, Campbell B, Chen Y, Chen Z, Chiaro B, Dunsworth A, Fowler A G, Jeffrey E, Megrant A, Mutus J Y, Neill C, Quintana C, Sank D, Vainsencher A, Wenner J, White T C, Coveney P V, Love P J, Neven H, Aspuru-Guzik A and Martinis J M 2015 Scalable Quantum Simulation of Molecular Energies arXiv:1512.06860 [physics, physics:quant-ph] ArXiv: 1512.06860 URL http://arxiv.org/abs/1512.06860
+
+[25] Tranter A, Sofia S, Seeley J, Kaicher M, McClean J, Babbush R, Coveney P V, Mintert F, Wilhelm F and Love P J 2015 The Bravyi–Kitaev transformation: Properties and applications Int. J. Quantum Chem. 115 1431–1441 ISSN 1097-461X URL http://onlinelibrary.wiley.com/doi/10.1002/qua.24969/abstract
+
+[26] Whitfield J D 2015 Unified views of quantum simulation algorithms for chemistry arXiv:1502.03771 [physics, physics:quant-ph] ArXiv: 1502.03771 URL http://arxiv.org/abs/1502.03771
+
+[27] Ortiz G, Gubernatis J E, Knill E and Laflamme R 2001 Quantum algorithms for fermionic simulations Phys. Rev. A 64 022319 URL http://link.aps.org/doi/10.1103/PhysRevA.64.022319
+
+[28] Jordan P and Wigner E 1928 Über das Paulische Äquivalenzverbot Zeitschrift für Physik 47 631–651 ISSN 1434-6001, 1434-601X URL http://rd.springer.com/article/10.1007%2FBF01331938
+
+[29] Bravyi S B and Kitaev A Y 2002 Fermionic Quantum Computation Annals of Physics 298 210–226 ISSN 0003-4916 URL http://www.sciencedirect.com/science/article/pii/S0003491602962548
+
+[30] Biamonte J D and Love P J 2008 Realizable Hamiltonians for universal adiabatic quantum computers Phys. Rev. A 78 012352 URL http://link.aps.org/doi/10.1103/PhysRevA.78.012352

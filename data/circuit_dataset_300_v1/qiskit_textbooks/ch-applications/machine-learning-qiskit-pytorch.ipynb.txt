@@ -1,0 +1,377 @@
+# Hybrid quantum-classical Neural Networks with PyTorch and Qiskit
+
+
+Machine learning (ML) has established itself as a successful interdisciplinary field which seeks to mathematically extract generalizable information from data. Throwing in quantum computing gives rise to interesting areas of research which seek to leverage the principles of quantum mechanics to augment machine learning or vice-versa. Whether you're aiming to enhance classical ML algorithms by outsourcing difficult calculations to a quantum computer or optimise quantum algorithms using classical ML architectures - both fall under the diverse umbrella of quantum machine learning (QML).
+
+In this chapter, we explore how a classical neural network can be partially quantized to create a hybrid quantum-classical neural network. We will code up a simple example that integrates **Qiskit** with a state-of-the-art open-source software package - **PyTorch**. The purpose of this example is to demonstrate the ease of integrating Qiskit with existing ML tools and to encourage ML practitioners to explore what is possible with quantum computing.
+
+## Contents
+
+1. How Does it Work?    
+    1.1 Preliminaries    
+2. So How Does Quantum Enter the Picture?
+3. Let's code!  
+    3.1 Imports   
+    3.2 Create a "Quantum Class" with Qiskit    
+    3.3 Create a "Quantum-Classical Class" with PyTorch    
+    3.4 Data Loading and Preprocessing    
+    3.5 Creating the Hybrid Neural Network     
+    3.6 Training the Network    
+    3.7 Testing the Network
+4. What Now?
+
+
+## 1. How does it work? 
+
+**Fig.1** Illustrates the framework we will construct in this chapter. Ultimately, we will create a hybrid quantum-classical neural network that seeks to classify hand drawn digits. Note that the edges shown in this image are all directed downward; however, the directionality is not visually indicated.
+
+
+### 1.1 Preliminaries 
+The background presented here on classical neural networks is included to establish relevant ideas and shared terminology; however, it is still extremely high-level. __If you'd like to dive one step deeper into classical neural networks, see the well made video series by youtuber__ 3Blue1Brown. Alternatively, if you are already familiar with classical networks, you can skip to the next section.
+
+###### Neurons and Weights
+A neural network is ultimately just an elaborate function that is built by composing smaller building blocks called neurons. A ***neuron*** is typically a simple, easy-to-compute, and nonlinear function that maps one or more inputs to a single real number. The single output of a neuron is typically copied and fed as input into other neurons. Graphically, we represent neurons as nodes in a graph and we draw directed edges between nodes to indicate how the output of one neuron will be used as input to other neurons. It's also important to note that each edge in our graph is often associated with a scalar-value called a ***weight***. The idea here is that each of the inputs to a neuron will be multiplied by a different scalar before being collected and processed into a single value. The objective when training a neural network consists primarily of choosing our weights such that the network behaves in a particular way. 
+
+###### Feed Forward Neural Networks
+It is also worth noting that the particular type of neural network we will concern ourselves with is called a **feed-forward neural network (FFNN)**. This means that as data flows through our neural network, it will never return to a neuron it has already visited. Equivalently, you could say that the graph which describes our neural network is a **directed acyclic graph (DAG)**. Furthermore, we will stipulate that neurons within the same layer of our neural network will not have edges between them. 
+
+###### IO Structure of Layers
+The input to a neural network is a classical (real-valued) vector. Each component of the input vector is multiplied by a different weight and fed into a layer of neurons according to the graph structure of the network. After each neuron in the layer has been evaluated, the results are collected into a new vector where the i'th component records the output of the i'th neuron. This new vector can then be treated as an input for a new layer, and so on. We will use the standard term ***hidden layer*** to describe all but the first and last layers of our network.
+
+
+## 2. So How Does Quantum Enter the Picture?  
+
+To create a quantum-classical neural network, one can implement a hidden layer for our neural network using a parameterized quantum circuit. By "parameterized quantum circuit", we mean a quantum circuit where the rotation angles for each gate are specified by the components of a classical input vector. The outputs from our neural network's previous layer will be collected and used as the inputs for our parameterized circuit. The measurement statistics of our quantum circuit can then be collected and used as inputs for the following layer. A simple example is depicted below:
+
+Here, $\sigma$ is a nonlinear function and $h_i$ is the value of neuron $i$ at each hidden layer. $R(h_i)$ represents any rotation gate about an angle equal to $h_i$ and $y$ is the final prediction value generated from the hybrid network.  
+
+### What about backpropagation?
+If you're familiar with classical ML, you may immediately be wondering *how do we calculate gradients when quantum circuits are involved?* This would be necessary to enlist powerful optimisation techniques such as **gradient descent**. It gets a bit technical, but in short, we can view a quantum circuit as a black box and the gradient of this black box with respect to its parameters can be calculated as follows: 
+
+where $\theta$ represents the parameters of the quantum circuit and $s$ is a macroscopic shift. The gradient is then simply the difference between our quantum circuit evaluated at $\theta+s$ and $\theta - s$. Thus, we can systematically differentiate our quantum circuit as part of a larger backpropagation routine. This closed form rule for calculating the gradient of quantum circuit parameters is known as **the parameter shift rule**.
+
+
+## 3. Let's code! 
+
+### 3.1 Imports 
+First, we import some handy packages that we will need, including Qiskit and PyTorch.
+
+
+[Python source: cell 6]
+import numpy as np
+import matplotlib.pyplot as plt
+
+import torch
+from torch.autograd import Function
+from torchvision import datasets, transforms
+import torch.optim as optim
+import torch.nn as nn
+import torch.nn.functional as F
+
+import qiskit
+from qiskit import transpile, assemble
+from qiskit.visualization import *
+
+
+### 3.2 Create a "Quantum Class" with Qiskit 
+We can conveniently put our Qiskit quantum functions into a class. First, we specify how many trainable quantum parameters and how many shots we wish to use in our quantum circuit. In this example, we will keep it simple and use a 1-qubit circuit with one trainable quantum parameter $\theta$. We hard code the circuit for simplicity and use a $RY-$rotation by the angle $\theta$ to train the output of our circuit. The circuit looks like this:
+
+In order to measure the output in the $z-$basis, we calculate the $\sigma_\mathbf{z}$ expectation. 
+$$\sigma_\mathbf{z} = \sum_i z_i p(z_i)$$
+We will see later how this all ties into the hybrid neural network.
+
+
+[Python source: cell 8]
+class QuantumCircuit:
+    """ 
+    This class provides a simple interface for interaction 
+    with the quantum circuit 
+    """
+    
+    def __init__(self, n_qubits, backend, shots):
+        # --- Circuit definition ---
+        self._circuit = qiskit.QuantumCircuit(n_qubits)
+        
+        all_qubits = [i for i in range(n_qubits)]
+        self.theta = qiskit.circuit.Parameter('theta')
+        
+        self._circuit.h(all_qubits)
+        self._circuit.barrier()
+        self._circuit.ry(self.theta, all_qubits)
+        
+        self._circuit.measure_all()
+        # ---------------------------
+
+        self.backend = backend
+        self.shots = shots
+    
+    def run(self, thetas):
+        t_qc = transpile(self._circuit,
+                         self.backend)
+        job = self.backend.run(t_qc)
+        result = job.result().get_counts()
+        
+        counts = np.array(list(result.values()))
+        states = np.array(list(result.keys())).astype(float)
+        
+        # Compute probabilities for each state
+        probabilities = counts / self.shots
+        # Get state expectation
+        expectation = np.sum(states * probabilities)
+        
+        return np.array([expectation])
+
+
+Let's test the implementation
+
+
+[Python source: cell 10]
+simulator = qiskit.Aer.get_backend('aer_simulator')
+
+circuit = QuantumCircuit(1, simulator, 100)
+print('Expected value for rotation pi {}'.format(circuit.run([np.pi])[0]))
+circuit._circuit.draw()
+
+
+### 3.3 Create a "Quantum-Classical Class" with PyTorch 
+Now that our quantum circuit is defined, we can create the functions needed for backpropagation using PyTorch. The forward and backward passes contain elements from our Qiskit class. The backward pass directly computes the analytical gradients using the finite difference formula we introduced above.
+
+
+[Python source: cell 12]
+class HybridFunction(Function):
+    """ Hybrid quantum - classical function definition """
+    
+    @staticmethod
+    def forward(ctx, input, quantum_circuit, shift):
+        """ Forward pass computation """
+        ctx.shift = shift
+        ctx.quantum_circuit = quantum_circuit
+
+        expectation_z = ctx.quantum_circuit.run(input[0].tolist())
+        result = torch.tensor([expectation_z])
+        ctx.save_for_backward(input, result)
+
+        return result
+        
+    @staticmethod
+    def backward(ctx, grad_output):
+        """ Backward pass computation """
+        input, expectation_z = ctx.saved_tensors
+        input_list = np.array(input.tolist())
+        
+        shift_right = input_list + np.ones(input_list.shape) * ctx.shift
+        shift_left = input_list - np.ones(input_list.shape) * ctx.shift
+        
+        gradients = []
+        for i in range(len(input_list)):
+            expectation_right = ctx.quantum_circuit.run(shift_right[i])
+            expectation_left  = ctx.quantum_circuit.run(shift_left[i])
+            
+            gradient = torch.tensor([expectation_right]) - torch.tensor([expectation_left])
+            gradients.append(gradient)
+        gradients = np.array([gradients]).T
+        return torch.tensor([gradients]).float() * grad_output.float(), None, None
+
+class Hybrid(nn.Module):
+    """ Hybrid quantum - classical layer definition """
+    
+    def __init__(self, backend, shots, shift):
+        super(Hybrid, self).__init__()
+        self.quantum_circuit = QuantumCircuit(1, backend, shots)
+        self.shift = shift
+        
+    def forward(self, input):
+        return HybridFunction.apply(input, self.quantum_circuit, self.shift)
+
+
+### 3.4 Data Loading and Preprocessing 
+##### Putting this all together:
+We will create a simple hybrid neural network to classify images of two types of digits (0 or 1) from the MNIST dataset. We first load MNIST and filter for pictures containing 0's and 1's. These will serve as inputs for our neural network to classify.
+
+
+#### Training data
+
+
+[Python source: cell 15]
+# Concentrating on the first 100 samples
+n_samples = 100
+
+X_train = datasets.MNIST(root='./data', train=True, download=True,
+                         transform=transforms.Compose([transforms.ToTensor()]))
+
+# Leaving only labels 0 and 1 
+idx = np.append(np.where(X_train.targets == 0)[0][:n_samples], 
+                np.where(X_train.targets == 1)[0][:n_samples])
+
+X_train.data = X_train.data[idx]
+X_train.targets = X_train.targets[idx]
+
+train_loader = torch.utils.data.DataLoader(X_train, batch_size=1, shuffle=True)
+
+
+[Python source: cell 16]
+n_samples_show = 6
+
+data_iter = iter(train_loader)
+fig, axes = plt.subplots(nrows=1, ncols=n_samples_show, figsize=(10, 3))
+
+while n_samples_show > 0:
+    images, targets = data_iter.__next__()
+
+    axes[n_samples_show - 1].imshow(images[0].numpy().squeeze(), cmap='gray')
+    axes[n_samples_show - 1].set_xticks([])
+    axes[n_samples_show - 1].set_yticks([])
+    axes[n_samples_show - 1].set_title("Labeled: {}".format(targets.item()))
+    
+    n_samples_show -= 1
+
+
+#### Testing data
+
+
+[Python source: cell 18]
+n_samples = 50
+
+X_test = datasets.MNIST(root='./data', train=False, download=True,
+                        transform=transforms.Compose([transforms.ToTensor()]))
+
+idx = np.append(np.where(X_test.targets == 0)[0][:n_samples], 
+                np.where(X_test.targets == 1)[0][:n_samples])
+
+X_test.data = X_test.data[idx]
+X_test.targets = X_test.targets[idx]
+
+test_loader = torch.utils.data.DataLoader(X_test, batch_size=1, shuffle=True)
+
+
+So far, we have loaded the data and coded a class that creates our quantum circuit which contains 1 trainable parameter. This quantum parameter will be inserted into a classical neural network along with the other classical parameters to form the hybrid neural network. We also created backward and forward pass functions that allow us to do backpropagation and optimise our neural network. Lastly, we need to specify our neural network architecture such that we can begin to train our parameters using optimisation techniques provided by PyTorch. 
+
+### 3.5 Creating the Hybrid Neural Network 
+We can use a neat PyTorch pipeline to create a neural network architecture. The network will need to be compatible in terms of its dimensionality when we insert the quantum layer (i.e. our quantum circuit). Since our quantum  in this example contains 1 parameter, we must ensure the network condenses neurons down to size 1. We create a typical Convolutional Neural Network with two fully-connected layers at the end. The value of the last neuron of the fully-connected layer is fed as the parameter $\theta$ into our quantum circuit. The circuit measurement then serves as the final prediction for 0 or 1 as provided by a $\sigma_z$ measurement.
+
+
+[Python source: cell 20]
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.conv1 = nn.Conv2d(1, 6, kernel_size=5)
+        self.conv2 = nn.Conv2d(6, 16, kernel_size=5)
+        self.dropout = nn.Dropout2d()
+        self.fc1 = nn.Linear(256, 64)
+        self.fc2 = nn.Linear(64, 1)
+        self.hybrid = Hybrid(qiskit.Aer.get_backend('aer_simulator'), 100, np.pi / 2)
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.max_pool2d(x, 2)
+        x = F.relu(self.conv2(x))
+        x = F.max_pool2d(x, 2)
+        x = self.dropout(x)
+        x = x.view(1, -1)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        x = self.hybrid(x)
+        return torch.cat((x, 1 - x), -1)
+
+
+
+### 3.6 Training the Network 
+We now have all the ingredients to train our hybrid network! We can specify any PyTorch optimiser, learning rate and cost/loss function in order to train over multiple epochs. In this instance, we use the Adam optimiser, a learning rate of 0.001 and the negative log-likelihood loss function.
+
+
+[Python source: cell 22]
+model = Net()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+loss_func = nn.NLLLoss()
+
+epochs = 20
+loss_list = []
+
+model.train()
+for epoch in range(epochs):
+    total_loss = []
+    for batch_idx, (data, target) in enumerate(train_loader):
+        optimizer.zero_grad()
+        # Forward pass
+        output = model(data)
+        # Calculating loss
+        loss = loss_func(output, target)
+        # Backward pass
+        loss.backward()
+        # Optimize the weights
+        optimizer.step()
+        
+        total_loss.append(loss.item())
+    loss_list.append(sum(total_loss)/len(total_loss))
+    print('Training [{:.0f}%]\tLoss: {:.4f}'.format(
+        100. * (epoch + 1) / epochs, loss_list[-1]))
+
+
+Plot the training graph
+
+
+[Python source: cell 24]
+plt.plot(loss_list)
+plt.title('Hybrid NN Training Convergence')
+plt.xlabel('Training Iterations')
+plt.ylabel('Neg Log Likelihood Loss')
+
+
+### 3.7 Testing the Network
+
+
+[Python source: cell 26]
+model.eval()
+with torch.no_grad():
+    
+    correct = 0
+    for batch_idx, (data, target) in enumerate(test_loader):
+        output = model(data)
+        
+        pred = output.argmax(dim=1, keepdim=True) 
+        correct += pred.eq(target.view_as(pred)).sum().item()
+        
+        loss = loss_func(output, target)
+        total_loss.append(loss.item())
+        
+    print('Performance on test data:\n\tLoss: {:.4f}\n\tAccuracy: {:.1f}%'.format(
+        sum(total_loss) / len(total_loss),
+        correct / len(test_loader) * 100)
+        )
+
+
+[Python source: cell 27]
+n_samples_show = 6
+count = 0
+fig, axes = plt.subplots(nrows=1, ncols=n_samples_show, figsize=(10, 3))
+
+model.eval()
+with torch.no_grad():
+    for batch_idx, (data, target) in enumerate(test_loader):
+        if count == n_samples_show:
+            break
+        output = model(data)
+        
+        pred = output.argmax(dim=1, keepdim=True) 
+
+        axes[count].imshow(data[0].numpy().squeeze(), cmap='gray')
+
+        axes[count].set_xticks([])
+        axes[count].set_yticks([])
+        axes[count].set_title('Predicted {}'.format(pred.item()))
+        
+        count += 1
+
+
+## 4. What Now? 
+
+#### While it is totally possible to create hybrid neural networks, does this actually have any benefit? 
+
+In fact, the classical layers of this network train perfectly fine (in fact, better) without the quantum layer. Furthermore, you may have noticed that the quantum layer we trained here **generates no entanglement**, and will, therefore, continue to be classically simulatable as we scale up this particular architecture. This means that if you hope to achieve a quantum advantage using hybrid neural networks, you'll need to start by extending this code to include a more sophisticated quantum layer. 
+
+The point of this exercise was to get you thinking about integrating techniques from ML and quantum computing in order to investigate if there is indeed some element of interest - and thanks to PyTorch and Qiskit, this becomes a little bit easier.
+
+
+[Python source: cell 29]
+import qiskit.tools.jupyter
+%qiskit_version_table

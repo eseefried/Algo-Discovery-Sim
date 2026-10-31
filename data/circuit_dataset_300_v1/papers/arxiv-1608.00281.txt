@@ -1,0 +1,1137 @@
+## 1 Introduction
+
+One of the most anticipated applications of quantum computation is Hamiltonian simulation. In fact, this was Feynman’s main motivation for suggesting the creation of quantum computers [Fey82]. Feynman’s intuition may soon pay off, as the simulation of Hamiltonians for quantum chemistry looks to be implementable on small to moderately sized quantum computers [HWBT15, WBC+14]. In addition, Hamiltonian simulation has implications for more general computational problems, including adiabatic algorithms [FGGS00], quantum walk algorithms [CCD+03], and algorithms for systems of linear equations [HHL09].
+
+Much work has been done on the time and query complexity of Hamiltonian simulation when given a classical description or black box description of the Hamiltonian. Lloyd provided the first formal results on simulation, considering Hamiltonians that consist of sums of non-commuting terms [Llo96]. Other lines of research have focused on simulating sparse Hamiltonians, with a long sequence of work recently culminating in an optimal algorithm [LC16] (see [BCK15] for a more complete history of work in this field).
+
+In this work, we approach the problem of Hamiltonian simulation from a slightly different perspective. Rather than given a classical description or black-box access to a Hamiltonian $H$, we consider the problem of simulating $H$ when given many copies of a quantum state $\rho$ that encodes the Hamiltonian to be simulated. In particular, we assume that
+
+$$
+\rho=\frac{H+c\mathbb{1}}{\Tr(H+c\mathbb{1})} \tag{1}
+$$
+
+for some constant $c\in\mathbb{R}$ such that $H+c\mathbb{1}$ is positive semidefinite. In that case, $\rho$ itself is positive semidefinite and $\Tr\rho=1$, so $\rho$ is a valid density matrix. Note that
+
+$$
+e^{-i\rho t}=\exp\left\lparen\frac{-i(H+c\mathbb{1})t}{\Tr(H+c\mathbb{1})}\right\rparen=\exp\left\lparen\frac{-ict}{\Tr(H+c\mathbb{1})}\right\rparen\exp\left\lparen-iH\frac{t}{\Tr(H+c\mathbb{1})}\right\rparen, \tag{2}
+$$
+
+so the Hamiltonian dynamics of $H$ and $\rho$ are equivalent up to an overall phase and time scaling. Moreover, since the Hamiltonian $H$ in Eq. 2 can be arbitrary, any unitary can in fact be expressed as $e^{-i\rho t}$ for an appropriately chosen state $\rho$ and time $t$.
+
+This modified version of the original Hamiltonian simulation problem is what we call sample-based Hamiltonian simulation: given one copy of an unknown state $\sigma$ and $n$ copies of an unknown state $\rho$, implement the following map:
+
+$$
+\sigma\otimes\underbrace{\rho\otimes\dotsb\otimes\rho}_{n}\quad\mapsto\quad e^{-i\rho t}\sigma e^{i\rho t} \tag{3}
+$$
+
+where $t$ is the desired evolution time. We also allow for some error in the final state—we denote by $\delta$ the trace distance [NC10] between the state that is output by the protocol and the ideal state $e^{-i\rho t}\sigma e^{i\rho t}$. This problem was first considered in [LMR14], where the authors give a simple protocol, which we call the LMR protocol (after the authors’ initials), for approximately implementing the unitary $e^{-i\rho t}$ using many copies of $\rho$. Their protocol is based on a partial swap operation that can also be considered as a finite-dimensional analogue of a beam-splitter [ADO16]. An interesting feature of the LMR protocol is that it is agnostic with regard to $\rho$. In the spirit of [Pre99, GC99], this suggests interpreting $\rho$ as a “quantum software state”.
+
+The main motivation for sample-based Hamiltonian simulation in [LMR14] is to perform principal component analysis of $\rho$. They do this by performing phase estimation on the unitary $e^{-i\rho}$. We note that it is a nontrivial fact that the controlled-$e^{-i\rho}$ operation can in fact be implemented with the LMR protocol; see Appendix C (this fact does not seem to have been explicitly discussed in previous work). In addition, we note in Appendix D that a slightly more careful analysis gives a polynomial improvement in sample complexity over the complexity given in [LMR14] for performing phase estimation. The LMR protocol has applications to many problems in machine learning, e.g. [LMR14, Wan14, RML14, CD15].
+
+In this paper, we investigate the optimal scaling of sample-based Hamiltonian simulation. That is, we ask the following question: given $t$ and $\delta$, what is the minimum $n$ (number of copies of $\rho$) necessary to implement $e^{-i\rho t}$ on an unknown state $\sigma$ to trace distance at most $\delta$? We call this the sample complexity of Hamiltonian simulation.
+
+It is interesting to consider alternative strategies, other than LMR, for sample-based Hamiltonian simulation. While the LMR protocol acts with each copy of $\rho$ sequentially, perhaps one could achieve better performance by acting with a global operation [Ozo15]? For example, recent near-optimal tomographic protocols have relied on performing global operations (like the Schur transform) on many copies of the unknown state [HHJ+15, OW15]. Along those lines, perhaps one could do better than LMR by applying tomographic protocols to get an estimate $\widehat{\rho}$ of $\rho$ from the $n$ copies of $\rho$, and then evolve according to $e^{-i\widehat{\rho}t}$.
+
+On the contrary, however, we show that the LMR protocol performs sample-based Hamiltonian simulation with asymptotic optimality in both $t$ and $\delta$ simultaneously (Section 3). In fact, LMR performs asymptotically better than any tomographic strategy (Section 2) for sample-based Hamiltonian simulation. While the lower bound of Section 3 uses mixed states, in Section 4, we show a matching lower bound in $\delta$ even when restricting to pure states. In the process, we provide a sample-optimal algorithm for a variant of Grover’s search. In Section 5, we discuss the sample complexity of more complex Hamiltonians that depend on multiple states. For example, we show how to simulate the Hamiltonians given by the commutator $i[\rho_{1},\rho_{2}]$ and anti-commutator $\{\rho_{1},\rho_{2}\}$ of two states $\rho_{1}$ and $\rho_{2}$, when given access to many copies of those states, and prove that our protocol is optimal. We also show how to simulate any real linear combination of states $\rho_{1},\dotsc,\rho_{K}$ and, by combining these observations, any Hermitian polynomial (i.e. any element of the Jordan-Lie algebra [Emc84], see Appendix E) generated by these states, when given access to many copies of those states. In Section 6, we give applications of commutator simulation to orthogonality testing and quantum state addition. In Section 7, we show how to use sample-based Hamiltonian simulation to implement a universal model of quantum computation using only partial swaps and a stream of input qubits initialized in $|0\rangle$ and $|+\rangle$. Finally, in Section 8, we discuss some open questions.
+
+### Notation
+
+We use $\mathcal{H}$ to denote a finite-dimensional Hilbert space, and $\mathrm{D}(\mathcal{H})$ to represent the set of positive semi-definite operators with trace $1$ in $\mathcal{H}$ (i.e. the set of valid quantum states).
+
+The trace distance between $\rho,\sigma\in\mathrm{D}(\mathcal{H})$ is given by
+
+$$
+\frac{1}{2}\lVert\rho-\sigma\rVert_{1} \tag{4}
+$$
+
+where $\|A\|_{1}:=\Tr(\sqrt{AA^{\dagger}}).$ The trace distance between $\rho$ and $\sigma$ gives the maximum difference in probability of any measurement on the two states [NC10]. For two quantum channels $\mathcal{E}_{1}$ and $\mathcal{E}_{2}$ that act on $\mathrm{D}(\mathcal{H})$, their trace norm distance is defined as
+
+$$
+\frac{1}{2}\|\mathcal{E}_{1}-\mathcal{E}_{2}\|_{\mathrm{tr}}:=\frac{1}{2}\max_{\rho\in\mathrm{D}(\mathcal{H})}\|\mathcal{E}_{1}(\rho)-\mathcal{E}_{2}(\rho)\|_{1} \tag{5}
+$$
+
+The diamond norm distance is defined as
+
+$$
+\frac{1}{2}\|\mathcal{E}_{1}-\mathcal{E}_{2}\|_{\diamond}:=\frac{1}{2}\max_{k,\rho\in\mathrm{D}(\mathcal{H}\otimes\mathcal{H}_{k})}\big\lVert(\mathcal{E}_{1}\otimes\mathcal{I})(\rho)-(\mathcal{E}_{2}\otimes\mathcal{I})(\rho)\big\rVert_{1} \tag{6}
+$$
+
+where $\mathcal{I}$ is the identity channel on a $k$-dimensional space $\mathcal{H}_{k}$. By definition, $\|\mathcal{E}_{1}-\mathcal{E}_{2}\|_{\diamond}\geq\|\mathcal{E}_{1}-\mathcal{E}_{2}\|_{\mathrm{tr}}$. For unitary channels $\mathcal{U}_{1}$ and $\mathcal{U}_{2}$ corresponding to conjugation by unitary matrices $U_{1}$ and $U_{2}$, we will sometimes write $\|U_{1}-U_{2}\|_{\diamond}$ to mean $\|\mathcal{U}_{1}-\mathcal{U}_{2}\|_{\diamond}$. If $\rho_{\mathsf{A}\mathsf{B}}\in\mathrm{D}(\mathcal{H}_{\mathsf{A}}\otimes\mathcal{H}_{\mathsf{B}})$, by $\Tr_{\mathsf{B}}\rho_{\mathsf{A}\mathsf{B}}$ we mean taking the partial trace of the second system. More generally, given a state $\rho$ on multiple subsystems, by $\Tr_{i}\rho$ we mean taking the partial trace of the $i^{\mathrm{th}}$ subsystem of $\rho.$
+
+We define the single qubit state $|+\rangle\coloneqq(|0\rangle+|1\rangle)/\sqrt{2}$. We refer to $i[A,B]:=i(AB-BA)$ as the commutator and $\{A,B\}:=AB+BA$ as the anticommutator of operators $A$ and $B$. We will use $X$, $Y$, and $Z$ to denote the single-qubit Pauli operators. We use $\mathbb{1}_{\mathsf{A}}$ to mean the identity matrix acting on subsystem $\mathsf{A}$, but if clear from context, we will drop the subscript.
+
+## 2 LMR Protocol versus State Tomography
+
+Lloyd, Mohseni, and Rebentrost [LMR14] gave a simple method for approximating the transformation in Eq. 3. Importantly, their procedure is independent of $\sigma$ and $\rho$, and the number of copies of $\rho$ required does not depend on the dimension of the two states. We state their result in a slightly more general form, where $\sigma$ has two registers and $e^{-i\rho t}$ is applied only to one of them.
+
+**Theorem 1 ([LMR14]).**
+
+Let $\rho\in\mathrm{D}(\mathcal{H}_{\mathsf{A}})$ and $\sigma\in\mathrm{D}(\mathcal{H}_{\mathsf{A}}\otimes\mathcal{H}_{\mathsf{B}})$ be two unknown quantum states and $t\in\mathbb{R}$ (can be either positive or negative). Then there exists a quantum algorithm that transforms $\sigma_{\mathsf{A}\mathsf{B}}\otimes\rho_{\mathsf{A}_{1}}\otimes\dotsb\otimes\rho_{\mathsf{A}_{n}}$ into $\tilde{\sigma}_{\mathsf{A}\mathsf{B}}$ such that
+
+$$
+\frac{1}{2}\big\lVert\big\lparen e^{-i\rho_{\mathsf{A}}t}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen\sigma_{\mathsf{A}\mathsf{B}}\big\lparen e^{i\rho_{\mathsf{A}}t}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen-\tilde{\sigma}_{\mathsf{A}\mathsf{B}}\big\rVert_{1}\leq\delta, \tag{7}
+$$
+
+as long as the number of copies of $\rho$ is $n=O(t^{2}/\delta)$. In other words, this quantum algorithm implements the unitary $e^{-i\rho t}$ up to error $\delta$ in diamond norm, using $O(t^{2}/\delta)$ copies of $\rho$.
+
+**Proof.**
+
+We will give a sketch of the proof; for the full proof see Appendix B. For simplicity we assume $\rho$ and $\sigma$ have the same dimension, i.e. $\mathcal{H}_{\mathsf{B}}$ is one-dimensional. Then by the Hadamard Lemma (see Appendix A), the target state is
+
+$$
+e^{-i\rho t}\sigma e^{i\rho t}=\sigma-i[\rho,\sigma]t-\frac{1}{2!}[\rho,[\rho,\sigma]]t^{2}+\dotsb. \tag{8}
+$$
+
+We note that for very small evolution times $\Delta$, we have the following direct calculation:
+
+$$
+\Tr_{2}\left[e^{-iS\Delta}(\sigma\otimes\rho)e^{iS\Delta}\right] =\sigma-i[\rho,\sigma]\Delta+O(\Delta^{2}) \tag{9}
+$$
+$$
+=e^{-i\rho\Delta}\sigma e^{i\rho\Delta}+O(\Delta^{2}), \tag{10}
+$$
+
+were $S$ is the swap operator between the two registers. If we take $\Delta=\delta/t$ and repeat this procedure $O(t^{2}/\delta)$ times, we end up implementing the operator $e^{-i\rho t}$ up to error $O(\Delta^{2}\cdot t^{2}/\delta)=O(\delta)$.
+
+Thus the LMR protocol uses $O(t^{2}/\delta)$ copies of $\rho$ to implement the unitary $e^{-i\rho t}$ up to error $\delta$ in trace norm. To obtain the result for diamond norm, we can simply replace $\rho$ by $\rho_{\mathsf{A}}\otimes\mathbb{1}_{\mathsf{B}}$ and $\sigma$ by $\sigma_{\mathsf{A}\mathsf{B}}$. See Appendix B for a more detailed proof. ∎
+
+**Remark 2.**
+
+While not noted explicitly in [LMR14], it turns out that the LMR protocol can be implemented efficiently, i.e. using $O(\log D\cdot t^{2}/\delta)$ single-qubit and Fredkin (controlled-swap) gates, where $D=\dim(\mathcal{H}_{\mathsf{A}})$. To see this, we recall that in the proof of Theorem 1, the only potentially expensive operation is the partial swap
+
+$$
+e^{-iS\Delta}=(\cos\Delta)\mathbb{1}-i(\sin\Delta)S. \tag{11}
+$$
+
+This operation is a linear combination of the two unitaries $\mathbb{1}$ and $S$, the latter swapping two registers of dimension $D$ and thus being implementable using $O(\log D)$ gates. By the LCU (linear combination of unitaries) algorithm (see e.g. [BCK15], or [Kot14, Theorem 2.4]), $e^{-iS\Delta}$ can be implemented using a constant number of uses of controlled-$S$, elementary single-qubit rotations, and a single-qubit unitary $A$ satisfying
+
+$$
+A|0\rangle\propto\sqrt{\cos\Delta}|0\rangle+\sqrt{\sin\Delta}|1\rangle. \tag{12}
+$$
+
+Hence the LMR protocol can be implemented with $O(\log D\cdot t^{2}/\delta)$ single-qubit and Fredkin gates.[^1]
+
+[^1]: This analysis hides the use of the Solovay-Kitaev theorem to implement the single-qubit rotation $A$; decomposed into elementary gates, the total number of gates required is $O((\log D+\poly\log(t/\delta))\cdot t^{2}/\delta)$. The runtime stated in the alternative efficient implementation in [ML16, Appendix C] similarly does not consider the cost of implementing arbitrary single-qubit rotations.
+
+We note that Marvian and Lloyd independently give an alternative efficient implementation for the LMR protocol [ML16, Appendix C]; their algorithm has an extra multiplicative factor of $\log(t^{2}/\delta)$ in the runtime.
+
+**Remark 3.**
+
+We also note that the LMR protocol can be modified to implement the controlled-$e^{-i\rho t}$ operation, which will be important if one wants to implement phase estimation on $e^{-i\rho t}$. This fact does not seem to have been addressed in previous work; see Appendix C.
+
+An alternative method to LMR for the sample-based Hamiltonian simulation problem would be to perform tomography on the copies of $\rho$ to get an estimate $\widehat{\rho}$ of $\rho$, and then implement $e^{-i\widehat{\rho}t}$. Let $\zeta=\widehat{\rho}-\rho$ and suppose $\|\zeta\|_{1}=\epsilon$. We first show that simulating with $\widehat{\rho}$ instead of $\rho$ results in a diamond norm distance at most $\epsilon t$. That is,
+
+$$
+\left\|e^{-i\widehat{\rho}t}-e^{-i\rho t}\right\|_{\diamond}\leq\epsilon t. \tag{13}
+$$
+
+To show this, we recall the Lie product formula [Var84]
+
+$$
+e^{-i\widehat{\rho}t}=\lim_{l\rightarrow\infty}\left(e^{-i\rho t/l}e^{-i\zeta t/l}\right)^{l}. \tag{14}
+$$
+
+For any integer $l\geq 1$ and unitaries $U$ and $V$, using the triangle inequality we have that
+
+$$
+\lVert U^{l}-V^{l}\rVert_{\diamond} \leq\lVert U^{l}-UV^{l-1}\rVert_{\diamond}+\lVert UV^{l-1}-V^{l}\rVert_{\diamond} \tag{15}
+$$
+$$
+=\lVert U^{l-1}-V^{l-1}\rVert_{\diamond}+\lVert U-V\rVert_{\diamond} \tag{16}
+$$
+
+where the equality comes from the unitary invariance of the diamond norm. Applying this argument inductively, $\lVert U^{l}-V^{l}\rVert_{\diamond}\leq l\lVert U-V\rVert_{\diamond}$. Hence
+
+$$
+\big\lVert\big\lparen e^{-i\rho t/l}e^{-i\zeta t/l}\big\rparen^{l}-e^{-i\rho t}\big\rVert_{\diamond} \leq l\big\lVert e^{-i\rho t/l}e^{-i\zeta t/l}-e^{-i\rho t/l}\big\rVert_{\diamond} \tag{17}
+$$
+$$
+=l\lVert e^{-i\zeta t/l}-\mathbb{1}\rVert_{\diamond} \tag{18}
+$$
+$$
+\leq\epsilon t+O\left(\epsilon^{2}t^{2}/l\right), \tag{19}
+$$
+
+where the last line follows using a Taylor series expansion. Finally, using Eq. 14 and taking $l\rightarrow\infty$ in Eq. 19, we obtain Eq. 13.
+
+Moreover, there exists $\rho$ and $\widehat{\rho}$ for which Eq. 13 is essentially tight. To see this, note that if $\rho$ and $\widehat{\rho}$ commute, we have
+
+$$
+\left\|e^{-i\widehat{\rho}t}-e^{-i\rho t}\right\|_{\diamond} =\left\|\mathbb{1}-e^{-i(\rho-\widehat{\rho})t}\right\|_{\diamond} \tag{20}
+$$
+$$
+=\|\widehat{\rho}-\rho\|_{1}t+O(\|\widehat{\rho}-\rho\|_{1}^{2}t^{2}) \tag{21}
+$$
+$$
+=\epsilon t+O\left(\epsilon^{2}t^{2}\right). \tag{22}
+$$
+
+This means that if we want to simulate $e^{-i\rho t}$ to error $\delta$ in diamond norm, in general we need an estimate $\widehat{\rho}$ such that $\|\widehat{\rho}-\rho\|_{1}=O(\delta/t).$
+
+In Theorem 1 of [HHJ+15], they prove that to acquire an estimate of a rank-$r$ state $\rho\in\mathrm{D}(d)$ that differs from the true $\rho$ by at most $\epsilon$ in trace distance with probability at least $1-\eta$ requires $n$ copies of $\rho$, where
+
+$$
+n=\Omega\left(\frac{Cdr\left(1-\epsilon\right)^{2}}{\epsilon^{2}\log(d/r\epsilon)}\right) \tag{23}
+$$
+
+with $C$ a function of only $\eta$. The scaling in $\epsilon$ can be slightly improved. Fixing $\eta$, $d$ and $r$, Eq. 23 scales in $\epsilon$ as $\Omega(1/(\epsilon^{2}\log(1/\epsilon)))$. If one could acquire such an estimate of $\rho$, one could violate the Helstrom bound [Hel76] that scales as $\Omega(1/\epsilon^{2})$. Therefore, we can combine the two bounds to get
+
+$$
+n=\Omega\left(\frac{Cdr(1-\epsilon)^{2}}{\epsilon^{2}\log(d/r\epsilon)}+\frac{1}{\epsilon^{2}}\right). \tag{24}
+$$
+
+Back to our problem of Hamiltonian simulation, we want $\epsilon=\delta/t$ to obtain a simulation correct to accuracy $\delta$. Setting $\epsilon=\delta/t$, we find that the number of samples needed to obtain a tomographic estimate to the desired accuracy is
+
+$$
+n=\Omega\left(\frac{Cdr(t-\delta)^{2}}{\delta^{2}\log(dt/r\delta)}+\frac{t^{2}}{\delta^{2}}\right). \tag{25}
+$$
+
+On the other hand, using LMR to simulate $e^{-i\rho t}$ to accuracy $\delta$ uses $n$ copies of $\rho$, where
+
+$$
+n=O(t^{2}/\delta). \tag{26}
+$$
+
+Since LMR does not have any dependence on $d$ or $r$, we immediately see that for large $d$ or $r$, it does significantly better. Furthermore, even fixing $d$ and $r$, we see that LMR provides a square root improvement in sample complexity over tomography in terms of $\delta$.
+
+## 3 LMR Protocol is Optimal
+
+Our strategy for proving the optimality of the LMR protocol will be as follows. We first give a lower bound on the sample complexity of distinguishing two specific states. Next, we assume we have a protocol that simulates $e^{-i\rho t}$ to trace norm (not diamond norm, see discussion below) $\delta$ using $f(t,\delta)$ samples of $\rho$ for some function $f$. Then we show that using such a protocol, one can distinguish these two states. However, if $f=o(t^{2}/\delta)$, we would violate our lower bound on state discrimination.
+
+For this bound, we will consider states of the form
+
+$$
+\rho(x) :=x|0\rangle\!\langle 0|+(1-x)|1\rangle\!\langle 1|=\frac{1}{2}\mathbb{1}+\left(x-\frac{1}{2}\right)Z \tag{27}
+$$
+
+for some $x\in[0,1]$.
+
+**Lemma 4.**
+
+Suppose we are promised that a state $\rho$ is either $\rho(x)$ or $\rho(x+\epsilon)$ where $x\in(\eta,1-\eta)$ and $\epsilon<\eta<1/2$. Then given fewer than $C_{\eta}/\epsilon^{2}$ copies of $\rho$ for some constant $C_{\eta}$ that depends only on $\eta$, the probability of correctly determining whether $\rho$ is $\rho(x)$ or $\rho(x+\epsilon)$ is at most 2/3.
+
+**Proof.**
+
+If we have $n$ samples of $\rho$, and we want to determine whether $\rho$ is $\rho(x)$ or $\rho(x+\epsilon)$, then the maximum probability that we correctly identify $\rho$ is at most [Hol73, Hel76]
+
+$$
+\frac{1+\frac{1}{2}\|\rho(x)^{\otimes n}-\rho(x+\epsilon)^{\otimes n}\|_{1}}{2}. \tag{28}
+$$
+
+Now $\rho(x)$ and $\rho(x+\epsilon)$ commute, so the trace distance in Eq. 28 becomes the total variation distance between the eigenvalues of the two states. Since $\rho(x)$ is a rank-2 state, this variation distance is the same as the variation distance between two binomial distributions with $n$ trials and probabilities $x$ and $x+\epsilon$ respectively. Then if $n<C_{\eta}/\epsilon^{2}$, for a sufficiently small constant $C_{\eta}$ that depends on $\eta$, as long as $\epsilon<\eta,$ the total variation distance between these two binomial distributions is less than $1/3$ (from many sources, e.g. [AJ06]). ∎
+
+We now show the main result of this section: the sample complexity of the LMR protocol is optimal.
+
+**Theorem 5.**
+
+Let $f(t,\delta)$ be the number of copies of $\rho$ required to implement the unitary $e^{-i\rho t}$ up to error $\delta$ in trace norm. Then as long as $\delta\leq 1/6$ and $\delta/t\leq 1/(6\pi)$, it holds that $f(t,\delta)=\Theta(t^{2}/\delta)$.
+
+The upper bound holds by the LMR protocol, Theorem 1, so we will only prove the lower bound. The fact that the trace norm lower bounds the diamond norm makes a tight lower bound in terms of the trace norm a stronger result than if we had used the diamond norm.
+
+**Proof.**
+
+Given many copies of an unknown state $\rho$, suppose we want to distinguish between the cases $\rho_{1}:=\rho(\frac{1}{2})$ and $\rho_{2}:=\rho(\frac{1}{2}+\epsilon)$, with $0<\epsilon\leq 1/2$, promised $\rho$ is one of the two. One way of doing this is to consider the single-qubit unitary operator $U(\rho,t):=\exp(-i\rho t)$. Then for
+
+$$
+t_{\epsilon}:=\frac{\pi}{2}\cdot\frac{1}{\epsilon} \tag{29}
+$$
+
+the operators $U(\rho_{i},t_{\epsilon})$ become orthogonal, namely,
+
+$$
+U(\rho_{1},t_{\epsilon}) \propto\mathbb{1}, U(\rho_{2},t_{\epsilon}) \propto Z, \tag{30}
+$$
+
+where $\propto$ indicates that we have hidden an unimportant phase factor. Consequently, applying $U(\rho,t)$ to $|+\rangle$ and measuring in the $X$-basis will distinguish $\rho_{1}$ from $\rho_{2}$ with certainty.
+
+Thus, we can distinguish between $\rho=\rho_{1}$ or $\rho=\rho_{2}$ with probability at least $2/3$ using no more than $f(t_{\epsilon},1/3)$ copies of $\rho$ by implementing a map that differs from $U(\rho,t_{\epsilon})$ by trace norm $1/3$. However Lemma 4 tells us that $C_{\eta}/\epsilon^{2}$ samples of $\rho$ are required if $\epsilon<\eta\leq 1/2$. Therefore
+
+$$
+f(t_{\epsilon},1/3)\geq C_{\eta}/\epsilon^{2}=Ct_{\epsilon}^{2},\quad t_{\epsilon}\geq\pi, \tag{31}
+$$
+
+using Eq. 29, where $C:=4C_{\eta}/\pi^{2}$ is some positive constant. Equation 31 holds whenever $t_{\epsilon}\geq\pi$ since $\epsilon\leq 1/2$ and so $t_{\epsilon}=\tfrac{\pi}{2}\cdot\tfrac{1}{\epsilon}\geq\pi$.
+
+Now suppose instead we have arbitrary $\delta$ and $t$ satisfying $\delta\leq 1/6$ and $t/\delta\geq 6\pi$, as assumed in the theorem statement. We note the following inequality for any $t\in\mathbb{R}$ and any integer $m\geq 0$:
+
+$$
+mf(t,\delta)\geq f(mt,m\delta), \tag{32}
+$$
+
+which holds because one way of simulating $\exp(-i\rho mt)$ up to error $m\delta$ is to run $m$ times a simulation of $\exp(-i\rho t)$ up to error $\delta$. Taking $m=\lceil 1/(6\delta)\rceil$, we have
+
+$$
+f(t,\delta) \geq f(mt,m\delta)/m \tag{33}
+$$
+$$
+\geq C(mt)^{2}/m=Cmt^{2} \tag{34}
+$$
+$$
+=\Omega(t^{2}/\delta), \tag{35}
+$$
+
+where Eq. 34 holds because $m\delta\leq 1/6+\delta\leq 1/3$ and $mt\geq t/(6\delta)\geq\pi$, so Eq. 31 applies. ∎
+
+## 4 Pure State Discrimination and the Optimality of LMR for Pure States
+
+In the previous section, we saw that the sample complexity of the LMR protocol cannot in general be improved. However, the specific case of state discrimination that we used in the proof involved mixed states. One is left to wonder whether simulating $\exp({-i|\psi\rangle\!\langle\psi|t})$ for a pure state $|\psi\rangle$ might possibly be more efficient. This relates to a practically relevant question; as we will see in Section 7, the LMR protocol and certain pure states as resources create a universal model for quantum computation.
+
+In this section, however, we show that LMR is also optimal for pure states, at least in the $\delta$ error parameter. What about the $t$ parameter? We argue that we cannot expect to prove a meaningful lower bound on the $t$ dependence in pure state LMR. The reason is that, given any state $\rho$ and promised that $\exp({-i\rho t})$ is periodic (i.e. $\exp({-i\rho t_{1}})=\exp({-i\rho t_{2}})$ for any $t_{2}=t_{1}+kT$ for integer $k$ and real number $T$), we can always simulate the Hamiltonian $\rho$ for an equivalent time $t^{\prime}\in[0,T)$ instead. Notice first that LMR gives an algorithm for this simulation that takes a finite number of samples for any time $t^{\prime}\in[0,T)$ and fixed $\delta$. Since we have such an upper bound, any lower bound correct in the $\delta$ scaling but not necessarily in the time scaling will differ by at most a constant from this upper bound. Such a lower bound is not meaningful with respect to any asymptotic scaling. Most relevant to our immediate purpose, this argument applies to pure states: knowing a state is pure, we immediately know its period, namely $2\pi$.
+
+To prove that the LMR protocol is optimal for pure states, we first show that pure state discrimination reduces to a problem we call sample-based Grover’s search. Then, with the help of known bounds on state discrimination, we prove a lower bound on the efficiency of sample-based Grover’s search. Finally, we show that LMR can be used to implement sample-based Grover’s search, and therefore find that LMR is optimal in terms of the precision $\delta$.
+
+### 4.1 Metrological View of Grover’s Search
+
+While Grover’s search [Gro96] is a well-known quantum mechanical task, it is not often stated in its form as a decision problem, and very rarely [DDM15] as a metrological decision problem, where the inputs are unitaries and the output depends on a property that those unitaries either possess or do not possess. This guise is useful for our purposes, however, because the LMR protocol, Eq. 3, allows us to turn metrology problems on states into metrology problems on quantum operations.
+
+In the metrological view, Grover’s search, or perhaps more precisely amplitude amplification [BHMT02], is the following problem of parameter estimation. Let $\mathcal{T}$ be a subspace of $\mathbb{C}^{2^{q}}$. We call $\mathcal{T}$ the target subspace. Let $U_{\mathcal{T}}$ be a unitary acting on $q+1$ qubits such that
+
+$$
+U_{\mathcal{T}}|\phi\rangle|0\rangle=\begin{cases}|\phi\rangle|1\rangle,&\textrm{ if }|\phi\rangle\in\mathcal{T},\\ |\phi\rangle|0\rangle,&\textrm{ if }|\phi\rangle\perp\mathcal{T}.\end{cases} \tag{36}
+$$
+
+In this problem, and in the following variations, we will assume access to $U_{\mathcal{T}}$ and $U_{\mathcal{T}}^{\dagger}$ are free. For an $q$-qubit unitary $V$, define
+
+$$
+\lambda=\left|\lparen\mathbb{1}\otimes\langle 1|\rparen U_{\mathcal{T}}\big\lparen\lparen V|0\rangle^{\otimes q}\rparen\otimes|0\rangle\big\rparen\right|^{2}. \tag{37}
+$$
+
+Then in Grover’s search, the task is to decide whether $\lambda\geq w$ (for $w>0$) or $\lambda=0$, while using $V$ and $V^{\dagger}$ as few times as possible. In words, if we call $|s\rangle=V|0\rangle^{\otimes q}$ the start state, we would like to determine whether the start state has substantial probability mass in the target subspace or none, promised one is the case. If we solve this problem using Grover’s search and count the number of uses of $V$ and $V^{\dagger}$ required to succeed with probability $1-\epsilon$, we get the standard complexity $\Theta(\log(1/\epsilon)/\sqrt{w})$ [BBHT98, BCdWZ99].
+
+One simple modification of metrological Grover’s search is to replace the circuit description of the start state preparation operator $V$ with copies of the start state $|s\rangle$ instead. The problem is now to determine whether $\lambda=|\lparen\mathbb{1}\otimes\langle 1|\rparen U_{\mathcal{T}}\lparen|s\rangle\otimes|0\rangle\rparen|^{2}$ is at least $w>0$ or equal to zero, promised one is the case, given copies of $|s\rangle$ and unlimited access to $U_{\mathcal{T}}$ and $U_{\mathcal{T}}^{\dagger}$. We call this sample-based Grover’s search. But how many copies of $|s\rangle$ are needed? We will see in Section 4.2 that the answer is $\Theta\left\lparen\log(1/\epsilon)/w\right\rparen$, and so we find we have lost the square-root advantage of Grover’s search.
+
+A second variant of metrological Grover’s search is to replace both $V$ and $U_{\mathcal{T}}$ with quantum states. In this form, the problem becomes: given copies of $q$-qubit states $|s\rangle$ and $|t\rangle$, determine whether $\lambda=\lvert\langle s|t\rangle\rvert^{2}$ is at least $w>0$ or equal to zero, promised one is the case. We call this variant orthogonality testing. The number of copies of $|s\rangle$ and $|t\rangle$ needed will also turn out to be $\Theta\left\lparen\log(1/\epsilon)/w\right\rparen$; see Section 6.
+
+Orthogonality testing is similar to equality testing, the problem of deciding whether $\lvert\langle s|t\rangle\rvert^{2}=1$ or $\lvert\langle s|t\rangle\rvert^{2}<1-w$ for some $w>0$, for which there is already an optimal (up to log factors) algorithm [BCWdW01].
+
+### 4.2 The LMR Protocol is Optimal for Pure States
+
+To show LMR is optimal for pure states, we begin by showing a lower bound on sample-based Grover’s search. Then, we show that sample-based Grover’s search can be implemented optimally by LMR.
+
+**Lemma 6.**
+
+Sample-based Grover’s search with success probability $1-\epsilon$ uses $\Theta\left(\log(1/\epsilon)/w\right)$ copies of $|s\rangle$.
+
+**Proof.**
+
+We will first prove the lower bound. Consider the pure state discrimination problem of Helstrom [Hel76]. You are given a quantum state $|\psi\rangle$ (of arbitrary dimension) which is either $|\phi_{1}\rangle$ or $|\phi_{2}\rangle$, each with probability $1/2$. You are provided with classical descriptions of the two states $|\phi_{1}\rangle$ and $|\phi_{2}\rangle$, and asked to decide whether $|\psi\rangle=|\phi_{1}\rangle$ or $|\psi\rangle=|\phi_{2}\rangle$. Over all possible measurements one could perform on $|\psi\rangle$, what is the minimum failure rate $\epsilon$ that can be achieved?
+
+Helstrom’s bound [Hel76] states that for any discrimination procedure,
+
+$$
+\epsilon\geq\frac{1}{2}\left(1-\sqrt{1-|\langle\phi_{1}|\phi_{2}\rangle|^{2}}\right). \tag{38}
+$$
+
+A special case of the bound corresponds to discrimination given $n$ copies of $|\psi\rangle$ instead of one. Then, the problem is to discriminate between $|\phi_{1}\rangle^{\otimes n}$ and $|\phi_{2}\rangle^{\otimes n}$, and Helstrom’s bound can be rearranged to give
+
+$$
+n\geq\frac{\log 4\epsilon(1-\epsilon)}{\log|\langle\phi_{1}|\phi_{2}\rangle|^{2}}\geq-\frac{\log(1/4\epsilon)}{\log|\langle\phi_{1}|\phi_{2}\rangle|^{2}}. \tag{39}
+$$
+
+For $|\langle\phi_{1}|\phi_{2}\rangle|^{2}$ close to 1, this is asymptotically the bound
+
+$$
+n=\Omega\left(\frac{\log(1/\epsilon)}{1-|\langle\phi_{1}|\phi_{2}\rangle|^{2}}\right). \tag{40}
+$$
+
+The next step in proving the lower bound is to show that pure state discrimination can be done with sample-based Grover’s search as described in Section 4.1. A similar reduction to state discrimination and Helstrom’s bound is the key step in [BCWdW01] for proving a lower bound on equality testing.
+
+Now, recall that sample-based Grover’s search requires copies of a $q$-qubit input state $|s\rangle$ and a unitary $U_{\mathcal{T}}$ that defines a target space $\mathcal{T}$, as in Eq. 36. We set $|s\rangle$ to the mystery state $|\psi\rangle$. To choose $U_{\mathcal{T}}$, we note that for some $w\in[0,1]$ we can write $|\phi_{2}\rangle=\sqrt{1-w}|\phi_{1}\rangle+\sqrt{w}|\phi_{1}^{\perp}\rangle$ where $|\phi_{1}^{\perp}\rangle$ is a normalized state such that $\langle\phi_{1}|\phi_{1}^{\perp}\rangle=0$. Note that $|\phi_{1}^{\perp}\rangle$ and $w=\lvert\langle\phi_{1}^{\perp}|\phi_{2}\rangle\rvert^{2}$ are known because we have classical descriptions of $|\phi_{1}\rangle$ and $|\phi_{2}\rangle$. We can therefore choose $U_{\mathcal{T}}$, as defined by Eq. 36, to be a $|\phi_{1}^{\perp}\rangle$-tester by letting $\mathcal{T}=\spn\{|\phi_{1}^{\perp}\rangle\}$.
+
+Now, provided enough copies of $|s\rangle=|\psi\rangle$, a sample-based Grover’s algorithm with this choice of $U_{\mathcal{T}}$ will be able to distinguish between $|\psi\rangle=|\phi_{1}\rangle$ (the $\lambda=0$ case) and $|\psi\rangle=|\phi_{2}\rangle$ (the $\lambda\geq w$ case). Since it solves the pure state discrimination problem for states $|\phi_{1}\rangle$ and $|\phi_{2}\rangle$, using Eq. 40 with $\lvert\langle\phi_{1}|\phi_{2}\rangle\rvert^{2}=1-w$ gives us the desired bound.
+
+Now we prove the upper bound. Given an oracle marking the target space, we should, by just applying $U_{\mathcal{T}}$ to $|s\rangle|0\rangle$ and measuring the ancilla bit, on average observe at least one positive event after $O(1/w)$ trials if $|s\rangle$ does have some overlap $\geq w$ with the target space. To boost the probability of success from a constant to $\epsilon$ requires only a factor of $\log(1/\epsilon)$ more attempts. This is, of course, the pure state discrimination analogue of a classical randomized algorithm for unstructured search. ∎
+
+While the classical search algorithm described in the proof is an obvious optimal procedure in sampling complexity, we can also solve sample-based Grover’s search with LMR. The ultimate reason to do this is not to give a useful algorithm for sample-based search, but rather to show that LMR is optimal in the number of copies of a pure state $\rho$ that it uses to simulate $e^{-i\rho t}$.
+
+**Theorem 7.**
+
+The number of copies of an unknown pure state $\rho$ required for any algorithm to simulate $e^{-i\rho t}$ to trace norm $\delta$ is $\Omega(1/\delta)$.
+
+**Proof.**
+
+For $\rho=|s\rangle\!\langle s|$ a pure state we have
+
+$$
+e^{-i\rho t}=e^{-it|s\rangle\!\langle s|}=\mathbb{1}-(1-e^{-it})|s\rangle\!\langle s|. \tag{41}
+$$
+
+Setting $t=\pi$ this is $e^{-i\pi|s\rangle\!\langle s|}=\mathbb{1}-2|s\rangle\!\langle s|=R_{|s\rangle\!\langle s|}$, the reflection about the start state $|s\rangle$ that plays a crucial role in Grover’s algorithm [Gro96].
+
+Let us implement sample-based Grover’s search using this observation. Since we have unlimited access to $U_{\mathcal{T}}$ and $U_{\mathcal{T}}^{\dagger}$, we can implement the reflection about the target space as $R_{\mathcal{T}}=U_{\mathcal{T}}^{\dagger}(\mathbb{1}\otimes Z)U_{\mathcal{T}}$ without any sampling. Grover’s search finds a state $|t_{0}\rangle$ in the target space $\mathcal{T}=\{|t\rangle:U_{\mathcal{T}}|t\rangle|0\rangle=|t\rangle|1\rangle\}$ by first applying $G=-R_{|s\rangle\!\langle s|}R_{\mathcal{T}}$ to $|s\rangle$ $O(1/\sqrt{\lambda})$ times, where the initial probability mass of $|s\rangle$ inside the target space is $\lambda$. Next, we apply $U_{\mathcal{T}}$ to the resulting state and a $|0\rangle$ ancilla and then measure the ancilla to determine whether a state $|t_{0}\rangle$ within $\mathcal{T}$ has been found. This process as stated requires knowing $\lambda$ to determine the number of times $G$ is to be applied.
+
+But notice, for the sample-based Grover search problem we are promised only that $\lambda=0$ or $\lambda\geq w$, not that we know $\lambda$ exactly. However, this is not a problem. It has been shown, using either exponentially increasing sequences of Grover iterates [BBHT98] or fixed-point quantum search [YLC14], that performing $O(\log(1/\epsilon)/\sqrt{w})$ iterates suffices to distinguish the two cases with success probability $1-\epsilon$. That is, in the $\lambda=0$ case, no target state $|t_{0}\rangle$ is found, while in the $\lambda\geq w$ case such a state is found with probability $1-\epsilon$. In the remainder of the proof, we will take $\epsilon$ to be a constant.
+
+Now since $O(1/\sqrt{w})$ applications of $R_{|s\rangle\!\langle s|}$ are required, and we would like the entire algorithm to succeed with constant error, we need each application of $R_{|s\rangle\!\langle s|}$ to have at most $\sqrt{w}$ error. So if $n_{\delta}$ copies of $\rho$ are required to simulate $R_{|s\rangle\!\langle s|}$ to trace norm accuracy $\delta$, then $n_{\sqrt{w}}\cdot 1/\sqrt{w}$ copies are required in total for the entire algorithm. Notice $n_{\sqrt{w}}\cdot 1/\sqrt{w}=\Omega(1/w)$ by the lower bound in Lemma 6. Thus $n_{\delta}=\Omega(1/\delta)$ as advertised. ∎
+
+## 5 Generalized LMR for Simulation of Hermitian Polynomials
+
+The sample-based Hamiltonian simulation of Eq. 3 can be further generalized. Instead of evolution of $\sigma$ by a single state $\rho$, the target Hamiltonian $H$ could be encoded by some combination of multiple states $\rho_{1},\rho_{2},\dotsc,\rho_{K}$. For example, we might want to implement the map
+
+$$
+\sigma\otimes\bigotimes_{j=1}^{K}\rho_{j}^{\otimes n_{j}}\quad\mapsto\quad e^{-if(\rho_{1},\rho_{2},\dotsc,\rho_{K})t}\sigma e^{if(\rho_{1},\rho_{2},\dotsc,\rho_{K})t}, \tag{42}
+$$
+
+where $H=f(\rho_{1},\rho_{2},\dotsc,\rho_{K})$ is some Hermitian multinomial function of the input states. We will treat this problem fully in this section.
+
+One key tool will be the following lemma, which lets us simulate a Hamiltonian given by the difference of two subnormalized states:
+
+**Lemma 8.**
+
+Let $\rho^{\prime}\in\mathrm{D}(\mathbb{C}^{2}\otimes\mathcal{H}_{\mathsf{A}})$ be a quantum state of the form $\rho^{\prime}=|0\rangle\!\langle 0|\otimes\rho_{+}+|1\rangle\!\langle 1|\otimes\rho_{-}$, where $\rho_{+},\rho_{-}$ are unknown subnormalized states with $\Tr\rho_{+}+\Tr\rho_{-}=1$. Using $n$ samples of $\rho^{\prime}$, a quantum algorithm can transform $\sigma_{\mathsf{A}\mathsf{B}}$ into $\tilde{\sigma}_{\mathsf{A}\mathsf{B}}$ such that
+
+$$
+\frac{1}{2}\big\lVert\big\lparen e^{-iHt}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen\sigma_{\mathsf{A}\mathsf{B}}\big\lparen e^{iHt}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen-\tilde{\sigma}_{\mathsf{A}\mathsf{B}}\big\rVert_{1}\leq O(\delta),\quad H=\rho_{+}-\rho_{-}, \tag{43}
+$$
+
+if $n=O(t^{2}/\delta)$.
+
+**Proof.**
+
+We will apply a modification of the LMR protocol—instead of using partial swaps, we will use the following unitary operator:
+
+$$
+e^{-iS^{\prime}\Delta}=|0\rangle\!\langle 0|\otimes e^{-iS\Delta}+|1\rangle\!\langle 1|\otimes e^{iS\Delta} \tag{44}
+$$
+
+where
+
+$$
+S^{\prime}:=|0\rangle\!\langle 0|\otimes S+|1\rangle\!\langle 1|\otimes(-S) \tag{45}
+$$
+
+and $S$ is the usual swap operator. The first qubit in $e^{-iS^{\prime}\Delta}$ essentially controls whether the partial swap on the remaining two systems is applied in the forwards or backwards direction in time. Applying $e^{-iS^{\prime}\Delta}$ to $\rho^{\prime}\otimes\sigma$, we obtain
+
+$$
+e^{-iS^{\prime}\Delta}\big\lparen|0\rangle\!\langle 0|\otimes\rho_{+}\otimes\sigma+|1\rangle\!\langle 1|\otimes\rho_{-}\otimes\sigma\big\rparen e^{iS^{\prime}\Delta} \tag{46}
+$$
+$$
+=|0\rangle\!\langle 0|\otimes e^{-iS\Delta}(\rho_{+}\otimes\sigma)e^{iS\Delta}+|1\rangle\!\langle 1|\otimes e^{iS\Delta}(\rho_{-}\otimes\sigma)e^{-iS\Delta}. \tag{47}
+$$
+
+Tracing out the second register (the register originally containing $\rho_{\pm}$), we obtain the state
+
+$$
+|0\rangle\!\langle 0|\otimes\big\lparen\Tr(\rho_{+})\sigma-i[\rho_{+},\sigma]\Delta\big\rparen+|1\rangle\!\langle 1|\otimes\big\lparen\Tr(\rho_{-})\sigma+i[\rho_{-},\sigma]\Delta\big\rparen+O(\Delta^{2}). \tag{48}
+$$
+
+Now tracing out the first qubit, we obtain the state
+
+$$
+(\Tr\rho_{+}+\Tr\rho_{-})\sigma-i[\rho_{+}-\rho_{-},\sigma]\Delta+O(\Delta^{2}) =\sigma-i[H,\sigma]\Delta+O(\Delta^{2}) \tag{49}
+$$
+$$
+=e^{-iH\Delta}\sigma e^{iH\Delta}+O(\Delta^{2}), \tag{50}
+$$
+
+where we’ve used $\Tr\rho_{+}+\Tr\rho_{-}=1$ and $H=\rho_{+}-\rho_{-}$ in the first line. Thus with one copy of $\rho^{\prime}$ we can simulate the operation $e^{-iH\Delta}$ up to error $O(\Delta^{2})$; by choosing $\Delta=\delta/t$ and repeating this for $t^{2}/\delta$ times, we obtain a simulation of $e^{-iHt}$ up to error $O(\delta)$, using $O(t^{2}/\delta)$ copies of $\rho^{\prime}$. ∎
+
+### 5.1 Simulating Linear Combinations
+
+In the simplest case where $H=\sum_{j=1}^{K}c_{j}\rho_{j}$ is a linear combination of the $\rho_{j}$, we show:
+
+**Theorem 9.**
+
+Let $\rho_{1},\dotsc,\rho_{K}\in\mathrm{D}(\mathcal{H}_{\mathsf{A}})$ and $\sigma_{\mathsf{A}\mathsf{B}}\in\mathrm{D}(\mathcal{H}_{\mathsf{A}}\otimes\mathcal{H}_{\mathsf{B}})$ be unknown quantum states, and let $c_{1},\dotsc,c_{K}\in\mathbb{R}$. Using $n$ samples from the states $\{\rho_{1},\dotsc,\rho_{K}\},$ a quantum algorithm can transform $\sigma_{\mathsf{A}\mathsf{B}}$ into $\tilde{\sigma}_{\mathsf{A}\mathsf{B}}$ such that
+
+$$
+\frac{1}{2}\big\lVert\big\lparen e^{-iHt}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen\sigma_{\mathsf{A}\mathsf{B}}\big\lparen e^{iHt}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen-\tilde{\sigma}_{\mathsf{A}\mathsf{B}}\big\rVert_{1}\leq O(\delta),\quad H=\sum_{j=1}^{K}c_{j}\rho_{j}, \tag{51}
+$$
+
+if $n=O(c^{2}t^{2}/\delta)$ where $c:=\sum_{j=1}^{K}|c_{j}|$. Moreover, on average, the number of copies of $\rho_{j}$ consumed is $n_{j}=O(|c_{j}|ct^{2}/\delta)$.
+
+**Proof.**
+
+Define
+
+$$
+\rho^{\prime}:=\frac{1}{c}\bigg[|0\rangle\!\langle 0|\otimes\sum_{j:c_{j}>0}c_{j}\rho_{j}+|1\rangle\!\langle 1|\otimes\sum_{j:c_{j}<0}(-c_{j})\rho_{j}\bigg]. \tag{52}
+$$
+
+Note that $\rho^{\prime}$ is a valid density matrix, and can be created by sampling the state $|0\rangle\!\langle 0|\otimes\rho_{j}$ with probability $c_{j}/c$ if $c_{j}>0$, and otherwise sampling the state $|1\rangle\!\langle 1|\otimes\rho_{j}$ with probability $-c_{j}/c$ if $c_{j}<0$. (This works for the same reason a mixed state is indistinguishable from the corresponding probabilistic distribution of pure states.) By Lemma 8, since $\rho^{\prime}$ is of the form $|0\rangle\!\langle 0|\otimes\rho_{+}+|1\rangle\!\langle 1|\otimes\rho_{-}$ with
+
+$$
+\rho_{+}-\rho_{-}=\frac{1}{c}\sum_{j=1}^{K}c_{j}\rho_{j}=\frac{H}{c}, \tag{53}
+$$
+
+we can simulate $e^{-iHt}=e^{-i(H/c)(ct)}$ to error $\delta$ using $O(c^{2}t^{2}/\delta)$ copies of $\rho^{\prime}$. On average the state $\rho_{j}$ is sampled $|c_{j}|/c\cdot O(c^{2}t^{2}/\delta)=O(|c_{j}|ct^{2}/\delta)$ times. ∎
+
+We now show that Theorem 9 is tight.
+
+**Theorem 10.**
+
+Let $\{c_{1},\dotsc,c_{K}\}$ be a set of $K$ real numbers. Then there exist $\rho_{1},\dotsc,\rho_{K}$ such that to simulate $H=\sum_{j=1}^{K}c_{j}\rho_{j}$ for time $t$ and to error $\delta$ in trace norm requires $\Omega(c^{2}t^{2}/\delta)$ copies of states in $\{\rho_{1},\dotsc,\rho_{K}\}$, where $c:=\sum_{j}\lvert c_{j}\rvert$, as long as $\delta$ and $\delta/(ct)$ are smaller than some constants.
+
+**Proof.**
+
+We first consider the case that $\rho_{j}=\rho$ and $c_{j}\geq 0$ for all $j$. Then we can use Theorem 9 to simulate $H=\sum_{j}c_{j}\rho=c\rho$ for time $t$ to accuracy $\delta$ using $O(c^{2}t^{2}/\delta)$ samples of $\rho$. Comparing with our lower bound in Theorem 5, we find this is optimal.
+
+If we have $c_{j}$’s such that some $c_{j}<0$, without loss of generality, assume that $\sum_{j:c_{j}>0}c_{j}\geq\sum_{j:c_{j}<0}|c_{j}|$. Then if $c_{j}>0$, set $\rho_{j}=\rho$, and if $c_{j}<0$, set $\rho_{j}$ equal to the maximally mixed state. This gives
+
+$$
+H=\sum_{j:c_{j}>0}c_{j}\rho+c^{\prime}\mathbb{1} \tag{54}
+$$
+
+where $c^{\prime}$ is some real number. The term proportional to the identity can be dropped (since it only gives an irrelevant phase factor), and $\sum_{j:c_{j}>0}c_{j}\geq c/2$ by assumption, so simulating $H$ for time $t$ to accuracy $\delta$ requires $\Omega(c^{2}t^{2}/\delta)$ samples of $\rho$. ∎
+
+### 5.2 Simulating the Commutator and Anticommutator
+
+In this section, we will show how to simulate a Hamiltonian that is the commutator of two states $H_{c}=i[\rho_{1},\rho_{2}]$; or the anticommutator $H_{a}=\{\rho_{1},\rho_{2}\}$; or some linear combination of the two. As we will show in the next section, simulating the commutator $H_{c}$ is useful for orthogonality testing and for adding two unknown pure states.
+
+One approach to simulating $H_{c}$ would be to use the expression [Var84, Corollary 2.12.5]
+
+$$
+e^{-iH_{c}t}=\lim_{r\rightarrow\infty}(e^{-i\rho_{1}\sqrt{t/r}}e^{-i\rho_{2}\sqrt{t/r}}e^{i\rho_{1}\sqrt{t/r}}e^{i\rho_{2}\sqrt{t/r}})^{r} \tag{55}
+$$
+
+and apply Theorem 1 sequentially for each term in the product. Unfortunately, this leads to an error of $O(t)$, and is incorrect even at the lowest order. We now present an alternate approach using Lemma 8.
+
+**Theorem 11.**
+
+Let $\rho_{1},\rho_{2}\in\mathrm{D}(\mathcal{H}_{\mathsf{A}})$ and $\sigma_{\mathsf{A}\mathsf{B}}\in\mathrm{D}(\mathcal{H}_{\mathsf{A}}\otimes\mathcal{H}_{\mathsf{B}})$ be unknown quantum states, and $\phi\in[0,2\pi)$. Using $n$ samples each of $\rho_{1}$ and $\rho_{2}$, a quantum algorithm can transform $\sigma_{\mathsf{A}\mathsf{B}}$ into $\tilde{\sigma}_{\mathsf{A}\mathsf{B}}$ such that
+
+$$
+\frac{1}{2}\big\lVert\big\lparen e^{-iHt}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen\sigma_{\mathsf{A}\mathsf{B}}\big\lparen e^{iHt}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen-\tilde{\sigma}_{\mathsf{A}\mathsf{B}}\big\rVert_{\diamond}\leq O(\delta), \tag{56}
+$$
+
+where
+
+$$
+H=\frac{1}{2}\cos(\phi)\{\rho_{1},\rho_{2}\}+\frac{1}{2}\sin(\phi)i[\rho_{1},\rho_{2}] \tag{57}
+$$
+
+if $n=O(t^{2}/\delta)$.
+
+Note that choosing $\phi=0$ we recover the anticommutator Hamiltonian $H_{a}/2$, and choosing $\phi=\pi/2$ we recover the commutator Hamiltonian $H_{c}/2$.
+
+**Proof.**
+
+For simplicity we only consider the case when $\rho_{1}$, $\rho_{2}$, $\sigma\in\mathrm{D}(\mathcal{H}_{\mathsf{A}})$; the general case can be straightforwardly tackled as in Appendix B. Our strategy will be to produce a state of the form $\rho^{\prime}=|0\rangle\!\langle 0|\otimes\rho_{+}+|1\rangle\!\langle 1|\otimes\rho_{-}$, such that
+
+$$
+\Tr(\rho_{+}+\rho_{-}) =1, \rho_{+}-\rho_{-} =H, \tag{58}
+$$
+
+and then apply Lemma 8. We will use the circuit in Fig. 1 to produce such a state.
+
+We now analyze Fig. 1. There are a number of dotted lines cutting the figure, and we will write down the state (as a density matrix) at each. First, at I, after applying a controlled swap,
+
+$$
+\rho_{\textrm{I}}= \,\lvert a\rvert^{2}|0\rangle\!\langle 0|\otimes(\rho_{1}\otimes\rho_{2})+ab^{*}|0\rangle\!\langle 1|\otimes(\rho_{1}\otimes\rho_{2})S \tag{59}
+$$
+$$
++a^{*}b|1\rangle\!\langle 0|\otimes S(\rho_{1}\otimes\rho_{2})+\lvert b\rvert^{2}|1\rangle\!\langle 1|\otimes(\rho_{2}\otimes\rho_{1}).
+$$
+
+After discarding the last register we get
+
+$$
+\rho_{\textrm{II}}= \,|0\rangle\!\langle 0|\otimes\lvert a\rvert^{2}\rho_{1}+|0\rangle\!\langle 1|\otimes ab^{*}\rho_{1}\rho_{2} \tag{60}
+$$
+$$
++|1\rangle\!\langle 0|\otimes a^{*}b\rho_{2}\rho_{1}+|1\rangle\!\langle 1|\otimes\lvert b\rvert^{2}\rho_{2}.
+$$
+
+Finally, a Hadamard operation to the first qubit gives
+
+$$
+\rho_{\textrm{III}}= \,|0\rangle\!\langle 0|\otimes\frac{1}{2}\left(|a|^{2}\rho_{1}+|b|^{2}\rho_{2}+ab^{*}\rho_{1}\rho_{2}+a^{*}b\rho_{2}\rho_{1}\right) \tag{61}
+$$
+$$
++|0\rangle\!\langle 1|\otimes\frac{1}{2}\left(|a|^{2}\rho_{1}-|b|^{2}\rho_{2}-ab^{*}\rho_{1}\rho_{2}+a^{*}b\rho_{2}\rho_{1}\right)
+$$
+$$
++|1\rangle\!\langle 0|\otimes\frac{1}{2}\left(|a|^{2}\rho_{1}-|b|^{2}\rho_{2}+ab^{*}\rho_{1}\rho_{2}-a^{*}b\rho_{2}\rho_{1}\right)
+$$
+$$
++|1\rangle\!\langle 1|\otimes\frac{1}{2}\left(|a|^{2}\rho_{1}+|b|^{2}\rho_{2}-ab^{*}\rho_{1}\rho_{2}-a^{*}b\rho_{2}\rho_{1}\right).
+$$
+
+Now the measurement operator on the first qubit in Fig. 1 denotes dephasing in the standard basis. Namely, we measure in the $\{|0\rangle\!\langle 0|,|1\rangle\!\langle 1|\}$ basis, and if outcome $|0\rangle\!\langle 0|$ is obtained, replace the qubit state with $|0\rangle\!\langle 0|$, and if outcome $|1\rangle\!\langle 1|$ is obtained, replace it with $|1\rangle\!\langle 1|$. Thus at IV, after performing this measurement, we have
+
+$$
+\rho_{\textrm{IV}}= \,|0\rangle\!\langle 0|\otimes\frac{1}{2}\left(|a|^{2}\rho_{1}+|b|^{2}\rho_{2}+ab^{*}\rho_{1}\rho_{2}+a^{*}b\rho_{2}\rho_{1}\right) \tag{62}
+$$
+$$
++|1\rangle\!\langle 1|\otimes\frac{1}{2}\left(|a|^{2}\rho_{1}+|b|^{2}\rho_{2}-ab^{*}\rho_{1}\rho_{2}-a^{*}b\rho_{2}\rho_{1}\right),
+$$
+
+Notice that $\rho_{\textrm{IV}}$ is a state of the form $\rho^{\prime}=|0\rangle\!\langle 0|\otimes\rho_{+}+|1\rangle\!\langle 1|\otimes\rho_{-}$, where $\rho_{+}$ and $\rho_{-}$ are subnormalized states with $\Tr\rho_{+}+\Tr\rho_{-}=1$, and
+
+$$
+\rho_{+}-\rho_{-}=ab^{*}\rho_{1}\rho_{2}+a^{*}b\rho_{2}\rho_{1}. \tag{63}
+$$
+
+Choosing $a=1/\sqrt{2}$ and $b=e^{-i\phi}/\sqrt{2}$ we get
+
+$$
+\rho_{+}-\rho_{-}=\frac{1}{2}\left\lparen e^{i\phi}\rho_{1}\rho_{2}+e^{-i\phi}\rho_{2}\rho_{1}\right\rparen=H. \tag{64}
+$$
+
+Applying Lemma 8, we can simulate $H$ using the claimed resources. ∎
+
+It is easy to see that the simulation from Theorem 11 of the anticommutator $H_{a}=\{\rho_{1},\rho_{2}\}$ has optimal scaling in $t$ and $\delta$, because in the qubit case, we can always choose $\rho_{2}=\mathbb{1}/2$ so that $H_{a}=\rho_{1}$ and we can apply the lower bound from Theorem 5. It is a little less trivial to show that our simulation of $H_{c}=i[\rho_{1},\rho_{2}]$ is optimal, but we show now that it is. The proof proceeds along similar lines as the optimality proofs in Theorem 5 and Theorem 10.
+
+**Theorem 12.**
+
+To simulate $H=i[\rho_{1},\rho_{2}]$ for time $t$ and to trace norm error $\delta$ requires $\Omega(t^{2}/\delta)$ copies each of the states $\rho_{1}$ and $\rho_{2}$, as long as $\delta$ and $\delta/t$ are smaller than some constants.
+
+**Proof.**
+
+First, consider the two states $\rho_{A}=\rho(1/2)=\mathbb{1}/2$ and $\rho_{B}=\rho(1/2+\epsilon)$, where $\rho(x)$ is from Eq. 27 and $0<\epsilon\leq 1/2$. By using the commutator simulation, we will identify an unknown state $\rho_{1}$ as either $\rho_{A}$ or $\rho_{B}$ with probability 2/3, a task for which Lemma 4 gives a lower bound of $C\epsilon^{-2}$ on the sample complexity, for some constant $C$.
+
+Let $\rho_{2}=|+\rangle\!\langle+|$. Then $\exp({[\rho_{1},\rho_{2}]\pi/(2\epsilon)})\propto\mathbb{1}$ if $\rho_{1}=\rho_{A}$ and $\exp({[\rho_{1},\rho_{2}]\pi/(2\epsilon)})\propto Y$ if $\rho_{1}=\rho_{B}$. A single qubit experiment then distinguishes $\rho_{1}=\rho_{A}$ from $\rho_{1}=\rho_{B}$. Simply perform $\exp({[\rho_{1},\rho_{2}]\pi/(2\epsilon)})$ on $|0\rangle$ through commutator simulation and measure in the $Z$-basis. The outcome will be $|1\rangle$ if and only if $\rho_{1}=\rho_{2}$. The remaining part of the proof, extending to any sufficiently large $t$ and small $\delta$, proceeds exactly as in Theorem 5. Notice that symmetry of the commutator requires that any lower bound proved on the number of copies of $\rho_{1}$ also applies to the number of copies of $\rho_{2}$. ∎
+
+While the above proof uses mixed states, it is possible to prove commutator simuation is optimal for pure states as well, by using the lower bound on orthogonality testing we will provide in Section 6.2.
+
+### 5.3 Simulating Hermitian Polynomials in the Input States
+
+It is not hard to show that any Hamiltonian written as a sum of nested commutators (with factors of $i$) and anticommutators can be expanded into a Hermitian multinomial. In fact, the converse is true too, as we sketch in Appendix E. This motivates us to extend the ideas of Theorem 11 to simulate any Hermitian multinomial in the states $\rho_{1},\dotsc,\rho_{K}$, given sample access to these states.
+
+**Theorem 13.**
+
+Let $\rho_{1},\dotsc,\rho_{K}\in\mathrm{D}(\mathcal{H}_{\mathsf{A}})$ and $\sigma_{\mathsf{A}\mathsf{B}}\in\mathrm{D}(\mathcal{H}_{\mathsf{A}}\otimes\mathcal{H}_{\mathsf{B}})$ be unknown quantum states, and let
+
+$$
+H=\sum_{r\in R}c_{r}H_{r},\quad H_{r}=\frac{1}{2}\left(e^{i\phi_{r}}\rho_{r_{1}}\rho_{r_{2}}\dotsm\rho_{r_{|r|}}+e^{-i\phi_{r}}\rho_{r_{|r|}}\rho_{r_{|r|-1}}\dotsm\rho_{r_{1}}\right) \tag{65}
+$$
+
+be a Hermitian polynomial in $\rho_{1},\dotsc,\rho_{K}$, where $R$ is a finite set of strings over the alphabet $\{1,2,\dotsc,K\}$. Using $n$ samples from the states $\{\rho_{1},\dotsc,\rho_{K}\}$, a quantum algorithm can transform $\sigma_{\mathsf{A}\mathsf{B}}$ into $\tilde{\sigma}_{\mathsf{A}\mathsf{B}}$ such that
+
+$$
+\frac{1}{2}\big\lVert\big\lparen e^{-iHt}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen\sigma_{\mathsf{A}\mathsf{B}}\big\lparen e^{iHt}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen-\tilde{\sigma}_{\mathsf{A}\mathsf{B}}\big\rVert_{1}\leq O(\delta), \tag{66}
+$$
+
+if $n=O(Lc^{2}t^{2}/\delta)$ where $c:=\sum_{r\in R}\lvert c_{r}\rvert$ and $L:=\max_{r\in R}|r|$ is the multinomial degree of $H$. Moreover, on average, the number of copies of $\rho_{j}$ consumed is $n_{j}=O\left(\kappa_{j}c^{2}t^{2}/\delta\right)$ where $\kappa_{j}=\sum_{r\in R}v_{j}(r)|c_{r}|/c$, and $v_{j}(r)=|\{s:r_{s}=j\}|$.
+
+**Proof.**
+
+We first consider a term $H_{r}$ with $r=(1,2,\dotsc,k)$, for some $k$ such that $2\leq k\leq K$. (More general $r$ will follow easily from this special case.) Let $S_{k}$ be the cyclic permutation of $k$ copies of $\mathcal{H}_{\mathsf{A}}$ that acts as follows: $S_{k}|j_{1},j_{2},\dotsc,j_{k}\rangle=|j_{k},j_{1},\dotsc,j_{k-1}\rangle$. In other words,
+
+$$
+S_{k}:=\sum_{j_{1},j_{2},\dotsc,j_{k}=1}^{\dim\mathcal{H}_{\mathsf{A}}}|j_{k}\rangle\!\langle j_{1}|\otimes|j_{1}\rangle\!\langle j_{2}|\otimes|j_{2}\rangle\!\langle j_{3}|\otimes\dotsb\otimes|j_{k-1}\rangle\!\langle j_{k}|. \tag{67}
+$$
+
+Consider the circuit in Fig. 2. The output of Fig. 2 (we will not go through the details of the calculation as they are very similar to the analysis in Theorem 11) is of the form $\rho^{\prime(r)}=|0\rangle\!\langle 0|\otimes\rho_{+}^{(r)}+|1\rangle\!\langle 1|\otimes\rho_{-}^{(r)}$, where
+
+$$
+\rho_{+}^{(r)} :=\frac{1}{2}\left(|a|^{2}\rho_{1}+|b|^{2}\rho_{k}+ab^{*}\rho_{1}\rho_{2}\dotsm\rho_{k}+a^{*}b\rho_{k}\rho_{k-1}\dotsm\rho_{1}\right),
+$$
+$$
+\rho_{-}^{(r)} :=\frac{1}{2}\left(|a|^{2}\rho_{1}+|b|^{2}\rho_{k}-ab^{*}\rho_{1}\rho_{2}\dotsm\rho_{k}-a^{*}b\rho_{k}\rho_{k-1}\dotsm\rho_{1}\right). \tag{68}
+$$
+
+When we chose $ab^{*}=e^{i\phi_{r}}/2$, we find
+
+$$
+\rho_{+}^{(r)}-\rho_{-}^{(r)}=\frac{1}{2}e^{i\phi_{r}}\rho_{1}\rho_{2}\dotsm\rho_{{k}}+\frac{1}{2}e^{-i\phi_{r}}\rho_{{k}}\rho_{{k-1}}\dotsm\rho_{1}=H_{r}. \tag{69}
+$$
+
+To apply this analysis to any other $r$ with $|r|=k$, one can simply supply the appropriate input states $\rho_{j}$ in Fig. 2.
+
+Now without loss of generality we can assume $c_{r}\geq 0$ for all $r$, since the sign can be absorbed into the phase $\phi_{r}$. Therefore by sampling from $r\in R$ with probability $c_{r}/c$ and creating $\rho^{\prime(r)}$, we obtain the state
+
+$$
+\rho^{\prime}=\frac{1}{c}\left(\sum_{r\in R}c_{r}\rho^{\prime(r)}\right)=\frac{1}{c}\left(|0\rangle\!\langle 0|\otimes\left(\sum_{r\in R}c_{r}\rho_{+}^{(r)}\right)+|1\rangle\!\langle 1|\otimes\left(\sum_{r\in R}c_{r}\rho_{-}^{(r)}\right)\right). \tag{70}
+$$
+
+By Lemma 8, we can therefore simulate the Hamiltonian
+
+$$
+H=\sum_{r\in R}c_{r}(\rho_{+}^{(r)}-\rho_{-}^{(r)})=\sum_{r\in R}c_{r}H_{r} \tag{71}
+$$
+
+for the desired time and precision using $O(c^{2}t^{2}/\delta)$ copies of $\rho^{\prime}$. Since each copy of $\rho^{\prime}$ requires a sample of a state $\rho^{\prime(r)}$, and each of these states requires at most $L=\max_{r\in R}|r|$ copies of states in $\{\rho_{1},\dots,\rho_{K}\}$, we obtain the stated total sample complexity.
+
+To calculate the average number of uses of $\rho_{j}$, we note that $\rho_{j}$ is used $v_{j}(r)$ times to create the state $\rho^{\prime(r)}$, and to create the state $\rho^{\prime}$, the state $\rho^{\prime(r)}$ is chosen with probability $|c_{j}|/c.$ Thus $\rho_{j}$ is used on average $\kappa_{j}=\sum_{r\in R}v_{j}(r)|c_{r}|/c$ times to create a single $\rho^{\prime}.$ Then since $O(c^{2}t^{2}/\delta)$ copies of $\rho^{\prime}$ are used in the simulation, we obtain the stated complexity.
+
+∎
+
+## 6 Applications of Commutator Simulation
+
+One might wonder if commutator simulation is useful for any quantum information processing task. We describe how commutator simulation can be used to coherently add two pure states, i.e. producing a state proportional to $|\psi_{1}\rangle+|\psi_{2}\rangle$. We also show that commutator simulation can be used to perform orthogonality testing. Recall from Section 4.1 that this is the problem of determining whether two pure states have overlap at least $w$ or are orthogonal.
+
+### 6.1 Coherent state addition
+
+We first give a protocol for coherent state addition: given many copies of unknown pure states $|\psi_{1}\rangle$ and $|\psi_{2}\rangle$, the task is to obtain a state of the form
+
+$$
+a|\psi_{1}\rangle+b|\psi_{2}\rangle \tag{72}
+$$
+
+for some $a,b\in\mathbb{R}$. Note that the target state is sensitive to the global phases of the two input states—in particular, the relative phase between $|\psi_{1}\rangle$ and $|\psi_{2}\rangle$—which have no physical meaning. To make the task well-defined, we instead demand the target state to be of the form
+
+$$
+a|\psi_{1}\rangle+b\frac{\langle\psi_{2}|\psi_{1}\rangle}{\lvert\langle\psi_{2}|\psi_{1}\rangle\rvert}|\psi_{2}\rangle \tag{73}
+$$
+
+for some $a,b\in\mathbb{R}$, which is unique (up to a global phase) even when the global phases of the two input states have not been specified. Note that we can always recover Eq. 72 from Eq. 73 by fixing the global phases of the two input states appropriately (i.e. such that $\langle\psi_{2}|\psi_{1}\rangle\geq 0$).
+
+**Theorem 14.**
+
+Let $|\psi_{1}\rangle$ and $|\psi_{2}\rangle$ be unknown pure states of the same dimension. Promised that the angle between the two states is $\Delta:=\arccos\lvert\langle\psi_{1}|\psi_{2}\rangle\rvert$ and $\Delta\notin\{0,\pi/2\}$, it is possible to create the state
+
+$$
+|\psi(\chi)\rangle:=\frac{1}{\sin\Delta}\Big\lparen\sin(\Delta-\chi)|\psi_{1}\rangle+e^{i\varphi}\sin\chi|\psi_{2}\rangle\Big\rparen \tag{74}
+$$
+
+to trace distance $\delta$ using $O(\frac{\chi^{2}}{\delta\sin^{2}2\Delta})$ copies of $|\psi_{1}\rangle$ and $|\psi_{2}\rangle$, where $e^{i\varphi}:=\langle\psi_{2}|\psi_{1}\rangle/\lvert\langle\psi_{2}|\psi_{1}\rangle\rvert$ is an unimportant phase factor that can be ignored by appropriately adjusting the global phases of the two states.
+
+**Remark 15.**
+
+Our proof is based on commutator simulation and effectively implements a rotation in the two-dimensional subspace spanned by $|\psi_{1}\rangle$ and $|\psi_{2}\rangle$. Indeed, note from Eq. 74 that $|\psi(0)\rangle=|\psi_{1}\rangle$ and $|\psi(\Delta)\rangle=e^{i\varphi}|\psi_{2}\rangle$, while intermediate values of $\chi$ produce states that interpolate between these two. As a consequence, the target state in Eq. 73 has real coefficients $a$ and $b$. One can also achieve complex coefficients using a more sophisticated Hamiltonian that includes terms proportional to $|\psi_{1}\rangle\!\langle\psi_{1}|$ and $|\psi_{2}\rangle\!\langle\psi_{2}|$, but we do not consider this case here for the sake of simplicity.
+
+**Remark 16.**
+
+If one does not care about the relative phase $e^{i\varphi}$, one can always exchange the two states and replace $\chi$ by $\Delta-\chi$, which would improve the complexity by a constant factor when $\chi>\Delta/2$.
+
+**Remark 17.**
+
+Our protocol requires a very large number of samples when the states $|\psi_{1}\rangle$ and $|\psi_{2}\rangle$ have either very small or very large overlap (i.e. in cases when $\sin^{2}2\Delta$ is very small). This is because we use commutator simulation to effectively implement a rotation in the two-dimensional subspace spanned by $|\psi_{1}\rangle$ and $|\psi_{2}\rangle$, and in the special cases when $|\psi_{1}\rangle\perp|\psi_{2}\rangle$ or $|\psi_{1}\rangle=e^{i\varphi}|\psi_{2}\rangle$ the commutator vanishes and hence our protocol fails (in the second case the task is trivial though).
+
+**Proof.**
+
+Using $\langle\psi_{2}|\psi_{1}\rangle=e^{i\varphi}\cos\Delta$, we can write
+
+$$
+|\psi_{2}\rangle=e^{-i\varphi}\big\lparen\cos\Delta|\psi_{1}\rangle-\sin\Delta|\psi_{1}^{\perp}\rangle\big\rparen \tag{75}
+$$
+
+for some unit vector $|\psi_{1}^{\perp}\rangle$ such that $\langle\psi_{1}|\psi_{1}^{\perp}\rangle=0$.
+
+Then the commutator of two non-orthogonal pure states acts as a Hamiltonian that induces a rotation in the two-dimensional subspace spanned by the states. In particular,
+
+$$
+i\big[|\psi_{1}\rangle\!\langle\psi_{1}|,|\psi_{2}\rangle\!\langle\psi_{2}|\big] =i\big\lparen\langle\psi_{1}|\psi_{2}\rangle|\psi_{1}\rangle\!\langle\psi_{2}|-\langle\psi_{2}|\psi_{1}\rangle|\psi_{2}\rangle\!\langle\psi_{1}|\big\rparen \tag{76}
+$$
+$$
+=\cos\Delta\,i\big\lparen e^{-i\varphi}|\psi_{1}\rangle\!\langle\psi_{2}|-e^{i\varphi}|\psi_{2}\rangle\!\langle\psi_{1}|\big\rparen \tag{77}
+$$
+$$
+=\cos\Delta\sin\Delta\,i\big\lparen|\psi_{1}^{\perp}\rangle\!\langle\psi_{1}|-|\psi_{1}\rangle\!\langle\psi_{1}^{\perp}|\big\rparen \tag{78}
+$$
+$$
+=:\cos\Delta\sin\Delta\,Y_{|\psi_{1}\rangle,|\psi_{1}^{\perp}\rangle}, \tag{79}
+$$
+
+where $Y_{|\psi\rangle,|\psi^{\perp}\rangle}$ acts as the Pauli $Y$ matrix in the two-dimensional subspace spanned by orthonormal states $|\psi\rangle$ and $|\psi^{\perp}\rangle$. If $Y$ is the $2\times 2$ Pauli matrix then $e^{i\chi Y}=\cos\chi\,\mathbb{1}+i\sin\chi\,Y$ for any $\chi\in\mathbb{R}$ so
+
+$$
+\exp\big\lparen i\chi Y_{|\psi_{1}\rangle,|\psi_{1}^{\perp}\rangle}\big\rparen|\psi_{1}\rangle =\cos\chi|\psi_{1}\rangle+i\sin\chi Y_{|\psi_{1}\rangle,|\psi_{1}^{\perp}\rangle}|\psi_{1}\rangle \tag{80}
+$$
+$$
+=\cos\chi|\psi_{1}\rangle-\sin\chi|\psi_{1}^{\perp}\rangle \tag{81}
+$$
+$$
+=\frac{1}{\sin\Delta}\big\lparen\sin(\Delta-\chi)|\psi_{1}\rangle+e^{i\varphi}\sin\chi|\psi_{2}\rangle\big\rparen, \tag{82}
+$$
+
+which is the desired state $|\psi(\chi)\rangle$ (we substituted $|\psi_{1}^{\perp}\rangle=(\cos\Delta|\psi_{1}\rangle-e^{i\varphi}|\psi_{2}\rangle)/\sin\Delta$ from Eq. 75 to get the last line). To prepare this state, we can apply $\exp\left(i\chi Y_{|\psi_{1}\rangle,|\psi_{1}^{\perp}\rangle}\right)$ to $|\psi_{1}\rangle$ using the commutator simulation algorithm: we evolve with $H:=i\big[|\psi_{2}\rangle\!\langle\psi_{2}|,|\psi_{1}\rangle\!\langle\psi_{1}|\big]=-\cos\Delta\sin\Delta\,Y_{|\psi_{1}\rangle,|\psi_{1}^{\perp}\rangle}$ for time $t=\chi/(\cos\Delta\sin\Delta)$. According to Theorem 11, this requires $O(t^{2}/\delta)$ copies of each state, so the total sample complexity is $O(\frac{\chi^{2}}{\delta\sin^{2}2\Delta})$. ∎
+
+Interestingly, by choosing $\chi=\Delta/2$ in Eq. 74 it is possible to coherently add two states, i.e. create a state proportional to $|\psi_{1}\rangle+|\psi_{2}\rangle$ (we are ignoring the relative phase between the two states). However, to determine $\Delta$ one needs to estimate the inner product between the two states, which can be done by running phase estimation on the commutator.
+
+### 6.2 Orthogonality Testing
+
+We now give a method for testing the orthogonality of two unknown pure states.
+
+**Theorem 18.**
+
+Let $|\psi_{1}\rangle$ and $|\psi_{2}\rangle$ be unknown pure states of the same dimension. Promised that either $\lvert\langle\psi_{1}|\psi_{2}\rangle\rvert=0$ or $\lvert\langle\psi_{1}|\psi_{2}\rangle\rvert\geq w$, deciding which with probability $1-\epsilon$ uses $\Theta(\log(1/\epsilon)/w)$ copies of $|\psi_{1}\rangle$ and $|\psi_{2}\rangle$.
+
+**Proof.**
+
+For the upper bound, let $\Delta:=\arccos\lvert\langle\psi_{1}|\psi_{2}\rangle\rvert$. From Eq. 79, we see that if the states are non-orthogonal, commutator simulation generates a rotation; whereas if the states are orthogonal, i.e. $\Delta=\pi/2$, commutator simulation performs only the identity. However, we have to be careful, because identical states correspond to $\Delta=0$ which also results in a trivial commutator. Therefore we consider the modified states $|\widetilde{\psi}_{1}\rangle:=|\psi_{1}\rangle|0\rangle$ and $|\widetilde{\psi}_{2}\rangle:=|\psi_{2}\rangle|+\rangle$, which can never have overlap greater than $1/2$. (We do this by appending the states $|0\rangle$ and $|+\rangle$ to the sampled states.) If we let $\lambda:=\lvert\langle\psi_{1}|\psi_{2}\rangle\rvert^{2}=\cos^{2}\Delta$, then $\lvert\langle\widetilde{\psi}_{1}|\widetilde{\psi}_{2}\rangle\rvert^{2}=\lambda/2$ and the evolution with the commutator of $|\widetilde{\psi}_{1}\rangle$ and $|\widetilde{\psi}_{2}\rangle$ for time $t=1$ generates the unitary
+
+$$
+U=\exp\Big\lparen\big[|\widetilde{\psi}_{1}\rangle\!\langle\widetilde{\psi}_{1}|,|\widetilde{\psi}_{2}\rangle\!\langle\widetilde{\psi}_{2}|\big]\Big\rparen=\exp\left\lparen-i\sqrt{\frac{\lambda}{2}\left\lparen 1-\frac{\lambda}{2}\right\rparen}Y_{|\widetilde{\psi}_{1}\rangle,|\widetilde{\psi}_{1}^{\perp}\rangle}\right\rparen. \tag{83}
+$$
+
+Phase estimation on $U$ to precision $\Omega(1/\sqrt{w})$ suffices to distinguish between $\lambda=0$ and $\lambda\geq w$, and thus solves orthogonality testing. Similarly to Appendix D, phase estimation with constant probability of success requires $O(1/\sqrt{w})$ applications of $U$, each implemented to error $O(\sqrt{w})$; this uses $O(1/(\sqrt{w})^{2})=O(1/w)$ samples. To succeed with probability $1-\epsilon$ we can repeat $O(\log(1/\epsilon))$ times, giving a total sample complexity of $O(\log(1/\epsilon)/w)$.[^2]
+
+[^2]: Notice that simple repeating of the SWAP test [BCWdW01] on $|\psi_{1}\rangle$ and $|\psi_{2}\rangle$ produces a slower orthogonality testing algorithm. Essentially, we end up having to distinguish Bernoulli random variables with $p=1/2$ and $p\geq 1/2+w/2$. This takes $\Omega(1/w^{2})$ samples (see Lemma 4 and [AJ06]).
+
+For the lower bound, first notice that sample-based Grover search (see Section 4.2) reduces to orthogonality testing in the following way. Since in sample-based Grover search we do not count uses of $U$, we may therefore perform tomography on $U$ to learn, to arbitrary accuracy, a complete orthogonal basis $\{|t_{1}\rangle,|t_{2}\rangle,\dots,|t_{k}\rangle\}$ for the target space $T$. Now perform orthogonality testing between $|s\rangle$ and each of the $|t_{j}\rangle$ to determine whether $|s\rangle$ has overlap $\lambda_{j}=|\langle s|t_{j}\rangle|^{2}$ at least $w/k$. If the total probability mass of $|s\rangle$ inside the target space is at least $w$, then this must be true for some $|t_{j}\rangle$. Treating factors of $k$ as constant, this implies $\Omega(\log(1/\epsilon)/w)$ copies of $|s\rangle$ (and $|t_{j}\rangle$ by symmetry) must be required for orthogonality testing with success probability $1-\epsilon$, so as not to break the sample-based Grover search lower bound of Lemma 6. ∎
+
+## 7 Universality of LMR
+
+In many solid state implementations of quantum computers such as quantum dots [LD98], donor-pairs [Kan98], and electron spins [VYW+00], the Heisenberg exchange is the natural coupling interaction between qubits. Up to an overall scaling, the Heisenberg interaction is the same as the swap interaction used in the LMR protocol.
+
+The Heisenberg interaction between qubits $i$ and $j$ is given by
+
+$$
+H_{ij}=X^{i}\otimes X^{j}+Y^{i}\otimes Y^{j}+Z^{i}\otimes Z^{j}, \tag{84}
+$$
+
+where $X^{i}$, $Y^{i}$, and $Z^{i}$ are the Pauli matrices acting on qubit $i.$ In these solid state systems, the Heisenberg interaction can be turned on and off for different pairs of qubits for any desired length of time.
+
+The operations induced by the Heisenberg interactions in these systems are fast and reliable. While it is beneficial to create computing models that take advantage of this Heisenberg exchange interaction, the Heisenberg interaction is not universal for spin-$1/2$ systems [BBC+95]. Several schemes have overcome this limitation by using encoded logical qubits and decoherence-free-subsystems [DBK+00, Lev02].
+
+In this section, we show how to use the LMR protocol to design a universal model for quantum computation that does not use encoded qubits, but which requires only the Heisenberg interaction, as well as the ability to prepare the states $|0\rangle$ and $|+\rangle$ on a single qubit. Our scheme thus requires $n+1$ physical qubits to perform computations on $n$ qubits, in contrast to encoded schemes, of which the simplest require 2 or 3 times the number of physical qubits [DBK+00, Lev02]. Furthermore, there has been much research in the field of quantum dots on how to quickly and reliably prepare a fixed qubit state, e.g. [CV10, FPMU03, HVvB+04, RSL00]. These schemes could be applied to produce the single qubit states needed for our protocol.
+
+We consider a connectivity graph of the qubits as in Fig. 3 (different connectivity graphs lead to different scalings depending on which costs you would like to optimize). We assume exchange interactions can be applied between connected qubits in the form of unitaries $\exp(-itH_{ij})$ for arbitrary $t$. The qubit $q_{*}$ is where the states $|0\rangle$ and $|+\rangle$ are prepared.
+
+Recall that arbitrary single qubit gates combined with any entangling two-qubit gate is sufficient for universal quantum computation [BDD+02]. Since we do not have encoded qubits, the exchange interaction itself immediately gives us an entangling gate. Now for universal quantum computation we need to show how to perform arbitrary single qubit gates.
+
+Let $X_{\phi}$ denote the unitary operation
+
+$$
+\cos(\phi/2)\mathbb{1}+i\sin(\phi/2)X, \tag{85}
+$$
+
+and let $Z_{\theta}$ denote the unitary operation
+
+$$
+\cos(\phi/2)\mathbb{1}+i\sin(\phi/2)Z. \tag{86}
+$$
+
+Then any single qubit rotation can be written as $X_{\phi}Z_{\theta}X_{\xi}$ for angles $\phi$, $\theta$, and $\xi.$ Therefore, it is sufficient to show how to perform $X$ and $Z$ rotations.
+
+If qubit $i$ needs to have a single qubit gate performed on it, using the Heisenberg interaction, we use swap gates to move that qubit to position 0. We now show how to perform a $Z_{\phi}$ and $X_{\theta}$ on the qubit in position 0. Using LMR, given $n$ copies of the state $|0\rangle$ input at qubit $q_{*}$, using only partial swap operations on qubits $q_{0}$ and $q_{*}$, (i.e. applying the Heisenberg interaction between qubits $q_{0}$ and $q_{*}$) we can apply the unitary
+
+$$
+\exp(-i\phi|0\rangle\!\langle 0|)=Z_{\phi} \tag{87}
+$$
+
+to accuracy $O\left(n^{-1}\right)$. Likewise, using the LMR protocol, given $n$ copies of the state $|+\rangle$, using only partial swap interactions between qubits $q_{0}$ and $q_{*}$, we can apply the unitary
+
+$$
+\exp(-i\theta|+\rangle\!\langle+|)=X_{\theta} \tag{88}
+$$
+
+to accuracy $O\left(n^{-1}\right)$.
+
+To apply an arbitrary single qubit rotation to accuracy $\epsilon$, we need $O(\epsilon^{-1})$ resource states $|0\rangle$ and $|+\rangle$ (this construction is reminiscent of ideas in [MM08]). Suppose that over the course of an algorithm, one must apply $M$ single qubit gates and $M^{\prime}$ CNOT gates. We note that to apply a CNOT gate requires a constant number of single qubits gates as well as a constant number of partial swap gates [BDD+02]. Then to bound the error over the course of the algorithm, we require accuracy of $O((M+M^{\prime})^{-1})$ for each single qubit gate. Therefore, we require $O((M+M^{\prime})^{2})$ resource states $|0\rangle$ and $|+\rangle$ in total. Additionally, using the connectivity graph of Fig. 3, to move qubits into proximity with one another to perform any single or two qubit gate requires $O(N)$ swap operations operations, where $N$ is the number of qubits. This results in a total number of operations that scales as $O(N(M+M^{\prime})^{2})$.
+
+We note that the states $|0\rangle$ and $|+\rangle$ need not be prepared perfectly for our protocol to work. For example, if we have slightly depolarized versions of these states, we would simply need to increase the number of rounds in the LMR protocol by a constant factor. In fact, two arbitrary states (other than $|0\rangle$ and $|+\rangle$) could be used, as long as they are not diagonal in the same basis, and as long as the states themselves are well characterized.
+
+Our model produces a polynomial (in particular squared) blow-up in the number of operations, which still allows for universal quantum computation. However, with such a model, it would be impossible to obtain a speed-up for problems such as Grover’s search. We hope it is a useful model for systems where the Heisenberg exchange is a natural operation. It may even be useful in non-solid state systems such as cold, trapped atoms, where it was shown that partial swaps could be implemented using Rydberg interactions or through coupling to a cavity [PZS+16].
+
+## 8 Outlook
+
+We have shown that the LMR protocol is optimal for the problem of simulating unknown Hamiltonians encoded as quantum states. Moreover, the protocol and its generalizations also turn out to be optimal for a variety of other tasks, such as discriminating between pure states and Hamiltonian evolution under the commutators of unknown states. We hope that this study will motivate the discovery of other possible applications of this versatile protocol.
+
+We have not shown the optimality of our protocol for simulating the evolution by the multinomials in Eq. 42. It would be interesting to investigate whether it is optimal, or whether better algorithms can be found.
+
+Another interesting aspect is the role of ancilla qubits in our protocol. While the original LMR protocol for Hamiltonian simulation is based on partial swaps and hence does not require ancilla qubits, the use of ancillas seems to be essential in our more general simulation protocol (see Fig. 2). We wonder whether the use of ancillas is necessary in our protocol, or for example, whether it can be implemented using the continuous permutations introduced in [Ozo15]. These continuous permutations generalize the partial swap operation and do not require ancillas.
+
+Another possible direction is to investigate distributed versions of our protocols in the context of multiparty communication. [HL11] consider a protocol for simulating distributed unitaries over multiple remote parties using shared entanglement and a limited amount of quantum communication, and the techniques they use are reminiscent to those of the LMR protocol. It would be interesting to investigate connections of [HL11] with the protocols in our work.
+
+Finally, the LMR protocol can be seen as allowing the encoding of the operation $e^{-i\rho t}$ into multiple copies of a quantum state $\rho$. As discussed in Section 2, having access to $O(t^{2}/\delta)$ copies of $\rho$ allows a user to perform the operation $e^{-i\rho t}$, but may be insufficient for the user to determine what $\rho$ is through tomography. It is an intriguing question whether other quantum operations could be encoded into states in this way, so that a user could perform the quantum operation but learn little else about what operation is being performed. This could be seen as a form of quantum copy-protection [Aar09]. See [ML16] for some progress in this direction, and [AF16] for negative results when the encoding is required to be a circuit and not a state.
+
+## Acknowledgments
+
+We thank Andrew Childs for suggesting the proof idea of Theorem 7, and Aram Harrow, Stephen Jordan, Seth Lloyd, Iman Marvian, Ronald de Wolf, and Henry Yuen for useful discussions. SK and CYL are funded by the Department of Defense. GHL is funded by the NSF CCR and the ARO quantum computing projects. MO acknowledges Leverhulme Trust Early Career Fellowship (ECF-2015-256) and European Union project QALGO (Grant Agreement No. 600700) for financial support. TJY thanks the DoD, Air Force Office of Scientific Research, National Defense Science and Engineering Graduate (NDSEG) Fellowship, 32 CFR 168a. Part of this work was done while MO was visiting the University of Maryland and MIT, so he would like to thank both institutions for their hospitality.
+
+## References
+
+[Aar09] Scott Aaronson. Quantum copy-protection and quantum money. In Computational Complexity (CCC), 2009 IEEE 24th Annual Conference on, pages 229–242. IEEE, Jul 2009. arXiv:1110.5353, doi:10.1109/CCC.2009.42.
+
+[ADO16] Koenraad Audenaert, Nilanjana Datta, and Maris Ozols. Entropy power inequalities for qudits. Journal of Mathematical Physics, 57(5):052202, 2016. arXiv:1503.04213, doi:10.1063/1.4950785.
+
+[AF16] Gorjan Alagic and Bill Fefferman. On quantum obfuscation. 2016. arXiv:1602.01771.
+
+[AJ06] José A. Adell and Pedro Jodrá. Exact Kolmogorov and total variation distances between some familiar discrete distributions. Journal of Inequalities and Applications, 2006(1):64307, 2006. doi:10.1155/JIA/2006/64307.
+
+[BBC+95] Adriano Barenco, Charles H. Bennett, Richard Cleve, David P. DiVincenzo, Norman Margolus, Peter Shor, Tycho Sleator, John A. Smolin, and Harald Weinfurter. Elementary gates for quantum computation. Phys. Rev. A, 52(5):3457–3467, Nov 1995. arXiv:quant-ph/9503016, doi:10.1103/PhysRevA.52.3457.
+
+[BBHT98] Michel Boyer, Gilles Brassard, Peter Høyer, and Alain Tapp. Tight bounds on quantum searching. Fortschritte der Physik, 46(4-5):493–505, 1998. arXiv:quant-ph/9605034, doi:10.1002/(SICI)1521-3978(199806)46:4/5<493::AID-PROP493>3.0.CO;2-P.
+
+[BCdWZ99] Harry Buhrman, Richard Cleve, Ronald de Wolf, and Christof Zalka. Bounds for small-error and zero-error quantum algorithms. In Foundations of Computer Science, 1999. 40th Annual Symposium on, pages 358–368. IEEE, 1999. arXiv:cs/9904019, doi:10.1109/SFFCS.1999.814607.
+
+[BCK15] Dominic W. Berry, Andrew M. Childs, and Robin Kothari. Hamiltonian simulation with nearly optimal dependence on all parameters. In Foundations of Computer Science (FOCS), 2015 IEEE 56th Annual Symposium on, pages 792–809. IEEE, Oct 2015. arXiv:1501.01715, doi:10.1109/FOCS.2015.54.
+
+[BCWdW01] Harry Buhrman, Richard Cleve, John Watrous, and Ronald de Wolf. Quantum fingerprinting. Phys. Rev. Lett., 87(16):167902, Sep 2001. arXiv:quant-ph/0102001, doi:10.1103/PhysRevLett.87.167902.
+
+[BDD+02] Michael J. Bremner, Christopher M. Dawson, Jennifer L. Dodd, Alexei Gilchrist, Aram W. Harrow, Duncan Mortimer, Michael A. Nielsen, and Tobias J. Osborne. Practical scheme for quantum computation with any two-qubit entangling gate. Phys. Rev. Lett., 89(24):247902, Nov 2002. arXiv:quant-ph/0207072, doi:10.1103/PhysRevLett.89.247902.
+
+[BHMT02] Gilles Brassard, Peter Høyer, Michele Mosca, and Alain Tapp. Quantum amplitude amplification and estimation. Contemporary Mathematics, 305:53–74, 2002. arXiv:quant-ph/0005055, doi:10.1090/conm/305.
+
+[CCD+03] Andrew M. Childs, Richard Cleve, Enrico Deotto, Edward Farhi, Sam Gutmann, and Daniel A. Spielman. Exponential algorithmic speedup by a quantum walk. In Proceedings of the thirty-fifth annual ACM symposium on Theory of computing, pages 59–68. ACM, 2003. arXiv:quant-ph/0209131, doi:10.1145/780542.780552.
+
+[CD15] Iris Cong and Luming Duan. Quantum discriminant analysis for dimensionality reduction and classification. 2015. arXiv:1510.00113.
+
+[CV10] Marius V. Costache and Sergio O. Valenzuela. Experimental spin ratchet. Science, 330(6011):1645–1648, 2010. arXiv:1103.0105, doi:10.1126/science.1196228.
+
+[DBK+00] David P. DiVincenzo, Dave Bacon, Julia Kempe, Guido Burkard, and K. Birgitta Whaley. Universal quantum computation with the exchange interaction. Nature, 408(6810):339–342, 2000. arXiv:quant-ph/0005116, doi:10.1038/35042541.
+
+[DDM15] Rafał Demkowicz-Dobrzański and Marcin Markiewicz. Quantum computation speedup limits from quantum metrological precision bounds. Phys. Rev. A, 91(6):062322, Jun 2015. arXiv:1412.6111, doi:10.1103/PhysRevA.91.062322.
+
+[EAO+02] Artur K Ekert, Carolina Moura Alves, Daniel KL Oi, Michał Horodecki, Paweł Horodecki, and Leong Chuan Kwek. Direct estimations of linear and nonlinear functionals of a quantum state. Physical review letters, 88(21):217901, 2002.
+
+[Emc84] Gérard G. Emch. Mathematical and Conceptual Foundations of 20th-Century Physics. North-Holland Mathematics Studies. Elsevier Science, 1984. Available from: https://books.google.com/books?id=eYQHIjkaEroC&pg=PA306.
+
+[Fey82] Richard P. Feynman. Simulating physics with computers. International Journal of Theoretical Physics, 21(6):467–488, 1982. doi:10.1007/BF02650179.
+
+[FGGS00] Edward Farhi, Jeffrey Goldstone, Sam Gutmann, and Michael Sipser. Quantum computation by adiabatic evolution. 2000. arXiv:quant-ph/0001106.
+
+[FPMU03] Joshua A. Folk, Ronald M. Potok, Charles M. Marcus, and Vladimir Umansky. A gate-controlled bidirectional spin filter using quantum coherence. Science, 299(5607):679–682, 2003. doi:10.1126/science.1078419.
+
+[GC99] Daniel Gottesman and Isaac L. Chuang. Demonstrating the viability of universal quantum computation using teleportation and single-qubit operations. Nature, 402(6760):390–393, Nov 1999. arXiv:quant-ph/9908010, doi:10.1038/46503.
+
+[Gro96] Lov K. Grover. A fast quantum mechanical algorithm for database search. In Proceedings of the twenty-eighth annual ACM symposium on Theory of computing, pages 212–219. ACM, 1996. arXiv:quant-ph/9605043, doi:10.1145/237814.237866.
+
+[Hel76] Carl W. Helstrom. Quantum detection and estimation theory. Mathematics in science and engineering. Academic Press, 1976. Available from: https://books.google.com/books?id=Ne3iT_QLcsMC&pg=PA113.
+
+[HHJ+15] Jeongwan Haah, Aram W. Harrow, Zhengfeng Ji, Xiaodi Wu, and Nengkun Yu. Sample-optimal tomography of quantum states. 2015. arXiv:1508.01797.
+
+[HHL09] Aram W. Harrow, Avinatan Hassidim, and Seth Lloyd. Quantum algorithm for linear systems of equations. Phys. Rev. Lett., 103(15):150502, Oct 2009. arXiv:0811.3171, doi:10.1103/PhysRevLett.103.150502.
+
+[HL11] Aram W. Harrow and Debbie W. Leung. A communication-efficient nonlocal measurement with application to communication complexity and bipartite gate capacities. IEEE Trans. Inf. Theory, 57(8):5504–5508, Aug 2011. arXiv:0803.3066, doi:10.1109/TIT.2011.2158468.
+
+[Hol73] Alexander S. Holevo. Statistical decision theory for quantum systems. Journal of Multivariate Analysis, 3(4):337–394, 1973. doi:10.1016/0047-259X(73)90028-6.
+
+[HVvB+04] R. Hanson, L. M. K. Vandersypen, L. H. Willems van Beveren, J. M. Elzerman, I. T. Vink, and L. P. Kouwenhoven. Semiconductor few-electron quantum dot operated as a bipolar spin filter. Phys. Rev. B, 70(24):241304, Dec 2004. arXiv:cond-mat/0311414, doi:10.1103/PhysRevB.70.241304.
+
+[HWBT15] Matthew B. Hastings, Dave Wecker, Bela Bauer, and Matthias Troyer. Improving quantum algorithms for quantum chemistry. Quantum Information & Computation, 15(1-2):1–21, Jan 2015. Available from: http://www.rintonpress.com/xxqic15/qic-15-12/0001-0021.pdf, arXiv:1403.1539.
+
+[Kan98] Bruce E. Kane. A silicon-based nuclear spin quantum computer. Nature, 393(6681):133–137, 1998. doi:10.1038/30156.
+
+[Kot14] Robin Kothari. Efficient algorithms in quantum query complexity. PhD thesis, University of Waterloo, 2014. Available from: http://hdl.handle.net/10012/8625.
+
+[LC16] Guang Hao Low and Isaac L. Chuang. Optimal Hamiltonian simulation by quantum signal processing. 2016. arXiv:1606.02685.
+
+[LD98] Daniel Loss and David P. DiVincenzo. Quantum computation with quantum dots. Phys. Rev. A, 57(1):120–126, Jan 1998. arXiv:cond-mat/9701055, doi:10.1103/PhysRevA.57.120.
+
+[Lev02] Jeremy Levy. Universal quantum computation with spin-$1/2$ pairs and Heisenberg exchange. Phys. Rev. Lett., 89(14):147902, Sep 2002. arXiv:quant-ph/0101057, doi:10.1103/PhysRevLett.89.147902.
+
+[Llo96] Seth Lloyd. Universal quantum simulators. Science, 273(5278):1073–1078, 1996. doi:10.1126/science.273.5278.1073.
+
+[LMR14] Seth Lloyd, Masoud Mohseni, and Patrick Rebentrost. Quantum principal component analysis. Nature Physics, 10(9):631–633, 2014. arXiv:1307.0401, doi:10.1038/nphys3029.
+
+[ML16] Iman Marvian and Seth Lloyd. Universal quantum emulator. 2016. arXiv:1606.02734.
+
+[MM08] Iman Marvian and Robert B. Mann. Building all time evolutions with rotationally invariant Hamiltonians. Phys. Rev. A, 78(2):022304, Aug 2008. arXiv:0802.0870, doi:10.1103/PhysRevA.78.022304.
+
+[NC10] Michael A. Nielsen and Isaac L. Chuang. Quantum computation and quantum information. Cambridge University Press, 2010. Available from: https://books.google.com/books?id=-s4DEy7o-a0C.
+
+[OW15] Ryan O’Donnell and John Wright. Efficient quantum tomography. 2015. arXiv:1508.01907.
+
+[Ozo15] Maris Ozols. How to combine three quantum states. 2015. arXiv:1508.00860.
+
+[Pre99] John Preskill. Plug-in quantum software. Nature, 402(6760):357–358, Nov 1999. doi:10.1038/46434.
+
+[PZS+16] Hannes Pichler, Guanyu Zhu, Alireza Seif, Peter Zoller, and Mohammad Hafezi. A measurement protocol for the entanglement spectrum of cold atoms. arXiv preprint arXiv:1605.08624, 2016.
+
+[RML14] Patrick Rebentrost, Masoud Mohseni, and Seth Lloyd. Quantum support vector machine for big data classification. Phys. Rev. Lett., 113(13):130503, Sep 2014. arXiv:1307.0471, doi:10.1103/PhysRevLett.113.130503.
+
+[RSL00] Patrik Recher, Eugene V. Sukhorukov, and Daniel Loss. Quantum dot as spin filter and spin memory. Phys. Rev. Lett., 85(9):1962–1965, Aug 2000. arXiv:cond-mat/0003089, doi:10.1103/PhysRevLett.85.1962.
+
+[Var84] Veeravalli S. Varadarajan. Lie Groups, Lie Algebras, and Their Representations. Graduate Texts in Mathematics. Springer, 1984. Available from: https://books.google.com/books?id=uwfpBwAAQBAJ&pg=PA99.
+
+[VYW+00] Rutger Vrijen, Eli Yablonovitch, Kang Wang, Hong Wen Jiang, Alex Balandin, Vwani Roychowdhury, Tal Mor, and David DiVincenzo. Electron-spin-resonance transistors for quantum computing in silicon-germanium heterostructures. Phys. Rev. A, 62(1):012306, Jun 2000. arXiv:quant-ph/9905096, doi:10.1103/PhysRevA.62.012306.
+
+[Wan14] Guoming Wang. Quantum algorithms for curve fitting. 2014. arXiv:1402.0660.
+
+[WBC+14] Dave Wecker, Bela Bauer, Bryan K. Clark, Matthew B. Hastings, and Matthias Troyer. Gate-count estimates for performing quantum chemistry on small quantum computers. Phys. Rev. A, 90(2):022305, Aug 2014. arXiv:1312.1695, doi:10.1103/PhysRevA.90.022305.
+
+[WBC15] Christopher J. Wood, Jacob D. Biamonte, and David G. Cory. Tensor networks and graphical calculus for open quantum systems. Quantum Information & Computation, 15(9&10):759–811, 2015. Available from: http://www.rintonpress.com/xxqic15/qic-15-910/0759-0811.pdf, arXiv:1111.6950.
+
+[YLC14] Theodore J. Yoder, Guang Hao Low, and Isaac L. Chuang. Fixed-point quantum search with an optimal number of queries. Phys. Rev. Lett., 113(21):210501, Nov 2014. arXiv:1409.3305, doi:10.1103/PhysRevLett.113.210501.
+
+## Appendix A Proof of Hadamard Lemma
+
+**Lemma 19 (Hadamard Lemma).**
+
+Let $\ad_{A}(B):=[A,B]$ (also known as the adjoint representation of a Lie algebra). Then
+
+$$
+e^{A}Be^{-A}=e^{\ad_{A}}(B)=B+[A,B]+\frac{1}{2!}[A,[A,B]]+\dotsb. \tag{89}
+$$
+
+**Proof.**
+
+Let $f(t):=e^{tA}Be^{-tA}$. Since $\frac{d}{dt}e^{tA}=Ae^{tA}=e^{tA}A$,
+
+$$
+\frac{d}{dt}f(t)=e^{tA}ABe^{-tA}-e^{tA}BAe^{-tA}=e^{tA}[A,B]e^{-tA}. \tag{90}
+$$
+
+Repeating the same argument inductively, the $n$-th derivative of $f(t)$, for any $n\geq 0$, is
+
+$$
+f^{(n)}(t):=\frac{d^{n}}{dt^{n}}f(t)=e^{tA}[A,B]_{n}e^{-tA} \tag{91}
+$$
+
+where $[A,B]_{n}:=[A,[A,B]_{n-1}]$ and $[A,B]_{0}:=B$. In particular, note that
+
+$$
+f^{(n)}(0)=[A,B]_{n}=\ad_{A}^{n}(B). \tag{92}
+$$
+
+The Taylor expansion of $f(t)$ at $t=0$ then is
+
+$$
+f(t)=\sum_{n\geq 0}\frac{f^{(n)}(0)}{n!}t^{n}=\sum_{n\geq 0}\frac{[A,B]_{n}}{n!}t^{n}=\sum_{n\geq 0}\frac{[tA,B]_{n}}{n!}=\sum_{n\geq 0}\frac{\ad_{tA}^{n}(B)}{n!}=e^{\ad_{tA}}(B). \tag{93}
+$$
+
+Recall that $f(t)=e^{tA}Be^{-tA}$, so the result follows by equating the two expression for $f(1)$. ∎
+
+## Appendix B Proof of the LMR Upper Bound
+
+In this section we give a complete proof of Theorem 1: there is a protocol that uses $O(t^{2}/\delta)$ copies of an unknown state $\rho$ to implement the unitary $e^{-i\rho t}$, up to error $\delta$ in diamond norm.
+
+**Proof.**
+
+Note that $e^{-i\rho_{\mathsf{A}}\epsilon}\otimes\mathbb{1}_{\mathsf{B}}=e^{-i\lparen\rho_{\mathsf{A}}\otimes\mathbb{1}_{\mathsf{B}}\rparen\epsilon}$, so we apply the Hadamard Lemma (see Appendix A) with $A=-i\lparen\rho_{\mathsf{A}}\otimes\mathbb{1}_{\mathsf{B}}\rparen\epsilon$ and $B=\sigma_{\mathsf{A}\mathsf{B}}$. This yields
+
+$$
+\big\lparen e^{-i\rho_{\mathsf{A}}\epsilon}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen\sigma_{\mathsf{A}\mathsf{B}}\big\lparen e^{i\rho_{\mathsf{A}}\epsilon}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen=\sigma_{\mathsf{A}\mathsf{B}}-i[\rho_{\mathsf{A}}\otimes\mathbb{1}_{\mathsf{B}},\sigma_{\mathsf{A}\mathsf{B}}]\epsilon-\frac{1}{2!}[\rho_{\mathsf{A}}\otimes\mathbb{1}_{\mathsf{B}},[\rho_{\mathsf{A}}\otimes\mathbb{1}_{\mathsf{B}},\sigma_{\mathsf{A}\mathsf{B}}]]\epsilon^{2}+\dotsb. \tag{94}
+$$
+
+We let $\mathrm{U}(\mathcal{H})$ be the set of unitary operators in the Hilbert space $\mathcal{H}$. Let $S\in\mathrm{U}(\mathcal{H}_{\mathsf{A}}\otimes\mathcal{H}_{\mathsf{A}_{k}})$ be the unitary operator that swaps systems $\mathsf{A}$ and $\mathsf{A}_{k}$, i.e. $S|i\rangle_{\mathsf{A}}|j\rangle_{\mathsf{A}_{k}}=|j\rangle_{\mathsf{A}}|i\rangle_{\mathsf{A}_{k}}$ for all $i,j\in\{1,\dotsc,\dim(\mathcal{H}_{\mathsf{A}})\}$. Note that $S^{2}=\mathbb{1}$ implies $S^{\dagger}=S$ so $S\in\mathrm{Herm}(\mathcal{H}_{\mathsf{A}}\otimes\mathcal{H}_{\mathsf{A}_{k}})$. Applying Hamiltonian $S$ for time $\mp\epsilon$ implements the partial swap unitary
+
+$$
+e^{\pm iS\epsilon}=\mathbb{1}\cos\epsilon\pm iS\sin\epsilon. \tag{95}
+$$
+
+The LMR algorithm simply applies the swap Hamiltonian $S$ between systems $\mathsf{A}$ and $\mathsf{A}_{k}$ for some small amount of time $\epsilon$, and then discards $\mathsf{A}_{k}$ (this is done consecutively for each copy $\rho_{\mathsf{A}_{k}}$ as $k$ ranges from $1$ to $n$).
+
+The state after the first iteration of the above procedure can be explicitly written as
+
+$$
+\Tr_{\mathsf{A}_{1}}\big[(e^{-iS_{\mathsf{A}\mathsf{A}_{1}}\epsilon}\otimes\mathbb{1}_{\mathsf{B}})(\sigma_{\mathsf{A}\mathsf{B}}\otimes\rho_{\mathsf{A}_{1}})(e^{iS_{\mathsf{A}\mathsf{A}_{1}}\epsilon}\otimes\mathbb{1}_{\mathsf{B}})\big]
+$$
+$$
+=\sigma_{\mathsf{A}\mathsf{B}}\cos^{2}\epsilon-i[\rho_{\mathsf{A}}\otimes\mathbb{1}_{\mathsf{B}},\sigma_{\mathsf{A}\mathsf{B}}]\sin\epsilon\cos\epsilon+\rho_{\mathsf{A}}\otimes\Tr_{\mathsf{A}}(\sigma_{\mathsf{A}\mathsf{B}})\sin^{2}\epsilon \tag{96}
+$$
+$$
+=\sigma_{\mathsf{A}\mathsf{B}}-i[\rho_{\mathsf{A}}\otimes\mathbb{1}_{\mathsf{B}},\sigma_{\mathsf{A}\mathsf{B}}]\epsilon-\big\lparen\sigma_{\mathsf{A}\mathsf{B}}-\rho_{\mathsf{A}}\otimes\Tr_{\mathsf{A}}(\sigma_{\mathsf{A}\mathsf{B}})\big\rparen\epsilon^{2}+\dotsb, \tag{97}
+$$
+
+where the partial trace can be computed using graphical notation [WBC15], and the last line was obtained using the Taylor expansion at $\epsilon=0$. Note that the difference in trace distance between the ideal state Eq. 94 and our first approximation Eq. 97 is
+
+$$
+\frac{1}{2}\left\lVert\big\lparen e^{-i\rho_{\mathsf{A}}\epsilon}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen\sigma_{\mathsf{A}\mathsf{B}}\big\lparen e^{i\rho_{\mathsf{A}}\epsilon}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen-\Tr_{\mathsf{A}_{1}}\big[(e^{-iS_{\mathsf{A}\mathsf{A}_{1}}\epsilon}\otimes\mathbb{1}_{\mathsf{B}})(\sigma_{\mathsf{A}\mathsf{B}}\otimes\rho_{\mathsf{A}_{1}})(e^{iS_{\mathsf{A}\mathsf{A}_{1}}\epsilon}\otimes\mathbb{1}_{\mathsf{B}})\big]\right\rVert_{1}\leq O(\epsilon^{2}). \tag{98}
+$$
+
+If we write $\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[k]}$ to denote the state after $k$ iterations of this procedure (so $\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[0]}=\sigma_{\mathsf{A}\mathsf{B}}$ denotes the original state and $\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[1]}$ denotes the state in Eq. 97), we get the following recursion from Eq. 97:
+
+$$
+\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[k]}=\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[k-1]}-i[\rho_{\mathsf{A}}\otimes\mathbb{1}_{\mathsf{B}},\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[k-1]}]\epsilon-\big\lparen\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[k-1]}-\rho_{\mathsf{A}}\otimes\Tr_{\mathsf{A}}(\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[k-1]})\big\rparen\epsilon^{2}+O(\epsilon^{3}). \tag{99}
+$$
+
+By evaluating this recursively, the final state can be expressed as
+
+$$
+\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[n]} =\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[n-m]}-i[\rho_{\mathsf{A}}\otimes\mathbb{1}_{\mathsf{B}},\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[n-m]}]m\epsilon-\big\lparen\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[n-m]}-\rho_{\mathsf{A}}\otimes\Tr_{\mathsf{A}}(\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[n-m]})\big\rparen m\epsilon^{2} \tag{100}
+$$
+$$
++i\big[\rho_{\mathsf{A}}\otimes\mathbb{1}_{\mathsf{B}},i[\rho_{\mathsf{A}}\otimes\mathbb{1}_{\mathsf{B}},\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[n-m]}]\big]\lparen 1+2+\dotsb+m\rparen\epsilon^{2}+O(\epsilon^{3}). \tag{101}
+$$
+
+for any $m\in\{0,\dotsc,n\}$. In particular, for $m=n$ we get
+
+$$
+\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[n]} =\sigma_{\mathsf{A}\mathsf{B}}-i[\rho_{\mathsf{A}}\otimes\mathbb{1}_{\mathsf{B}},\sigma_{\mathsf{A}\mathsf{B}}]n\epsilon-\big\lparen\sigma_{\mathsf{A}\mathsf{B}}-\rho_{\mathsf{A}}\otimes\Tr_{\mathsf{A}}(\sigma_{\mathsf{A}\mathsf{B}})\big\rparen n\epsilon^{2} \tag{102}
+$$
+$$
++i\big[\rho_{\mathsf{A}}\otimes\mathbb{1}_{\mathsf{B}},i[\rho_{\mathsf{A}}\otimes\mathbb{1}_{\mathsf{B}},\sigma_{\mathsf{A}\mathsf{B}}]\big]\frac{n(n-1)}{2}\epsilon^{2}+O(\epsilon^{3}). \tag{103}
+$$
+
+Choosing $\epsilon=t/n$ in Eq. 103 and comparing this with the desired final state at time $t$ (given by Eq. 94, with $t$ instead of $\epsilon$), we see that
+
+$$
+\frac{1}{2}\big\lVert\big\lparen e^{-i\rho_{\mathsf{A}}t}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen\sigma_{\mathsf{A}\mathsf{B}}\big\lparen e^{i\rho_{\mathsf{A}}t}\otimes\mathbb{1}_{\mathsf{B}}\big\rparen-\tilde{\sigma}_{\mathsf{A}\mathsf{B}}^{[n]}\big\rVert_{1}\leq O(n\epsilon^{2})=O(t^{2}/n). \tag{104}
+$$
+
+Thus, if we desire a final trace distance accuracy of $\delta$ and want to implement the Hamiltonian $\rho$ for a time $t$, the LMR protocol uses $n=O(t^{2}/\delta)$ copies of $\rho.$ ∎
+
+## Appendix C Controlled Density Matrix Exponentiation
+
+As we have seen in Theorem 1, given an input state $\sigma$ and $O(t^{2}/\delta)$ copies of another state $\rho$, the LMR protocol allows us to obtain the output state $e^{-i\rho t}\sigma e^{i\rho t}$. In many applications (see e.g. [LMR14, Wan14]) we would like to perform phase estimation on the operator $e^{-i\rho t}$, which requires the ability to apply the controlled-$e^{-i\rho t}$ operation. However it is not immediately obvious to see that the controlled-$e^{-i\rho t}$ operation can be performed with the LMR protocol: since the LMR protocol involves the discarding (tracing out) of quantum registers, it could very well lose any coherence between the $|0\rangle$ and $|1\rangle$ components of the control qubit. Nevertheless, we show this is not the case:
+
+**Theorem 20.**
+
+Given $O(t^{2}/\delta)$ copies of an unknown quantum state $\rho\in\mathrm{D}(\mathcal{H}_{\mathsf{A}})$, the controlled-$e^{-i\rho t}$ operation, $|0\rangle\!\langle 0|~\otimes~\mathbb{1}_{\mathsf{A}}~+~|1\rangle\!\langle 1|~\otimes e^{-i\rho t}$, can be performed up to error $\delta$ in diamond norm.
+
+**Proof.**
+
+We will give two ways of deriving this result. The first simplest method is to realize that
+
+$$
+\exp\big\lparen-i(|1\rangle\!\langle 1|\otimes\rho)t\big\rparen=|0\rangle\!\langle 0|\otimes\mathbb{1}_{\mathsf{A}}+|1\rangle\!\langle 1|\otimes e^{-i\rho t} \tag{105}
+$$
+
+and so to simulate the controlled-$e^{-i\rho t}$ operator, we can simply use the $|1\rangle\!\langle 1|\otimes\rho$ as the input states to the LMR protocol instead.
+
+Alternatively, the naive method of replacing the partial swaps in the LMR protocol by controlled versions also works. To see this, let us consider starting from the initial state $\Sigma=(a|0\rangle+b|1\rangle)(a^{*}\langle 0|+b^{*}|1\rangle)\otimes\sigma\otimes\rho$, applying the controlled-partial swap $|0\rangle\langle 0|\otimes\mathbb{1}+|1\rangle\langle 1|\otimes e^{-iS\Delta}$. The result is
+
+$$
+aa^{*}|0\rangle\!\langle 0|\otimes\sigma\otimes\rho+ba^{*}|1\rangle\!\langle 0|\otimes(c\mathbb{1}-isS)(\sigma\otimes\rho)
+$$
+$$
++ab^{*}|0\rangle\!\langle 1|\otimes(\sigma\otimes\rho)(c\mathbb{1}+isS)+bb^{*}|1\rangle\!\langle 1|\otimes(c\mathbb{1}-isS)(\sigma\otimes\rho)(c\mathbb{1}+isS) \tag{106}
+$$
+
+where we’ve used the shorthand $s\equiv\sin\Delta$ and $c\equiv\cos\Delta$. By using the identities $\Tr_{2}[S(\sigma\otimes\rho)]=\rho\sigma$ and $\Tr_{2}[(\sigma\otimes\rho)S]=\sigma\rho$, we can calculate the resulting state if we trace out the last register:
+
+$$
+aa^{*}|0\rangle\!\langle 0|\otimes\sigma+ba^{*}|1\rangle\!\langle 0|\otimes(c\sigma-is\rho\sigma)+ab^{*}|0\rangle\!\langle 1|\otimes(c\sigma+is\sigma\rho)
+$$
+$$
++bb^{*}|1\rangle\!\langle 1|\otimes(c^{2}\sigma-is\rho\sigma+is\sigma\rho+s^{2}\rho) \tag{107}
+$$
+$$
+={} (|0\rangle\!\langle 0|\otimes\mathbb{1}+|1\rangle\!\langle 1|\otimes(\mathbb{1}-i\rho\Delta))\>\>\Tr_{3}\Sigma\>\>(|0\rangle\!\langle 0|\otimes\mathbb{1}+|1\rangle\!\langle 1|\otimes(\mathbb{1}+i\rho\Delta))+O(\Delta^{2}) \tag{108}
+$$
+$$
+={} (|0\rangle\!\langle 0|\otimes\mathbb{1}+|1\rangle\!\langle 1|\otimes e^{-i\rho\Delta})\>\>\Tr_{3}\Sigma\>\>(|0\rangle\!\langle 0|\otimes\mathbb{1}+|1\rangle\!\langle 1|\otimes e^{-i\rho\Delta})+O(\Delta^{2}) \tag{109}
+$$
+
+where $\Tr_{3}\Sigma$ refers to the initial state with the third register ($\rho$) traced out. This shows that we can use one copy of $\rho$ to implement the controlled-$e^{-i\rho\Delta}$ operation up to error $O(\Delta^{2})$. Therefore similar to the discussion in the proof of Theorem 1, by choosing $\Delta=\delta/t$ and repeating this procedure $O(t^{2}/\delta)$ times, we implement the controlled-$e^{-i\rho t}$ operator up to error $O(\delta)$. ∎
+
+**Remark 21.**
+
+It is easy to see that the simple trick of appending a qubit in the $|1\rangle$ state, as described in the first paragraph of the proof of Theorem 20, also works for all results in Section 5. For instance, let $f(\rho_{1},\rho_{2},\dotsc,\rho_{K})$ be an arbitrary Hermitian polynomial in $\rho_{1},\dotsc,\rho_{K})$. Then $f(|1\rangle\!\langle 1|\otimes\rho_{1},\dotsc,|1\rangle\!\langle 1|\otimes\rho_{K})=|1\rangle\!\langle 1|\otimes f(\rho_{1},\dotsc,\rho_{K})$, and hence if we wish to simulate the controlled-$e^{-if(\rho_{1},\dotsc,\rho_{K})t}$ operator, we have
+
+$$
+|0\rangle\!\langle 0|\otimes\mathbb{1}_{\mathsf{A}}+|1\rangle\!\langle 1|\otimes e^{-if(\rho_{1},\dotsc,\rho_{K})t} =\exp\big\lparen-i(|1\rangle\!\langle 1|\otimes f(\rho_{1},\dotsc,\rho_{K}))t\big\rparen \tag{110}
+$$
+$$
+=\exp\big\lparen-if(|1\rangle\!\langle 1|\otimes\rho_{1},\dotsc,|1\rangle\!\langle 1|\otimes\rho_{K})t\big\rparen \tag{111}
+$$
+
+and we can equivalently simulate $f(\rho_{1}^{\prime},\dotsc,\rho_{K}^{\prime})$ with $\rho_{j}^{\prime}=|1\rangle\!\langle 1|\otimes\rho_{j}$ instead.
+
+## Appendix D Better Phase Estimation
+
+We note that principal component analysis can be performed using fewer samples than what is claimed in [LMR14].
+
+**Corollary 22.**
+
+Kitaev’s phase estimation on the unitary $U=e^{-i\rho}$ can be performed to precision $\epsilon$ and constant failure probability, using $O(1/\epsilon^{2})$ samples.
+
+In [LMR14], they state that this phase estimation requires $O(1/\epsilon^{3})$ samples, so this is a polynomial improvement.
+
+**Proof.**
+
+Notice that to estimate an eigenvalue of $U$ to precision $\epsilon$ using standard Kitaev’s phase estimation requires $O(1/\epsilon)$ uses of controlled-$U.$ Then as long as the simulation of controlled-$U$ does not change the resulting state by trace distance more than $O(\epsilon)$, the total error in trace distance of the final state will be $O(1).$ Using the LMR protocol, we can simulate $e^{-i\rho}$ to precision $O(\epsilon)$ a total of $O(1/\epsilon)$ times, giving a sample complexity of $O(1/\epsilon^{2})$. ∎
+
+## Appendix E Equivalence of Hermitian polynomials and the Jordan-Lie algebra
+
+In this appendix we sketch that any Hamiltonian that is a Hermitian multinomial in $\rho_{1},\rho_{2},\dots,\rho_{k}$ can be created from sums of nested commutators (multiplied by $i$) and anticommutators of density matrices (i.e. is in the Jordan-Lie algebra [Emc84] generated by the states), and vice versa.
+
+First, we begin by noticing that for $z\in\mathbb{C}$,
+
+$$
+z\rho_{1}\rho_{2} =\frac{z}{2}\left(\{\rho_{1},\rho_{2}\}+[\rho_{1},\rho_{2}]\right) \tag{112}
+$$
+$$
+z\rho_{1}\rho_{2}\rho_{3} =\frac{z}{4}\left(\{\{\rho_{1},\rho_{2}\}+[\rho_{1},\rho_{2}],\rho_{3}\}+[\{\rho_{1},\rho_{2}\}+[\rho_{1},\rho_{2}],\rho_{3}]\right) \tag{113}
+$$
+$$
+\dots \tag{114}
+$$
+
+So we can write all monomials as sums of nested commutators (but no $i$) and anticommutators.
+
+Now we just want to show that a monomial plus its Hermitian conjugate can be written as a sum of nested commutators (with $i$) and anticommutators. This is possible by noticing that the Hermitian conjugate of an expression of nested commutators and anticommutators (e.g. $[[\{[A,B],C\},D],E]$) of Hermitian matrices (e.g. $A,B,C,D,E$) is equal to that same expression with a $(-1)^{c}$ sign, where $c$ is the number of commutators (alternatively, the number of “$[$” symbols) in the expression (e.g. $[[\{[A,B],C\},D],E]^{\dagger}=(-1)^{3}[[\{[A,B],C\},D],E]$).
+
+With this fact we can treat all Hermitian polynomials. We replace each monomial by a nested expression of commutators and anticommuatators, and then group together terms with the same parity $c$ of commutators. The terms with even $c$ will contribute to the real part of $z$ while the terms with odd $c$ will contribute to the imaginary part of $z$ (we also need to introduce extra minus signs in front of nested commutators when $c$ is equal to $2$ or $3$ modulo $4$). For instance, we can rewrite the degree-3 monomial plus its Hermitian conjugate as follows:
+
+$$
+z\rho_{1}\rho_{2}\rho_{3}+(z\rho_{1}\rho_{2}\rho_{3})^{\dagger} =\frac{1}{2}\operatorname{Re}(z)\left(\{\{\rho_{1},\rho_{2}\},\rho_{3}\}-i[i[\rho_{1},\rho_{2}],\rho_{3}]\right) \tag{115}
+$$
+$$
++\frac{1}{2}\operatorname{Im}(z)\left(\{i[\rho_{1},\rho_{2}],\rho_{3}\}+i[\{\rho_{1},\rho_{2}\},\rho_{3}]\right). \tag{116}
+$$

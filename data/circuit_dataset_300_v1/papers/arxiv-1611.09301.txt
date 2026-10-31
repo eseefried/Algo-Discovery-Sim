@@ -1,0 +1,552 @@
+## I Introduction
+
+Many quantum algorithms have been developed under the presumption that the hardware upon which they will run is effectively error-free: the error rate is so low that the entire algorithm can be executed successfully without a single error. It is now known that such hardware can, in principle, be created using components that have far higher error rates. Fault-tolerant quantum computing can be achieved by encoding qubits in non-Abelian anyons in topological materials [1] or using the quantum error correction codes [2]. While the former is still in the early stages of its development, for the latter approach sub-threshold quantum operations have been demonstrated in ion-trap and superconducting systems [3, 4, 5, 6]. However, quantum error correction involves a substantial multiplication of resources; the number of physical qubits required may be orders of magnitude greater than the number of error-free logical qubits seen by the algorithm. A recent study audited the cost of implementing Shor’s algorithm to solve a classically-infeasible task, and found that even with state-of-the-art techniques for magic state distillation the machine would need over six million of today’s highest quality qubits [7].
+
+The need for millions of qubits contrasts starkly with the fact that only fifty qubits are needed to achieve so-called ‘quantum supremacy’, i.e. to create a quantum processor that is so complex that conventional supercomputers [8] cannot predict its behaviour. Machines involving this many qubits, under good but imperfect control, are expected to emerge in the next few years. The challenge for researchers is to identify useful functions for such devices, in order to motivate further investment and continue the evolution toward the longer-term goal of fully fault tolerant systems.
+
+Recently some hybrid quantum/classical algorithms have been developed which are promising for near future quantum applications [9, 10, 11, 12, 13, 14, 15, 16, 17]. A common feature of these algorithms is that the quantum computer is only in charge of carrying out a subroutine, acting as a ‘coprocessor’ while the larger scale algorithm is governed by a classical computer. The task of the quantum computer is thus simplified and may be accomplished with relatively few quantum operations. A higher error rate per operation is therefore tolerable; in a fault-tolerant machine this would imply a more modest resource overhead for the code, but it may even be possible to implement such quantum algorithms without quantum error correction.
+
+Hybrid approaches are very relevant to quantum simulation, i.e. Feynman’s vision [18, 19] of using a controlled quantum processor to model another quantum system. Such a technology would be highly advantageous for the investigation of various large quantum systems, e.g. simulating quantum chemistry systems [23, 20, 21, 22], or novel materials and other condensed-matter systems [24, 25, 26]. A powerful tool that has been exploited in several hybrid protocols is the variational method [9, 10, 11, 12]. Typically the state of the target system can be found by writing a trial quantum state with a large but tractable number of parameters, and then discovering the optimal value of these parameters. Implicitly this requires the scientists to use their understanding of the target system (the novel molecule, or material) to select a set of parameters that, while large, is far smaller than the total number of parameters needed to specify an arbitrary quantum state. The latter is of course exponential in the number of particles composing the target system.
+
+Our focus here is on finding the dynamics of interesting quantum systems, and we briefly remark on the considerable significance of such a capability. Dynamics must be studied when properties cannot be determined from static features. This has motivated dynamical versions of many well-known techniques, e.g. nonequilibrium dynamical mean-field theory [27], the time-dependent variational quantum Monte Carlo method [28], time-dependent tensor network methods [29, 30], and of course time-dependent density functional theory [31]. However, there are still many problems that cannot be solved using these powerful classical methods, so it is hoped that quantum computers can extend their reach [18, 19, 32].
+
+We therefore propose a hybrid quantum algorithm for simulating the dynamics of a quantum system. The conventional approach for simulating quantum dynamics employs Trotterisation [19, 33, 34, 35, 36], which usually requires many quantum operations; therefore it seems likely to necessitate the full machinery of fault-tolerant quantum computing [20, 21, 22]. Our approach is based on the variational method and our hope is that it could be implemented using small-size quantum circuits, i.e. quantum circuits with a small number of quantum operations that suffer significant noise compared with fault-tolerant quantum computers. A novel feature of our algorithm is that it compensates for errors through classical inference without encoding: If the noise in the quantum computer mainly results in stochastic errors and the rate of errors can be amplified in a controllable way, then we find that errors can be approximately corrected. The condition that noise is stochastic can be met by engineering for many systems: if, for example, single qubit gates have relatively high fidelity [3, 4, 5, 6, 37] and their noise is stochastic, then arbitrary two-qubit gate errors can be made stochastic through a twirling-like technique [38, 39, 40] which we presently discuss. Moreover, the severity of such errors can be deliberately increased artificially, allowing one to create curves that the classical algorithm can extrapolate to estimate the zero-error limit. We performed numerical emulations of the process on small systems, finding that this technique does indeed lead to robustness: The impact of physical errors on the simulator’s performance is far lower than in an (optimised) Trotterisation protocol, and moreover this impact does not worsen with the duration of the simulation.
+
+The remainder of this paper is organised as follows. In Sec. II, we review the Trotterisation algorithm and variational methods. In Sec. III, our hybrid algorithm is introduced. In Sec. IV, the variational theory is discussed. In Sec. V, the task for the quantum computer and the overall program are described in detail. Errors in our algorithm are analysed in Sec. VI. The method for reducing errors is given in Sec. VII, in which we also discuss how to convert non-stochastic errors into stochastic errors and how to tune the rate of errors. Numerical results are presented in Sec. VIII. A summary is given in Sec. IX.
+
+## II Trotterisation and variational method
+
+The Trotterisation approach to simulation, which we use as a basis for comparison with our protocol, exploits the fact that time evolution under a general Hamiltonian $H=\sum_{j}H_{j}$ can be approximated according to the Trotter-Suzuki decomposition [33]
+
+$$
+e^{-iHT}\simeq R=\prod_{n=1}^{N_{\rm t}}\left(\prod_{j}e^{-iH_{j}\tau_{n,j}}\right). \tag{1}
+$$
+
+Here, each term $e^{-iH_{j}\tau_{n,j}}$ corresponds to the evolution driven by the term $H_{j}$ for a short time $\tau_{n,j}$, which can be realised by a quantum gate or a combination of quantum gates. Usually, the short time is taken uniformly as $\tau_{n,j}=T/N_{\rm t}$, where $T$ is the time of the simulated evolution. When $N_{\rm t}$ is larger, the approximation is better, and errors in the approximation scale with the simulated time and the number of quantum gates as $T^{2}/N_{\rm t}$ [35].
+
+Our approach is based on a variational technique. Variational methods have numerous applications in the numerical study of many-body quantum systems, for examples, density functional theory [41], the matrix product state method [42], and simulating molecular dynamics using the variational principle [43]. In these methods, typically a trial state is used to approximate the true state of the system. The trial state must of course be specified by some tractable number of parameters. But since existing realisations are entirely classical, there is a stronger condition on the trial function: it must be possible to efficiently evaluate its fit to the true quantum state using only a classical algorithm. This requirement limits the application of variational methods. Sometimes it may be impossible to evaluate a trial state that provides a good approximation to the true state in a classical computer. In such a case, a quantum computer could be helpful, because we may be able to complete tasks that are difficult for a classical computer using a quantum computer. An example is the unitary coupled cluster method [10, 44], in which the energy of the trial state can be evaluated using a quantum computer when it is hard for a classical computer to do so. The protocol we describe here is another example.
+
+## III Hybrid quantum simulation of dynamics
+
+The purpose of our hybrid algorithm is to solve the Schrödinger equation $i\frac{\partial}{\partial t}|{\Phi(t)}\rangle=H|{\Phi(t)}\rangle$ ($\hbar=1$), assuming that the state $|{\Phi(t)}\rangle$ can be approximated by a trial state $|{\Psi(t)}\rangle\equiv|{\Psi(\lambda_{1},\lambda_{2},\ldots)}\rangle$, where $\{\lambda_{k}(t)\}$ are variational parameters. As shown in Fig. 1(a), the hybrid algorithm is implemented on both a quantum computer and a classical computer. The task of the classical computer is to determine variational parameters according to the Schrödinger equation, and this procedure requires certain derivatives associated with the state $|{\Psi(t)}\rangle$ which the quantum computer provides.
+
+The hybrid algorithm works out variational parameters iteratively as shown in Fig. 1(b). Parameters at the time $t$ ($\{\lambda_{k}(t)\}$) are sent to the quantum computer, with which the quantum computer finds the values required by the classical computer. Based on results from the quantum computer, the classical computer can determine parameters at the time $t+\delta t$ ($\{\lambda_{k}(t+\delta t)\}$), where $\delta t$ is a short time. Then, these new parameters are sent back to the quantum computer. In this way, given parameters of the initial state ($\{\lambda_{k}(0)\}$), parameters at the time $T$ ($\{\lambda_{k}(T)\}$) are systematically inferred by iterating the process carried out by two computers. The simulation is successful if the state $|{\Psi(T)}\rangle$ is a good approximation of the state $|{\Phi(T)}\rangle$.
+
+Using the variational method, the degrees of freedom provided by variational parameters allow us to use quantum circuits with a size much smaller than the circuit of the Trotterisation algorithm to simulate the time evolution of a quantum system. Note that this is an ‘apples to oranges’ comparison because our algorithm only simulates the time evolution of a given initial state while the Trotterisation algorithm simulates the time evolution of arbitrary initial states, i.e. the time evolution operator. Thus our algorithm aims at an easier problem than the Trotterisation algorithm.
+
+Tracking the evolution from a specific initial state is the main goal in many simulations, and other more general tasks can also be reexpressed this way. The approach we describe can be relevant to the specific problem of designing and calibrating quantum gates, thus allowing early quantum computers to aid in the design of their successors. Moreover there are also interesting connections between dynamical simulation and the determination of static properties: one could find a ground state by simulating an adiabatic time evolution [45], thus our algorithm is relevant to that task. In other hybrid algorithms for determining the ground state of a quantum system [9, 10, 11, 12], one may need to find the global minimum of the energy in the parameter space to maximise the fidelity. However, finding the global minimum in a high-dimensional parameter space is usually a non-trivial computing task. In our algorithm, parameters are worked out iteratively, therefore the global minimisation is not required. We remark that Trotterisation is used in some hybrid algorithms [10, 12, 13, 14, 15]. In principle our algorithm can be used to replace the Trotterisation method in these instances, to further simplify the task of the quantum computer.
+
+## IV Variational theory of quantum time evolution
+
+The time-dependent variational principle corresponding to the Schrödinger equation reads $\delta\int_{t_{i}}^{t_{f}}dtL=0$, where the Lagrangian is [46, 47]
+
+$$
+L=\langle{\Psi(t)}|(i\frac{\partial}{\partial t}-H)|{\Psi(t)}\rangle. \tag{2}
+$$
+
+Assuming that the state $|{\Psi(t)}\rangle$ is determined by a set of real parameters $\{\lambda_{k}(t)\}$, i.e. $|{\Psi(t)}\rangle\equiv|{\Psi(\lambda_{1},\lambda_{2},\ldots)}\rangle$, the Lagrangian can be rewritten as
+
+$$
+L=i\sum_{k}\langle{\Psi}|\frac{\partial|{\Psi}\rangle}{\partial\lambda_{k}}\dot{\lambda}_{k}-\langle{\Psi}|H|{\Psi}\rangle, \tag{3}
+$$
+
+which is a function of parameters $\{\lambda_{k}\}$ and their time derivatives $\{\dot{\lambda}_{k}=\frac{d\lambda_{k}}{dt}\}$. According to $L$, the Euler-Lagrange equation describing the evolution of parameters (hence the state $|{\Psi}\rangle$) is
+
+$$
+\sum_{q}M_{k,q}\dot{\lambda}_{q}=V_{k}, \tag{4}
+$$
+
+where
+
+$$
+M_{k,q} = i\eta\frac{\partial\langle{\Psi}|}{\partial\lambda_{k}}\frac{\partial|{\Psi}\rangle}{\partial\lambda_{q}}+{\rm h.c.}, \tag{5}
+$$
+$$
+V_{k} = \eta\frac{\partial\langle{\Psi}|}{\partial\lambda_{k}}H|{\Psi}\rangle+{\rm h.c.}. \tag{6}
+$$
+
+Here, $\eta=1$, both $M$ and $V$ are real, and $M$ is antisymmetric. There are other variational principles for the quantum time evolution [48]. For example, McLachlan’s variational principle reads $\delta\|(i\frac{\partial}{\partial t}-H)|{\Psi(t)}\rangle\|=0$ [49], which leads to the same equation as Eq. (4) but $\eta=-i$. Here, the norm is $\|\psi\|=\sqrt{\langle\psi|\psi\rangle}$. In the following, we focus on the time-dependent variational principle, but the hybrid algorithm can be adapted to McLachlan’s variational principle.
+
+Recall that we can always express a state as $|{\Psi}\rangle=\sum_{n}(\alpha_{n}+i\beta_{n})|{n}\rangle$, where $\alpha_{n}$ and $\beta{{}_{n}}$ are real, and $|{n}\rangle$ are orthonormal basis states. Taking parameters $\{\lambda_{k}\}=\{\alpha_{n},\beta_{n}\}$, Eq. (4) leads to the Schrödinger equation; but of course we require a parameterisation such that the number of parameters remains tractable for the sizes of target systems that we are interested in. Thus our variational approach, like others, is relevant when the scientist can make an educated guess as to the general form of the quantum state – there can be a large number of free parameters $\{\lambda_{k}\}$, but typically far fewer than would be needed to specify an arbitrary state.
+
+## V Variational algorithm on a hybrid computer
+
+We consider trial states that can be directly prepared in the quantum computer, i.e. states can be expressed as $|{\Psi}\rangle=R|{\bar{0}}\rangle$, where $|{\bar{0}}\rangle$ is an initial state of the quantum computer, and $R$ is a sequence of quantum gates determined by parameters $\{\lambda_{k}\}$, i.e.
+
+$$
+R=R_{N_{\rm v}}(\lambda_{N_{\rm v}})R_{N_{\rm v}-1}(\lambda_{N_{\rm v}-1})\cdots R_{2}(\lambda_{2})R_{1}(\lambda_{1}). \tag{7}
+$$
+
+Here, $R_{k}$ is a unitary operator describing a quantum gate, and the total number of gates (i.e. parameters) is $N_{\rm v}$. If $N_{\rm v}$ is smaller than the dimension of the Hilbert space ($2\times{\rm dim}-2$ to be exact), trial states $|{\Psi}\rangle$ only span a sub-manifold of the Hilbert space. In this restricted trial-state space, Eq. (4) approximates the exact evolution if the exact state is close to the trial-state space.
+
+In the following analysis, we describe each $R_{k}$ gate as dependent on only one parameter $\lambda_{k}$. However it is worth noting that the trial state can be generalised to the case where each gate $R_{k}$ depends on multiple parameters, including parameters that vary in a pre-defined way with time, and that both the Trotter-Suzuki decomposition [33] and the unitary coupled cluster ansatz [44] can be expressed in this form. As a generalisation to the case in which the number of gates $N_{\rm v}$ is fixed, one can even vary $N_{\rm v}$ depending on the simulated time, providing that we understand how to re-express the trial state using the new gates (adding gates to the set is of course trivially possible). Our point is that the set of gates with which we create our trial state, can itself evolve over the simulated time.
+
+We are interested in the case where evaluating coefficients $M$ and $V$ in Eq. (4) is intractable in a classical computer, therefore these coefficients are obtained using the quantum computer. Each parameter is determined in turn, by appropriately configuring a quantum circuit involving $\sim N_{\rm v}$ gates and a single measurement outcome; this fixed circuit is run repeatedly until the expected measurement outcome is known to a given precision. Note that this implies the overall protocol is trivially parallelisable over a large number of quantum processors with no quantum link between them.
+
+We express the Hamiltonian in the form
+
+$$
+H=\sum_{i}h_{i}\sigma_{i}, \tag{8}
+$$
+
+where $\sigma_{i}$ are unitary operators. In many quantum systems, the number of terms in this expression scales with the size of the system polynomially. Similarly, we write
+
+$$
+\frac{dR_{k}}{d\lambda_{k}}=\sum_{i}f_{k,i}R_{k}\sigma_{k,i}, \tag{9}
+$$
+
+where $\sigma_{k,i}$ are also unitary operators. For many frequently used single-qubit gates and two-qubit gates ($R_{k}$), there is only one term in this expression, and $\sigma_{k,i}$ is also a one-qubit or two-qubit gate. Because any operator can be expressed using Pauli operators, we can choose unitary operators $\sigma_{i}$ and $\sigma_{k,i}$ as (single-qubit and multi-qubit) Pauli operators.
+
+Using the expression (9), we rewrite the derivative of the state as
+
+$$
+\frac{\partial|{\Psi}\rangle}{\partial\lambda_{k}}=\sum_{i}f_{k,i}R_{k,i}|{\bar{0}}\rangle, \tag{10}
+$$
+
+where
+
+$$
+R_{k,i}=R_{N_{\rm v}}R_{N_{\rm v}-1}\cdots R_{k+1}R_{k}\sigma_{k,i}\cdots R_{2}R_{1}. \tag{11}
+$$
+
+Then, differential equation coefficients can be expressed as
+
+$$
+M_{k,q}=\sum_{i,j}\left(if^{*}_{k,i}f_{q,j}\langle{\bar{0}}|R^{\dagger}_{k,i}R_{q,j}|{\bar{0}}\rangle+{\rm h.c.}\right), \tag{12}
+$$
+
+and
+
+$$
+V_{k}=\sum_{i,j}\left(f^{*}_{k,i}h_{j}\langle{\bar{0}}|R^{\dagger}_{k,i}\sigma_{j}R|{\bar{0}}\rangle+{\rm h.c.}\right), \tag{13}
+$$
+
+where we have used the expression (8).
+
+In Eqs. (12) and (13), each term is in the form
+
+$$
+a\mathrm{Re}\left(e^{i\theta}\langle{\bar{0}}|U|{\bar{0}}\rangle\right),
+$$
+
+where the amplitude $a$ and phase $\theta$ are determined by either $if^{*}_{k,i}f_{q,j}$ or $f^{*}_{k,i}h_{j}$ [50], and $U$ is a unitary operator equal to either $R^{\dagger}_{k,i}R_{q,j}$ or $R^{\dagger}_{k,i}\sigma_{j}R$. Such a term can be evaluated using the quantum circuit shown in Fig. 2. This circuit needs an ancillary qubit initialised in the state $(|{0}\rangle+e^{i\theta}|{1}\rangle)/\sqrt{2}$ and a register initialised in the state $|{\bar{0}}\rangle$. The ancillary qubit is measured in the $\{|{+}\rangle,|{-}\rangle\}$ basis after a sequence of quantum gates on the register and two controlled gates, in which the ancillary qubit is the control qubit. The value of each term is given by $\mathrm{Re}\left(e^{i\theta}\langle{\bar{0}}|U|{\bar{0}}\rangle\right)=\langle X\rangle=\mathrm{Tr}(X\rho)$, where $\rho$ is the final state of the quantum computer, and $X$ is the x-direction Pauli operator of the ancillary qubit. In the following, we consider the case in which the value of $\langle X\rangle$ is estimated by repeating this relatively shallow circuit and calculating the mean value of measurement outcomes. Note that the value of $\langle X\rangle$ could be estimated more efficiently using quantum amplitude estimation [51] if error rates could be made low enough to allow a circuit of sufficient depth to function.
+
+### Main program
+
+The overall flow of the algorithm is as follows: Firstly, we select initial parameters $\{\lambda_{k}(0)\}$. Secondly, we solve the differential equation (4) numerically using the classical computer, in which the matrix $M$ and the vector $V$ in the equation are evaluated using the quantum coprocessor. The solution permits us to project our parameters forward by a small time increment, and repeat the second step. Eventually we reach the parameters $\{\lambda_{k}(T)\}$ which allow us to prepare the final state in the quantum computer.
+
+There are many different numerical methods for solving a differential equation, and the choice of specific numerical method determines the details of the information exchange loop between quantum and classical processors. In the following, we take the Euler method as an example, but the algorithm can be adapted to other numerical methods, e.g. Runge-Kutta methods [54].
+
+Time is discretised as $t_{n}=n\delta t$, where $t_{0}=0$ is the initial time, and $t_{N}=N\delta t=T$ is the simulated evolution time. Firstly, $M$ and $V$ corresponding to parameters $\{\lambda_{k}(t_{0})\}$ are evaluated using the quantum computer. Then, the following process is repeated. Given $M$ and $V$ corresponding to the time $t_{n}$, Eq. (4) is solved numerically on the classical computer to obtain values of $\{\dot{\lambda}_{k}(t_{n})\}$. As parameters $\{\lambda_{k}(t_{n})\}$ have been obtained from previous calculations, one can approximately calculate parameters of the time $t_{n+1}$ using $\lambda_{k}(t_{n+1})=\lambda_{k}(t_{n})+\dot{\lambda}_{k}\delta t$. Repeating the process until $t_{n+1}=T$, we can work out the parameters $\{\lambda_{k}(T)\}$ of the final state.
+
+## VI Error analysis
+
+There are four types of errors that can result in infidelity in the variational quantum simulation: i) errors due to limited generality of the trial wavefunction, which may only be able to describe the simulated system approximately; ii) errors in the numerical integration obtained by solving Eq. (4), which is always approximate because of the finite discretisation of time; iii) shot noise in measuring equation coefficients $M$ and $V$; and iv) errors due to noise in the quantum machine, e.g. decoherence and quantum gate infidelity.
+
+A good trial wavefunction allows us to not only reduce trial-wavefunction errors but also minimise the difficulty of implementing the algorithm, e.g. only use small-size quantum circuits. Whether a good trial wavefunction can be found depends on the simulated system and our understanding of the physics in that system. However, a trial wavefunction that contains a polynomial number of parameters and is a high-fidelity approximation to the true wavefunction always exists. For example, one can set the trial wavefunction in the Trotter-Suzuki form, i.e. take the sequence of gate operations $R$ in the form of Eq. (1), and then take the evolution time of each term as a variational parameter ($\{\lambda_{k}\}=\{\tau_{n,j}\}$) rather than a fixed value as in the Trotterisation algorithm [11]. Using the Trotter-Suzuki-form trial wavefunction, we know that the probability of trial-wavefunction errors decreases with the number of Trotterisation slices $N_{\rm t}$ as ‘${\rm Error}\propto 1/N_{\rm t}$’ [35] in the worst case.
+
+Integration errors depend on the numerical method for solving the differential equation (4). We take the Euler method as an example. In the Euler method, the probability of error is proportional to the size of each step $\delta t$ [54]. Therefore, by choosing a small step size, integration errors can be suppressed.
+
+Shot noise and machine noise occur in the implementation of the algorithm while trial-wavefunction errors and integration errors are due to the imperfection of the algorithm itself. The effect of implementation errors in the integration process is that coefficients $M$ and $V$ evaluated using the quantum computer are inaccurate, i.e. their values are different from their true values $M^{(0)}$ and $V^{(0)}$ given by Eqs. (12) and (13) (that is, the values given by a quantum computer without shot noise and machine noise). If coefficients $M$ and $V$ are inaccurate, time derivatives $\{\dot{\lambda}_{k}\}$ obtained from $M$ and $V$ [see Eq. (4)] are different from their true values $\{\dot{\lambda}_{k}^{(0)}\}$ obtained from $M^{(0)}$ and $V^{(0)}$. Using $\delta M=M-M^{(0)}$, $\delta V=V-V^{(0)}$ and $\delta\dot{\lambda}=\dot{\lambda}-\dot{\lambda}^{(0)}$ to denote deviations from true values and using $\dot{\lambda}=g(M,V)$ to denote the solution of Eq. (4), we have $\delta\dot{\lambda}_{k}\simeq\sum_{p,q}\frac{\partial g_{k}}{\partial M_{p,q}}\delta M_{p,q}+\sum_{q}\frac{\partial g_{k}}{\partial V_{q}}\delta V_{q}$. When the matrix is invertible in the vicinity of $M^{(0)}$, $\delta\dot{\lambda}\simeq-\frac{1}{M^{(0)}}\delta M\dot{\lambda}^{(0)}+\frac{1}{M^{(0)}}\delta V$.
+
+### VI.1 Trace distance
+
+To analyse errors in the hybrid algorithm, we use the trace distance $D(\rho,\rho^{\prime})=\frac{1}{2}\mathrm{Tr}|\rho-\rho^{\prime}|$ [55] as the measure of error severity. The degree of error in the overall process is given by $D(|{\Phi(t_{N})}\rangle,\rho_{N})$. Here, $|{\Phi_{n}}\rangle\equiv|{\Phi(t_{n})}\rangle$ denotes the true wavefunction, $|{\Psi_{n}}\rangle\equiv|{\Psi(t_{n})}\rangle$ denotes the trial wavefunction, and $\rho_{N}$ is the state prepared in the quantum computer according to the state $|{\Psi_{N}}\rangle$. The two states $\rho_{N}$ and $|{\Psi_{N}}\rangle$ are different because of the machine noise. The triangle inequality holds for the trace distance, i.e. $D(\rho,\rho^{\prime})\leq D(\rho,\rho^{\prime\prime})+D(\rho^{\prime\prime},\rho^{\prime})$. Therefore, an upper bound of $D(|{\Phi_{N}}\rangle,\rho_{N})$ is given by (see Fig. 3)
+
+$$
+D(|{\Phi_{N}}\rangle,\rho_{N}) \leq D(|{\Phi_{0}}\rangle,|{\Psi_{0}}\rangle)+D(|{\Psi_{N}}\rangle,\rho_{N}) \tag{14}
+$$
+$$
++\sum_{n=1}^{N}D(U_{n}|{\Psi_{n-1}}\rangle,|{\Psi_{n}}\rangle).
+$$
+
+Here, $U_{n}$ is the exact evolution during the time from $t_{n-1}$ to $t_{n}$ ($U_{n}=e^{-iH\delta t}$ if the Hamiltonian is time-independent), therefore $|{\Phi_{n}}\rangle=U_{n}|{\Phi_{n-1}}\rangle$. To obtain the upper bound, we have used $D(|{\Phi_{n-1}}\rangle,|{\Psi_{n-1}}\rangle)=D(U_{n}|{\Phi_{n-1}}\rangle,U_{n}|{\Psi_{n-1}}\rangle)=D(|{\Phi_{n}}\rangle,U_{n}|{\Psi_{n-1}}\rangle)$.
+
+To distinguish algorithm errors and implementation errors, we use the inequality $D(U_{n}|{\Psi_{n-1}}\rangle,|{\Psi_{n}}\rangle)\leq D(U_{n}|{\Psi_{n-1}}\rangle,|{\Psi^{(0)}_{n}}\rangle)+D(|{\Psi^{(0)}_{n}}\rangle,|{\Psi_{n}}\rangle)$. Here, the state $|{\Psi^{(0)}_{n}}\rangle$ is a trial state corresponding to parameters $\{\lambda_{k}^{(0)}=\lambda_{k}(t_{n-1})+\dot{\lambda}_{k}^{(0)}\delta t\}$, i.e. assuming that the quantum computer reports accurate values of $M$ and $V$ at the time $t_{n-1}$. Then, the upper bound can be rewritten as
+
+$$
+D(|{\Phi_{N}}\rangle,\rho_{N})\leq D_{\rm A}+D_{\rm I}, \tag{15}
+$$
+
+where
+
+$$
+D_{\rm A} = D(|{\Phi_{0}}\rangle,|{\Psi_{0}}\rangle)+\sum_{n=1}^{N}D(U_{n}|{\Psi_{n-1}}\rangle,|{\Psi^{(0)}_{n}}\rangle), \tag{16}
+$$
+$$
+D_{\rm I} = \sum_{n=1}^{N}D(|{\Psi^{(0)}_{n}}\rangle,|{\Psi_{n}}\rangle)+D(|{\Psi_{N}}\rangle,\rho_{N}). \tag{17}
+$$
+
+Here, $D_{\rm A}$ corresponds to algorithm errors, and $D_{\rm I}$ corresponds to implementation errors.
+
+Algorithm errors in each time step can be expressed as
+
+$$
+D(U_{n}|{\Psi_{n-1}}\rangle,|{\Psi^{(0)}_{n}}\rangle)=\sqrt{\Delta^{(2)}\delta t^{2}+E}, \tag{18}
+$$
+
+where
+
+$$
+\Delta^{(2)} = \langle\delta\Psi_{n}|\delta\Psi_{n}\rangle-|\langle\delta\Psi_{n}|\Psi_{n-1}\rangle|^{2}, \tag{19}
+$$
+
+$$
+|{\delta\Psi_{n}}\rangle = -iH|{\Psi_{n-1}}\rangle-\sum_{k}\dot{\lambda}_{k}^{(0)}\frac{\partial|{\Psi_{n-1}}\rangle}{\partial\lambda_{k}}, \tag{20}
+$$
+
+and
+
+$$
+|E| \leq \left(\sum_{m=0}^{\infty}\frac{\|H^{m}\|\delta t^{m}}{m!}\right)^{2}\left(\sum_{m=0}^{\infty}\frac{\|\frac{d^{m}R}{dt^{m}}\|\delta t^{m}}{m!}\right)^{2} \tag{21}
+$$
+$$
+-\left(1+\|H\|\delta t+\|\frac{dR}{dt}\|\delta t\right)^{2}
+$$
+$$
+-\left(\|H^{2}\|+2\|H\|\|\frac{dR}{dt}\|+\|\frac{d^{2}R}{dt^{2}}\|\right)\delta t^{2}
+$$
+$$
+= \Delta^{(3)}\delta t^{3}+\mathcal{O}(\delta t^{4}).
+$$
+
+Here, we have used Taylor expansions of $U_{n}|{\Psi_{n-1}}\rangle$ and $|{\Psi^{(0)}_{n}}\rangle$, i.e. $U_{n}|{\Psi_{n-1}}\rangle=\sum_{m=0}^{\infty}(\delta t^{m}/m!)(-iH)^{m}|{\Psi_{n-1}}\rangle$ and $|{\Psi^{(0)}_{n}}\rangle=\sum_{m=0}^{\infty}(\delta t^{m}/m!)(d^{m}R/dt^{m})|{\bar{0}}\rangle$, where $\frac{d}{dt}=\sum_{k}\dot{\lambda}_{k}^{(0)}\frac{\partial}{\partial\lambda_{k}}$. See Appendix B for details. The matrix norm is induced by the vector norm, therefore $|\langle{\Psi_{n-1}}|H^{m^{\prime}}\frac{d^{m}R}{dt^{m}}|{\bar{0}}\rangle|\leq\|H^{m^{\prime}}\|\|\frac{d^{m}R}{dt^{m}}\|$.
+
+Implementation errors in each time step are due to the difference between time derivatives obtained from the real quantum computer and their true values, i.e. $\delta\dot{\lambda}_{k}=\dot{\lambda}_{k}-\dot{\lambda}^{(0)}_{k}$, which can be expressed as
+
+$$
+D(|{\Psi^{(0)}_{n}}\rangle,|{\Psi_{n}}\rangle)=\sqrt{\delta\dot{\lambda}^{\rm T}A\delta\dot{\lambda}\delta t^{2}+\mathcal{O}(\delta t^{3})}, \tag{22}
+$$
+
+where $A$ is a positive semi-definite matrix and
+
+$$
+A_{k,q} = \frac{\partial\langle{\Psi_{n-1}}|}{\partial\lambda_{q}}\frac{\partial|{\Psi_{n-1}}\rangle}{\partial\lambda_{k}} \tag{23}
+$$
+$$
+-\frac{\partial\langle{\Psi_{n-1}}|}{\partial\lambda_{q}}|\Psi_{n-1}\rangle\langle\Psi_{n-1}|\frac{\partial|{\Psi_{n-1}}\rangle}{\partial\lambda_{k}}
+$$
+
+Here, we have used the Taylor expansion of $|{\Psi_{n}}\rangle$, which is the same as $|{\Psi^{(0)}_{n}}\rangle$ but with $\{\dot{\lambda}_{k}^{(0)}\}$ replaced by $\{\dot{\lambda}_{k}\}$.
+
+### VI.2 Cost of the hybrid algorithm
+
+Using $Q_{\rm max}$ to denote the maximum value of the quantity $Q$ for all $t_{n}$, we have
+
+$$
+D_{\rm A} \lesssim D(|{\Phi_{0}}\rangle,|{\Psi_{0}}\rangle)+\sqrt{\Delta^{(2)}_{\rm max}}T+\sqrt{\Delta^{(3)}_{\rm max}\delta t}T \tag{24}
+$$
+$$
+D_{\rm I} \lesssim \sqrt{\|A\|_{\rm max}}\|\delta\dot{\lambda}\|_{\rm max}T+D(|{\Psi_{N}}\rangle,\rho_{N}). \tag{25}
+$$
+
+The first term of $D_{\rm A}$ and the second term of $D_{\rm I}$ are due to imperfections in approximating the initial state using the trial wavefunction and preparing the final state in the quantum computer with machine noise, respectively. Note that these two terms are not $T$ dependent; for simulations over a substantial time $T$ we may expect them to make relatively small contributions. In the following, we analyse the other three terms one by one.
+
+The second term of $D_{\rm A}$ is the accumulation of trial-wavefunction imperfections in each time step. Using the circuit in Fig. 2, every term in $\Delta^{(2)}$ can be measured by a method analogous to that used for obtaining $M$ and $V$. The accuracy is again limited by the shot noise and machine noise. Therefore, algorithm errors due to the trial wavefunction can be continually estimated during the execution of the hybrid quantum computation.
+
+The third term of $D_{\rm A}$ is caused by the finite integration step size, which can be reduced by decreasing $\delta t$. In order to limit this term to $\varepsilon$, we need to choose a step size $\delta t\sim\varepsilon^{2}/(\Delta^{(3)}T^{2})$, i.e. the number of time steps $N\sim\Delta^{(3)}T^{3}/\varepsilon^{2}$. When the trial wavefunction is a good approximation to the exact state, we can expect that $\frac{d^{m}R}{dt^{m}}|{\Psi}\rangle\simeq H^{m}|{\Psi}\rangle$, which implies $\|\frac{d^{m}R}{dt^{m}}\|\sim\|H^{m}\|$ in the subspace of the problem, and in this case $\Delta^{(3)}\sim\|H\|^{3}$.
+
+The first term of $D_{\rm I}$ is due to the difference between $\{\dot{\lambda}_{k}\}$ and their true values $\{\dot{\lambda}_{k}^{(0)}\}$. The difference is $\|\delta\dot{\lambda}\|\leq\|\frac{1}{M^{(0)}}\|^{2}\|V^{(0)}\|\|\delta M\|+\|\frac{1}{M^{(0)}}\|\|\delta V\|$. Here, $M$ and $V$ are evaluated as required by the algorithm. Similar to $\Delta^{(2)}$, each element of $A$ can also be measured using the circuit in Fig. 2. Therefore, the susceptibility to shot noise and machine noise in the integration process can be estimated during the execution of the hybrid quantum computation. The algorithm is susceptible to implementation errors when $M^{(0)}$ is singular, which should be avoided when choosing the trial wavefunction. As a worst-case scenario, implementation errors accumulate linearly with the simulated time. However, it can be far less severe: In Sec. VIII, we will explore an example in which the accumulation of errors due to the machine noise is almost negligible compared with errors in a quantum simulation based on the conventional Trotter-Suzuki decomposition.
+
+Shot noise can be suppressed by repeating quantum circuits for measuring $M$ and $V$ many times. To measure the quantity $\langle X\rangle$, the deviation due to the shot noise decreases with the number of repetitions $N_{\rm r}$ as $\delta\langle X\rangle\propto 1/\sqrt{N_{\rm r}}$. Therefore, if there is only shot noise, we have $\|\delta\dot{\lambda}\|\sim\Delta/\sqrt{N_{\rm r}}$, where $\Delta=\|\frac{1}{M^{(0)}}\|^{2}\|V^{(0)}\|\Theta_{M}+\|\frac{1}{M^{(0)}}\|\Theta_{V}$, $\Theta_{M}=2[\sum_{k,q}(\sum_{i,j}|if^{*}_{k,i}f_{q,j}|)^{2}]^{1/2}$ and $\Theta_{V}=2[\sum_{k}(\sum_{i,j}|f^{*}_{k,i}h_{j}|)^{2}]^{1/2}$. In order to limit the overall effect of shot noise to $\varepsilon^{\prime}$, we need to choose $N_{\rm r}\sim\|A\|\Delta^{2}T^{2}/\varepsilon^{\prime 2}$.
+
+The number of distinct circuits $N_{\rm c}$ required for finding the $M$ and $V$ parameters depends on $N_{\rm H}$ the number of terms in the Hamiltonian $H$ [see Eq. (8)], $N_{\rm d}$ the number of terms in each time derivative of $R_{k}$ [see Eq. (9)], and $N_{\rm v}$ the number of parameters in the trial wavefunction. Note that $N_{\rm c}=N_{\rm v}^{2}N_{\rm d}^{2}+N_{\rm v}N_{\rm d}N_{\rm H}$, where the first term corresponds to $M$, and the second term corresponds to $V$. If each $R_{k}$ is realised by $N_{R}$ gates, and each term $\sigma_{i}$ or $\sigma_{k,i}$ in the Hamiltonian or the time derivative of $R_{k}$ is a Pauli operator of less than $K$ qubits, each circuit includes at most $N_{\rm g}=N_{\rm v}N_{R}+2(K+1)$ gates. Here, we have assumed that each controlled-$U$ gate in the circuit (Fig. 2) is realised by $K$ two-qubit controlled-$\sigma$ gates, where $\sigma$ is a single-qubit Pauli operator. To complete the circuit, other operations include preparing initial states of the ancillary qubit and the register and measuring the ancillary qubit.
+
+The overall computation includes $N$ times steps, in each time step, $N_{\rm c}$ circuits are implemented, each circuit contains $N_{\rm g}$ gates and is repeated $N_{\rm r}$ times. Therefore, the overall number of gates is
+
+$$
+NN_{\rm c}N_{\rm g}N_{\rm r} \sim \frac{\|A\|\Delta^{2}\Delta^{(3)}T^{5}}{\varepsilon^{2}\varepsilon^{\prime 2}} \tag{26}
+$$
+$$
+\times N_{\rm v}N_{\rm d}(N_{\rm v}N_{\rm d}+N_{\rm H})
+$$
+$$
+\times[N_{\rm v}N_{R}+2(K+1)].
+$$
+
+From this expression, we see that the cost is a polynomial function with respect to the integration error $\varepsilon$, the shot-noise error $\varepsilon^{\prime}$ and the simulated time $T$. Factors $\|A\|$, $\Delta$ and $\Delta^{(3)}$ depend on the form of the trial wavefunction. However, during the actual execution of the hybrid computation, it will be possible to estimate $\|A\|$ and $\Delta$. Moreover $\Delta^{(3)}\sim\|H\|^{3}$ when the trial wavefunction is a good approximation to the true state.
+
+It is important to remember that while the overall gate count will be a large (albeit polynomially-scaling) total, the complete calculation is formed of many small quantum calculations of depth $N_{\rm g}$. Each small computation is isolated from the others, i.e. there is no shared or persistent quantum resource, and indeed $\sim N_{\rm c}N_{\rm r}$ such circuits could be performed in parallel using that many separate small quantum computers.
+
+## VII Effect of machine noise and error reduction
+
+Of the implementation errors, machine noise is the more problematic. Shot noise can be suppressed merely by repeating each quantum circuit many times, and the number of repetitions is a polynomial function with respect to the accuracy. Machine noise is less easily dismissed, and it is the focus of this section.
+
+Machine noise need not necessarily result in computing errors. The task of the quantum computer is to evaluate coefficients $M$ and $V$, so that the classical computer can solve time derivatives $\{\dot{\lambda}_{k}\}$ according to Eq. (4). Machine noise (as well as shot noise) can potentially cause computing errors by changing these time derivatives from their true values $\{\dot{\lambda}_{k}^{(0)}\}$. However, sometimes machine noise does not change values of $\{\dot{\lambda}_{k}\}$. For example, consider the case in which the effect of machine noise is to depolarise the ancillary qubit at a fixed level, i.e. the output of the quantum computer becomes $\langle X\rangle=\eta\langle X\rangle^{(0)}$, where $\eta$ is a constant independent of the quantum circuit. In this case, all equation coefficients are scaled as $M=\eta M^{(0)}$ and $V=\eta V^{(0)}$. As long as $\eta$ is non-zero, the solution $\{\dot{\lambda}_{k}\}$ of Eq. (4) is the same for any value of $\eta$. Therefore, only an inhomogeneous scaling of quantum outputs $\langle X\rangle$ results in computing errors.
+
+An example of the homogeneous scaling is the case of balanced measurement errors. Errors in the measurement on the ancillary qubit (see Fig. 2) can be modelled as follows: if the state of the qubit is $|{0}\rangle$ ($|{1}\rangle$), the measurement outcome is correct, i.e. $0$ ($1$), with the probability $1-p_{0}$ ($1-p_{1}$), and the outcome is incorrect, i.e. $1$ ($0$), with the probability $p_{0}$ ($p_{1}$). If there are no other implementation errors, quantum outputs are changed from $\langle X\rangle^{(0)}$ to $\langle X\rangle=(p_{1}-p_{0})+(1-p_{0}-p_{1})\langle X\rangle^{(0)}$ (the measurement in the $\{|{+}\rangle,|{-}\rangle\}$ basis is done by performing a Hadamard gate before measuring the qubit in the $\{|{0}\rangle,|{1}\rangle\}$ basis). If measurement errors are balanced, i.e. $p_{0}=p_{1}$, the effect of measurement errors is a fixed scaling factor $\eta=1-p_{0}-p_{1}$, which does not result in computing errors. Therefore, our hybrid algorithm is inherently insensitive to measurement errors on the ancillary qubit if these errors are balanced. We remark that if single-qubit gates are reliable, one can flip the qubit before the measurement, so that measurement errors are effectively balanced.
+
+Measurement errors can be corrected even if they are not balanced. If $p_{0}$ and $p_{1}$ can be evaluated by benchmarking measurement operations, one can easily work out the true value $\langle X\rangle^{(0)}$ using the value obtained from the real machine: $\langle X\rangle^{(0)}=[\langle X\rangle-(p_{1}-p_{0})]/(1-p_{0}-p_{1})$. We remark that when error probabilities are higher, the denominator is smaller, which means that we need to evaluate $\langle X\rangle$ with a higher accuracy in order to achieve the same accuracy of $\langle X\rangle^{(0)}$. Next, we show that a similar procedure can be applied to any machine noise if errors due to the machine noise are stochastic with tunable probabilities. We also show how to convert errors in two-qubit entangling gates, which are expected to be the main sources of errors, into stochastic errors if they are not stochastic, and how to simulate stochastic errors to tune error probabilities.
+
+### VII.1 Error reduction
+
+Errors in an operation are stochastic if the operation is described by a superoperator $\mathcal{N}\mathcal{U}$ and $\mathcal{N}$ has the form $\mathcal{N}=(1-\epsilon)\mathcal{I}+\epsilon\mathcal{E}$. Here, $\mathcal{U}$ is the ideal operation without errors, $\mathcal{N}$ is the superoperator describing the effect of the noise, $\mathcal{I}$ is an identity operation, and errors $\mathcal{E}$ occur with the probability $\epsilon$. Here, $\mathcal{E}$ is a valid quantum operation, i.e. trace-preserving completely positive map.
+
+Given an initial state $|{\bar{0}}\rangle$, after a sequence of operations, the final state of the quantum computer is
+
+$$
+\rho=\mathcal{N}_{L}\mathcal{U}_{L}\cdots\mathcal{N}_{l}\mathcal{U}_{l}\cdots\mathcal{N}_{1}\mathcal{U}_{1}(|\bar{0}\rangle\langle\bar{0}|), \tag{27}
+$$
+
+where $\mathcal{N}_{l}\mathcal{U}_{l}$ denotes the $l$th operation. Taking into account the fact that errors are stochastic, the quantum outcome can be rewritten in the form
+
+$$
+\langle X\rangle=(1-r\sum_{l}\epsilon_{l})\langle X\rangle^{(0)}+r\langle X\rangle^{(1)}+\mathcal{O}(r^{2}). \tag{28}
+$$
+
+Here, $\langle X\rangle=\mathrm{Tr}(X\rho)$, $\langle X\rangle^{(0)}=\mathrm{Tr}(X\rho^{(0)})$ is the value without errors,
+
+$$
+\rho^{(0)}=\mathcal{U}_{L}\cdots\mathcal{U}_{l}\cdots\mathcal{U}_{1}(|\bar{0}\rangle\langle\bar{0}|), \tag{29}
+$$
+
+$\langle X\rangle^{(1)}=\mathrm{Tr}(X\rho^{(1)})$, and
+
+$$
+\rho^{(1)}=\sum_{l}\epsilon_{l}\mathcal{U}_{L}\cdots\mathcal{E}_{l}\mathcal{U}_{l}\cdots\mathcal{U}_{1}(|\bar{0}\rangle\langle\bar{0}|). \tag{30}
+$$
+
+The $l^{\text{th}}$ term of $\rho^{(1)}$ corresponds to the case in which only the $l^{\text{th}}$ operation causes errors and all other operations are ideal. Note that in these equations we have replaced error probabilities $\epsilon_{l}$ with $r\epsilon_{l}$, where $r$ is a convenient scale factor allowing us to write $\langle X\rangle(r)$ as a function of $r$, and $\langle X\rangle(0)=\langle X\rangle^{(0)}$.
+
+If probabilities of errors are tunable, we can infer the value of $\langle X\rangle(0)$ by measuring values of $\langle X\rangle(r)$ of a set of different factors $r$ [see Fig. 4(a)]. Clearly $r$ can never be zero for our machine, as this would imply that we have the ability to fully switch off the machine noise, making it perfect. If $\{\epsilon_{l}\}$ are the minimum error probabilities allowed by the machine, the minimum value of $r$ achievable by the machine is $1$. To infer the value of $\langle X\rangle(0)$, firstly, we take $N_{\rm X}$ values of $r$ as $r_{1},r_{2},\ldots,r_{N_{\rm X}}$ and measure $\langle X\rangle(r_{1}),\langle X\rangle(r_{2}),\ldots,\langle X\rangle(r_{N_{\rm X}})$ using the quantum computer, where we can take $r_{1}=1$. For example, in Fig. 4(a), we have taken $r_{1}=1$, $r_{2}=1.5$ and $r_{3}=2$. Secondly, we fit quantum outputs using the function $\langle X\rangle(r)=\langle X\rangle^{(0)}+\chi r$, where $\chi=-\langle X\rangle^{(0)}\sum_{l}\epsilon_{l}+\langle X\rangle^{(1)}$. As a result of the fitting, we obtain the value of $\langle X\rangle^{(0)}$, represented by the gray circle in Fig. 4(a). In this way, the first-order contribution of machine noise can be corrected. Similarly, by considering second-order terms in the expansion (28), one can fit data using a function with second-order terms (i.e. $r^{2}$ terms) to correct the second-order contribution of machine noise. Using the extrapolation, we can reduce the effect of the machine noise. However, the final estimation of $\langle X\rangle^{(0)}$ may still be different from its actual value, and the error in the extrapolation depends on the shot noise in estimating each $\langle X\rangle(r)$.
+
+The error reduction protocol only works for small-size circuits, which are used in the hybrid algorithm while the Trotterisation algorithm usually needs large-size circuits. The true value $\langle X\rangle^{(0)}$ can be inferred because the contribution of high-order terms is much smaller than the contribution of lower-order terms, i.e. $|\mathcal{O}(r^{2})|\ll|r\langle X\rangle^{(1)}|$. The total rate of errors in the quantum circuit with $N_{\rm g}$ gates is $\sim 1-(1-\epsilon)^{N_{\rm g}}=N_{\rm g}\epsilon+N_{\rm g}^{2}\epsilon^{2}/2+\cdots$. The first term in the expansion corresponds to the first order contribution $|r\langle X\rangle^{(1)}|$, and so on. Therefore, high-order terms cannot be neglected if $N_{\rm g}\epsilon\gtrsim 1$. When there are too many gates in the circuit or the error rate is too high, the quantum state will be populated with errors and one cannot retrieve the true value $\langle X\rangle^{(0)}$ even if we consider high-order terms in the interpolation. The best experiments to date [5, 6] have reduced two-qubit gate infidelity to the range $10^{-3}$ to $10^{-4}$. With hardware of that kind, our protocol could support hundreds of gates. Thus a simulation of a quantum system using a trial wavefunction with hundred(s) of parameters, may be feasible.
+
+Implementing the error reduction protocol requires knowledge of the inherent machine noise. Therefore, quantum operations need to be benchmarked, e.g. using quantum process tomography [55, 56], before the quantum coprocessor is used, and the nature of the machine noise should not vary significantly during the simulation. Alternatively, one can monitor the machine noise in the process by stopping the protocol and benchmarking operations, because in the hybrid algorithm the quantum computer only performs small-size circuits and can be stopped at any stage.
+
+### VII.2 Error twirling and simulation
+
+Non-stochastic errors can be converted into stochastic Pauli errors using some redundant Pauli gates [38, 39, 40]. It is a common feature of quantum computing systems that two-qubit gates are the main source of errors, i.e. probabilities of errors in two-qubit gates are much higher than probabilities of errors in single-qubit gates [3, 4, 5, 6, 37]. In this case, arbitrary errors in two-qubit gates can be converted into stochastic errors through the use of redundant Pauli gates, without introducing significant additional noise. We consider the controlled-phase gate $\Lambda=(\openone+\sigma^{\rm z}_{\rm c})/2+\sigma^{\rm z}_{\rm t}(\openone-\sigma^{\rm z}_{\rm c})/2$ as an example, and it is similar for other two-qubit gates, e.g. the controlled-NOT gate. Here c and t denote the control qubit and the target qubit, respectively.
+
+The controlled-phase gate with noise is $\mathcal{N}_{\Lambda}\mathcal{U}_{\Lambda}$, where $\mathcal{U}_{\Lambda}\rho=\Lambda\rho\Lambda^{\dagger}$. In general the noise may not be in stochastic-error form, but we can always express the noise operation in the Kraus form, i.e. $\mathcal{N}_{\Lambda}\rho=\sum_{h}E_{h}\rho E_{h}^{\dagger}$, where $\sum_{h}E_{h}^{\dagger}E_{h}=\openone$, and each two-qubit matrix can be written as $E_{h}=\sum_{a=0}^{3}\sum_{b=0}^{3}\alpha_{h;a,b}\sigma^{a}_{\rm c}\sigma^{b}_{\rm t}$ [55]. Here $a,b=0,1,2,3$ correspond to Pauli operators $\openone$, $\sigma^{\rm x}$, $\sigma^{\rm y}$ and $\sigma^{\rm z}$, respectively.
+
+In order to convert errors, Pauli gates $\{\openone,\sigma^{\rm x},\sigma^{\rm y},\sigma^{\rm z}\}$ are randomly chosen and applied on each qubit before and after the controlled-phase gate. If the gate before the controlled-phase gate is $U$, the gate after the controlled-phase gate is restricted to be $\Lambda U\Lambda^{\dagger}$ in order to let random Pauli gates cancel each other. Here, $U$ and $\Lambda U\Lambda^{\dagger}$ are both two-qubit Pauli gates. The circuit is shown in Fig. 4(b), in which we take $c=a+b(3-b)(3-2a)/2$ and $d=b+a(3-a)(3-2b)/2$, so that $\sigma^{c}_{\rm c}\sigma^{d}_{\rm t}=\Lambda\sigma^{a}_{\rm c}\sigma^{b}_{\rm t}\Lambda^{\dagger}$ up to a phase factor. As a result, the overall operation is $\bar{\mathcal{N}}_{\Lambda}\mathcal{U}_{\Lambda}$, where $\bar{\mathcal{N}}_{\Lambda}$ is the superoperator describing the effective noise after applying random Pauli gates. The effective noise superoperator is in the stochastic form [57] (see Appendix C), i.e.
+
+$$
+\bar{\mathcal{N}}_{\Lambda} = F_{\Lambda}[\openone]+\sum_{(a,b)\neq(0,0)}\epsilon_{a,b}[\sigma^{a}_{\rm c}\sigma^{b}_{\rm t}], \tag{31}
+$$
+
+where the fidelity is $F_{\Lambda}=\sum_{h}|\alpha_{h;0,0}|^{2}$, and error probabilities are $\epsilon_{a,b}=\sum_{h}|\alpha_{h;a,b}|^{2}$. Here, $[U]$ is a superoperator, and $[U]\rho=U\rho U^{\dagger}$. We have assumed that Pauli gates are ideal. In the case where Pauli gates are not ideal but their error probabilities are much lower than the controlled-phase gate, noise of Pauli gates will be a perturbation to the effective noise of the controlled-phase gate. Error severity in the controlled-phase gate will effectively increase by four units of the single-qubit Pauli gate error rate, and the effective noise of the controlled-phase gate may not be fully stochastic if Pauli-gate errors are non-stochastic.
+
+To tune probabilities of errors, we can randomly perform Pauli gates after the controlled-phase gate according to desired error probabilities [see Fig. 4(b)]. Assuming that we want to tune error probabilities from $\epsilon_{e,f}$ to $r\epsilon_{e,f}$, we can perform the Pauli gate $\sigma^{e}_{\rm c}\sigma^{f}_{\rm t}$ [$(e,f)\neq(0,0)$] with the probability $(r-1)\epsilon_{e,f}$. Because we are only interested in the case where $r\epsilon_{e,f}\ll 1$, overall error probabilities are approximately $\epsilon_{e,f}+(r-1)\epsilon_{e,f}$ where the first term is due to the raw controlled-phase gate (with noise), and the second term is due to simulated errors using single-qubit Pauli gates.
+
+## VIII Numerical results — Quantum Ising model
+
+To demonstrate the hybrid algorithm, we numerically simulate a small quantum computer using classical computers. We take the quantum Ising model [58] as an example. The Hamiltonian of the model reads $H=H_{\rm Z}+H_{\rm X}$, where $H_{\rm Z}=-J\sum_{j=1}^{n_{\rm s}}\sigma^{\rm z}_{j}\sigma^{\rm z}_{j+1}$ and $H_{\rm X}=-B\sum_{j=1}^{n_{\rm s}}\sigma^{\rm x}_{j}$. Here, $n_{\rm s}$ is the number of spins, and $\sigma^{\rm z}_{n_{\rm s}+1}=\sigma^{\rm z}_{1}$. In our numerical simulations, we take $J=B=1/2$ and $n_{\rm s}=3$, therefore we need at least four qubits in the quantum computer to implement the hybrid algorithm. The trial state is chosen to be
+
+$$
+|{\Psi}\rangle=e^{i\lambda_{2}H_{\rm X}}e^{i\lambda_{1}H_{\rm Z}}|{\Phi(0)}\rangle,
+$$
+
+where the initial state $|{\Phi(0)}\rangle$ is a one-dimensional cluster state. In the cluster state, qubits are in the eigenstate of stabilisers $S_{j}=\sigma^{\rm z}_{j-1}\sigma^{\rm x}_{j}\sigma^{\rm z}_{j+1}$ ($j=1,2,\ldots,n_{\rm s}$) with the same eigenvalue $+1$, which is prepared by performing the controlled-phase gate on each pair of nearest neighbouring qubits initialised in the state $|{+}\rangle$ [59]. The evolution of the true state is $|{\Phi(t)}\rangle=e^{-iHt}|{\Phi(0)}\rangle$. In this example, the trial state is capable of exactly matching the true state given the correct values of the parameters.
+
+We consider a quantum computer that can initialise qubits in the state $|{0}\rangle$, measure a qubit in the $\{|{0}\rangle,|{1}\rangle\}$ basis, and perform single-qubit and two-qubit quantum gates. Quantum gates include the Hadamard gate, Pauli gates, phase gates $e^{i\sigma^{\rm z}\theta}$, flip gates $e^{i\sigma^{\rm x}\theta}$, two-qubit gates $e^{i\sigma^{\rm z}_{1}\sigma^{\rm z}_{2}\theta}$, the controlled-phase gate and the controlled-NOT gate. If we have one of the three types of two-qubit gates, the other two can be efficiently realised, e.g. the gate $e^{i\sigma^{\rm z}_{1}\sigma^{\rm z}_{2}\theta}=H_{1}\Lambda e^{i\sigma^{\rm x}_{1}\theta}\Lambda H_{1}$ can be realised using two controlled-phase gates and three single-qubit gates. Here, $H_{1}$ is the Hadamard gate on qubit-1. We assume that all three types of two-qubit gates can be directly implemented for simplification. The state $|{+}\rangle$ is prepared by initialising the qubit in the state $|{0}\rangle$ and performing a Hadamard gate; the measurement in the $\{|{+}\rangle,|{-}\rangle\}$ basis is done by performing a Hadamard gate before measuring the qubit in the $\{|{0}\rangle,|{1}\rangle\}$ basis.
+
+We model the machine noise in the quantum computer as depolarising errors. A qubit may be initialised in the incorrect state ($|{1}\rangle$) with the probability $\epsilon^{\rm I}$. The measurement outcome is incorrect with the probability $p_{0}=p_{1}=\epsilon^{\rm M}$. For single-qubit gates, the noise superoperator is
+
+$$
+\mathcal{N}^{(1)}=(1-\frac{4}{3}\epsilon^{(1)})[\openone]+\frac{\epsilon^{(1)}}{3}\sum_{a=0}^{3}[\sigma^{(a)}].
+$$
+
+For two-qubit gates, the noise superoperator is
+
+$$
+\mathcal{N}^{(2)}=(1-\frac{16}{15}\epsilon^{(2)})[\openone]+\frac{\epsilon^{(2)}}{15}\sum_{a=0}^{3}\sum_{b=0}^{3}[\sigma^{(a)}_{1}\sigma^{(b)}_{2}].
+$$
+
+Here, $\epsilon^{(1)}$ and $\epsilon^{(2)}$ are rates of errors per gate. We assume that error rates of all single-qubit gates are the same, error rates of all two-qubit gates are the same, and error rates of single-qubit operations are only one tenth of the error rates of two-qubit gates, i.e. $\epsilon^{\rm I}=\epsilon^{\rm M}=\epsilon^{(1)}=\epsilon^{(2)}/10$. Because the size of quantum circuits for implementing the hybrid algorithm is small, we neglect memory errors. In this model of the machine noise, errors in quantum operations are all stochastic, and error rates can be tuned by simulating errors using single-qubit Pauli gates.
+
+Numerical simulations are performed to find the trace distance $D(|{\Phi}\rangle,\rho)$ between the true state $|{\Phi(t)}\rangle$ and the state $\rho(t)$ prepared in the quantum computer according to the trial state $|{\Psi(t)}\rangle$ [see Fig. 5(a)]. Because of the machine noise, $\rho(t)$ is different from $|{\Psi(t)}\rangle$. The average values of stabilisers can be used to describe the quality of a cluster state. The performance of quantum algorithms in estimating the average values of stabilisers is shown in Fig. 5(b). In our numerical simulations, we have taken $\epsilon^{(2)}=0.1\%$, which is the state-of-the-art error rate [5, 6]. See Appendix D for some details about our numerical simulations.
+
+We observe that in this simulation the hybrid algorithm proves to be far more reliable than the Trotterisation algorithm. The distance in the hybrid algorithm is about ten times lower than the distance in the Trotterisation algorithm, and moreover the increase of the distance as a function of time can be largely suppressed in the hybrid algorithm by using the error reduction scheme [Fig. 5(a)]. As a result, the hybrid algorithm can provide a much better estimation of the average values of stabilisers [Fig. 5(b)]. We would like to stress that in order to make the comparison fair, the time interval selected for the Trotterisation algorithm has been optimised to minimise errors (in practice this would be possible only if the distance from the true state can be measured in the quantum computer, which would probably negate the need for simulation). We have also considered the lowest-order symmetric Trotter-Suzuki decomposition [60, 61], which can reduce errors due to the Trotterisation compared with the conventional Trotterisation scheme. However, we find that the total errors are more significant using the symmetric decomposition given the gate error rate $\epsilon^{(2)}=0.1\%$. In the hybrid algorithm, we have used the fourth-order Runge-Kutta method and taken $\delta t=2\pi\times 10^{-6}$ to eliminate errors due to the numerical integration. We have neglected the effect of shot noise, therefore all errors are due to machine noise.
+
+Given a finite time cost of implementing the hybrid algorithm, we need to consider the effect of errors in the numerical integration and shot noise. Taking into account the effect of these two types of imperfections, we find that the distance in the hybrid algorithm may be increased but is still much lower than the distance in the Trotterisation algorithm [blue and red bands in Fig. 5(a)]: we take $\delta t=2\pi\times 10^{-4}$ and assume that each circuit is repeated for $N_{\rm r}=10^{4}$ ($N_{\rm r}=10^{6}$) times to measure $\langle X\rangle$ in the hybrid algorithm (with the error reduction). Increasing the distance only slightly changes the estimation of average values of stabilisers [Fig. 5(b)].
+
+## IX Summary
+
+We have proposed a quantum algorithm for simulating the time evolution of a quantum system. In this algorithm, both a classical processor and a quantum coprocessor are tightly integrated. Because of the assistance of the classical computer, the algorithm can be implemented with quantum circuits of much less depth (i.e. fewer quantum operations) compared with the canonical Trotterisation algorithm. We discussed the robustness of the algorithm to noise, and we found that the algorithm can automatically correct some errors induced by the noise in the quantum computer. Moreover, by deliberately amplifying stochastic noise in a controllable way, the zero-error limit can be estimated; consequently, the effect of errors can be significantly suppressed without the need for code-based quantum error correction and its concomitant resource overheads. This quantum algorithm can also be parallelised easily. The task of the quantum coprocessor is to repeatedly implement a set of small-size quantum circuits, therefore the computing speed can be accelerated by using a cluster of quantum coprocessors, in which each works independently and there are no quantum channels linking them.
+
+In view of these various merits, we believe that our algorithm is a promising candidate for early-stage non-fault-tolerant quantum computers.
+
+**Acknowledgements.**
+
+This work was supported by the EPSRC National Quantum Technology Hub in Networked Quantum Information Technologies. The authors would like to acknowledge the use of the University of Oxford Advanced Research Computing (ARC) facility in carrying out this work. http://dx.doi.org/10.5281/zenodo.22558.
+
+Note added: Recently, a highly relevant paper was also posted by Temme, Bravyi, and Gambetta (arXiv:1612.02058). In that work the authors also studied an error mitigation strategy involving deliberate variation of the error severity and subsequent extrapolation to the most likely zero-error value of their observable. While the authors analyse this as a general technique and investigate higher order corrections, rather than employing the technique in the specific context of quantum dynamical simulation as we do here, the results of our two papers are consistent and can be compared.
+
+## Appendix A Simulated model of Fig. 1(b)
+
+In Fig. 1(b), the time evolution of a qubit is simulated. The time evolution is driven by the Hamiltonian $H=-(\sigma^{\rm y}+\sigma^{\rm z}\cos t-\sigma^{\rm y}\sin t)/2$. The trial state is in the form $|{\Psi}\rangle=e^{i(\pi/2)\lambda_{2}\sigma^{\rm z}}e^{i(\pi/2)\lambda_{1}\sigma^{\rm y}}|{0}\rangle$. The initial state is given by $\lambda_{1}=3/4$ and $\lambda_{2}=-1/2$, and $T=2\pi$. To Demonstrate this example, we need a quantum computer of two qubits.
+
+## Appendix B Algorithm errors
+
+Algorithm errors in each time step are expressed as per Eq. (18), where $E=1-|\langle{\Psi^{(0)}_{n}}|U_{n}|{\Psi_{n-1}}\rangle|^{2}-\Delta^{(2)}\delta t^{2}$. Using Taylor expansions of $|{\Psi^{(0)}_{n}}\rangle$ and $U_{n}|{\Psi_{n-1}}\rangle$ and the expression of $\Delta^{(2)}$ in Eq. (19), we find that
+
+$$
+|\langle{\Psi^{(0)}_{n}}|U_{n}|{\Psi_{n-1}}\rangle|^{2}=1-\Delta^{(2)}\delta t^{2}+\mathcal{O}(\delta t^{3}). \tag{32}
+$$
+
+Here we used the observation that $\mathrm{Re}\langle{\bar{0}}|\frac{dR^{\dagger}}{dt}|{\Psi_{n-1}}\rangle=0$ and $\mathrm{Re}\langle{\bar{0}}|\frac{d^{2}R^{\dagger}}{dt^{2}}|{\Psi_{n-1}}\rangle+\|\frac{dR}{dt}|{\bar{0}}\rangle\|^{2}=0$. We remark that $|{\Psi_{n-1}}\rangle=R|{\bar{0}}\rangle$. In other words, in the expansion of $E$, there is no term corresponding to either $\delta t^{0}$, $\delta t^{1}$ or $\delta t^{2}$. Therefore, one can obtain the inequality (21), where the second and third lines negate the $\delta t^{0}$, $\delta t^{1}$ and $\delta t^{2}$ terms from the first line. We can sum the $\delta t^{3}$ terms from the first line of inequality (21) as follows,
+
+$$
+\Delta^{(3)} = \|H\|\|H^{2}\|+\frac{1}{3}\|H^{3}\| \tag{33}
+$$
+$$
++\|\frac{dR}{dt}\|\|\frac{d^{2}R}{dt^{2}}\|+\frac{1}{3}\|\frac{d^{3}R}{dt^{3}}\|
+$$
+$$
++\|H\|(\|\frac{dR}{dt}\|^{2}+\|\frac{d^{2}R}{dt^{2}}\|)
+$$
+$$
++(\|H\|^{2}+\|H^{2}\|)\|\frac{dR}{dt}\|.
+$$
+
+## Appendix C Error Twirling of controlled-phase gates
+
+The twirled controlled-phase gate on a state $\rho$ reads
+
+$$
+\frac{1}{16}\sum_{a=0}^{3}\sum_{b=0}^{3}[\sigma^{c}_{\rm c}\sigma^{d}_{\rm t}]\mathcal{N}_{\Lambda}\mathcal{U}_{\Lambda}[\sigma^{a}_{\rm c}\sigma^{b}_{\rm t}]\rho=\bar{\mathcal{N}}_{\Lambda}\mathcal{U}_{\Lambda}\rho \tag{34}
+$$
+
+The effective noise superoperator is
+
+$$
+\bar{\mathcal{N}}_{\Lambda} = \frac{1}{16}\sum_{a=0}^{3}\sum_{b=0}^{3}[\sigma^{a}_{\rm c}\sigma^{b}_{\rm t}]\mathcal{N}_{\Lambda}[\sigma^{a}_{\rm c}\sigma^{b}_{\rm t}]. \tag{35}
+$$
+
+Using $\sigma^{a}\sigma^{b}\sigma^{a}=[2\delta_{a,b}-(2\delta_{a,0}-1)(2\delta_{b,0}-1)]\sigma^{b}$, we find that the effective noise is in the stochastic form of Eq. (31).
+
+## Appendix D Some details about numerical simulations
+
+In the hybrid algorithm with error reduction, we take $r_{1}=1$ and $r_{2}=2$ and fit the function $\langle X\rangle=\langle X\rangle^{(0)}+\chi r$ to infer the value of $\langle X\rangle^{(0)}$. To simulate shot noise, we use the normal distribution to approximate the binomial distribution, i.e. the value of $\langle X\rangle$ taking into account the shot noise is given by $x=1-2p$, where $p$ is given by a normal distribution with the mean $p_{0}=(1-\langle X\rangle)/2$ and the standard deviation $\sqrt{p_{0}(1-p_{0})/N_{\rm r}}$.
+
+In the Trotterisation algorithm, the time evolution is simulated using Eq. (1). For the quantum Ising model, the Hamiltonian is decomposed into two terms $H_{1}=H_{\rm Z}$ and $H_{2}=H_{\rm X}$. In our numerical simulations, we take $N_{\rm t}={\rm ceiling}(T/\delta t)$, $\tau_{n,j}=\delta t$ if $n<N_{\rm t}$, and $\tau_{N_{\rm t},j}=T-(N_{\rm t}-1)\delta t$. Such a method of determining Trotterisation parameters coincides with the optimal choice of the number $N_{\rm t}$ to minimise errors [36]. The state $\rho(t)$ is given by replacing $T$ with $t$ and determining $N_{\rm t}$ and $\tau_{n,j}$ using the method we just described.
+
+To find the optimal $\delta t$, we consider the average trace distance $\overline{D(|{\Phi}\rangle,\rho)}=T^{-1}\int_{0}^{T}dtD(|{\Phi(t)}\rangle,\rho(t))$, where $|{\Phi}\rangle$ is the true state, and $\rho$ is the state prepared in the quantum computer according to the Trotterisation algorithm. The average trace distance is plotted in Fig. 5(a), taking $T=4\pi$. To obtain other results in Fig. 5, we take $\delta t=2\pi\times 10^{-1.4}$ in the Trotterisation algorithm, which minimises the average distance.
+
+It is interesting to ask whether second-order techniques, which are known to be helpful in reducing the error in the Trotterisation technique, might have a superior performance here. For the lowest-order symmetric Trotter-Suzuki decomposition [60, 61], each time step in Eq. (1) is replaced by $\prod_{j=1}^{N_{\rm H}}e^{-iH_{j}\delta t/2}\prod_{j=N_{\rm H}}^{1}e^{-iH_{j}\delta t/2}$, where $N_{\rm H}$ is the number of terms in the Hamiltonian. The performance when using this technique is plotted as the grey curve in the inset to Fig. 5(a). We see that the performance is actually inferior to the more basic Trotterisation approach; the explanation is that the potential gains are more than negated because the larger number of gates employed introduces a greater degree of error (due to the $0.1\%$ physical gate errors).
+
+## References
+
+[1] A. Kitaev, Fault-tolerant quantum computation by anyons, Ann. Phys. 303, 2 (2003).
+
+[2] R. Raussendorf and J. Harrington, Fault-tolerant quantum computation with high threshold in two dimensions, Phys. Rev. Lett. 98, 190504 (2007).
+
+[3] R. Barends, J. Kelly, A. Megrant, A. Veitia, D. Sank, E. Jeffrey, T. C. White, J. Mutus, A. G. Fowler, B. Campbell, Y. Chen, Z. Chen, B. Chiaro, A. Dunsworth, C. Neill, P. O’Malley, P. Roushan, A. Vainsencher, J. Wenner, A. N. Korotkov, A. N. Cleland, and J. M. Martinis, Superconducting quantum circuits at the surface code threshold for fault tolerance, Nature 508, 500 (2014).
+
+[4] T. P. Harty, D. T. C. Allcock, C. J. Ballance, L. Guidoni, H. A. Janacek, N. M. Linke, D. N. Stacey, and D. M. Lucas, High-fidelity preparation, gates, memory and readout of a trapped-ion quantum bit, Phys. Rev. Lett. 113, 220501 (2014).
+
+[5] C. J. Ballance, T. P. Harty, N. M. Linke, M. A. Sepiol, and D. M. Lucas, High-fidelity quantum logic gates using trapped-ion hyperfine qubits, Phys. Rev. Lett. 117, 060504 (2016).
+
+[6] J. P. Gaebler, T. R. Tan, Y. Lin, Y. Wan, R. Bowler, A. C. Keith, S. Glancy, K. Coakley, E. Knill, D. Leibfried, and D. J. Wineland, High-fidelity universal gate set for 9Be+ ion qubits, Phys. Rev. Lett. 117, 060505 (2016).
+
+[7] J. O’Gorman and E. T. Campbell, Quantum computation with realistic magic state factories, arXiv:1605.07197.
+
+[8] M. Smelyanskiy, N. P. D. Sawaya, and A. Aspuru-Guzik, qHiPSTER: The Quantum High Performance Software Testing Environment, arXiv:1601.07195.
+
+[9] E. Farhi and J. Goldstone, A quantum approximate optimization algorithm, arXiv:1411.4028.
+
+[10] A. Peruzzo, J. McClean, P. Shadbolt, M.-H. Yung, X.-Q. Zhou, P. J. Love, A. Aspuru-Guzik, and J. L. O’Brien, A variational eigenvalue solver on a photonic quantum processor, Nat. Commun. 5, 4213 (2014).
+
+[11] D. Wecker, M. B. Hastings, and M. Troyer, Progress towards practical quantum variational algorithms, Phys. Rev. A 92, 042303 (2015).
+
+[12] J. R. McClean, J. Romero, R. Babbush, and A. Aspuru-Guzik, The theory of variational hybrid quantum-classical algorithms, New J. Phys. 18, 023023 (2016).
+
+[13] B. Bauer, D. Wecker, A. J. Millis, M. B. Hastings, and M. Troyer, Hybrid quantum-classical approach to correlated materials, Phys. Rev. X 6, 031045 (2016).
+
+[14] J. M. Kreula, S. R. Clark, and D. Jaksch, Non-linear quantum-classical scheme to simulate non-equilibrium strongly correlated fermionic many-body dynamics, Sci. Rep. 6, 32940 (2016).
+
+[15] J. M. Kreula, L. García-Álvarez, L. Lamata, S. R. Clark, E. Solano, and D. Jaksch, Few-qubit quantum-classical simulation of strongly correlated lattice fermions, EPJ Quantum Technology 3, 11 (2016).
+
+[16] Y. Shen, X. Zhang, S. Zhang, J.-N. Zhang, M.-H. Yung, and K. Kim, Quantum implementation of unitary coupled cluster for simulating molecular electronic structure, Phys. Rev. A 95, 020501 (2017).
+
+[17] P. J. J. O’Malley, R. Babbush, I. D. Kivlichan, J. Romero, J. R. McClean, R. Barends, J. Kelly, P. Roushan, A. Tranter, N. Ding, B. Campbell, Y. Chen, Z. Chen, B. Chiaro, A. Dunsworth, A. G. Fowler, E. Jeffrey, E. Lucero, A. Megrant, J. Y. Mutus, M. Neeley, C. Neill, C. Quintana, D. Sank, A. Vainsencher, J. Wenner, T. C. White, P. V. Coveney, P. J. Love, H. Neven, A. Aspuru-Guzik, and J. M. Martinis, Scalable quantum simulation of molecular energies, Phys. Rev. X 6, 031007 (2016).
+
+[18] R. Feynman, Simulating physics with computers, Int. J. Theor. Phys. 21, 467 (1982).
+
+[19] S. Lloyd, Universal quantum simulators, Science 273, 1073 (1996).
+
+[20] D. Wecker, B. Bauer, B. K. Clark, M. B. Hastings, and M. Troyer, Gate-count estimates for performing quantum chemistry on small quantum computers, Phys. Rev. A 90, 022305 (2014).
+
+[21] D. Poulin, M. B. Hastings, D. Wecker, N. Wiebe, Andrew C. Doberty, and M. Troyer, The Trotter step size required for accurate quantum simulation of quantum chemistry, QIC 15, 361 (2015).
+
+[22] M. Reiher, N. Wiebe, K. M. Svore, D. Wecker, and M. Troyer, Elucidating Reaction Mechanisms on Quantum Computers, arXiv:1605.03590.
+
+[23] I. Kassal, J. D. Whitfield, A. Perdomo-Ortiz, M.-H. Yung, and A. Aspuru-Guzik, Simulating chemistry using quantum computers, Annu. Rev. Phys. Chem. 62, 185 (2011).
+
+[24] B. P. Lanyon, C. Hempel, D. Nigg, M. Müller, R. Gerritsma, F. Zähringer, P. Schindler, J. T. Barreiro, M. Rambach, G. Kirchmair, M. Hennrich, P. Zoller, R. Blatt, and C. F. Roos, Universal digital quantum simulation with trapped ions, Science 334, 57 (2011).
+
+[25] X. Ma, B. Dakic, W. Naylor, A. Zeilinger, and P. Walther, Quantum simulation of the wavefunction to probe frustrated Heisenberg spin systems, Nat. Phys. 7, 399 (2011).
+
+[26] R. Barends, L. Lamata, J. Kelly, L. García-Álvarez, A. G. Fowler, A. Megrant, E. Jeffrey, T. C. White, D. Sank, J. Y. Mutus, B. Campbell, Y. Chen, Z. Chen, B. Chiaro, A. Dunsworth, I.-C. Hoi, C. Neill, P. J. J. O’Malley, C. Quintana, P. Roushan, A. Vainsencher, J. Wenner, E. Solano, and J. M. Martinis, Digital quantum simulation of fermionic models with a superconducting circuit, Nat. Commun. 6, 7654 (2015).
+
+[27] H. Aoki, N. Tsuji, M. Eckstein, M. Kollar, T. Oka, and P. Werner, Nonequilibrium dynamical mean-field theory and its applications, Rev. Mod. Phys. 86, 779 (2014).
+
+[28] G. Carleo, F. Becca, M. Schiró, and M. Fabrizio, Localization and glassy dynamics of many-body quantum systems, Sci. Rep. 2, 243 (2012).
+
+[29] A. J. Daley, C. Kollath, U. Schollwöck, and G. Vidal, Time-dependent density-matrix renormalization-group using adaptive effective Hilbert spaces, J. Stat. Mech. Theor. Exp. 2004, 04005 (2004).
+
+[30] M. C. Bañuls, M. B. Hastings, F. Verstraete, and J. I. Cirac, Matrix product states for dynamical simulation of infinite chains, Phys. Rev. Lett. 102, 240603 (2009).
+
+[31] E. Runge and E. K. U. Gross, Density-functional theory for time-dependent systems, Phys. Rev. Lett. 52, 997 (1984).
+
+[32] J. I. Cirac and P. Zoller, Goals and opportunities in quantum simulation, Nature Phys. 8, 264 (2012).
+
+[33] H. F. Trotter, On the product of semi-groups of operators, Proc. Am. Math. Soc. 10, 545 (1959).
+
+[34] G. Ortiz, J. E. Gubernatis, E. Knill, and R. Laflamme, Quantum algorithms for fermionic simulations, Phys. Rev. A 64, 022319 (2001).
+
+[35] I. Dhand and B. C Sanders, Stability of the Trotter-Suzuki decomposition, J. Phys. A 47, 265206 (2014).
+
+[36] G. C. Knee and W. J. Munro, Optimal Trotterization in universal quantum simulators under faulty control, Phys. Rev. A 91, 052327 (2015).
+
+[37] T. D. Ladd, F. Jelezko, R. Laflamme, Y. Nakamura, C. Monroe, and J. L. O’Brien, Quantum computers, Nature 464, 45 (2010).
+
+[38] E. Knill, Fault-tolerant postselected quantum computation: threshold analysis, arXiv:quant-ph/0404104.
+
+[39] J. J. Wallman and J. Emerson, Noise tailoring for scalable quantum computation via randomized compiling, arXiv:1512.01098.
+
+[40] J. O’Gorman, N. H. Nickerson, P. Ross, J. J. L. Morton, and S. C. Benjamin, A silicon-based surface code quantum computer, npj Quantum Information 2, 15019 (2016).
+
+[41] R. O. Jones, Density functional theory: Its origins, rise to prominence, and future, Rev. Mod. Phys. 87, 897 (2015).
+
+[42] D. Perez-Garcia, F. Verstraete, M. M. Wolf, and J. I. Cirac, Matrix Product State Representations, QIC 7, 401 (2007).
+
+[43] H. Feldmeier and J. Schnack, Molecular dynamics for fermions, Rev. Mod. Phys. 72, 655 (2000).
+
+[44] A. G. Taube and R. J. Bartlett, New perspectives on unitary coupled-cluster theory, Int. J. Quant. Chem. 106, 3393 (2006).
+
+[45] E. Farhi, J. Goldstone, S. Gutmann, and M. Sipser, Quantum computation by adiabatic evolution, arXiv:quant-ph/0001106.
+
+[46] P. A. M. Dirac, The Principles of Quantum Mechanics, Clarendon, Oxford (1930); Proc. Camb. Phil. SOC. 26, 376 (1930).
+
+[47] J. Frenkel, Wave Mechanics: Advanced General Theory, Clarendon, Oxford (1934).
+
+[48] J. Broeckhove, L. Lathouwers, E. Kesteloot, and P. Van Leuven, On the equivalence of time-dependent variational principles, Chem. Phys. Lett. 149, 547 (1988).
+
+[49] A. D. McLachlan, A variational solution of the time-dependent Schrodinger equation, Mol. Phys. 8, 39 (1964).
+
+[50] For the $(i,j)$ term of $M_{k,q}$, $a=2|if_{k,i}^{*}f_{q,j}|$, $\theta=\arg{if_{k,i}^{*}f_{q,j}}$ and $U=R^{\dagger}_{k,i}R_{q,j}$; for the $(i,j)$ term of $V_{k}$, $a=2|f^{*}_{k,i}h_{j}|$, $\theta=\arg{f^{*}_{k,i}h_{j}}$ and $U=R^{\dagger}_{k,i}\sigma_{j}R$.
+
+[51] G. Brassard, P. Høyer, M. Mosca, and A. Tapp, Quantum amplitude amplification and estimation, Quantum Computation and Quantum Information, Samuel J. Lomonaco, Jr. (editor), AMS Contemporary Mathematics 305, 53 (2002); arXiv:quant-ph/0005055.
+
+[52] A. K. Ekert, C. M. Alves, D. K. L. Oi, M. Horodecki, and L. C. Kwek, Direct estimations of linear and nonlinear functionals of a quantum state, Phys. Rev. Lett. 88, 217901 (2002).
+
+[53] In the circuit, there are only two controlled gates because of the pattern of $R_{l}$ terms in $\langle{\bar{0}}|U|{\bar{0}}\rangle$. Note that $U$ is a product of unitary operators, and if $R_{l}$ is in the product $R_{l}^{\dagger}$ is also in the product. The only two exceptions are $U_{k}$ and $U_{q}$. The circuit prepares the state $(|{0}\rangle\otimes R_{N_{\rm v}}\cdots R_{k}U_{k}\cdots R_{1}|{\bar{0}}\rangle+e^{i\theta}|{1}\rangle\otimes R_{N_{\rm v}}\cdots R_{q}U_{q}\cdots R_{1}|{\bar{0}}\rangle)/\sqrt{2}$ before the ancillary qubit is measured. If we take out an overall factor $R_{N_{\rm v}}\cdots R_{k}U_{k}\cdots R_{1}$, which does not affect the measurement outcome, the state becomes $(|{0}\rangle\otimes|{\bar{0}}\rangle+e^{i\theta}|{1}\rangle\otimes U|{\bar{0}}\rangle)/\sqrt{2}$, which is the state prepared using the circuit in Ref. [52].
+
+[54] J. C. Butcher, Numerical Methods for Ordinary Differential Equations, Wiley (2008).
+
+[55] M. A. Nielsen and I. L. Chuang, Quantum Computation and Quantum Information, Cambridge University Press, Cambridge, (2010).
+
+[56] R. C. Bialczak, M. Ansmann, M. Hofheinz, E. Lucero, M. Neeley, A. D. O’Connell, D. Sank, H. Wang, J. Wenner, M. Steffen, A. N. Cleland, and J. M. Martinis, Quantum process tomography of a universal entangling gate implemented with Josephson phase qubits, Nat. Phys. 6, 409 (2010).
+
+[57] J. Emerson, M. Silva, O. Moussa, C. Ryan, M. Laforest, J. Baugh, D. G. Cory, and R. Laflamme, Symmetrized characterization of noisy quantum processes, Science 317, 1893 (2007).
+
+[58] S. Sachdev, Quantum Phase Transitions, Cambridge University Press, Cambridge, (2011).
+
+[59] R. Raussendorf, D. E. Browne, and H. J. Briegel, Measurement-based quantum computation on cluster states, Phys. Rev. A 68, 022312 (2003).
+
+[60] D. W. Berry, G. Ahokas, R. Cleve, B. C. Sanders, Efficient quantum algorithms for simulating sparse Hamiltonians, Commun. Math. Phys. 270, 359 (2007).
+
+[61] N. Wiebe, D. Berry, P. Høyer, and B. C. Sanders, Higher order decompositions of ordered operator exponentials, J. Phys. A: Math. Theor. 43, 065203 (2010).

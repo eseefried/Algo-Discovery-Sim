@@ -1,0 +1,380 @@
+## I Introduction
+
+Simulating quantum phenomena with classical computers is often hard. This observation originated the idea of universal quantum simulators, or quantum computers [1]. Since then, technology has advanced to the point where small collections of interacting quantum bits (qubits) can be fabricated, characterized and controlled to find the ground state energy of simple molecules [2] in quantum chemistry. Scaling to a few tens or hundreds of highly coherent qubits will open new ways to study classes of important but classically intractable problems. The prototypical non-integrable system where long-range entanglement and short-range fluctuations makes classical simulation prohibitive is the two-dimensional Fermi-Hubbard model, where electrons can hop on a bipartite lattice with local Coulomb interaction [3]. The Fermi-Hubbard model can be used to explain phenomena arising in Mott insulators and cuprate superconductors [4]. As in the simulation of quantum chemistry [5, 6, 2, 7], the simulation of strongly correlated materials can also be improved by hybrid quantum-classical solver [8, 9, 10, 11, 12, 13] even if the number of interacting particles is in principle macroscopic.
+
+To study phase transitions occuring in condensed matter systems, single-particle correlation functions containing the information of the dynamics of the excited states have to be computed. Correlated lattices can be approximated in variational algorithms by constraining the space of possible self-energies to that of a lattice of finite clusters [14]. The solutions can be refined systematically by increasing the size of the clusters, however the classical memory required to represent state vectors in the clusters Hilbert space increases exponentially with the number of simulated electronic orbitals in a cluster. We showed in earlier work [15] how to extend the range of applicability of variational classical cluster methods by leveraging small quantum computers. The quantum algorithm uses black-box time evolutions[16] without making any assumptions on the architecture of the underlying quantum computer. This paper is meant to extend the quantum algorithm and to present a natural architecture and gate decomposition as an example to a general-purpose quantum simulator for dynamical cluster methods. Such a device could significantly improve our capabilities to investigate and simulate the macroscopic properties of correlated systems of electrons.
+
+Here we present four main results. First, a practical physical layout of the simulator can be made with two parallel chains of qubits with nearest-neighbor interactions and a control/probe qubit connected to all elements of the chains. The layout is fabrication-friendly as it has no crossing interaction lines, yet it can simulate Gibbs states of a lattice of arbitrary dimensionality. Second, there is a limited number of three-qubit gates that need to be tuned and benchmarked prior to a simulation, these gates are called “conditional imaginary swap” ($\mathrm{c-\pm iSWAP}$ or $\mathrm{iFredkin}$) with positive and negative varieties. Third, the toughest terms of a cluster Hamiltonian can be decomposed in a number of gates which is subquadratic in the size of the cluster. Finally, a numerical example is used to show that the Trotter-Suzuki approximations can reach arbitrary precision when non-commuting terms in the cluster Hamiltonian are propagated in time.
+
+Specifically, the paper is structured in the following way. In section II, the Fermi-Hubbard is briefly introduced. In subsection II.1, the core elements of the quantum solver are reviewed and an architecture is proprosed for a quantum simulator. In section III the gate decomposition of the time evolution of the cluster is given through the example of a $2\times 2$ Fermi-Hubbard cluster. The Jordan-Wigner transformation used is shown in subsection III.1 and subsection II.3 introduces the notation used in the procedure to measure the correlation function and more notation concerning the mapping of qubits to spin orbitals. The explicit gate decomposition of important terms of the Fermi-Hubbard model are given in subsection III.2. A short analysis of Trotter-Suzuki errors is done in subsection III.3. Finally, the scaling properties of the quantum ressources involved in scaling the algorithm are analysed in section IV.
+
+## II Solving the Fermi-Hubbard model on a quantum computer
+
+The model describes a simple electronic band in a periodic square lattice where electrons are free to hop between orbitals (or sites) with kinetic energy $t$ and interact via a simple two-body Coulomb term $U$. The standard form of the Fermi-Hubbard Hamiltonian is given by
+
+$$
+\mathcal{H}=-t\sum_{\left\langle i,j\right\rangle,\sigma}c_{i\sigma}^{\dagger}c_{j\sigma}+U\sum_{i}n_{i\uparrow}n_{i\downarrow}-\mu\sum_{i,\sigma}n_{i\sigma}, \tag{1}
+$$
+
+where $\mu$ is the chemical potential that controls the occupation of the band. The $c_{i\sigma}$($c_{i\sigma}^{\dagger}$) are the fermionic annihilation (creation) operators and the number operators are $n_{i\sigma}=c_{i\sigma}^{\dagger}c_{i\sigma}$. Note that in the rest of this document, units are chosen such that $\hbar=1$ and $k_{B}=1$. The hopping energy $t=1$ is assumed to be the reference energy and inverse time unit. The model is analytically solvable in the tight-binding limit $\frac{U}{t}\rightarrow 0$ and the atomic limit $\frac{t}{U}\rightarrow 0$. For a finite $\frac{U}{t}$, there is competition from different orders (antiferromagnetism, superconductivity) and no general solution is known for more than one dimension [17]. Many numerical methods have been developped to compute the thermodynamic properties of the Fermi-Hubbard model [18, 19]. Dynamical mean field methods, unified under the broader self-energy functional theory, can asymptotically approach solutions of the model by simulating the dynamics of increasingly larger clusters that contain the information of the quantum fluctuations of the system. However, simulating those clusters on a classical computer is a task that requires an exponential amount of computing ressources as the cluster size is increased. A general introduction to the classical cluster methods and self-energy functional theory can be found in [14, 20]. In [15], we showed how the important information of the clusters could be extracted from a quantum computer. In the next part, we explain how an architecture can be chosen for a quantum simulator such that the time evolution of any cluster Hamiltonian becomes very natural.
+
+### II.1 The layout of qubits
+
+We introduced an hybrid quantum-classical solver in [15] to show how some parts of quantum cluster methods can be improved by executing them on universal quantum computers. We refer the readers to our previous work for discussion and details of the various parameters. In the present paper we show that there is a simple physical layout of qubits which implements naturally the quantum circuit of figure 1. The circuit is used to prepare a Gibbs state of a cluster of the Fermi-Hubbard model in register $S$ and output the single-particle correlation functions in register $P$ (the operator $O\left(\tau\right)$ is detailed in section II.3). In principle the same type of circuit can simulate many other physical models, the Fermi-Hubbard model is used as an example that encapsulates the essence of strongly correlated systems. Since each register performs a definite task in the algorithm, the qubit layout can also be divided into modules. A subtle but important difference to [15] consists in controlling the bath ($B$) + system ($S$) registers through qubit $P$. This significantly reduces the number of elements that have to be controlled on the quantum simulator chip. Since the extraction of the correlation functions is done by measuring the probability of $\mathcal{M}=1$ and given that $S$ is in general in a mixed state, there is no clear advantage to using more than one qubit in register $P$. It can therefore be used to mediate the operations between register $R$ and $S+B$ in the Gibbs state preparation protocol (see figure 1). The suggested physical layout of qubits is shown in figure 2, the qubits of $R$ and $S+B$ are aligned as parallel chains with nearest-neighbor interactions and all conditional operations from $R$ are mediated through qubit $P$. An important feature of the proposed physical layout is the absence of overlapping interaction lines. Compared to a general purpose quantum computer, a dedicated quantum circuit has a much smaller set of gates that have to be tuned and benchmarked to solve a class of problems. Register $R$ needs only to support single qubits Hadamard gates and the operations required for an inverse quantum Fourier transform ($\mathrm{QFT^{\dagger}}$), only $q$ qubits are measured to determine the effective temperature $\beta$ of the Gibbs state prepared (depending on the output $s_{*}$, see [21] for details). The operations between $P$ and $B$ can all be reduced to controlled single qubits phase rotations as the bath is assumed to consists of independent spins. The operations between $P$ and $S$ require a more detailed analysis.
+
+First, a one dimensional chain of qubits with local controls and nearest neighbor exchange interaction is sufficient to implement the simulation of a higher dimensional cluster of a correlated electrons system. The exchange interaction can be used to generate the $\mathrm{iSWAP}$ gate which can be used to implement any Pauli string arising from the Jordan-Wigner form of given fermionic cluster Hamiltonians [22]. Two dimensional clusters of the Fermi-Hubbard model can be simulated efficiently with a number of gates which scales sub-quadratically with the number of orbitals. Finally, using a Trotter-Suzuki decomposition, the time evolution can be implemented accurately and with a better scaling than typical “hard” molecules [23].
+
+### II.2 Jordan-Wigner transformation
+
+Qubits in quantum computer are distinguishable objects, while electrons are not. In order to map the fermionic creation and annihilation operators of the Hamiltonian to the computational basis, a Jordan-Wigner transformation [24] can be used. If there are $n=2L_{c}$ electrons, then the Jordan-Wigner transformed creation operators are given by
+
+$$
+\begin{array}[]{ccl}c_{i\uparrow}^{\dagger}&=&\mathbb{I}^{\otimes 2\left(L_{c}-i\right)+1}\otimes\sigma_{+}\otimes\sigma_{z}^{\otimes 2\left(i-1\right)}\\ \\ c_{i\downarrow}^{\dagger}&=&\mathbb{I}^{\otimes 2\left(L_{c}-i\right)}\otimes\sigma_{+}\otimes\sigma_{z}^{\otimes 2i-1}\end{array}. \tag{2}
+$$
+
+This ensures that the fermionic anticommuation relation $\left\{c_{i\sigma},c_{j\sigma^{\prime}}^{\dagger}\right\}=\delta_{ij}\delta_{\sigma\sigma^{\prime}}$ and $\left\{c_{i\sigma},c_{j\sigma^{\prime}}\right\}=\left\{c_{i\sigma}^{\dagger},c_{j\sigma^{\prime}}^{\dagger}\right\}=0$ are enforced. In this notation,
+
+$$
+\mathbb{\sigma}^{\otimes k}\equiv\begin{cases}1&k=0\\ \sigma&k=1\\ \sigma\otimes\mathbb{\sigma}^{\otimes k-1}&k>1\end{cases}, \tag{3}
+$$
+
+also $\sigma_{+}=\frac{\left(\sigma_{x}+i\sigma_{y}\right)}{2}$, $\sigma_{-}=\sigma_{+}^{\dagger}$ and $\sigma_{z}=2\sigma_{n}-\mathbb{I}$, where $\sigma_{n}\equiv\sigma_{+}\sigma_{-}$. The relations $\sigma_{+}\sigma_{z}=\sigma_{+}=-\sigma_{z}\sigma_{+}$ and $\sigma_{z}\sigma_{-}=\sigma_{-}=-\sigma_{-}\sigma_{z}$ can also be used. In this scheme, each spin orbital $i\uparrow$ is followed in tensored space by the spin orbital $i\downarrow$. This ordering is convenient to simplify the interaction terms of Fermi-Hubbard clusters as the Coulomb interaction is confined to each site. As there is freedom in the ordering of the indices, for other models a good ordering should be chosen based on the symmetries of the simulated Hamiltonians. Note that for finite clusters the Jordan-Wigner transformation is in general independent of the dimensionality of the system.
+
+### II.3 Measuring the correlation function
+
+In figure 1, the Gibbs state produced in register $S$ is conditionally evolved with gate $O\left(\tau\right)$ for different times $\tau$ to measure the correlation functions. The precise decomposition of $\mathrm{c-}O\left(\tau\right)$ in fermionic operators and unitary Hamiltonian evolutions is shown in figure 3 [15]. Registers $P$ and $S$ are initially in the separable state $\left|0\right\rangle\left\langle 0\right|\otimes\rho_{\mathrm{Gibbs}}\left(T\right)$, where
+
+$$
+\rho_{\mathrm{Gibbs}}\left(T\right)\equiv\frac{1}{Z}\sum_{m}e^{-\frac{E_{m}}{T}}\left|\phi_{m}\right\rangle\left\langle\phi_{m}\right| \tag{4}
+$$
+
+and $E_{m}$ and $\left|\phi_{m}\right\rangle$ are respectively the eigenenergies and eigenstates of $\mathcal{H}^{\prime}$. A Hadamard gate is applied on $P$ such that is is in the state $\frac{\left|0\right\rangle+\left|1\right\rangle}{\sqrt{2}}$. Then a conditional Hermitianized creation/annihilation operator $\sigma_{\mu}\in\left\{X_{i\sigma},Y_{i\sigma}\right\}$ is applied on register $S$ controlled from $P$. Since creation and annihilation operators are not invertible, they cannot be used as $\sigma_{\mu}$ and $\sigma_{\nu}$ directly. A trick consists in using a linear combination of the operators. For each electron site, the Hermitian $X_{i\sigma}$ and $Y_{i\sigma}$ operators are defined from (2) such that
+
+$$
+\begin{array}[]{ccl}X_{i\sigma}&\equiv&c_{i\sigma}+c_{i\sigma}^{\dagger}\\ \\ Y_{i\sigma}&\equiv&+i\left(c_{i\sigma}-c_{i\sigma}^{\dagger}\right).\end{array} \tag{5}
+$$
+
+Note that $\left[X_{i\sigma},Y_{j\sigma^{\prime}}\right]=i\delta_{ij}\delta_{\sigma\sigma^{\prime}}Z_{i\sigma}$, where $Z_{i\sigma}\equiv c_{i\sigma}^{\dagger}c_{i\sigma}-\frac{1}{2}$. For a cluster with $L_{c}$ site, it is convenient to order the Jordan-Wigner basis such that up/down spins orbitals for each site are adjacents:
+
+$$
+\begin{array}[]{rcl}X_{i\uparrow}&=&\mathbb{I}^{\otimes 2\left(L_{c}-i\right)+1}\otimes\sigma_{x}\otimes\sigma_{z}^{\otimes 2\left(i-1\right)}\\ \\ X_{i\downarrow}&=&\mathbb{I}^{\otimes 2\left(L_{c}-i\right)}\otimes\sigma_{x}\otimes\sigma_{z}^{\otimes 2i-1}\\ \\ Y_{i\uparrow}&=&\mathbb{I}^{\otimes 2\left(L_{c}-i\right)+1}\otimes\sigma_{y}\otimes\sigma_{z}^{\otimes 2\left(i-1\right)}\\ \\ Y_{i\downarrow}&=&\mathbb{I}^{\otimes 2\left(L_{c}-i\right)}\otimes\sigma_{y}\otimes\sigma_{z}^{\otimes 2i-1}.\end{array} \tag{6}
+$$
+
+These operators must be implemented as operations controlled from register $P$,
+
+$$
+\begin{array}[]{rcl}\mathrm{c-}X_{i\sigma}&=&\left|0\right\rangle\left\langle 0\right|\otimes\mathbb{I}^{\otimes 2L_{c}}+\left|1\right\rangle\left\langle 1\right|\otimes X_{i\sigma}\\ \\ \mathrm{c-}Y_{i\sigma}&=&\left|0\right\rangle\left\langle 0\right|\otimes\mathbb{I}^{\otimes 2L_{c}}+\left|1\right\rangle\left\langle 1\right|\otimes Y_{i\sigma}\end{array} \tag{7}
+$$
+
+for spins $\uparrow/\downarrow$ and $i$ between 1 and $L_{c}$. These operators are easy to construct using the method found in [22] and the types of sequences found in the next section.
+
+Following the first $\mathrm{c-}\sigma_{\mu}$ operation, the $S$ register is conditionally evolved with the cluster Hamiltonian $\mathcal{H}^{\prime}$:
+
+$$
+\mathrm{c-}U_{S}\left(\tau\right)\equiv\left|0\right\rangle\left\langle 0\right|\otimes\mathbb{I}^{\otimes 2L_{c}}+\left|1\right\rangle\left\langle 1\right|\otimes e^{-i\mathcal{H}^{\prime}\tau}. \tag{8}
+$$
+
+Section III is dedicated to the precise gate decompostion of (8) as it was treated as a black-box in [15].
+
+After the second $\mathrm{c-}\sigma_{\nu}$ operation and the reverse conditional time evolution is applied, register $P$ is measured and register $S$ can be discarded. The measured probability outcomes are recorded for each time $\tau$
+
+$$
+C_{\mu\nu}\left(\tau\right)=2\left(P_{\mu\nu}\left(\mathcal{M}=0,\tau\right)-P_{\mu\nu}\left(\mathcal{M}=1,\tau\right)\right) \tag{9}
+$$
+
+such that the elements of the Nambu Green’s function can be computed from the inverse transformation
+
+$$
+\left(\begin{array}[]{c}\left\langle c_{i\sigma}\left(\tau\right)c_{j\sigma^{\prime}}^{\dagger}\left(0\right)\right\rangle\\ \left\langle c_{i\sigma}^{\dagger}\left(\tau\right)c_{j\sigma^{\prime}}\left(0\right)\right\rangle\\ \left\langle c_{i\sigma}^{\phantom{}}\left(\tau\right)c_{j\sigma^{\prime}}\left(0\right)\right\rangle\\ \left\langle c_{i\sigma}^{\dagger}\left(\tau\right)c_{j\sigma^{\prime}}^{\dagger}\left(0\right)\right\rangle\end{array}\right)=\frac{1}{2}\left(\begin{array}[]{rrrr}1&1&i&-i\\ 1&1&-i&i\\ 1&-1&i&i\\ 1&-1&-i&-i\end{array}\right)\left(\begin{array}[]{c}\left\langle X_{i\sigma}\left(\tau\right)X_{j\sigma^{\prime}}\left(0\right)\right\rangle\\ \left\langle Y_{i\sigma}\left(\tau\right)Y_{j\sigma^{\prime}}\left(0\right)\right\rangle\\ \left\langle Y_{i\sigma}\left(\tau\right)X_{j\sigma^{\prime}}\left(0\right)\right\rangle\\ \left\langle X_{i\sigma}\left(\tau\right)Y_{j\sigma^{\prime}}\left(0\right)\right\rangle\end{array}\right) \tag{10}
+$$
+
+A simple Fourier transform then yield the retarded Green’s function $G_{\mu\nu}^{R}\left(\omega\right)$ which is used to iterated the classical algorithm until a saddle-point $\frac{\partial\Omega_{t}}{\partial\mathbf{t^{\prime}}}=0$ of the Potthoff self-energy function is found. Depending on the symmetries of the cluster Hamiltonian, some terms in (10) may be zero at all time (e.g. if there is no pairing or spin-orbit interaction) and can be removed from the computation for speed-up or used to monitor possible errors coming from noise or other sources.
+
+Let’s remark that (9) can be expanded into a Taylor series
+
+$$
+C_{\mu\nu}\left(\tau\right)=\sum_{s=0}^{\infty}\frac{\tau^{s}}{s!}C_{\mu\nu}^{\left(s\right)}. \tag{11}
+$$
+
+The coefficients are also the moment of the Green’s function in the Lehmann representation such that the coefficient which can be measured as the time derivative of (9) at $\tau\rightarrow 0$:
+
+$$
+\begin{array}[]{rcl}C_{\mu\nu}^{\left(s\right)}&=&\left(-i\right)^{s}\sum_{m}\sum_{n}A_{\mu\nu}^{mn}\left(E_{m}-E_{n}\right)^{s}\\ \\ &=&\underset{\tau\rightarrow 0^{+}}{\mathrm{lim}}\frac{d^{s}}{d\tau^{s}}C_{\mu\nu}\left(\tau\right)\end{array} \tag{12}
+$$
+
+The retarded Green’s function is then given by
+
+$$
+G_{\mu\nu}^{R}\left(\omega\right)=-i\lim_{\eta\rightarrow 0^{+}}\sum_{s=0}^{\infty}\frac{C_{\mu\nu}^{\left(s\right)}}{\left(\eta+i\omega\right)^{s+1}}, \tag{13}
+$$
+
+where $\eta$ is the small parameter of the analytical continuation of the retarded function. In practice it can also be seen as an effective inverse simulated time (or “decoherence rate”). If one can measure several cycles of the correlation functions (11), then the extracted spectra will be sharply defined and $\eta$ can be considered effectively small with respect to all simulated energies in the cluster Hamiltonian. In the other limit, if there is too much decoherence in the quantum simulator the measured correlation functions will be flat and no information can be extracted about the frequency dependence of (13), $\eta$ is then effectively related to the decoherence rate if it limits the simulated time.
+
+## III Time evolution of the cluster Hamiltonian
+
+In this section we will show how a typical trial cluster Hamiltonian for the Fermi-Hubbard model in 2D can be implemented accurately using a reasonable number of gates. In order to keep the notation straightforward, this is done through the example of a $2\times 2$ cluster with magnetic and superconducting trial terms which can be easily generalized to larger sizes and higher dimensions. After introducing the cluster Hamiltonian and some notation, the gates for the implementation of (8) will be shown for the example and a numerical estimate of the Trotter-Suzuki error will be provided. Along the way, “conditional imaginary swaps” or $\mathrm{c-\pm iSWAP}$s will be introduced as three-qubit quantum gates pratical for quantum simulations. Although they can be viewed as a complements to the traditional $\mathrm{Toffoli}$ ($\mathrm{c-c-NOT}$) and $\mathrm{Fredkin}$ ($\mathrm{c-SWAP}$) gates [25], the positive or negative imaginary phase in the “$\mathrm{\pm iFredkin}$” gates has no classical analog and makes them truly quantum operations.
+
+### III.1 Hamiltonian of a cluster
+
+Each cluster includes only a small subset of the terms of the original lattice and variational terms must also be included to account for possible long-range order. For convenience, let’s assume a square lattice with constant spacing $a$. It is broken down into $N_{c}$ clusters each with $L_{c}$ $s$-shell sites with two electrons each (spin up $\uparrow$ and spin down $\downarrow$). The Hamiltonian of each cluster is given by
+
+$$
+\mathcal{H}^{\prime}=\mathcal{H}_{\mathrm{kin}}+\mathcal{H}_{\mathrm{int}}-\mathcal{H}_{\mathrm{s-pair}}-\mathcal{H}_{\mathrm{d_{x^{2}-y^{2}}}}-\mathcal{H}_{\mathrm{local}}-\mathcal{H}_{\mathrm{AF}}, \tag{14}
+$$
+
+where $\mathcal{H}_{\mathrm{kin}}$ is the kinetic term, $\mathcal{H}_{\mathrm{int}}$ is the local Coulomb interaction, $\mathcal{H}_{\mathrm{s-pair}}$ and $\mathcal{H}_{\mathrm{d_{x^{2}-y^{2}}}}$ are variational pairing terms, $\mathcal{H}_{\mathrm{local}}$ is a variational chemical potential term and $\mathcal{H}_{\mathrm{AF}}$ is a variational Néel antiferromagnetic term. The variational self-energy functional method support many different Hamiltonian terms and models as long as the two-body interaction term is “local” enough that a cluster decomposition can be made without cutting any interaction link.
+
+Figure 4 show how the qubits of $S$ register are labelled to represent the electronic structure of the cluster and requires $2L_{c}$ qubits (1 qubit = 1 spin-orbital). Since the qubits are effectively distinguishable spins, the Jordan-Wigner transformation from section II.2 must be used to model accurately the fermionic statistics of indistinguishable electrons. The sites are simply assumed to be labelled sequentially when counting the gate numbers for larger cluster sizes in section IV.
+
+#### III.1.1 Some convenient Pauli strings
+
+To define the Hamiltonian terms of (14) in the Jordan-Wigner basis, it is useful to introduce the following strings of Pauli matrices. The hopping part of the Hamiltonian usually contains terms of the form
+
+$$
+\begin{array}[]{rcl}\mathbb{T}_{L_{c}\uparrow}\left(i,j\right)&\equiv&\mathbb{I}^{\otimes 2\left(L_{c}-j\right)+1}\otimes\left(\sigma_{+}\otimes\sigma_{z}^{\otimes 2\left(j-i\right)-1}\otimes\sigma_{-}+\sigma_{-}\otimes\sigma_{z}^{\otimes 2\left(j-i\right)-1}\otimes\sigma_{+}\right)\otimes\mathbb{I}^{\otimes 2\left(i-1\right)}\\ &=&2\mathbb{I}^{\otimes 2\left(L_{c}-j\right)+1}\otimes\left(\sigma_{x}\otimes\sigma_{z}^{\otimes 2\left(i-j\right)-1}\otimes\sigma_{x}+\sigma_{y}\otimes\sigma_{z}^{\otimes 2\left(j-i\right)-1}\otimes\sigma_{y}\right)\otimes\mathbb{I}^{\otimes 2\left(i-1\right)}\\ \\ \mathbb{T}_{L_{c}\downarrow}\left(i,j\right)&\equiv&\mathbb{I}^{\otimes 2\left(L_{c}-j\right)}\otimes\left(\sigma_{+}\otimes\sigma_{z}^{\otimes 2\left(i-j\right)-1}\otimes\sigma_{-}+\sigma_{-}\otimes\sigma_{z}^{\otimes 2\left(j-i\right)-1}\otimes\sigma_{+}\right)\otimes\mathbb{I}^{\otimes 2i-1}\\ &=&2\mathbb{I}^{\otimes 2\left(L_{c}-j\right)}\otimes\left(\sigma_{x}\otimes\sigma_{z}^{\otimes 2\left(i-j\right)-1}\otimes\sigma_{x}+\sigma_{y}\otimes\sigma_{z}^{\otimes 2\left(j-i\right)-1}\otimes\sigma_{y}\right)\otimes\mathbb{I}^{\otimes 2i-1},\end{array} \tag{15}
+$$
+
+where $j>i$ between 1 and $L_{c}$. These strings have the property $\left[\mathbb{T}_{L_{c}\sigma}\left(i,j\right),\mathbb{T}_{L_{c}\sigma^{\prime}}\left(i^{\prime},j^{\prime}\right)\right]=0$. The chemical potential and the variational antiferromagnetic terms built from $n_{i\sigma}$ operators have strings of the form
+
+$$
+\begin{array}[]{rcl}\mathbb{T}_{L_{c}\uparrow}\left(i\right)&\equiv&\mathbb{I}^{\otimes 2\left(L_{c}-i\right)+1}\otimes\sigma_{n}\otimes\mathbb{I}^{\otimes 2\left(i-1\right)}\\ \\ \mathbb{T}_{L_{c}\downarrow}\left(i\right)&\equiv&\mathbb{I}^{\otimes 2\left(L_{c}-i\right)}\otimes\sigma_{n}\otimes\mathbb{I}^{\otimes 2i-1}.\end{array} \tag{16}
+$$
+
+Since $\mathbb{T}_{L_{c}}\left(i,j\right)$ and $\mathbb{T}_{L_{c}}\left(i\right)$ conserve total spin in the Pauli basis, they are also number conserving in the occupation basis.
+
+$$
+\begin{array}[]{rcl}\mathbb{D}_{L_{c}\uparrow}\left(i,j\right)&\equiv&\mathbb{I}^{\otimes 2\left(L_{c}-j\right)}\otimes\left(\sigma_{+}\otimes\sigma_{z}^{\otimes 2\left(j-i\right)}\otimes\sigma_{+}+\sigma_{-}\otimes\sigma_{z}^{\otimes 2\left(j-i\right)}\otimes\sigma_{-}\right)\otimes\mathbb{I}^{\otimes 2\left(i-1\right)}\\ &=&2\mathbb{I}^{\otimes 2\left(L_{c}-j\right)}\otimes\left(\sigma_{x}\otimes\sigma_{z}^{\otimes 2\left(j-i\right)}\otimes\sigma_{x}-\sigma_{y}\otimes\sigma_{z}^{\otimes 2\left(j-i\right)}\otimes\sigma_{y}\right)\otimes\mathbb{I}^{\otimes 2\left(i-1\right)}\\ \\ \mathbb{D}_{L_{c}\downarrow}\left(i,j\right)&\equiv&\mathbb{I}^{\otimes 2\left(L_{c}-j\right)+1}\otimes\left(\sigma_{+}\otimes\sigma_{z}^{\otimes 2\left(j-i-1\right)}\otimes\sigma_{+}+\sigma_{-}\otimes\sigma_{z}^{\otimes 2\left(j-i-1\right)}\otimes\sigma_{-}\right)\otimes\mathbb{I}^{\otimes 2i-1}\\ &=&2\mathbb{I}^{\otimes 2\left(L_{c}-j\right)+1}\otimes\left(\sigma_{x}\otimes\sigma_{z}^{\otimes 2\left(j-i-1\right)}\otimes\sigma_{x}-\sigma_{y}\otimes\sigma_{z}^{\otimes 2\left(j-i-1\right)}\otimes\sigma_{y}\right)\otimes\mathbb{I}^{\otimes 2i-1}\end{array} \tag{17}
+$$
+
+in this case, $j>i$ can be anything between 1 and $L_{c}$. $\mathbb{D}_{L_{c}}\left(i,j\right)$ does not conserve total spin in the Pauli basis and it is not conserving in the occupation basis. The $\mathbb{D}_{L_{c}\sigma}\left(i,j\right)$ are used to represent pairing operators between differents sites in the Pauli basis.
+
+$$
+\begin{array}[]{rcl}\mathbb{D}_{L_{c}}\left(i\right)&\equiv&\mathbb{I}^{\otimes 2\left(L_{c}-i\right)}\otimes\left(\sigma_{+}\otimes\sigma_{+}+\sigma_{-}\otimes\sigma_{-}\right)\otimes\mathbb{I}^{\otimes 2\left(i-1\right)}\\ &=&2\mathbb{I}^{\otimes 2\left(L_{c}-i\right)}\otimes\left(\sigma_{x}\otimes\sigma_{x}-\sigma_{y}\otimes\sigma_{y}\right)\otimes\mathbb{I}^{\otimes 2\left(i-1\right)}\end{array} \tag{18}
+$$
+
+The $\mathbb{D}_{L_{c}}\left(i\right)$ operators are used to represent local pairing operators in the Pauli basis.
+
+### III.2 Gate decomposition
+
+Here we proceed to decomposing the terms of the cluster Hamiltonian (14). This is not an exhaustive list of all possible variational terms nor of the detailed decomposition method as it is covered in [22]. The aim is to provide an estimate of the number of quantum gates required during the simulation of the Fermi-Hubbard model. It is also shown that different blocks of the cluster Hamiltonian can be implemented exactly. The time evolution of the blocks that do not commute can be approximated by a Trotter-Suzuki approximation detailed in section (III.3).
+
+Let’s note we are using $\mathbb{H}=\frac{1}{\sqrt{2}}\left(\begin{array}[]{cc}1&1\\ 1&-1\end{array}\right)$ and $\mathbb{J}=\frac{1}{\sqrt{2}}\left(\begin{array}[]{cc}1&-i\\ 1&i\end{array}\right)$. Given a tunable nearest-neighbor exchange interaction $\sigma_{x}\otimes\sigma_{x}+\sigma_{y}\otimes\sigma_{y}$ between the qubits of register $S$, it naturally generates the “imaginary swap” gate
+
+$$
+\begin{array}[]{rcl}\mathrm{\pm iSWAP}&=&e^{\pm i\frac{\pi}{4}\left(\sigma_{x}\otimes\sigma_{x}+\sigma_{y}\otimes\sigma_{y}\right)}\\ \\ &=&\left(\begin{array}[]{cccc}1&0&0&0\\ 0&0&\pm i&0\\ 0&\pm i&0&0\\ 0&0&0&1\end{array}\right).\end{array} \tag{19}
+$$
+
+It has the nice property that it can be used to manipulate Pauli strings that appear in the Jordan-Wigner representation:
+
+$$
+\begin{array}[]{ccc}\mathrm{+iSWAP}\cdot\left(\mathbb{I}\otimes\sigma_{x}\right)\cdot\mathrm{-iSWAP}&=&\sigma_{y}\otimes\sigma_{z}\\ \\ \mathrm{+iSWAP}\cdot\left(\mathbb{I}\otimes\sigma_{y}\right)\cdot\mathrm{-iSWAP}&=&-\sigma_{x}\otimes\sigma_{z}\\ \\ \mathrm{+iSWAP}\cdot\left(\mathbb{I}\otimes\sigma_{z}\right)\cdot\mathrm{-iSWAP}&=&\sigma_{z}\otimes\mathbb{I}.\end{array} \tag{20}
+$$
+
+To implement a conditional evolution gates of the form (8), we introduce $\mathrm{c-\pm iSWAP}$s as fundamental 3-qubit gates for quantum simulations. These gates come only in two varieties ($\pm$) for each triple of qubits (qubit $P$ and two adjacent qubits in $S$). Since all other operations are conditional single-qubit gates, they are expected to be the most time-consuming operations and therefore they are used to benchmark the scaling properties of the algorithm. Let’s note that there appears to be numerical evidence that coupling the $P$ and the $S$ registers with tunable $\sigma_{z}\otimes\sigma_{z}$ interactions greatly simplifies the implementation of the $\mathrm{c-\pm iSWAP}$ gates[26]. This somewhat extends the toolset of three-qubit gates for reversible quantum computation, which already contains Toffoli and Fredkin gates. “Conditional single-qubit gates” is abbreviated by $\mathrm{c-SQG}$.
+
+#### III.2.1 Local terms
+
+Local terms are all one-body terms composed with the $n_{i\sigma}$ operators. This includes the chemical potential
+
+$$
+\begin{array}[]{rcl}\mathcal{H}_{\mathrm{local}}&=&\mu^{\prime}\sum_{i,\sigma}n_{i\sigma}\\ \\ &=&\mu^{\prime}\sum_{i=1}^{L_{c}}\left(\mathbb{T}_{L_{c}\uparrow}\left(i\right)+\mathbb{T}_{L_{c}\downarrow}\left(i\right)\right)\end{array} \tag{21}
+$$
+
+which is kept as a variational term to enforce the thermodynamic consistency of the electronic occupation value. The $\mathbb{T}_{L_{c}\sigma}\left(i\right)$ strings are given by (16). The variational Néel antiferromagnetic Weiss field is also a local term which takes the form
+
+$$
+\begin{array}[]{rcl}\mathcal{H}_{\mathrm{AF}}&=&M^{\prime}\sum_{i}e^{i\mathbf{Q}\cdot\mathbf{R}_{i}}\left(n_{i\uparrow}-n_{i\downarrow}\right)\\ \\ &=&M^{\prime}\sum_{i=1}^{L_{c}}e^{i\mathbf{Q}\cdot\mathbf{R}_{i}}\left(\mathbb{T}_{L_{c}\uparrow}\left(i\right)-\mathbb{T}_{L_{c}\downarrow}\left(i\right)\right)\end{array} \tag{22}
+$$
+
+where $\mathbf{Q}=\left(\pi,\pi\right)$ is the antiferromagnetic wavevector and $\mathbf{R}_{i}$ is the position of the site in units of $a$. These terms all commute between each other and do not require any $\mathrm{c-\pm iSWAP}$, only 2$L_{c}$ $\mathrm{c-}R_{\sigma_{n}}^{\Theta}$ are required, where
+
+$$
+R_{\sigma_{n}}^{\Theta}\equiv e^{-i\frac{\Theta}{2}}e^{-i\frac{\Theta}{2}\sigma_{z}}. \tag{23}
+$$
+
+The gate sequence is shown in figure 5.
+
+#### III.2.2 Interaction terms
+
+The fixed interaction terms are given by
+
+$$
+\begin{array}[]{rcl}\mathcal{H_{\mathrm{int}}}&=&U\sum_{i}n_{i\uparrow}n_{i\downarrow}\\ \\ &=&U\sum_{i=1}^{L_{c}}\mathbb{T}_{L_{c}\uparrow}\left(i\right)\cdot\mathbb{T}_{L_{c}\downarrow}\left(i\right),\end{array} \tag{24}
+$$
+
+where the $\mathbb{T}_{L_{c}\sigma}\left(i\right)$ strings are given by (16). From figures 6 and 6, it can seen that $L_{c}$ $\mathrm{c-+iSWAP}$s, $L_{c}$ $\mathrm{c--iSWAP}$s , $2L_{c}$ $\mathrm{c-}\mathbb{H}$ on spin-$\downarrow$ orbitals, $L_{c}$ $\mathrm{c-}R_{\sigma_{U}}^{\Theta}$ on spin-$\uparrow$ orbitals and $2L_{c}$ $\mathrm{c-}R_{\sigma_{n}}^{\Theta}$ on all qubits (those should be done at the same time as the gates of figure 5, then only the ressources from the interaction terms have to be counted) are required to implement the evolution of $\mathcal{H_{\mathrm{int}}}+\mathcal{H_{\mathrm{local}}}+\mathcal{H_{\mathrm{AF}}}$. These term are simple to implement and they commute with the local terms $\mathcal{H}_{\mathrm{local}}$ and $\mathcal{H}_{\textrm{AF}}$, so they should be done in sequence.
+
+#### III.2.3 Hopping terms
+
+The hopping terms between nearest-neighbors is given by
+
+$$
+\begin{array}[]{rcl}\mathcal{H_{\mathrm{kin}}}&=&-t\sum_{\left\langle i,j\right\rangle,\sigma}c_{i\sigma}^{\dagger}c_{j\sigma}+c_{j\sigma}^{\dagger}c_{i\sigma}\\ \\ &=&-t\sum_{\left\langle i,j\right\rangle}\left(\mathbb{T}_{L_{c}\uparrow}\left(i,j\right)+\mathbb{T}_{L_{c}\downarrow}\left(i,j\right)\right)\end{array} \tag{25}
+$$
+
+for all neighboring orbitals $\left\langle i,j\right\rangle$ such that $j>i$. The summation $\sum_{\left\langle i,j\right\rangle}$ has $2\left(L_{c}-\sqrt{L_{c}}\right)$ nearest-neighbor vertices. The $\mathbb{T}_{L_{c}\sigma}\left(i,j\right)$ strings are given by (15). From figures 7 and 7, it can seen that $4\left(\sqrt[3]{L_{c}}-\sqrt{L_{c}}\right)$ $\mathrm{c-+iSWAP}$s, $4\left(\sqrt[3]{L_{c}}-\sqrt{L_{c}}\right)$ $\mathrm{c--iSWAP}$s , $8\left(L_{c}-\sqrt{L_{c}}\right)$ $\mathrm{c-}\mathbb{H}$ , $4\left(L_{c}-\sqrt{L_{c}}\right)$ $\mathrm{c-}\mathbb{J}$, $4\left(L_{c}-\sqrt{L_{c}}\right)$ $\mathrm{c-}\mathbb{J}^{\dagger}$, $4\left(L_{c}-\sqrt{L_{c}}\right)$ $\mathrm{c-}R_{\sigma_{x}}^{\Theta}$ and $4\left(L_{c}-\sqrt{L_{c}}\right)$ $\mathrm{c-}R_{\sigma_{y}}^{\Theta}$ are required to exactly implement the evolution of $\mathcal{H_{\mathrm{kin}}}$. It may be possible to reduce these numbers by some constant factor if the whole sequence is precompiled and trivially cancelling operations are removed. The alternance of the positive and negative variants of the $\mathrm{c-iSWAP}$ gates enforces the anticommutativity of the fermionic terms. The main difficulties of the Fermi-Hubbard model arise from the fact that $\left[H_{\mathrm{kin}},H_{\mathrm{int}}\right]\neq 0$, a Trotter-Suzuki approximation must be used to evolve both terms at the same time.
+
+#### III.2.4 S-wave pairing terms
+
+To verify that the ($U<0$) Fermi-Hubbard model supports s-wave superconductivity, a variational singlet pairing term can be introduced as
+
+$$
+\begin{array}[]{rcl}\mathcal{H}_{\mathrm{s-pair}}&=&\Delta_{s}^{\prime}\sum_{i}\left(c_{i\uparrow}^{\dagger}c_{i\downarrow}^{\dagger}+c_{i\downarrow}c_{i\uparrow}\right)\\ \\ &=&\Delta_{s}^{\prime}\sum_{i=1}^{L_{c}}\mathbb{D}_{L_{c}}\left(i\right),\end{array} \tag{26}
+$$
+
+where the $\mathbb{D}_{L_{c}}\left(i\right)$ strings are given by 18. From figures 8 and 8, it can seen that $2L_{c}$ $\mathrm{c-+iSWAP}$s, $2L_{c}$ $\mathrm{c--iSWAP}$s , $2L_{c}$ $\mathrm{c-}\mathbb{H}$ , $L_{c}$ $\mathrm{c-}\mathbb{J}$, $L_{c}$ $\mathrm{c-}\mathbb{J}^{\dagger}$, $L_{c}$ $\mathrm{c-}R_{\sigma_{x}}^{\Theta}$ and $L_{c}$ $\mathrm{c-}R_{\sigma_{y}}^{\Theta}$ are required to implement the evolution of $\mathcal{H}_{\mathrm{s-pair}}$. The $\mathrm{c-SQG}$s are all operated on spin-$\uparrow$ orbitals.
+
+#### III.2.5 D-wave pairing terms
+
+A superconducting $d_{x^{2}-y^{2}}$ singlet pairing term takes the form [20]
+
+$$
+\begin{array}[]{rcl}\mathcal{H}_{\mathrm{d_{x^{2}-y^{2}}}}&=&\Delta_{d}^{\prime}\sum_{\left\langle i,j\right\rangle}\frac{d_{ij}}{2}\left(c_{i\uparrow}^{\dagger}c_{j\downarrow}^{\dagger}-c_{i\downarrow}^{\dagger}c_{j\uparrow}^{\dagger}+c_{j\downarrow}c_{i\uparrow}-c_{j\uparrow}c_{i\downarrow}\right)\\ \\ &=&\Delta_{d}^{\prime}\sum_{\left\langle i,j\right\rangle}\frac{d_{ij}}{2}\left(\mathbb{D}_{L_{c}\uparrow}\left(i,j\right)-\mathbb{D}_{L_{c}\downarrow}\left(i,j\right)\right)\end{array} \tag{27}
+$$
+
+between nearest-neighbor site, where $\mathbf{R}$ are the vector positions of the sites in the cluster in units of $a$ and
+
+$$
+d_{ij}=\begin{cases}1&\mathrm{if}\>\mathbf{R}_{i}-\mathbf{R}_{j}=\pm a\mathbf{e_{x}}\\ -1&\mathrm{if}\>\mathbf{R}_{i}-\mathbf{R}_{j}=\pm a\mathbf{e_{y}}\\ 0&\mathrm{otherwise.}\end{cases} \tag{28}
+$$
+
+The $\mathbb{D}_{L_{c}\sigma}\left(i,j\right)$ strings are given by 17. From figures 9, 9 and 9, it can seen that $4\left(\sqrt[3]{L_{c}}+L_{c}-2\sqrt{L_{c}}\right)$ $\mathrm{c-+iSWAP}$s, $4\left(\sqrt[3]{L_{c}}+L_{c}-\sqrt{L_{c}}\right)$ $\mathrm{c--iSWAP}$s , $8\left(L_{c}-\sqrt{L_{c}}\right)$ $\mathrm{c-}\mathbb{H}$ , $4\left(L_{c}-\sqrt{L_{c}}\right)$ $\mathrm{c-}\mathbb{J}$, $4\left(L_{c}-\sqrt{L_{c}}\right)$ $\mathrm{c-}\mathbb{J}^{\dagger}$, $4\left(L_{c}-\sqrt{L_{c}}\right)$ $\mathrm{c-}R_{\sigma_{x}}^{\Theta}$ and $4\left(L_{c}-\sqrt{L_{c}}\right)$ $\mathrm{c-}R_{\sigma_{y}}^{\Theta}$ are required to implement the evolution of $\mathcal{H}_{\mathrm{d_{x^{2}-y^{2}}}}$. It may be possible to reduce these numbers by some constant factor if the whole sequence is precompiled and trivially cancelling operations are removed. Interestingly, $\left[\mathcal{H_{\mathrm{kin}}},\mathcal{H}_{\mathrm{d_{x^{2}-y^{2}}}}\right]=0$ and the two terms of the cluster can be grouped together to simulate their exact evolution.
+
+### III.3 The Trotter-Suzuki approximation
+
+Typically, the terms of the cluster Hamiltonian (14) do not commute and a Trotter-Suzuki approximation [27, 23, 11] must be used. Here is the procedure to make the mapping that requires no oracle black box for $\mathcal{H}^{\prime}$. The Hamiltonian (14) is broken into $M$ non-commuting parts such that
+
+$$
+\mathcal{H}^{\prime}=\sum_{i=1}^{M}\mathcal{H}_{i}^{\prime}. \tag{29}
+$$
+
+Each time-step $\Delta\tau$ evolution of the cluster Hamiltonian can be simulated with $n_{T}$ Trotter-Suzuki steps
+
+$$
+e^{-i\mathcal{H}^{\prime}\Delta\tau}\simeq\left(\prod_{i=1}^{M}e^{-\frac{i\mathcal{H}_{i}^{\prime}\Delta\tau}{n_{T}}}\right)^{n_{T}}+\sum_{i<j}\frac{\left[\mathcal{H}_{i}^{\prime},\mathcal{H}_{j}^{\prime}\right]\Delta\tau^{2}}{2n_{T}}+\ldots. \tag{30}
+$$
+
+It should be noted that those time-steps set the upper bound in the simulated energy spectrum which should scale as $\omega_{\mathrm{max}}\propto\frac{1}{\Delta\tau}$, while the lowest energy should scale at the inverse of the total simulation time.
+
+The cluster Hamiltonian $\mathcal{H}^{\prime}$ has 3 non-commuting blocks: $\mathcal{H}_{z}\equiv\mathcal{H}_{\mathrm{local}}+\mathcal{H}_{\mathrm{int}}-\mathcal{H}_{AF}$, $\mathcal{H_{\mathrm{kin}}}+\mathcal{H}_{\mathrm{d_{x^{2}-y^{2}}}}$ and $\mathcal{H}_{\mathrm{s-pair}}$, the commutation relations are given in table (1). All blocks are skew-hermitians such that $\mathcal{H}_{i}=\mathcal{H}_{i}^{*}$. The time evolution of each time block can be done exactly. The blocks containing nearest-neighbor operators ($\mathcal{H_{\mathrm{kin}}}$ and $\mathcal{H}_{\mathrm{d_{x^{2}-y^{2}}}}$) are the most expensive in terms of gates. If $D$ is the dimension of the lattice, then these blocks require the application of $O\left(L_{c}^{\frac{2D-1}{D}}\right)$ $\mathrm{c-\pm iSWAP}$s, so it is advisable to minimize the use of these blocks in the Trotter-Suzuki decompostion. The number of gates to implement the local interaction terms ($\mathcal{H}_{z}$ and $\mathcal{H}_{\mathrm{s-pair}}$) scales as $O\left(L_{c}\right)$.
+
+Table 1: Commutation relations of the different Hamiltonian terms ($2\times 2$ cluster). $\mathcal{H}_{A}$ to $\mathcal{H}_{H}$ represent different non-zero commutators.
+
+| $\left[\bullet,\bullet\right]$ | $\mathcal{H}_{\mathrm{local}}$ | $\mathcal{H}_{\mathrm{int}}$ | $\mathcal{H}_{AF}$ | $\mathcal{H_{\mathrm{kin}}}$ | $\mathcal{H}_{\mathrm{s-pair}}$ | $\mathcal{H}_{\mathrm{d_{x^{2}-y^{2}}}}$ |
+|---|---|---|---|---|---|---|
+| $\mathcal{H}_{\mathrm{local}}$ | $0$ | $0$ | $0$ | $0$ | $-2\mathcal{H}_{D}$ | $-2\mathcal{H}_{F}$ |
+| $\mathcal{H}_{\mathrm{int}}$ | $0$ | $0$ | $0$ | $-2\mathcal{H}_{A}$ | $-\mathcal{H}_{E}$ | $-2\mathcal{H}_{G}$ |
+| $\mathcal{H}_{AF}$ | $0$ | $0$ | $0$ | $-2\mathcal{H}_{B}$ | $0$ | $-2\mathcal{H}_{H}$ |
+| $\mathcal{H_{\mathrm{kin}}}$ | $0$ | $2\mathcal{H}_{A}$ | $2\mathcal{H}_{B}$ | $0$ | $\mathcal{H}_{C}$ | $0$ |
+| $\mathcal{H}_{\mathrm{s-pair}}$ | $2\mathcal{H}_{D}$ | $\mathcal{H}_{E}$ | $0$ | $-\mathcal{H}_{C}$ | $0$ | $0$ |
+| $\mathcal{H}_{\mathrm{d_{x^{2}-y^{2}}}}$ | $2\mathcal{H}_{F}$ | $2\mathcal{H}_{G}$ | $2\mathcal{H}_{H}$ | $0$ | $0$ | $0$ |
+
+The worst-case Trotter-Suzuki decomposition arises when all variational parameters have a non-zero value at some point during the saddle-point search. In this case a single Trotter-Suzuki step could be decomposed as
+
+$$
+\begin{array}[]{rcl}e^{-i\mathcal{H}^{\prime}\Delta\tau}&\approx&e^{-i\mathcal{H}_{z}\frac{\Delta\tau}{4}}\cdot e^{+i\mathcal{H}_{\mathrm{s-pair}}\frac{\Delta\tau}{2}}\cdot e^{-i\mathcal{H}_{z}\frac{\Delta\tau}{4}}\cdot e^{+i\mathcal{H}_{\mathrm{d_{x^{2}-y^{2}}}}\Delta\tau}\cdot e^{-i\mathcal{H_{\mathrm{kin}}}\Delta\tau}\ldots\\ &&\ldots\cdot e^{-i\mathcal{H}_{z}\frac{\Delta\tau}{4}}\cdot e^{+i\mathcal{H}_{\mathrm{s-pair}}\frac{\Delta\tau}{2}}\cdot e^{-i\mathcal{H}_{z}\frac{\Delta\tau}{4}}\end{array} \tag{31}
+$$
+
+Ruth’s formula [28, 27] can also be used recursively
+
+$$
+e^{-i\Delta\tau\left(A+B\right)+O\left(\Delta\tau^{4}\right)}=e^{-i\frac{7}{24}\Delta\tau A}e^{-i\frac{2}{3}\Delta\tau B}e^{-i\frac{3}{4}\Delta\tau A}e^{+i\frac{2}{3}\Delta\tau B}e^{+i\frac{1}{24}\Delta\tau A}e^{-i\Delta\tau B} \tag{32}
+$$
+
+by replacing $A$ and $B$ by the correct cluster Hamiltonian terms. Ruth’s formula is more precise but has a larger overhead in term is gate count. In a Trotter-Suzuki step, the hopping term $e^{-i\mathcal{H_{\mathrm{kin}}}\Delta\tau}$ and $e^{+i\mathcal{H}_{\mathrm{d_{x^{2}-y^{2}}}}\frac{\Delta\tau}{2}}$ appear once, the s-wave pairing term $e^{+i\mathcal{H}_{\mathrm{s-pair}}\frac{\Delta\tau}{4}}$ has two instances and the simple local $e^{-i\mathcal{H}_{z}\frac{\Delta\tau}{8}}$ appears four times. Figure 10 provides a practical effective bound on the error by looking at an extreme case of non-commuting variational parameters all applied at the same time. The error is given for a fixed evolution time by a varying step size. A step size $\Delta\tau<10^{-2}$ achieve an error $\sim 10^{-5}$ using a recursive Trotter-Suzuki formula and an error $\sim 10^{-10}$ using a recursive Ruth formula. Not considering all variational parameters at the same time significantly reduces the length of the decomposition.
+
+## IV Scaling to larger clusters
+
+Table 2: Quantum ressources required to solve a cluster of the Fermi-Hubbard once the Gibbs state is prepared. The information processed by the classical computer is proportional to the number of measured correlation functions which scales quadratically with the number of orbitals in the cluster.
+
+| Dimension(s) | Size | Orbitals (singlets) $\left[n\right]$ | Dim. of Hilbert space $\left[2^{n}\right]$ | Qubits required [$n+1$] | Measured correl. functions$\left[<4n^{2}\right]$ | $\mathrm{c-SQG}$s to tune $\left[7n\right]$ | $\mathrm{c-\pm iSWAP}$s to tune $\left[2n-2\right]$ | Gates / Trotter-Suzuki step (hopping terms) |
+|---|---|---|---|---|---|---|---|---|
+| 1D | $2$ | $4$ | $16$ | $5$ | $64$ | $28$ | $6$ | $24$ |
+| 1D | $3$ | $6$ | $64$ | $7$ | $144$ | $42$ | $10$ | $48$ |
+| 1D | $4$ | $8$ | $256$ | $9$ | $256$ | $56$ | $14$ | $72$ |
+| 2D | $2\times 2$ | $8$ | $256$ | $9$ | $256$ | $56$ | $14$ | $96$ |
+| 2D | $3\times 3$ | $18$ | $262,144$ | $19$ | $1,296$ | $126$ | $34$ | $336$ |
+| 2D | $4\times 4$ | $32$ | $4,294,967,296$ | $33$ | $4,096$ | $224$ | $62$ | $768$ |
+| 3D | $2\times 2\times 2$ | $16$ | $65,536$ | $17$ | $1,024$ | $112$ | $30$ | $416$ |
+| 3D | $3\times 3\times 3$ | $54$ | $1.8\times 10^{16}$ | $55$ | $11,664$ | $378$ | $106$ | $2,736$ |
+| 3D | $4\times 4\times 4$ | $128$ | $3.4\times 10^{38}$ | $129$ | $65,536$ | $896$ | $254$ | $10,368$ |
+
+The resource requirements of the algorithm are given in table 2 by giving examples for the 1D, 2D and 3D Fermi-Hubbard model. The 1D model can be solved analytically and can be used as a benchmark. The 3D model is meant to show that the method scales to higher dimensions. All ressources only include the $P$ and $S$ registers, the scaling of registers $R$ and $B$ are analyzed in details in [21].While the size of the Hilbert space required to store the density matrix scales exponentially with the number of spin orbitals, the number of qubits required in register $S$ scales linearly. The number of correlation functions to measure, which corresponds to the amount of classical information to extract from the quantum simulator, scales quadratically with the size of the cluster.The number of conditional single-qubits gates and the number of $\mathrm{c-\pm iSWAP}$s that have to be benchmarked and tuned also scales linearly with the size of the system, which is a significant technical advantage. Finally, the number of $\mathrm{c-\pm iSWAP}$s in terms with nearest-neighbor couplings (like hopping or d-wave superconductivity) scales subquadratically as $O\left(L_{c}^{\frac{2D-1}{D}}\right)$, where $D$ is the dimension of the system.
+
+## V Conclusion
+
+The Fermi-Hubbbard model contains the essential features of many strongly correlated electronic systems. We recently proposed a method to compute the properties of the Fermi-Hubbard using a hybrid quantum-classical approach. In this paper we looked more closely at the scaling properties of the quantum part of the algorithm by giving an explicit gate decomposition of the time evolution of the cluster Hamiltonian and bounding expected Trotter-Suzuki errors. The main results are the following:
+
+1. It scales linearly in memory: 1 spin orbital corresponds to 1 qubit.
+2. It scales favorably in number of measurements which are proportional to $L_{c}^{2}$ at worst.
+3. The number of time measurements determines precision in frequency space (same as classical, decoherence means less information, “good enough” is possible).
+4. The most difficult terms require $O\left(L_{c}^{\frac{2D-1}{D}}\right)$ $\mathrm{c-\pm iSWAP}$s (the longest gate).
+5. Trotter-Suzuki errors can be made as small as desired.
+6. The proposed architecture has no crossing interaction lines whose number scales as $O\left(L_{c}\right)$ with no long range interaction required.
+7. The number of gates that need to be tuned scales as $O\left(L_{c}\right)$.
+
+To fully benchmark the algorithm, a full simulation will have to be implemented to analyze the gate count in the Gibbs state preparation. A more careful analysis of errors also has to be done as the effect of errors may not be the same depending if they appear in the $R$, $P$ or $S+B$ registers. Finally, an adiabatic or annealing scheme could be used to replace the Gibbs state preparation if only zero-temperature states are studied [29]. In this case, the correlation function measurements would still stay the same as the rest of the classical method.
+
+**Acknowledgements.**
+
+This work was supported by SCALEQIT. The authors would like to thank Ryan Babbush, David Poulin for very helpful discussions.
+
+## References
+
+[1] R. P. Feynman, International Journal of Theoretical Physics 21, 467 (1982).
+
+[2] P. J. J. O’Malley et al., Scalable quantum simulation of molecular energies, 2015.
+
+[3] J. Hubbard, Proceedings of the Royal Society of London. Series A, Mathematical and Physical Sciences 276, 238 (1963).
+
+[4] P. W. Anderson, Science 235, 1196 (1987).
+
+[5] I. Kassal, J. D. Whitfield, A. Perdomo-Ortiz, M.-H. Yung, and A. Aspuru-Guzik, Annual Review of Physical Chemistry 62, 185 (2011).
+
+[6] A. Peruzzo et al., Nature Communications 5, 4213 (2014).
+
+[7] R. Babbush et al., New Journal of Physics 18, 033032 (2016).
+
+[8] U. L. Heras et al., Phys. Rev. Lett. 112, 200501 (2013).
+
+[9] L. Lamata, A. Mezzacapo, J. Casanova, and E. Solano, EPJ Quantum Technology 1, 9 (2014).
+
+[10] R. Barends et al., Nature Communications 6, 7654 (2015).
+
+[11] U. L. Heras, L. Garcia-Alvarez, A. Mezzacapo, E. Solano, and L. Lamata, EPJ Quantum Technology 2, 8 (2015).
+
+[12] B. Bauer, D. Wecker, A. J. Millis, M. B. Hastings, and M. Troyer, Hybrid quantum-classical approach to correlated materials, 2015.
+
+[13] Y. Salathe et al., Phys. Rev. X 5, 021027 (2015).
+
+[14] M. Potthoff, M. Aichhorn, and C. Dahnken, Phys. Rev. Lett. 91, 206402 (2003).
+
+[15] P.-L. Dallaire-Demers and F. K. Wilhelm, Phys. Rev. A 93, 032303 (2016).
+
+[16] J. Thompson, M. Gu, K. Modi, and V. Vedral, Quantum computing with black-box subroutines, 2013.
+
+[17] E. H. Lieb and F. Y. Wu, Physica A 321, 1 (2003).
+
+[18] D. Sénéchal, P.-L. Lavertu, M.-A. Marois, and A. Tremblay, Phys. Rev. Lett. 94, 156404 (2005).
+
+[19] A.-M. Tremblay, B. Kyung, and D. Sénéchal, Low Temperature Physics 32, 424 (2006).
+
+[20] D. Senechal, An introduction to quantum cluster methods, 2008, cond-mat.str-el/0806.2690v2.
+
+[21] A. Riera, C. Gogolin, and J. Eisert, Phys. Rev. Lett. 108, 080402 (2012).
+
+[22] M. Kaicher, F. Motzoi, and F. K. Wilhelm, Pauli strings with the exchange interaction, 2016.
+
+[23] D. Poulin et al., QIC 15, 361 (2015).
+
+[24] P. Jordan and E. Wigner, Z. Phys. 47, 631 (1928).
+
+[25] M. A. Nielsen and I. L. Chuang, Quantum Computation and Quantum Information (Cambridge University Press, 2001).
+
+[26] P. Liebermann, P.-L. Dallaire-Demers, E. Assémat, and F. K. Wilhelm, Conditional imaginary swap gates for quantum simulation of fermions, 2016.
+
+[27] N. Hatano and M. Suzuki, Quantum Annealing and Other Optimization Methods, Lecture Notes in Physics Vol. 679 (Springer Berlin Heidelberg, 2005), chap. Finding Exponential Product Formulas of Higher Orders, pp. 37–68.
+
+[28] R. D. Ruth, IEEE Transactions on Nuclear Science 30, 2669 (1983).
+
+[29] D. Wecker et al., Phys. Rev. A 92, 062318 (2015).

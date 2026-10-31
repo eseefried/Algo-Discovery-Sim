@@ -1,0 +1,625 @@
+## I Introduction
+
+Algorithms for the spectral estimation of signals consisting of finite sums of exponentially damped sinosoids have a vast number of practical applications in signal processing. These range from imaging and microscopy [1], radar target identification [2], nuclear magnetic resonance spectroscopy [3], estimation of ultra wide-band channels [4], quantum field tomography [5, 6], power electronics [7], up to the simulation of atomic systems [8]. If the damped frequencies (poles) are known and merely the concomitant coefficients are to be identified, linear methods are readily applicable. In the practically relevant task in which the poles are to be estimated from the data as well, however, one encounters a non-linear problem, and significantly more sophisticated methods have to be employed.
+
+There are various so-called high resolution spectral estimation techniques that provide precisely such methods: They include matrix pencil methods [9], Prony’s method [10], MUSIC [11], ESPRIT [12], and atomic norm denoising [13]. These techniques are superior to discrete Fourier transform (DFT) in instances with damped signals and close frequencies or small observation time $T>0$ [14, 15, 16] and are preferred over of the Fourier transform in those applications laid out in Refs. [3, 5, 2, 4, 7, 1, 8]: The DFT resolution in the frequency domain $\Delta\omega$ is proportional to $1/T$, which is especially critical for poles that are close to each other. If the poles are sufficiently damped and close, they cannot be resolved by DFT independently of $T$. Non-linear least-squares fitting of the poles or considering higher-order derivatives of the Fourier transform is in general relatively imprecise, sensitive to noise, or unefficient. Non-linear algorithms such as the matrix pencil method can still detect poles, where DFT fails, but are limited to signals composed of finitely many damped sinosoids.
+
+With regard to quantum algorithms dedicated to tasks of spectral estimation—algorithms to be run on a quantum computer—the celebrated quantum Fourier transform (QFT) [17] provides an exponential speedup towards the fastest known classical implementations of DFT for processing discretized signals of $N$ samples: Classical fast Fourier transform (FFT) algorithms, on the one hand, take $\Theta(N\log N)$ gates [18], whereas QFT takes $\Theta(\log^{2}N)$ gates to produce a quantum state encoding the Fourier coefficients in its amplitudes. The quantum Fourier transform constitutes a key primitive in various quantum algorithms. In particular, it paved the way for quantum speedups for problems such as prime factoring or order-finding [19]. Regarding spectral estimation, however, QFT inherits the above mentioned properties of its classical counterpart.
+
+The aim of this work is to develop a quantum version of a powerful spectral estimation technique, the matrix pencil method, providing an analogous quantum speedup from $O(\mathrm{poly}\,N)$ to $O(\polylog N)$ for data given in a suitable format. Hereto, we make use of the fact that establishing eigenvalues and eigenvectors of low-rank matrices—constituting major steps in this algorithm—can be achieved very fast on quantum computers [20]. Given signal data either via the amplitudes of a quantum state or stored in a quantum random access memory [21, 22, 23] (QRAM), phase estimation of these matrices can be performed directly. For exponentiating non-sparse operators for phase estimation, we employ quantum principal component analysis (QPCA) [20] and a recently developed oracle-based method [24]. In an additional step, we employ a quantum linear fitting algorithm [25, 26] to determine the summing coefficients and hence all parameters that determine the signal function. In this sense, we can understand our algorithm also as an instance of a non-linear quantum fitting algorithm in contrast to linear curve fitting algorithms [25, 26]. Furthermore, our algorithm can also be employed as a sub-routine in a higher quantum algorithm that requires spectral estimation as an intermediate step. We expect the developed methods to provide valuable novel primitives to be used in other quantum algorithms as well.
+
+## II The classical matrix pencil algorithm
+
+We start by briefly recapitulating the original (classical) matrix pencil algorithm before in section III, we turn to showing how to implement a quantum version of this algorithm in order to gain an exponential speedup. Matrix pencil methods (MPM) [9] comprise a family of efficient signal processing algorithms for spectral estimation and denoising of equidistantly sampled complex-valued functions $f$ of the type
+
+$$
+f(t)=\sum_{k=1}^{p}c_{k}\,\mathrm{e}^{\lambda_{k}t}=:\sum_{k=1}^{p}c_{k}\,\mathrm{e}^{-\alpha_{k}t}\ \mathrm{e}^{\mathrm{i}\,\beta_{k}t},~~~~0\leq t\leq T, \tag{1}
+$$
+
+with the poles $\lambda_{k}=-\alpha_{k}+\mathrm{i}\,\beta_{k}\in\mathbb{C}$, damping factors $\alpha_{k}\in\mathbb{R}_{+}$, frequencies $\beta_{k}\in\mathbb{R}$, and coefficients $c_{k}\in\mathbb{C}$ for $k=1,\dots,p$, where $p\in\mathbb{N}$ is the number of poles. The damping results in a broadening of the spectral lines towards Lorentzian curves. Real-valued functions as a special case can be analyzed as well: Here, for each $k=1,\dots,p$ either $\lambda_{k},c_{k}\in\mathbb{R}$—these terms are non-oscillatory—or there exist $\lambda_{k^{\prime}},c_{k^{\prime}}$ such that $\lambda_{k^{\prime}}=\lambda_{k}^{*}$ and $c_{k^{\prime}}=c_{k}^{*}$. Clearly, such signals, in which the number of poles $p$ is small and finite, are ubiquitous, or in other instances provide an exceedingly well approximation of the underlying signal.
+
+```text
+Data: Discretized signal with components
+fj=∑k=1pck​eλk​Δ​t⋅jf_{j}=\sum_{k=1}^{p}c_{k}\,\mathrm{e}^{\lambda_{k}\Delta t\cdot j},
+j=0,…,N−1j=0,\dots,N-1, ck,λk∈ℂ,ℜ​𝔢​(λk)≤0c_{k},{\lambda_{k}\in\mathbb{C},}~{\mathfrak{Re}(\lambda_{k})\leq 0}.
+Result: Frequencies {λk}k=1p\{\lambda_{k}\}_{k=1}^{p} and coefficients {ck}k=1p\{c_{k}\}_{k=1}^{p}.
+```
+
+Algorithm 1 Matrix pencil algorithm.
+
+The idea of MPM is to determine the poles $\{\lambda_{k}\}$ independently from the coefficients $\{c_{k}\}$ and compare the discretized signal with its translates. Assume that all $c_{k}$ are nonzero and $\lambda_{j}\neq\lambda_{k}$ for $j\neq k$. First, sample the function $f$ equidistantly,
+
+$$
+f\mapsto(f_{j})_{j=0}^{N-1},~~~~f_{j}=\sum_{k=1}^{p}c_{k}\,\mathrm{e}^{\lambda_{k}\Delta t\cdot j}, \tag{2}
+$$
+
+with sampling interval $\Delta t>0$. In general, the higher the number of samples $N$, the more robust the procedure becomes towards noise and the higher the frequencies that can be reconstructed (Nyquist-Shannon sampling theorem [27])—at the expense of computational effort. For clearness, assume that $N$ is even. From the sampled signal, create the Hankel matrices $F^{(1)},F^{(2)}\in\mathbb{C}^{N/2\,\times\,N/2}$, defined as
+
+$$
+F^{(1)}:=(f_{j+k-2})_{j,k\,=\,1}^{N/2}=\begin{bmatrix}f_{0}&f_{1}&\dots&f_{N/2-1}\\ f_{1}&f_{2}&\dots&f_{N/2}\\ \vdots&\vdots&&\vdots\\ f_{N/2-1}&f_{N/2}&\dots&f_{N-2}\end{bmatrix} \tag{3}
+$$
+
+and
+
+$$
+F^{(2)}:=(f_{j+k-1})_{j,k\,=\,1}^{N/2}=\begin{bmatrix}f_{1}&f_{2}&\dots&f_{N/2}\\ f_{2}&f_{3}&\dots&f_{N/2+1}\\ \vdots&\vdots&&\vdots\\ f_{N/2}&f_{N/2+1}&\dots&f_{N-1}\end{bmatrix}. \tag{4}
+$$
+
+Note that for complex signals, the matrices $F^{(1)}$ and $F^{(2)}$ are symmetric but in general not Hermitian. In other implementations, $F^{(1)}$ and $F^{(2)}$ do not even need to be square. To keep the notation clear, we proceed with square matrices as just defined. Set $\mu_{k}:=\textrm{e}^{\lambda_{k}\Delta t}$ for $k=1,\dots,p$. It is easy to see that $F^{(1)}$ can be factorized as
+
+$$
+F^{(1)}=M\,D_{c}\,M^{T} \tag{5}
+$$
+
+with the Vandermonde matrix $M\in\mathbb{C}^{N/2\,\times\,p}$,
+
+$$
+M:=\big(\mu_{k}^{j}\big)_{\vbox{\Let@\restore@math@cr\default@tag\halign{\hfil$\m@th\scriptstyle#$&$\m@th\scriptstyle{}#$\cr j&=0,\dots,N/2-1\\ k&=1,\ldots,p\crcr}}}~=~\begin{bmatrix}1&1&\dots&1\\ \mu_{1}&\mu_{2}&\dots&\mu_{p}\\ \vdots&\vdots&&\vdots\\ \mu_{1}^{N/2-1}&\mu_{2}^{N/2-1}&\dots&\mu_{p}^{N/2-1}\end{bmatrix} \scriptstyle j \scriptstyle{}=0,\dots,N/2-1\\ k \tag{6}
+$$
+
+and diagonal matrix $D_{c}:=\textrm{diag}((c_{k})_{k=1}^{p})\in\mathbb{C}^{p\times p}$. The matrix $F^{(2)}$, on the other hand, can be decomposed as
+
+$$
+F^{(2)}=M\,D_{c}\,D_{\mu}\,M^{T} \tag{7}
+$$
+
+with $D_{\mu}:=\textrm{diag}((\mu_{k})_{k=1}^{p})\in\mathbb{C}^{p\times p}$. Note that Eqs. (5) and (7) are neither the eigenvalue nor the singular value decomposition of $F^{(1)}$ and $F^{(2)}$, respectively; the column vectors of $M$ do not even have to be orthogonal. We can see from these equations that both $F^{(1)}$ and $F^{(2)}$ have rank $p$, which will in general also be the case for the linear matrix pencil [28]
+
+$$
+F^{(2)}-\gamma F^{(1)}=M\,D_{c}\,(D_{\mu}-\gamma\mathbbm{1})\,M^{T}, \tag{8}
+$$
+
+unless $\gamma\in\mathbb{C}$ matches an element of the set $\{\mu_{k}\}_{k=1}^{p}$. Hence, all $\mu_{k}$ are solutions of the generalized eigenvalue problem (GEVP)
+
+$$
+F^{(2)}v=\gamma F^{(1)}v, \tag{9}
+$$
+
+with $v\in\mathbb{C}^{N/2}$. The matrix pair $(F^{(2)},F^{(1)})$ is in general regular and accordingly results in $N/2$ generalized eigenvalues [29]—not all of these correspond to a $\mu_{k}$. There are different extensions that take care of this issue and increase algorithmic stability (see, e.g., Ref. [30]). To make the algorithm accessible to an efficient quantum implementation, we will consider a specific MPM variant, the direct MPM [9]: We make use of the singular value decompositions of $F^{(1)}$ and $F^{(2)}$, keeping only the nonzero singular values and the corresponding singular vectors,
+
+$$
+F^{(i)}=U^{(i)}S^{(i)}V^{(i)\,\dagger},~~~~U^{(i)},V^{(i)}\in\mathbb{C}^{N/2\,\times\,p}, \tag{10}
+$$
+
+with $S^{(i)}\in\mathbb{C}^{p\times p}$ for $i=1,2$. This singular value decomposition of a Hankel matrix of size order $N\times N$ is the time-critical step of the entire algorithm and it scales with $\Theta(N^{2}\log N)$ using state-of-the-art classical algorithms [31, 32]. We multiply $U^{(1)\,\dagger}$ from the left and $V^{(1)}$ from the right to
+
+$$
+F^{(2)}-\gamma F^{(1)}=F^{(2)}-\gamma U^{(1)}S^{(1)}V^{(1)\,\dagger} \tag{11}
+$$
+
+and see that the resulting equivalent GEVP
+
+$$
+U^{(1)\,\dagger}F^{(2)}V^{(1)}\,w=\gamma\,S^{(1)}\,w, \tag{12}
+$$
+
+with $w\in\mathbb{C}^{p}$, yields exactly $\{\mu_{k}\}_{k=1}^{p}$ as eigenvalues and via $\lambda_{k}=\log(\mu_{k})/\Delta t$ the corresponding poles. The eigenvalues can be retrieved in $\Theta(p^{3})$ steps using the QZ algorithm [33]. Although in general it can be numerically favorable to solve the GEVP directly [29], $S^{(1)}$ is an invertible diagonal matrix and it is in practice sufficient to solve the equivalent ordinary eigenvalue problem
+
+$$
+(S^{(1)})^{-1}U^{(1)\,\dagger}F^{(2)}V^{(1)}\,w=\gamma\,w. \tag{13}
+$$
+
+The coefficients $\{c_{k}\}$ are linearly related to the signal and can be obtained by plugging $\{\mu_{k}\}_{k=1}^{p}$ into an overdetermined Vandermonde equation system,
+
+$$
+W\,c=\begin{bmatrix}1&1&\cdots&1\\ \mu_{1}&\mu_{2}&\cdots&\mu_{p}\\ \vdots&\vdots&&\vdots\\ \mu_{1}^{N-1}&\mu_{1}^{N-1}&\cdots&\mu_{p}^{N-1}\end{bmatrix}\cdot\begin{bmatrix}c_{1}\\ c_{2}\\ \vdots\\ c_{p}\end{bmatrix}=\begin{bmatrix}f_{0}\\ f_{1}\\ \vdots\\ f_{N-1}\end{bmatrix}, \tag{14}
+$$
+
+and computing the least squares solution
+
+$$
+\hat{c}:=\argmin_{\tilde{c}\in\mathbb{C}^{p}}\|W\tilde{c}-f\|_{2} \tag{15}
+$$
+
+in terms of the $2$-norm, $\|\cdot\|_{2}$, e.g. via applying the Moore-Penrose pseudoinverse $W^{+}:=(W^{\dagger}W)^{-1}W^{\dagger}$ to the signal vector $f$. Thus, all parameters that determine the signal are reconstructed.
+
+## III Quantum implementation
+
+In the following, we describe how to implement an efficient quantum analogue of the matrix pencil method.
+
+```text
+Data: Discretized signal with components
+fj=∑k=1pck​eλk​Δ​t⋅jf_{j}=\sum_{k=1}^{p}c_{k}\,\mathrm{e}^{\lambda_{k}\Delta t\cdot j},
+j=0,…,N−1j=0,\dots,N-1, ck,λk∈ℂ,ℜ​𝔢​(λk)≤0c_{k},{\lambda_{k}\in\mathbb{C},}~{\mathfrak{Re}(\lambda_{k})\leq 0} either from QRAM or encoded in a quantum state.
+Result: Frequencies {λk}k=1p\{\lambda_{k}\}_{k=1}^{p} and coefficients {ck}k=1p\{c_{k}\}_{k=1}^{p}.
+begin
+
+ 
+
+Perform concatenated phase estimations via exponentiating Hermitian matrices F~(1),F~(2)\widetilde{F}^{(1)},\widetilde{F}^{(2)} that contain the matrices F(1)F^{(1)}, F(2)F^{(2)}, respectively,
+yielding the pp biggest singular values and the
+overlaps {⟨uj(1)|uk(2)⟩}\{\langle u^{(1)}_{j}|u^{(2)}_{k}\rangle\} and {⟨vj(1)|vk(2)⟩}\{\langle v^{(1)}_{j}|v^{(2)}_{k}\rangle\} of the according left and right singular vectors.
+
+Construct the according matrices and solve the eigenvalue problem classically to obtain the poles {λk}\{\lambda_{k}\}.
+
+ 
+
+Build a fitting matrix from the poles and obtain the coefficients {ck}\{c_{k}\} via quantum linear fitting.
+```
+
+Algorithm 2 Quantum matrix pencil algorithm.
+
+For an efficient quantum algorithm, we assume that the number of poles $p$ is constant and small relative to the number of samples $N$, which is a natural setting since in practice, we are often interested in damped line spectra with fewer constituents and higher sampling rates for robustness towards noise. The guiding idea is to condense all arrays of size $O(N)$ in Eq. (13) into arrays of size $O(p)$ by rewriting the first term in Eq. (12),
+
+$$
+\begin{bmatrix}\ \rule[2.0pt]{30.00005pt}{0.6pt}\ \langle u_{1}^{(1)}|\ \rule[2.0pt]{30.00005pt}{0.6pt}\ \\ \raisebox{3.00003pt}{\vdots\rule[2.0pt]{60.00009pt}{0.0pt}\vdots}\\ \ \rule[2.0pt]{30.00005pt}{0.6pt}\ \langle u_{p}^{(1)}|\ \rule[2.0pt]{30.00005pt}{0.6pt}\ \end{bmatrix}\!\begin{bmatrix}\mbox{\vline height 3em width .6pt}&\raisebox{15.00002pt}{\ldots}&\mbox{\vline height 3em width .6pt}\\ |u_{1}^{(2)}\rangle&&|u_{p}^{(2)}\rangle\\ \mbox{\vline height 3em width .6pt}&\raisebox{15.00002pt}{\ldots}&\mbox{\vline height 3em width .6pt}\end{bmatrix}\!\begin{bmatrix}s_{1}^{(2)}&&0\\ &\ddots\\ 0&&s_{p}^{(2)}\end{bmatrix}\!\begin{bmatrix}\ \rule[2.0pt]{30.00005pt}{0.6pt}\ \langle v_{1}^{(2)}|\ \rule[2.0pt]{30.00005pt}{0.6pt}\ \\ \raisebox{3.00003pt}{\vdots\rule[2.0pt]{60.00009pt}{0.0pt}\vdots}\\ \ \rule[2.0pt]{30.00005pt}{0.6pt}\ \langle v_{p}^{(2)}|\ \rule[2.0pt]{30.00005pt}{0.6pt}\ \end{bmatrix}\!\begin{bmatrix}\mbox{\vline height 3em width .6pt}&\raisebox{15.00002pt}{\ldots}&\mbox{\vline height 3em width .6pt}\\ |v_{1}^{(1)}\rangle&&|v_{p}^{(1)}\rangle\\ \mbox{\vline height 3em width .6pt}&\raisebox{15.00002pt}{\ldots}&\mbox{\vline height 3em width .6pt}\end{bmatrix},
+$$
+
+as
+
+$$
+\begin{bmatrix}\langle u_{1}^{(1)}|u_{1}^{(2)}\rangle&\dots&\langle u_{1}^{(1)}|u_{p}^{(2)}\rangle\\ \vdots&&\vdots\\ \langle u_{p}^{(1)}|u_{1}^{(2)}\rangle&\dots&\langle u_{p}^{(1)}|u_{p}^{(2)}\rangle\end{bmatrix}\,\begin{bmatrix}s_{1}^{(2)}&&0\\ &\ddots\\ 0&&s_{p}^{(2)}\end{bmatrix}\,\begin{bmatrix}\langle v_{1}^{(2)}|v_{1}^{(1)}\rangle&\dots&\langle v_{1}^{(2)}|v_{p}^{(1)}\rangle\\ \vdots&&\vdots\\ \langle v_{p}^{(2)}|v_{1}^{(1)}\rangle&\dots&\langle v_{p}^{(2)}|v_{p}^{(1)}\rangle\end{bmatrix}=:\mathcal{U}\,S^{(2)}\,\mathcal{V}, \tag{16}
+$$
+
+with $\mathcal{U},\mathcal{V}\in\mathbb{C}^{p\times p}$. The singular values $\{s^{(j)}_{k}\}$ will be obtained via quantum phase estimation [34, 35], the overlaps $\langle v_{k}^{(i)}|v_{l}^{(j)}\rangle$ via two concatenated quantum phase estimations. The eigenvalue problem Eq. (13),
+
+$$
+(S^{(1)})^{-1}\mathcal{U}\,S^{(2)}\,\mathcal{V}\,w=\gamma\,w, \tag{17}
+$$
+
+is now determined by $2p^{2}$ complex and $2p$ real numbers, and can easily be evaluated classically in $\Theta(p^{3})$ operations, yielding the required poles ${\lambda_{k}=\log(\mu_{k})/\Delta t}$ for $k=1,\dots,p$. Thus, as other efficient quantum algorithms [36, 37], the classical result is a low-dimensional read-out quantity. Otherwise, the read-out costs would neutralize any performance gain in the algorithm. After that, the poles are used as input for a quantum linear fitting algorithm yielding the coefficients $\{c_{k}\}$. In the following, we describe the individual steps of the quantum algorithm in detail. We start by discussing the quantum preparation of the Hankel matrices.
+
+### III.1 Accessing the data
+
+In order to realize a quantum speedup, the signal has to be accessible in a fast and coherent way—otherwise, the read-in process alone would be too costly. The data input for the matrix pencil algorithm consists of a time series $(f_{j})_{j=0}^{N-1}$. We consider two crucially different approaches of data access/availability for the quantum algorithm, with the main focus of this work being on the first approach:
+
+i) The signal is stored in a quantum accessible form such as quantum RAM. In other words, we are provided with access to the operation
+  $$
+  \ket{j}\ket{0}\mapsto|j\rangle|f_{j}\rangle \tag{18}
+  $$
+  for $j=0,\dots,N-1$, with the signal values encoded in binary form in the second quantum register. In order to create the Hankel matrix $F^{(i)}=(f_{j+k+i-3})_{j,k\,=\,1}^{N/2}\in\mathbb{C}^{N/2\times N/2}$ and $i=1,2$, we can perform the following operation with straightforward index manipulations,
+  $$
+  \ket{j}\ket{k}\ket{i}\ket{0}\longmapsto\ket{j}\ket{k}\ket{i}\ket{f_{j+k+i-3}}. \tag{19}
+  $$
+  for $j,k=1,\dots,N/2$. The ancilla prepared in $\ket{i}$, $i=1,2$, will be used in an entirely classical manner. This operation can be used to simulate Hankel matrices via the non-sparse matrix simulation methods of [24, 38]. One way to implement signal access in Eq. (18) is via quantum random access memory (QRAM) [21, 22]. As discussed in Refs. [21, 22], the expected number of hardware elements that are activated in a QRAM call is $O(\polylog N)$. For each memory call, the amount of required energy and created decoherence thus scales logarithmically with the memory size. Note that because of their peculiar structure, $(N\times N)$-Hankel matrices require only $O(N)$ elements to be stored. In comparison, a general $s$-sparse matrix requires storage of $O(Ns)$ elements.
+ii) As a second approach, we have been given multiple copies of particular quantum state vectors encoding the data in their amplitudes. This approach does not require quantum RAM and operates using the quantum principal component algorithm. Importantly, our method then compares to the Quantum Fourier transform in the sense that it operates on a given initial state that contains the data to be transformed. The given state vectors have to be of a particular form such as
+  $$
+  |\chi^{(i)}\rangle=\frac{1}{\sqrt{C^{(i)}}}\sum_{j,k=1}^{N/2}|j\rangle|k\rangle\left(F^{(i)}_{j,k}|0\rangle+a^{(i)}(F^{(i)\dagger}F^{(i)})_{j,k}|1\rangle\right), \tag{20}
+  $$
+  with $C^{(i)}=(\|F^{(i)}\|_{2}^{2}+a^{(i)\;2}\|F^{(i)\dagger}F^{(i)}\|_{2}^{2})$ and a known scaling constant $a^{(i)}$ such that $(a^{(i)})^{-1}=O(\max_{j,k}|(F^{(i)\dagger}F^{(i)})_{j,k}|)$, where $\|F^{(i)}\|_{2}$ is the Frobenius norm of $F^{(i)}$. This state includes in its amplitudes information about the Hankel matrix $F^{(i)}$ and $F^{(i)\dagger}F^{(i)}$. The particular form of $|\chi^{(i)}\rangle$ will become clear in the next section. The advantages of the matrix pencil algorithm over the usual Fourier transform come at a price in the quantum algorithm: We require availability of the state vectors $|\chi^{(i)}\rangle$ instead of the signal state vector $\sum_{j}f_{j}\ket{j}$.
+
+In the next section, we show how the operation in Eq. (18) or, alternatively, multiple copies of $|\chi^{(i)}\rangle$ can be used to efficiently simulate a Hermitian matrix that encodes the eigenvalues and associated eigenvectors of the Hankel matrices.
+
+### III.2 Simulating the Hankel matrices
+
+We would like to obtain the singular values and vectors of $F^{(1)}$ and $F^{(2)}$ with a quantum speedup via phase estimation, which for real signals correspond, up to signs, to their eigenvalues and vectors. Since the procedure is the same for $F^{(1)}$ and $F^{(2)}$, for clarity we will drop the index in this section and use $F$ for both matrices. Phase estimation requires the repeated application of powers of a unitary operator generated by a Hermitian matrix to find the eigenvalues and eigenvectors of that matrix. Thus, we need to connect both Hankel matrices, generally non-Hermitian, to Hermitian matrices. Depending on the input source discussed in the previous section, this is done in different ways.
+
+Generally, since $F$ is not sparse, we cannot make use of the sparse simulation techniques described in Ref. [39]. Although both matrices have low rank $p\ll N$, they will in general not be positive definite, so that quantum principal component analysis [20] cannot readily be used either. Note that although $F^{\dagger}F$ and $FF^{\dagger}$ are positive definite, provide the correct singular vectors of $F$, and can be efficiently exponentiated, the phase relations between left and right singular vectors, which are necessary for the matrix pencil algorithm, are not preserved. This insight can be taken as yet another motivation to look for more general efficient methods to exponentiate matrices that exhibit a suitable structure, such as being low-rank, sparse or having a low tensor rank.
+
+For the oracular setting i), we construct a Hermitian matrix $\widetilde{F}$ and apply the unitary operator $\mathrm{e}^{-\mathrm{i}\,\widetilde{F}t}$ to an initial quantum state. Hereto, we employ the “extended matrix”
+
+$$
+\widetilde{F} := \left[\begin{array}[]{cc}0&F\\ F^{\dagger}&0\end{array}\right]\in\mathbb{C}^{N\times N},
+$$
+
+which is Hermitian by construction. Its eigenvalues correspond to the singular values $\pm s_{j},j=1,\dots,N/2$, of $F$ and its eigenvectors are proportional to $(u_{j},\pm v_{j})\in\mathbb{C}^{N}$. Importantly, the phase relations between left and right singular vectors are preserved. Note that an operation analogous to Eq. (18) for the extended matrix can be easily constructed from Eq. (18). The method developed in Ref. [24] allows us to exponentiate non-sparse Hermitian matrices in this oracular setting. Following their discussion, Eq. (III.2) is mapped to the corresponding entries of a modified swap matrix $S_{\widetilde{F}}$, which is applied on an initial state $\rho\otimes\sigma$ with auxiliary state $\rho:=(1/N)_{j,k=1}^{N}$. This is equivalent to just evolving $\sigma$ in time with the Hamiltonian $\widetilde{F}$ for small ${\Delta t>0}$, i.e. $\operatorname{tr}_{1}(\mathrm{e}^{-\mathrm{i}\,S_{\widetilde{F}}\Delta t}\ \rho\otimes\sigma\ \mathrm{e}^{\mathrm{i}\,S_{\widetilde{F}}\Delta t})\approx\mathrm{e}^{-\mathrm{i}\,\widetilde{F}\,\Delta t/N}\,\sigma\,\mathrm{e}^{\mathrm{i}\,\widetilde{F}\,\Delta t/N}.$ The modified swap matrix $S_{\widetilde{F}}$ is one-sparse within a quadratically larger space and can be efficiently exponentiated with the methods in Refs. [40, 41, 39] with a constant number of oracle calls and run time $\widetilde{O}(\log N)$, where we omit polylogarithmic factors in $O$ by use of the symbol $\widetilde{O}$. Achieving an accuracy $\epsilon>0$ for the eigenvalues requires
+
+$$
+O\left(\frac{\|\widetilde{F}\|_{\max}^{2}}{\epsilon^{3}}\right) \tag{24}
+$$
+
+steps in the algorithm [24], where $\|\widetilde{F}\|_{\max}$ denotes the maximal absolute element of $\widetilde{F}$. Note that in our setting $|\widetilde{F}_{j,k}|=O(1)$ and in particular $\|\widetilde{F}\|_{\max}=O(1)$. The run time is the number of steps multiplied by the run time of the swap matrix simulation, i.e. $\widetilde{O}\left(\log N/\varepsilon^{3}\right)$. In Appendix A we provide further details on this method. In Appendix B, we discuss an alternative approach [38].
+
+In the setting ii), where we are given multiple copies of state vectors, we proceed in a different way and are in a position to employ quantum principal component analysis. The state vector $|\chi\rangle$ can be reduced to a particular quantum density matrix as
+
+$$
+|\chi\rangle\langle\chi|\longmapsto\frac{1}{C}\left[\begin{array}[]{cc}FF^{\dagger}&a\,F(F^{\dagger}F)\\ a\,(F^{\dagger}F)F^{\dagger}&a^{2}\,(F^{\dagger}F)(F^{\dagger}F)\end{array}\right]=:G. \tag{25}
+$$
+
+with quantities $C=(\|F\|_{2}^{2}+a^{2}\|F^{\dagger}F\|_{2}^{2})$ and $a^{-1}=O(\max_{j,k}|(F^{\dagger}F)_{j,k}|)$ as before. In the same way,
+
+$$
+\frac{1}{C}\left[\begin{array}[]{cc}a^{2}\,(F^{\dagger}F)(F^{\dagger}F)&a\,F(F^{\dagger}F)\\ a\,(F^{\dagger}F)F^{\dagger}&FF^{\dagger}\end{array}\right]=:\widetilde{G} \tag{26}
+$$
+
+can be prepared from a permuted state vector $\ket{\widetilde{\chi}}$. The matrix $Z:=(G+\widetilde{G})/2$ is positive semi-definite with unit trace by construction, just as required by the quantum principal component algorithm. Invoking the singular value decomposition of $F=USV^{\dagger}$, its eigenvalues in terms of the singular values of $F$ are given by $s_{j}^{2}(as_{j}\pm 1)^{2}/(2C)$, its eigenvectors are $(u_{j},\pm v_{j})\in\mathbb{C}^{N}$. The matrix $Z$ has twice the rank of $F$. The application of QPCA then allows resolving its eigenvalues to an accuracy $\varepsilon>0$ using
+
+$$
+O\left(\frac{1}{\varepsilon^{3}}\right) \tag{27}
+$$
+
+copies of $|\chi\rangle$ and $\ket{\widetilde{\chi}}$ [20] for a total run time of again $\widetilde{O}\left(\log N/\varepsilon^{3}\right)$. In Appendix C, we provide further details on this method.
+
+Both the oracular and the QPCA setting can be employed in quantum phase estimation to obtain the singular values and associated singular vectors of the Hankel matrices in quantum form. Phase estimation allows the preparation of
+
+$$
+\sum_{k=1}^{2p}\beta_{k}\ket{s_{k}}\ket{u_{k},v_{k}}, \tag{28}
+$$
+
+where $F=USV^{\dagger}$ is the singular value decomposition with right and left singular vectors $u_{k}$ and $v_{k}$. The associated singular value $s_{k}$ is encoded in a register. The $\beta_{k}$ arise from the choice of the initial state. The next section describes concretely how consecutive phase estimation steps are used for the matrix pencil algorithm as a building block to obtain the signal poles and expansion coefficients.
+
+### III.3 Twofold phase estimation
+
+In this section, we describe how to obtain the singular vector overlaps $\{\mathcal{U}_{j,k}\}$ and $\{\mathcal{V}_{j,k}\}$. Hereto, we perform two concatenated phase estimation procedures to obtain states that encode these overlaps in their amplitudes, which are essentially determined by tomography. It is important to pay attention to the correct phase relations between the overlaps. Phase estimation is applied to a specific initial state and an additional eigenvalue register. Initial states with large overlap with the eigenstates of $\widetilde{F}$ or $Z$, respectively, can be prepared efficiently. For example, $FF^{\dagger}/{\rm tr}(FF^{\dagger})\ket{0}\!\bra{0}$ or $F^{\dagger}F/{\rm tr}(F^{\dagger}F)\ket{1}\!\bra{1}$ are suitable initial states and can be prepared from the oracle Eq. (18) [20]. For both initial states, the trace with an eigenvector $\ket{u_{k},v_{k}}$ is $\sigma_{k}^{2}/(2\sum_{j}\sigma_{j}^{2})$. Alternatively, if we have been given multiple copies of $\ket{\chi}$, we can simply take $Z$ to be the initial state [20].
+
+We append two registers for storing the singular values to the initial state, obtaining $\ket{0}\ket{0}\ket{\psi_{0}}$ with the notation $\ket{0}:=\ket{0,\ldots,0}$, and perform the phase estimation algorithm with $\textrm{e}^{-\mathrm{i}\,S_{\tilde{F}^{(2)}}\,\Delta t}$ as a unitary operator to obtain a state proportional to
+
+$$
+\sum_{k=1}^{2p}\braket{u_{k}^{(2)},v_{k}^{(2)}|\psi_{0}}\ket{0}\ket{s_{k}^{(2)}}\ket{u_{k}^{(2)},v_{k}^{(2)}}, \tag{29}
+$$
+
+where for clarity we order the eigenspaces such that positive singular values are put first, i.e. $s_{k+p}^{(2)}=-s_{k}^{(2)}$, $u^{(2)}_{k+p}=u^{(2)}_{k}$, and $v^{(2)}_{k+p}=-v^{(2)}_{k}$ for $k=1,\dots,p$. To obtain the overlaps of the matrices $U^{(1)}$ and $U^{(2)}$, the $v$-part of the eigenvector of $\widetilde{F}^{(2)}$ is projected out, yielding
+
+$$
+\ket{\psi_{1}}=\frac{1}{\nu_{1}}\sum_{k=1}^{2p}\braket{u_{k}^{(2)},v_{k}^{(2)}|\psi_{0}}\ket{0}\ket{s_{k}^{(2)}}\ket{u_{k}^{(2)},0}=:\sum_{j=1}^{2p}g_{k}\ket{0}\ket{s_{k}^{(2)}}\ket{u_{k}^{(2)},0} \tag{30}
+$$
+
+with normalization factor $\nu_{1}\in\mathbb{R}_{+}$ and $\sum_{k=1}^{2p}|g_{k}|^{2}=1$. Each singular value $s_{k}^{(2)}\in\mathbb{R}_{+}$ can be determined efficiently from this with accuracy $\epsilon_{\sigma}$ in a runtime of $\tilde{O}(\log N/\epsilon_{\sigma}^{3})$ (cf. Sec. III.2). We need to determine the amplitudes $\{g_{k}\}$, which have to be removed from the overlap values. For this, we essentially perform standard tomography of the quantum state Eq. (30). The singular register vectors $\{\ket{s_{k}^{(2)}}\}_{k=1}^{2p}$ are pairwise orthogonal, so that the amplitudes $\{g_{k}\}_{k=1}^{p}$ can be efficiently obtained—up to a global complex phase $\mathrm{e}^{\mathrm{i}\,\vartheta_{1}}$—via measurements e.g. of the form
+
+$$
+\ket{s^{(2)}_{k_{1}}}\bra{s^{(2)}_{k_{1}}},~~~\ket{s^{(2)}_{k_{2}}}\bra{s^{(2)}_{k_{2}}},~~~(\ket{s^{(2)}_{k_{1}}}+\ket{s^{(2)}_{k_{2}}})(\bra{s^{(2)}_{k_{1}}}+\bra{s^{(2)}_{k_{2}}}),~~~(\ket{s^{(2)}_{k_{1}}}-\mathrm{i}\ket{s^{(2)}_{k_{2}}})(\bra{s^{(2)}_{k_{1}}}+\mathrm{i}\bra{s^{(2)}_{k_{2}}}), \tag{31}
+$$
+
+with probabilities
+
+$$
+|g_{k_{1}}|^{2},~~~|g_{k_{2}}|^{2},~~~|g_{k_{1}}|^{2}+|g_{k_{2}}|^{2}+2\,\mathfrak{Re}(g_{k_{1}}g_{k_{2}}^{*}),~~~|g_{k_{1}}|^{2}+|g_{k_{2}}|^{2}+2\,\mathfrak{Im}(g_{k_{1}}g_{k_{2}}^{*}), \tag{32}
+$$
+
+respectively. Suppose $g_{k_{1}}$ is known. Then $g_{k_{2}}$ can easily be obtained from Eq. (32). Hence, by fixing one global phase $\mathrm{e}^{\mathrm{i}\,\vartheta_{1}}$ (e.g. corresponding to $g_{1}\overset{!}{=}+|g_{1}|\,$), all values $\{g_{k}\}_{k=1}^{2p}$ are unambiguously determined. Requiring an accuracy
+
+$$
+\varepsilon_{g}={\mathbb{V}(g)}^{1/2}/\mathbb{E}(g) \tag{33}
+$$
+
+of the probabilities in Eq. (32) for $k=1,\dots,p$, we require $O(\xi_{g}/\varepsilon_{g}^{2})$ measurement repetitions for each amplitude, denoting the ratio of the biggest over the smallest probability with $\xi_{g}$. We thus have established the values
+
+$$
+g_{k}\mathrm{e}^{\mathrm{i}\,\vartheta_{1}}=\braket{u_{k}^{(2)},v_{k}^{(2)}|\psi_{0}}\frac{\mathrm{e}^{\mathrm{i}\,\vartheta_{1}}}{\nu_{1}},~~~k=1,\dots,2p. \tag{34}
+$$
+
+Next, the state vector $\ket{\psi_{1}}$ is used as input for a second phase estimation procedure with $\mathrm{e}^{-\mathrm{i}\,S_{\widetilde{F}^{(1)}}\Delta t}$ as unitary operator, yielding
+
+$$
+\ket{\psi_{2}}=\frac{1}{\nu_{2}} \sum_{j,k=1}^{2p}\braket{u_{k}^{(2)},v_{k}^{(2)}|\psi_{0}}\braket{u_{j}^{(1)},v_{j}^{(1)}|u_{k}^{(2)},0}\ket{s_{j}^{(1)}}\ket{s_{k}^{(2)}}\ket{u_{j}^{(1)},v_{k}^{(1)}}
+$$
+$$
+=: \sum_{j,k=1}^{2p}h_{j,k}\ket{s_{j}^{(1)}}\ket{s_{k}^{(2)}}\ket{u_{j}^{(1)},v_{k}^{(1)}} \tag{35}
+$$
+
+with normalization factor $\nu_{2}\in\mathbb{R}_{+}$ and $\sum_{j,k=1}^{2p}|h_{j,k}|^{2}=1$. The inner product $\braket{u_{j}^{(1)},v_{k}^{(1)}|u_{k}^{(2)},0}$ reduces to $\braket{u_{j}^{(1)}|u_{k}^{(2)}}$ with vectors in $\mathbb{C}^{N}$. The same way as above, we determine the singular values $\{s_{j}^{(1)}\}$ and the values
+
+$$
+h_{j,k}\mathrm{e}^{\mathrm{i}\,\vartheta_{2}}=\braket{u_{k}^{(2)},v_{k}^{(2)}|\psi_{0}}\braket{u_{j}^{(1)}|u_{k}^{(2)}}\frac{\mathrm{e}^{\mathrm{i}\,\vartheta_{2}}}{\nu_{2}},~~~j,k=1,\dots,2p, \tag{36}
+$$
+
+up to $\varepsilon_{h}$ with global phase $\mathrm{e}^{\mathrm{i}\,\vartheta_{2}}$ with $O(\xi_{h}/{\varepsilon_{h}^{2}})$ repetitions for each amplitude. Dividing the values in Eq. (36) by the ones in Eq. (34), we obtain
+
+$$
+\mathcal{U}_{j,k}\,\nu_{\mathcal{U}}\,\mathrm{e}^{\mathrm{i}\,\vartheta_{\mathcal{U}}}=\braket{u_{j}^{(1)}|u_{k}^{(2)}}\nu_{\mathcal{U}}\,\mathrm{e}^{\mathrm{i}\,\vartheta_{\mathcal{U}}},~~~j,k=1,\dots,2p, \tag{37}
+$$
+
+with $\vartheta_{\mathcal{U}}:=\vartheta_{2}-\vartheta_{1}$, $\nu_{\mathcal{U}}:=\nu_{1}/\nu_{2}$ and accuracy $\sim\varepsilon_{g}+\varepsilon_{h}$. The established overlaps
+
+$$
+\braket{u_{j}^{(1)}|u_{k}^{(2)}},~\braket{u_{j+p}^{(1)}|u_{k}^{(2)}},~\braket{u_{j}^{(1)}|u_{k+p}^{(2)}},~\braket{u_{j+p}^{(1)}|u_{k+p}^{(2)}} \tag{38}
+$$
+
+correspond to the same matrix entry of $\mathcal{U}$ for $j,k=1,\dots,p$ and can be averaged over. This way, the matrix $\mathcal{U}$ is determined up to a global phase and a normalization factor. Repeating the entire procedure, but with projecting out the $u$-part,
+
+$$
+\ket{u_{k}^{(2)},v_{k}^{(2)}}\mapsto\ket{0,v_{k}^{(2)}},~~k=1,\dots,2p, \tag{39}
+$$
+
+yields all overlaps $\{\braket{v_{j}^{(1)}|v_{k}^{(2)}}\}_{j,k=1}^{p}$, the entries of $\mathcal{V}$, up to a factor $\nu_{\mathcal{V}}\,\textrm{e}^{\textrm{i}\vartheta_{\mathcal{V}}}$. Note that
+
+$$
+\braket{v_{j}^{(1)}|v_{k}^{(2)}}=-\braket{v_{j+p}^{(1)}|v_{k}^{(2)}}=-\braket{v_{j}^{(1)}|v_{k+p}^{(2)}}=\braket{v_{j+p}^{(1)}|v_{k+p}^{(2)}} \tag{40}
+$$
+
+for $j,k=1,\dots,p$ because the $v$-parts of the $\widetilde{F}^{(i)}$ eigenvectors from $k=1,\dots,p$ and $k=p+1,\dots,2p$ have opposite signs. For real-valued signals and Hermitian $F^{(i)}$, we can perform the procedure with $\textrm{e}^{-\mathrm{i}\,S_{F^{(i)}}\,\Delta t}$ instead of $\textrm{e}^{-\mathrm{i}\,S_{\widetilde{F}^{(i)}}\,\Delta t}$ and do not need to project the $u$- and $v$-parts.
+
+In summary, we have determined the singular values forming matrix $S^{(i)}$ to accuracy $\epsilon_{\sigma}$ in time $\widetilde{O}(p/\epsilon_{\sigma}^{3})$. In addition, we have determined the overlaps of the right and left singular vectors of the two Hankel matrices $F^{(1)}$ and $F^{(2)}$. The required number of repetitions is
+
+$$
+n_{\mathcal{U}}=O\left(\frac{p}{\varepsilon_{g}^{2}}\xi_{g}+\frac{p^{2}}{\varepsilon_{h}^{2}}\xi_{h}\right) \tag{41}
+$$
+
+for obtaining the entries of $\mathcal{U}$ and analogously $n_{\mathcal{V}}$ for obtaining the entries of $\mathcal{V}$. With
+
+$$
+{\color[rgb]{0,0,0}n_{\phi}=\widetilde{O}\left(\frac{\log N}{\varepsilon^{3}}\right)} \tag{42}
+$$
+
+for the cost of the phase estimation, this leads to a total run time of
+
+$$
+{\color[rgb]{0,0,0}n:=n_{\phi}\,(n_{\mathcal{U}}+n_{\mathcal{V}})\,=\widetilde{O}\left(\frac{p^{2}\,\xi\,}{\varepsilon^{5}}\log N\right),} \tag{43}
+$$
+
+with $\xi:=\max\,\{\xi_{g},\xi_{h}\}$. The performance scales as $n=O({\rm poly}\log N)$ for example in the following regime: First, the number of poles is small compared to $N$, which is a natural regime, as mentioned above; second, regarding $\xi$, if the overlaps are of the same order of magnitude, $\xi=O({\rm poly}\log N)$; and third, an error $1/\varepsilon=O({\rm poly}\log N)$ can be tolerated.
+
+### III.4 Solving the small classical problem
+
+Having determined the values via phase estimation, the reconstructed eigenvalue equation (17) now reads
+
+$$
+\hat{\mathcal{F}}\,w:=\nu_{\mathcal{U}}\nu_{\mathcal{V}}\textrm{e}^{\textrm{i}(\vartheta_{\mathcal{U}}+\vartheta_{\mathcal{V}})}\ (S^{(1)})^{-1}\mathcal{U}\,S^{(2)}\,\mathcal{V}\,w=\gamma\,w. \tag{44}
+$$
+
+All (scaled) matrix entries of Eq. (44) are available classically and we can solve the problem with a classical algorithm [33] running with time $O(p^{3})$. The errors in the matrix entries are amplified within the entries of the matrix product entries $\hat{\mathcal{F}}_{j,k}$ by a factor of $\mathrm{poly}\ p$ at worst. Taking the inverse of $S^{(1)}$ amounts to inverting its diagonal entries, hence the relative errors of $(S^{(1)})^{-1}_{j,j}$ are unchanged. These are only small if the effective singular values of $F^{(1)}$ (the ones bigger than a suitable threshold $\theta_{1}$) are sufficiently bigger than zero, resulting in a condition number of $S^{(1)}$ bounded by $\max_{j}(S^{(1)}_{j,j})/\theta_{1}$. $\mathcal{F}$ as well as the perturbed matrix $\hat{\mathcal{F}}=\mathcal{F}+\Delta\mathcal{F}$ will in general not be normal, but diagonalizable: $\mathcal{F}=X\,\mathrm{diag}(\lambda_{j})\,X^{-1}$. According to the Bauer-Fike theorem [42], we can order the eigenvalues $\{\hat{\lambda}_{j}\}$ of $\hat{\mathcal{F}}$ such that
+
+$$
+|\lambda_{j}-\hat{\lambda}_{j}|\leq\kappa(X)\|\mathcal{F}-\hat{\mathcal{F}}\|_{2} \tag{45}
+$$
+
+for $j=1,\dots,p$, where $\kappa(X):=\|X\|_{2}\|X^{-1}\|_{2}$ is the condition number of $X$, which represents the amplification factor of the matrix perturbation towards the perturbation of the eigenvalues. The matrix perturbation contributes linearly, while the condition number of $X$, which is independent of the perturbation $\Delta\mathcal{F}$, is related to the condition of the underlying inverse spectral estimation problem. This could in principle be ill-conditioned (e.g. for the reconstruction of extremely small or highly damped spectral components relative to the other ones), but we are more concerned with problems that are also of interest in the classical world and hence sufficiently well-conditioned. Note that $p$, the number of poles, is small by assumption so that this classical step does not pose a computational bottleneck for the algorithm. For noisy signals, the rank of $F^{(i)}$ will in general be larger than $p$, $F^{(i)}$ could even be full rank—for not too large noise, however, the additional noise components will remain small such that the effective rank will still be at $p$. Since only the biggest components of $F^{(i)}$ are taken into account, this results in a rank-$p$ approximation that is best in the Frobenius norm sense (Eckart-Young theorem [43]) and an effective noise filtering of the underlying signal.
+
+The eigenvalues $\gamma_{k}$ of Eq. (44) are determined up to $\textrm{e}^{-\textrm{i}(\varphi_{\mathcal{U}}+\varphi_{\mathcal{V}})-\log(\nu_{\mathcal{U}}\nu_{\mathcal{V}})}$, which corresponds to a uniform translation of all poles. We can take care of this ambiguity by introducing an additional reference pole $\lambda_{\textrm{ref}}:=0$ (corresponding to the eigenvalue $\mu_{\mathrm{ref}}=1$) that has to be incorporated into the original signal. This can easily be achieved by adding any constant to the original signal vector (its normalizability is not affected). Since for exponentially damped signals $\mathfrak{Re}(\lambda_{k})\leq 0$ holds for each $k$, the eigenvalue $\gamma_{\mathrm{ref}}$ corresponding to the reference pole will still be identifiable as the one with the biggest absolute value $|\gamma_{k}|$. Simply dividing all $\gamma_{k}$ by $\gamma_{\mathrm{ref}}$ (corresponding to the transformation $\lambda_{k}\Delta t\mapsto\lambda_{k}\Delta t+\textrm{i}(\varphi_{\mathcal{U}}+\varphi_{\mathcal{V}})+\log(\nu_{\mathcal{U}}\nu_{\mathcal{V}})$ for each $k$) then yields the correct values $\{\mu_{k}\}$ and poles.
+
+### III.5 Quantum linear fitting
+
+We feed the poles back into the quantum world by using the quantum fitting algorithm described in Refs. [25, 26] to obtain the coefficients $\{c_{k}\}$ in $O(\log(N)p)$ steps and hence the entire parametrization of the input function. We consider real and imaginary parts of the signal $f$, the poles $\lambda_{k}\,\Delta t=:-\alpha_{k}+\mathrm{i}\,\beta_{k}$ and the coefficients $c_{k}=a_{k}+\mathrm{i}\,b_{k}$ separately, and Eq. (14) becomes
+
+$$
+\widetilde{W}\,\tilde{c}=\tilde{f} \tag{46}
+$$
+
+with
+
+$$
+\widetilde{W}:=\begin{bmatrix}\mathrm{e}^{-\alpha_{1}\cdot 0}\cos(\beta_{1}\cdot 0)&\dots&\mathrm{e}^{-\alpha_{p}\cdot 0}\cos(\beta_{p}\cdot 0)&-\mathrm{e}^{-\alpha_{1}\cdot 0}\sin(\beta_{1}\cdot 0)&\dots&-\mathrm{e}^{-\alpha_{p}\cdot 0}\sin(\beta_{p}\cdot 0)\\ \vdots&&\vdots&\vdots&&\vdots\\ \mathrm{e}^{-\alpha_{1}\cdot\widetilde{N}}\cos(\beta_{1}\!\cdot\!\widetilde{N})&\dots&\mathrm{e}^{-\alpha_{p}\cdot\widetilde{N}}\cos(\beta_{p}\!\cdot\!\widetilde{N})&-\mathrm{e}^{-\alpha_{1}\cdot\widetilde{N}}\sin(\beta_{1}\!\cdot\!\widetilde{N})&\dots&-\mathrm{e}^{-\alpha_{p}\cdot\widetilde{N}}\sin(\beta_{p}\!\cdot\!\widetilde{N})\\ \mathrm{e}^{-\alpha_{1}\cdot 0}\sin(\beta_{1}\cdot 0)&\dots&\mathrm{e}^{-\alpha_{p}\cdot 0}\sin(\beta_{p}\cdot 0)&\mathrm{e}^{-\alpha_{1}\cdot 0}\cos(\beta_{1}\cdot 0)&\dots&\mathrm{e}^{-\alpha_{p}\cdot 0}\cos(\beta_{p}\cdot 0)\\ \vdots&&\vdots&\vdots&&\vdots\\ \mathrm{e}^{-\alpha_{1}\cdot\widetilde{N}}\sin(\beta_{1}\!\cdot\!\widetilde{N})&\dots&\mathrm{e}^{-\alpha_{p}\cdot\widetilde{N}}\sin(\beta_{p}\!\cdot\!\widetilde{N})&\mathrm{e}^{-\alpha_{1}\cdot\widetilde{N}}\cos(\beta_{1}\!\cdot\!\widetilde{N})&\dots&\mathrm{e}^{-\alpha_{p}\cdot\widetilde{N}}\cos(\beta_{p}\!\cdot\!\widetilde{N})\end{bmatrix},
+$$
+
+$$
+\widetilde{W}:=(w_{j,k})=\begin{bmatrix}(\mathfrak{Re}\,\mu_{k}^{j-1})&(-\mathfrak{Im}\,\mu_{k}^{j-1})\\ (\mathfrak{Im}\,\mu_{k}^{j-1})&(\mathfrak{Re}\,\mu_{k}^{j-1})\end{bmatrix}\in\mathbb{R}^{2N\times 2p},~~~\tilde{c}:=\begin{bmatrix}\mathfrak{Re}\,c_{1}\\ \vdots\\ \mathfrak{Re}\,c_{p}\\ \mathfrak{Im}\,c_{1}\\ \vdots\\ \mathfrak{Im}\,c_{p}\end{bmatrix}\in\mathbb{R}^{2p},~~~\tilde{f}:=\begin{bmatrix}\mathfrak{Re}\,f_{0}\\ \vdots\\ \mathfrak{Re}\,f_{\widetilde{N}}\\ \mathfrak{Im}\,f_{0}\\ \vdots\\ \mathfrak{Im}\,f_{\widetilde{N}}\end{bmatrix}\in\mathbb{R}^{2N},
+$$
+
+and $\widetilde{N}:=N-1$. The vector $2$-norm of the $k$-th column of $\widetilde{W}$ can be established in closed form as
+
+$$
+\frac{1-\mathrm{e}^{-2\alpha_{k}N}}{1-\mathrm{e}^{-2\alpha_{k}}}\textrm{,~if~}\alpha_{k}>0,~~~\textrm{and~~}N\textrm{,~if~}\alpha_{k}=0. \tag{47}
+$$
+
+Hence, $\|\widetilde{W}\|_{2}$ can be computed in time $O(p)$. We will rescale the solution for $c$ such that we can assume that $\|\widetilde{W}\|_{2}=1$. The norms of matrices $\|\widetilde{W}\|_{2}$ for real-valued signals can be calculated as well by combining the norms of the $k$-th with the $(k+p)$-th column. Since each row consists of $2p$ elements, the row norms can be computed in $O(p)$ as well.
+
+Since $\alpha:=(\alpha_{k}),\beta:=(\beta_{k})$ are known, we can construct a quantum oracle, providing quantum access to the matrix entries $w_{j,k}(\alpha,\beta)$,
+
+$$
+\ket{\alpha}\ket{\beta}\ket{j}\ket{k}\ket{0}\,\longmapsto\,\ket{\alpha}\ket{\beta}\ket{j}\ket{k}\ket{w_{j,k}(\alpha,\beta)}{\color[rgb]{0,0,0}.} \tag{48}
+$$
+
+The matrix $\widetilde{W}$ can be prepared as a state vector
+
+$$
+\ket{w}=\sum_{j=1}^{2N}\sum_{k=1}^{2p}w_{j,k}\ket{j}\ket{k} \tag{49}
+$$
+
+following the procedure described in Ref. [26] with time $\widetilde{O}(\polylog(N)\,p\,\xi_{W}\log(1/\zeta))$, where $\zeta$ is the accuracy of the preparation of $\ket{w}$ and
+
+$$
+\xi_{W}:=\max\|w_{j}\|_{2}/\min\|w_{j}\|_{2}. \tag{50}
+$$
+
+Here, we set $\widetilde{O}(g(N)):=O(g(N)\polylog(g(N)))$ for functions $g$. For the preparation of $\ket{\tilde{f}}$, we require time $\widetilde{O}(\polylog(N)\,\xi_{f}\log(1/\zeta))$ with
+
+$$
+\xi_{f}:=\max|\tilde{f}_{j}|/\min|\tilde{f}_{j}|. \tag{51}
+$$
+
+With $\ket{w}$ and $\ket{f}$ prepared, we then can proceed as described in Ref. [26, Th. 2,3] and obtain with probability bigger than $2/3$ an estimate $\hat{c}$ in time $\allowbreak\widetilde{O}(\polylog(N)\kappa_{W}p^{3/2}(\sqrt{2p}\xi_{f}/\varepsilon+\kappa_{W}^{2}\xi_{f}/\Phi+\kappa_{W}^{6}(2p)^{5}\xi_{W}/\varepsilon^{4}\Phi)/\\ \varepsilon\Phi)$, with 2-norm accuracy $\varepsilon$, $\kappa_{W}=\|\widetilde{W}\|_{2}/\|\widetilde{W}^{+}\|_{2}$, and norm $\Phi$ of the projection of $\tilde{f}$ onto the column space of $\widetilde{W}$, the fit quality. Importantly, we can estimate the quality of the fit with time $\widetilde{O}(\polylog(N)(\xi_{f}+\xi_{W}(2p)^{3}\kappa_{W}^{4}/\varepsilon)/\varepsilon)$. Note that sampling $\hat{c}$ is efficient because it comprises $O(p)$ components. Altogether, we have determined the sought-after coefficients and hence all parameters that characterize the signal $f$ in $\polylog N$. This concludes the description of the quantum matrix pencil algorithm.
+
+## IV Summary and discussion
+
+We have developed a quantum implementation of an important algorithm for spectral estimation, the matrix pencil method, taking a tool from signal processing to the quantum world and significantly improving upon the effort required. Given the arguable scarcity of quantum algorithms with this feature, progress in this respect seems highly desirable. The quantum MPM is a useful alternative to quantum Fourier transform in many practical applications, in the same way that classical MPMs and related algorithms are useful alternatives to the classical Fourier transform. This is especially the case for signals with close damped poles and limited total sampling time.
+
+For a signal given by $N$ equidistant samples, we have made use of the fact that the eigenvalue problem Eq. (17) consisted of large matrices of size $O(N)$ that could, however, be contracted into manageable matrices of size $O(p)$ via concatenated use quantum phase estimations in $O(\polylog N)$. This justifies the use of a quantum version of the matrix pencil method as opposed to quantum versions of related algorithms like Prony’s method, where the $p$ quantities leading the corresponding poles are determined in a later step, during the fitting of the coefficients, and the critical step would already be $O(\mathrm{poly}N)$.
+
+The quantum phase estimation was shown to be implementable in two complementary ways: either by retrieving the input signal via quantum oracle calls such as QRAM, or by using multiple copies of a state with the signal encoded in its amplitudes for quantum principal component analysis. The employed extended matrix construction allows for exponentiating more general matrices via QPCA that are not positive semidefinite. This provides a useful new primitive also for other quantum algorithms.
+
+The actual step to determine the poles from an eigenvalue problem of a $p\times p$ matrix can be performed classically since $p$ is assumed to be small. Subsequently, feeding back the established poles into a quantum fitting algorithm allows the coefficients of the signal again to be determined efficiently in $O(\polylog N)$. This way, we have an effective division of labor between classical and quantum algorithms, to the extent that such a hybrid algorithm is possible efficiently. Classical intermediate steps are for example reminiscent of quantum error correction, where error syndromes are measured and the quantum state is processed according to the classical measurement results [44].
+
+The outlined procedure is generalizable to arbitrary signal dimensions $d$, i.e. signals of the type $f(t_{1},\dots,t_{d})=\sum_{k_{1},\dots,k_{d}=1}^{p}c_{k_{1},\dots,k_{d}}\,\mathrm{e}^{\lambda_{k_{1}}t_{1}+\dots+\lambda_{k_{d}}t_{d}}$, with $c\in{\mathbb{C}^{p}}^{\,d}$ by suitable tensor contractions of the array of signal samples $(f_{j_{1},\dots,j_{d}})_{\{j_{l}\}=0}^{N-1}$ [5] or fixing all time indices but one and applying the MPM on the remaining vector. This yields the sought-after poles since they are the same for the different time indices $t_{i}$. For time index-dependent poles, one can consider “enhanced matrices”—embeddings of Hankel matrices that correspond to one-dimensional projections of the multidimensional signal within a larger block Hankel matrix—as in Ref. [45]. There are many potential applications for this, e.g. in radar imaging and geophysics [46]. We expect the methods and primitives that we develop and introduce here to be highly useful also when devising other quantum algorithms. This includes the computation of overlaps by suitably concatenating quantum phase estimation procedures and the efficient exponentiation of structured matrices on a quantum computer. We hope that the present work stimulates such further research.
+
+## Acknowledgments
+
+AS thanks the German National Academic Foundation (Studienstiftung des deutschen Volkes) and the Fritz Haber Institute of the Max Planck Society for support. SL and PR were supported by ARO and AFOSR. JE thanks the Templeton Foundation, the DFG (CRC 183, EI 519/7-1), the ERC (TAQ), and the EC (RAQUEL, AQuS) for support.
+
+## References
+
+[1] M. Karski, L. Förster, J. M. Choi, W. Alt, A. Widera, and D. Meschede. Nearest-neighbor detection of atoms in a 1d optical lattice by fluorescence imaging. Phys. Rev. Lett., 102:053001, 2009.
+
+[2] K. Naishadham and J. E Piou. A robust state space model for the characterization of extended returns in radar target signatures. IEEE Trans. Ant. Prop., 56:1742–1751, 2008.
+
+[3] V. Viti, C. Petrucci, and P. Barone. Prony methods in NMR spectroscopy. Int. J. Im. Sys. Tech., 8:565–571, 1997.
+
+[4] I. Maravic, J. Kusuma, and M. Vetterli. Low-sampling rate UWB channel characterization and synchronization. J. Comm. Net., 5:319–327, 2003.
+
+[5] A. Steffens, C. A. Riofrío, R. Hübener, and J. Eisert. Quantum field tomography. New J. Phys., 16:123010, 2014.
+
+[6] A. Steffens, M. Friesdorf, T. Langen, B. Rauer, T. Schweigler, R. Hübener, J. Schmiedmayer, C. A. Riofrío, and J. Eisert. Towards experimental quantum field tomography with ultracold atoms. Nature Comm., 6:7663, 2015.
+
+[7] Z. Leonowicz, T. Lobos, and J. Rezmer. Advanced spectrum estimation methods for signal analysis in power electronics. IEEE Trans. Ind. Elec., 50:514–519, 2003.
+
+[8] X. Andrade, J. N. Sanders, and A. Aspuru-Guzik. Application of compressed sensing to the simulation of atomic systems. Proc. Nat. Ac. Sc., 109:13928–13933, 2012.
+
+[9] Y. Hua and T. K Sarkar. Matrix pencil method for estimating parameters of exponentially damped/undamped sinusoids in noise. IEEE Trans. Sig. Proc., 38:814–824, 1990.
+
+[10] B. G. R. de Prony. Essai éxperimental et analytique: sur les lois de la dilatabilité de fluides élastique et sur celles de la force expansive de la vapeur de l’alkohol, a différentes températures. J. Ec. Poly., 1:24–76, 1795.
+
+[11] R. O. Schmidt. Multiple emitter location and signal parameter estimation. IEEE Trans. Ant. Prop., 34:276–280, 1986.
+
+[12] R. Roy and T. Kailath. Esprit-estimation of signal parameters via rotational invariance techniques. IEEE Trans. Sig. Proc., 37:984–995, 1989.
+
+[13] B. N. Bhaskar, G. Tang, and B. Recht. Atomic norm denoising with applications to line spectral estimation. IEEE Trans. Sig. Proc., 61:5987–5999, 2013.
+
+[14] J.-I. Park and K.-T. Kim. A comparative study on ISAR imaging algorithms for radar target identification. Prog. El. Res., 108:155–175, 2010.
+
+[15] J. E. F. del Río and T. K. Sarkar. Comparison between the matrix pencil method and the Fourier transform technique for high-resolution spectral estimation. Digit. Sig. Proc., 6:108–125, 1996.
+
+[16] F. A. Baqai and Y. Hua. Matrix pencil methods for ISAR image reconstruction. In Acoustics, Speech, and Signal Processing, 1993. ICASSP-93., 1993 IEEE International Conference on, volume 5, pages 473–476. IEEE, 1993.
+
+[17] M. A. Nielsen and I. L. Chuang. Quantum computation and quantum information. Cambridge University Press, 2010.
+
+[18] J. W. Cooley and J. W. Tukey. An algorithm for the machine calculation of complex Fourier series. Mathematics of computation, 19:297–301, 1965.
+
+[19] P. W. Shor. Polynomial-time algorithms for prime factorization and discrete logarithms on a quantum computer. SIAM Rev., 41:303–332, 1999.
+
+[20] S. Lloyd, M. Mohseni, and P. Rebentrost. Quantum principal component analysis. Nature Phys., 10:631–633, 2014.
+
+[21] V. Giovannetti, S. Lloyd, and L. Maccone. Quantum random access memory. Phys. Rev. Lett., 100:160501, 2008.
+
+[22] V. Giovannetti, S. Lloyd, and L. Maccone. Architectures for a quantum random access memory. Phys. Rev. A, 78:052310, 2008.
+
+[23] F. De Martini, V. Giovannetti, S. Lloyd, L. Maccone, E. Nagali, L. Sansoni, and F. Sciarrino. Experimental quantum private queries with linear optics. Phys. Rev. A, 80:010302, 2009.
+
+[24] P. Rebentrost, A. Steffens, and S. Lloyd. Quantum singular value decomposition of non-sparse low-rank matrices. 2016. arXiv:1607.05404.
+
+[25] N. Wiebe, D. Braun, and S. Lloyd. Quantum algorithm for data fitting. Phys. Rev. Lett., 109:050505, 2012.
+
+[26] G. Wang. Quantum algorithms for curve fitting. arXiv preprint arXiv:1402.0660, 2014.
+
+[27] C. E. Shannon. Communication in the presence of noise. Prof. IRE, 37:10–21, 1949.
+
+[28] G. H. Golub and C. F Van Loan. Matrix computations, volume 3. JHU Press, 2012.
+
+[29] G. W. Stewart and J.-G. Sun. Matrix perturbation theory (computer science and scientific computing), 1990.
+
+[30] Y. Hua and T. K. Sarkar. On SVD for estimating generalized eigenvalues of singular matrix pencil in noise. In Circuits and Systems, 1991., IEEE International Symposium on, pages 2780–2783. IEEE, 1991.
+
+[31] K. Browne, S. Qiao, and Y. Wei. A Lanczos bidiagonalization algorithm for Hankel matrices. Lin. Alg. App., 430:1531–1543, 2009.
+
+[32] W. Xu and S. Qiao. A fast symmetric SVD algorithm for square Hankel matrices. Lin. Alg. App., 428:550–563, 2008.
+
+[33] C. B. Moler and G. W. Stewart. An algorithm for generalized matrix eigenvalue problems. SIAM J. Num. An., 10:241–256, 1973.
+
+[34] A. Y. Kitaev. Quantum measurements and the Abelian stabilizer problem. arXiv preprint quant-ph/9511026, 1995.
+
+[35] R. Cleve, A. Ekert, C. Macchiavello, and M. Mosca. Quantum algorithms revisited. In Proc. Roy. Soc. A, volume 454, pages 339–354. The Royal Society, 1998.
+
+[36] S. Aaronson. Bqp and the polynomial hierarchy. arXiv:0910.4698, 2009.
+
+[37] P. Rebentrost, M. Mohseni, and S. Lloyd. Quantum support vector machine for big data classification. Phys. Rev. Lett., 113:130503, 2014.
+
+[38] D. W. Berry and A. M. Childs. Black-box hamiltonian simulation and unitary implementation. Quantum Info. Comput., 12(1-2):29–62, January 2012.
+
+[39] D. W. Berry, G. Ahokas, R. Cleve, and B. C. Sanders. Efficient quantum algorithms for simulating sparse Hamiltonians. Comm. Math. Phys., 270:359–371, 2007.
+
+[40] A. M. Childs, R. Cleve, E. Deotto, E. Farhi, S. Gutmann, and D. A Spielman. Exponential algorithmic speedup by a quantum walk. In Proc. 35th Ann. ACM Sym. Th. Comp., pages 59–68. ACM, 2003.
+
+[41] D. Aharonov and A. Ta-Shma. Adiabatic quantum state generation and statistical zero knowledge. In Proc. 35th Ann. ACM Sym. Th. Comp., pages 20–29. ACM, 2003.
+
+[42] F. L. Bauer and C. T. Fike. Norms and exclusion theorems. Num. Math., 2:137–141, 1960.
+
+[43] C. Eckart and G. Young. The approximation of one matrix by another of lower rank. Psychometrika, 1(3):211–218, 1936.
+
+[44] D. Gottesman. An introduction to quantum error correction and fault-tolerant quantum computation. arXiv:0904.2557, 2009.
+
+[45] Y. Hua. Estimating two-dimensional frequencies by matrix enhancement and matrix pencil. IEEE Trans. Sig. Proc., 40(9):2267–2280, 1992.
+
+[46] R. Garello. Two-dimensional signal analysis. John Wiley & Sons, 2013.
+
+## Appendix A Non-sparse oracle method via modified swap matrix
+
+A new method developed in Ref. [24] allows us to exponentiate indefinite Hermitian matrices. In appendices C and B, we discuss alternative ways forward, contributing to providing a wider framework of efficient matrix exponentiation. Following the discussion in Ref. [24], Eq. (19) is mapped to the corresponding entry of a modified swap matrix $S_{\widetilde{F}^{(i)}}$, resulting in the matrix
+
+$$
+S_{\widetilde{F}^{(i)}}:=\sum_{j,k=1}^{N}\widetilde{F}^{(i)}_{j,k}\ket{k}\!\bra{j}\otimes\ket{j}\!\bra{k}\ \in\ \mathbb{C}^{\,N^{2}\times N^{2}}. \tag{52}
+$$
+
+In [24] it is shown that performing infinitesimal swap operations on an initial state $\rho\otimes\sigma$ with auxiliary state $\rho:=(1/N)_{j,k=1}^{N}$ is equivalent to just evolving $\sigma$ in time with the Hamiltonian $\widetilde{F}^{(i)}$ for small ${\Delta t>0}$, i.e. $\operatorname{tr}_{1}(\mathrm{e}^{-\mathrm{i}\,S_{\widetilde{F}^{(i)}}\Delta t}\ \rho\otimes\sigma\ \mathrm{e}^{\mathrm{i}\,S_{\widetilde{F}^{(i)}}\Delta t})\approx\mathrm{e}^{-\mathrm{i}\,\widetilde{F}^{(i)}\,\Delta t/N}\,\sigma\,\mathrm{e}^{\mathrm{i}\,\widetilde{F}^{(i)}\,\Delta t/N}.$
+
+## Appendix B Alternative non-sparse quantum oracle method
+
+Berry et al. present a method to exponentiate matrices sublinear in the sparsity [38]. In this section, we summarize the performance and requirements of this method and the application to the low-rank Hankel matrices of the present work. The number of oracle queries for simulating a matrix such as the Hermitian $\widetilde{F}^{(i)}$ in Eq. (III.2) is given by
+
+$$
+O(t^{3/2}\sqrt{{s\Lambda_{\rm tot}}/{\epsilon}}), \tag{53}
+$$
+
+where $s$ is the sparsity and $\epsilon$ is the error. The quantity $\Lambda_{\rm tot}>0$ depends on the norms of the matrix as $\Lambda_{\rm tot}=\Lambda\Lambda_{1}\Lambda_{\max}$ with the spectral norm $\Lambda=\|\widetilde{F}^{(i)}\|_{\infty}$, the maximum column sum norm $\Lambda_{1}=\|\widetilde{F}^{(i)}\|_{1}$, and the maximum matrix element $\Lambda_{\max}=\|\widetilde{F}^{(i)}\|_{\max}$. The conditions for this to work are given by $\Lambda t\geq\sqrt{\epsilon}$,
+
+$$
+t\geq\frac{\Lambda}{\Lambda_{\max}\Lambda_{1}s}, \tag{54}
+$$
+
+and $\Lambda\leq\Lambda_{1}$.
+
+We confirm that under reasonable assumptions the low-rank non-sparse Hankel matrices under consideration in this work can be simulated with $O(\log N)$ queries. Assume that the signal is reasonably small with not too many zeros. This implies that the matrix $\widetilde{F}^{(i)}$ is non-sparse with $s=\Theta(N)$ and the individual elements scale as $\widetilde{F}^{(i)}_{jk}=\Theta(1)$. If we assume that the signal is generated by a few (in fact, $p$) components, then the matrix is low rank with rank $2p$. Since ${\rm tr((\widetilde{F}^{(i)})^{2})}=\sum_{j=1}^{2p}\lambda^{2}_{j}\leq N^{2}\|\widetilde{F}^{(i)}\|_{\max}^{2}$, we have that the significant eigenvalues scale as $\lambda_{j}=\Theta(N)$, $j=1,\dots,2p$. These assumptions have the following straightforward implications:
+
+i) The spectral norm (largest eigenvalue) is $\Lambda=\Theta(N)$,
+ii) the induced $1$-norm (maximum column sum) is $\Lambda_{1}=\Theta(N)$, and
+iii) the maximum element is $\Lambda_{\max}=\Theta(1)$.
+
+Thus, $\Lambda_{\rm tot}=\Theta(N^{2})$ and the total number of queries is $O(t^{3/2}\sqrt{{\Theta(N^{3})}/{\epsilon}})$. We need time $t=\Theta(1/N)$ to resolve the eigenvalues $\lambda_{j}=\Theta(N)$ via phase estimation. Thus, at an error $\epsilon$, we need $O(1/\sqrt{\epsilon})$ queries, which is again efficient.
+
+We show that we can satisfy the conditions as follows. Since we have $t=\Theta(1/N)$ already from phase estimation, we can assume that with constant effort $t\geq\sqrt{\epsilon}/\Lambda=\Theta(\sqrt{\epsilon}/N)$. Next, by using i)-iii) and $s=\Theta(N)$, we have
+
+$$
+t\geq\frac{\Lambda}{\Lambda_{\max}\Lambda_{1}s}=\Theta\ \left(\frac{1}{N}\right). \tag{55}
+$$
+
+The third criterion $\Lambda\leq\Lambda_{1}$ is satisfied by Gershgorin’s theorem, since the eigenvalues are bounded by the maximum sum of the absolute elements in a row/column.
+
+## Appendix C Matrix exponentiation via quantum principal component analysis
+
+In this appendix, we present an alternative way to efficiently exponentiate indefinite matrices, in order to give more substance to ideas of exponentiating structured matrices while at the same time preserving a phase relationship. Since exponentiating matrices $F\in\mathbb{C}^{N/2\times N/2}$ while a preserving phase relationship is key to the above algorithm and is expected to be important in other quantum algorithms, we briefly present an alternative method that accomplishes this task via quantum principal component analysis. This method compares to the quantum Fourier transform in the sense that it operates on a given initial state that contains the data to be transformed in its amplitudes. We assume that we have been presented with many copies of the state vector
+
+$$
+|\chi\rangle=\frac{1}{\sqrt{C}}\sum_{j,k=1}^{N/2}|j\rangle|k\rangle\left(F_{j,k}|0\rangle+a(F^{\dagger}F)_{j,k}|1\rangle\right), \tag{56}
+$$
+
+with $C:=(\|F\|_{2}^{2}+a^{2}\|F^{\dagger}F\|_{2}^{2})$ and $a^{-1}:=O(\max_{j,k}|(F^{\dagger}F)_{j,k}|)$. The matrix $F$ takes the role of $F^{(1)}$ and $F^{(2)}$ of the main text, so again the classical index $i$ is suppressed. Note that even though $a$ is exponentially small, the individual amplitudes of this state are of similar size. Reducing the state in terms of the $k$ index leads to
+
+$$
+{\rm tr}_{2}(|\chi\rangle\langle\chi|)=\frac{1}{C}\biggl(\sum_{j,j^{\prime}}|j\rangle\langle j^{\prime}|\sum_{k=1}^{N/2}\Big(F_{j,k}|0\rangle+a(F^{\dagger}F)_{j,k}|1\rangle\Big)\Big(F_{j^{\prime},k}^{\ast}\langle 0|+a(F^{\dagger}F)_{j^{\prime},k}^{\ast}\langle 1|\Big)\biggr).
+$$
+
+In matrix form, this reduced density matrix is written as
+
+$$
+G:=\frac{1}{C}\left[\begin{array}[]{cc}FF^{\dagger}&a\,F(F^{\dagger}F)\\ a\,(F^{\dagger}F)F^{\dagger}&a^{2}\,(F^{\dagger}F)(F^{\dagger}F)\end{array}\right]. \tag{57}
+$$
+
+By the use of the singular value decomposition of $F=USV^{\dagger}$, this matrix—positive semi-definite by construction—can be written as
+
+$$
+G=\frac{1}{C}\left[\begin{array}[]{cc}U&0\\ 0&V\end{array}\right]\left[\begin{array}[]{cc}S^{2}&a\,S^{3}\\ a\,S^{3}&a^{2}S^{4}\end{array}\right]\left[\begin{array}[]{cc}U^{\dagger}&0\\ 0&V^{\dagger}\end{array}\right]. \tag{58}
+$$
+
+In precisely the same way, we are given multiple copies of the state
+
+$$
+|\widetilde{\chi}\rangle=\frac{1}{\sqrt{C}}\sum_{j,k=1}^{N/2}|j\rangle|k\rangle\left(a(FF^{\dagger})_{j,k}|0\rangle+F_{j,k}^{\dagger}|1\rangle\right). \tag{59}
+$$
+
+Again reducing the state in terms of the $k$ index leads to
+
+$$
+{\rm tr}_{2}(|\widetilde{\chi}\rangle\langle\widetilde{\chi}|)=\frac{1}{C}\biggl(\sum_{j,j^{\prime}}|j\rangle\langle j^{\prime}|\sum_{k=1}^{N/2}\Big(a(FF^{\dagger})_{j,k}|0\rangle+F_{j,k}^{\dagger}|1\rangle\Big)\Big(a(FF^{\dagger})_{j^{\prime},k}^{\ast}\langle 0|+(F_{j^{\prime},k}^{\dagger})^{\ast}\langle 1|\Big)\biggr),
+$$
+
+leading to the matrix
+
+$$
+\widetilde{G}:=\frac{1}{C}\left[\begin{array}[]{cc}a^{2}\,(FF^{\dagger})(FF^{\dagger})&a\,(FF^{\dagger})F\\ a\,F^{\dagger}(FF^{\dagger})&F^{\dagger}F\end{array}\right], \tag{60}
+$$
+
+which can be decomposed as
+
+$$
+\widetilde{G}=\frac{1}{C}\left[\begin{array}[]{cc}U&0\\ 0&V\end{array}\right]\left[\begin{array}[]{cc}a^{2}S^{4}&a\,S^{3}\\ a\,S^{3}&S^{2}\end{array}\right]\left[\begin{array}[]{cc}U^{\dagger}&0\\ 0&V^{\dagger}\end{array}\right]. \tag{61}
+$$
+
+The matrix
+
+$$
+Z:=\frac{1}{2}(G+\widetilde{G}) \tag{62}
+$$
+
+has still low rank, as it has just twice the rank of $F$. Its eigenvectors are $(u_{j},\pm v_{j})\in\mathbb{C}^{N}$ and its eigenvalues in terms of the singular values of $F$ are given by $s_{j}^{2}(as_{j}\pm 1)^{2}/(2C)$ since
+
+$$
+Z=\frac{1}{2C}\left[\begin{array}[]{cc}FF^{\dagger}+a^{2}\,(FF^{\dagger})(FF^{\dagger})&2a\,FF^{\dagger}F\\ 2a\,F^{\dagger}FF^{\dagger}&a^{2}\,F^{\dagger}F+(F^{\dagger}F)(F^{\dagger}F)\end{array}\right] \tag{63}
+$$
+
+and
+
+$$
+\frac{1}{2C}\left[\begin{array}[]{cc}FF^{\dagger}+a^{2}\,(FF^{\dagger})(FF^{\dagger})&2a\,FF^{\dagger}F\\ 2a\,F^{\dagger}FF^{\dagger}&a^{2}\,F^{\dagger}F+(F^{\dagger}F)(F^{\dagger}F)\end{array}\right] \left[\begin{array}[]{c}u_{j}\\ \pm v_{j}\end{array}\right]
+$$
+$$
+=\frac{1}{2C}\left[\begin{array}[]{c}(s_{j}^{2}+a^{2}s_{j}^{4}\pm 2as_{j}^{3})u_{j}\\ (2as_{j}^{3}\pm s_{j}^{2}\pm a^{2}s_{j}^{4})v_{j}\end{array}\right]=\frac{1}{2C}s_{j}^{2}(as_{j}\pm 1)^{2} \left[\begin{array}[]{c}u_{j}\\ \pm v_{j}\end{array}\right].
+$$
+
+This renders standard quantum principal component analysis [20] readily applicable.

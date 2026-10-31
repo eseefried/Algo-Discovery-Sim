@@ -1,0 +1,1430 @@
+## 1 Introduction
+
+The potential advantage of quantum computers over classical computers has generated a significant amount of interest in quantum computation, and has resulted in a large number of quantum algorithms not only for discrete problems, such as integer factorization, but also for computational problems in science and engineering, such as multivariate integration, path integration, the solution of ordinary and partial differential equations, eigenvalue problems, and numerical linear algebra problems. A survey of such algorithms can be found in [15].
+
+In solving scientific and engineering problems, classical algorithms typically use floating point arithmetic and numerical libraries of special functions. The IEEE Standard for Floating Point Arithmetic (IEEE 754-2008) [1] ensures that such calculations are performed with well-defined precision. A similar standard is needed for quantum computation. Many quantum algorithms use the quantum circuit model of computation, typically employing a fixed-precision representation of numbers. Yet there is no standard specifying how arithmetic operations between numbers (of possibly disproportionate magnitudes) held in registers of finite length are to be performed, and how to deal with error. Since registers have finite length it is not reasonable to expect to propagate all the results of intermediate calculations exactly throughout all the stages of an algorithm and intermediate approximations have to be made. Most importantly, there are no existing libraries of quantum circuits with performance guarantees, implementing functions such as the square root of a number, an arbitrary fractional power of a number, the logarithm of a number or other similar elementary functions. The quantum circuits should be uniformly scalable, and at the same time make efficient use of quantum resources to meet physical constraints of potential quantum computing devices of the foreseeable future.
+
+The need for such quantum circuits to be used as modules in other quantum algorithms is apparent. For example, a recent paper deals with the solution of linear systems on a quantum computer [11]. The authors present an algorithm that requires the (approximate) calculation of the reciprocal of a number followed by the calculation of trigonometric functions needed in a controlled rotation on the way to the final result. However, the paper does not give any details about how these operations are to be implemented. From a complexity theory point of view this may not be a complication, but certainly there is a lot of work that is left to be done before one is able to implement the linear systems algorithm in, say, the quantum circuit model of computation, and eventually use it if a quantum computer becomes available.
+
+It is worthwhile remarking on the direct applicability of classical algorithms to quantum computation. It is known that classical computation is subsumed by quantum computation, i.e., that for any classical algorithm, there exists a quantum algorithm which performs the same computation [14]. This follows from the fact that any classical algorithm (or circuit) can be implemented reversibly, in principle, but with the additional overhead of a possibly large number of ancilla qubits that must be carried forward throughout the computation. For simple circuits consisting of the composition of basic logical operations, this overhead grows with the number of gates. On the other hand, scientific computing algorithms are quite different. They typically involve a large number of floating point arithmetic operations computed approximately according to rules that take into account the relative magnitudes of the operands requiring mantissa shifting, normalization and rounding. Thus they are quite expensive to implement reversibly because this would require many registers of large size to store all the intermediate results. Moreover, a mechanism is necessary for dealing with roundoff error and overflow which are not reversible operations. Hence, direct simulation on a quantum computer of classical algorithms for scientific computing that have been implemented in floating point arithmetic quickly becomes quite complicated and prohibitively expensive.
+
+As we indicated, we consider the quantum circuit model of computation where arithmetic operations are performed with fixed precision. We use a small number of elementary modules, or building blocks, to implement fundamental numerical functions. Within each module the calculations are performed exactly. The results are logically truncated by selecting a desirable number of significant bits which are passed on as inputs to the next stage, which is also implemented using an elementary module. We repeat this procedure until we obtain the final result. This way, it suffices to implement quantum mechanically a relatively small number of elementary modules, which can be done once, and then to combine them as necessary to obtain the quantum circuits implementing the different functions. The elementary modules carry out certain basic tasks such as shifting the bits of a number held in a quantum register, or counting bits, or computing expressions involving addition and/or multiplication of the inputs. The benefit of using only addition and multiplication is that in fixed precision arithmetic the format of the input specifies exactly the format of the output, i.e., location of the decimal point in the result. There exist numerous quantum circuits in the literature for addition and multiplication; see e.g. [2, 3, 7, 8, 9, 10, 18, 21, 23, 26].
+
+There are three advantages to this approach. The first is that one can derive error estimates by treating the elementary modules as black boxes and considering only the truncation error in the output of each. The second is that it is easy to obtain total resource estimates by adding the resources used by the individual modules. The third advantage is that the modular design allows one to modify or improve the implementation of the individual elementary modules in a transparent way.
+
+We used this approach for Hamiltonian simulation and other numerical tasks in our paper [6] that deals with a quantum algorithm and circuit design for solving the Poisson equation. Individual elementary modules were combined to derive quantum circuits for Newton iteration and to compute approximately the reciprocal of a number, and trigonometric and inverse trigonometric functions. We also provided performance guarantees in terms of cost and accuracy for both the individual elementary modules and the functions resulting by combining the modules. We remark that a recent paper [27] also deals with quantum algorithms for numerical analysis.
+
+In this paper we continue this line of work of [6] by deriving quantum circuits which, given a number $w$ (represented using a finite number of bits), compute the functions $w^{1/2^{i}}$ for $i=1,\dots,k$, $\ln(w)$ (and thereby the logarithm in different bases), and $w^{f}$ with $f\in[0,1)$. For each circuit we provide cost and worst-case error estimates. We also illustrate the accuracy of our algorithms through a number of examples comparing their error with that of widely used numerical software such as Matlab. In summary, our tests show that using a moderate amount of resources, our algorithms compute the values of the functions matching the corresponding values obtained using scientific computing software (using floating point arithmetic) with 12 to 16 decimal digits of accuracy.
+
+We remark that our algorithms have applications beyond quantum computation. For instance, they can be used in signal processing and easily realized on an FPGA (Field Programmable Gate Array), providing superior performance with low cost. Moreover, there is resurgent interest in fixed-precision algorithms for low power/price applications such as mobile or embedded systems, where hardware support for floating-point operations is often lacking [5].
+
+We now summarize the contents of this paper. In Section 2, we discuss the individual algorithms, providing block diagrams of the corresponding quantum circuits and pseudocode, and state their performance characteristics. In Section 3, we provide some numerical results illustrating the performance of our algorithms and comparing it to that of widely used numerical software. In Section 4, we give some remarks on the implementation of our algorithms. In Section 5, we summarize our results. Finally, a number of theorems about the worst-case error of our algorithms are given in the Appendix.
+
+## 2 Algorithms
+
+We derive quantum algorithms and circuits computing approximately $w^{1/2^{i}}$, $i=1,\dots,k$, $\ln(w)$ and $w^{f}$, $f\in[0,1)$, for a given input $w$. We provide pseudocode and show how the algorithms are obtained by combining elementary quantum circuit modules. We provide error and cost estimates.
+
+The input of the algorithms is a fixed precision binary number. It is held in an $n$ qubit quantum register whose state is denoted ${\left|{w}\right\rangle}$ as shown in Fig. 1. The $m$ left most qubits are used to represent the integer part of the number and the remaining $n-m$ qubits represent its fractional part.
+
+${\left|{w}\right\rangle}=\underbrace{{\left|{w^{(m-1)}}\right\rangle}\otimes{\left|{w^{(m-2)}}\right\rangle}\otimes\cdots\otimes{\left|{w^{(0)}}\right\rangle}}_{{\rm integer\ part}}\otimes\underbrace{{\left|{w^{(-1)}}\right\rangle}\otimes\cdots\otimes{\left|{w^{(m-n)}}\right\rangle}}_{{\rm fractional\ part}},$
+
+Thus ${\left|{w}\right\rangle}={\left|{w^{(m-1)}}\right\rangle}\otimes{\left|{w^{(m-2)}}\right\rangle}\otimes\cdots\otimes{\left|{w^{(0)}}\right\rangle}\otimes{\left|{w^{(-1)}}\right\rangle}\otimes\cdots\otimes{\left|{w^{(m-n)}}\right\rangle}$, where $w^{(j)}\in\{0,1\}$, $j=m-n,m-n+1,\ldots,0,\dots,m-1$ and $w=\sum_{j=m-n}^{m-1}w^{(j)}2^{j}$. Since less than $n$ bits may suffice for the representation of the input, a number of leftmost qubits in the register may be set to ${\left|{0}\right\rangle}$. In general, we should have included a leading qubit to hold the sign of $w$, but since for the functions under consideration in this paper $w$ is a non-negative number we have omitted the sign qubit for simplicity.
+
+Our algorithms use elementary modules that perform certain basic calculations. Some are used to shift the contents of registers, others are used as counters determining the position of the most significant bit of a number. An important elementary module computes expressions of the form $xy+z$ exactly in fixed precision arithmetic.
+
+Following our convention concerning the fixed precision representation of numbers as we introduced it in Fig. 1, let $x$,$y$, and $z$ be represented using $n_{1}$-bits, of which $m_{1}$ bits are used to represent the integer part. (It is not necessary to use the same number of bits to represent all three numbers and this might useful in cases where we know that their magnitudes are significantly different.) The expression $xy+z$ can be computed exactly as long as we allocate $2n_{1}+1$ bits to hold the result. In this case, the rightmost $2(n_{1}-m_{1})$ bits hold the fractional part of the result. Such computations can be implemented reversibly. There are numerous quantum circuit designs in the literature implementing addition and multiplication [26, 3, 9, 8, 21, 25, 10, 23, 17, 2, 22, 18, 19, 12]. Therefore, we can use them to design a quantum circuit implementing $xy+z$. In fact, we can design a quantum circuit template for implementing such expressions and use it to derive the actual quantum circuit for any $n_{1}$, $m_{1}$ and values of the $x$, $y$, $z$ represented with fixed-precision. We use Fig. 2 below to represent such a quantum circuit.
+
+Note that Fig. 2 is an abstraction of an elementary module computing $res\leftarrow xy+z$. It is not meant to reveal or imply any of the implementation decisions including ancilla registers, saved values, and other details used for addition and multiplication.
+
+Any desired number $b$ of significant digits after the decimal point in the result ${\left|{res}\right\rangle}$ can be selected and passed on to the next stage of the computation. This corresponds to a truncation of the result to the desired accuracy.
+
+Recall that our algorithms take as input $w$ represented by a quantum state ${\left|{w}\right\rangle}$ as shown in Fig. 1. We remark that particularly for the algorithms in this paper the integer parts of the inputs and outputs of the instances of the quantum circuit of Fig. 2 can be represented exactly using an equal number of qubits to that used for ${\left|{w}\right\rangle}$, i.e. $m$ qubits.
+
+In an earlier paper [6] we have cascaded such elementary modules to derive the quantum algorithm, INV, and the corresponding circuit computing approximately the reciprocal $1/w$ of a number $w>1$. The algorithm INV is based on Newton iteration, where each of its steps is implemented using the elementary module of the form shown in Fig. 2.
+
+The algorithms of this paper compute approximations of functions which we list below and depend, to a certain extent, on the algorithm INV. For this we will review INV in the next subsection. Moreover our algorithms depend upon each other. The first algorithm we derive is SQRT computing the square root $\sqrt{w}$. This forms the basis of the algorithm Powerof2Roots that computes $w^{1/2^{i}}$, $i=1,\dots,k$. Powerof2Roots is used in LN, the algorithm computing $\ln(w)$. Without loss of generality and for brevity we only deal with the case $w>1$ in the functions computing the roots and the logarithm. Indeed, if $0<w<1$ one can suitably shift it to the left $\nu$ times to become $2^{\nu}w>1$. After obtaining the roots or the logarithm of the shifted number $2^{\nu}w$ the final result for $w$ can be obtained in a straightforward way, either by shifting it to the right in the case of the roots, or by subtracting $\nu\ln(2)$ in the case of the logarithm.
+
+Finally we derive an algorithm computing $w^{f}$, $f\in[0,1)$. For this we distinguish two cases $w\geq 1$ and $0<w<1$. We deal with each case separately and derive two algorithms FractionalPower and FractionalPower2, respectively. We remark that when $0<w<1$ we also shift to the left to obtain a number greater than one, just like before. However, undoing the shift to get the final result is a bit complicated. For this reason we provide all the details in FractionalPower2. (We also note that computing the roots and the powers of $w\in\{0,1\}$ is trivial and do not spend time on it since it can be accomplished with an elementary quantum circuit that determines if the input is zero or one. It is equally straightforward to compute the logarithm when $w=1$.)
+
+In the following subsections we discuss each of our algorithms providing the main idea leading to it, its details along with pseudocode and quantum circuits. We have obtained theorems establishing the performance of our algorithms in terms of their accuracy in relation to the number of required qubits. We have placed these theorems in the Appendix so the reader can focus on the algorithms without having to consider more technical issues at the same time. At the end we provide a number of simulation test results illustrating the excellent performance of our algorithms and comparing them to the corresponding algorithms using floating point arithmetic in Matlab. Table 1 summarizes the algorithms in this paper, their parameters and their error bounds.
+
+Function Requirements Algorithm and Parameters Idea Error $1/w$ $w\geq 1$ ${\rm INV}(w,n,m,b)$ 1. Newton iteration. Calculate $\leq(2+\log_{2}b)/2^{b}$ $b\geq m$ $x_{i}=-w\hat{x}^{2}_{i-1}+2\hat{x}_{i-1}$, $s=\lceil\log_{2}b\rceil$ for $i=1,2,\ldots,s$ 2. Return $\hat{x}_{s}$ $\sqrt{w}$ $w\geq 1$ ${\rm SQRT}(w,n,m,b)$ 1. Call INV$(w,n,m,b)$ $\leq\left(\frac{3}{4}\right)^{b-2m}(2+b+\log_{2}b)$ $b\geq\max\{2m,4\}$ 2. Newton iteration. Calculate $s=\lceil\log_{2}b\rceil$ $y_{j}=\frac{1}{2}(3\hat{y}_{j-1}-\hat{x}_{s}\hat{y}^{3}_{j-1})$ for $j=1,2,\ldots,s$ 3. Return $\hat{y}_{s}$ $w^{1/2^{i}}$ $w\geq 1$ ${\rm Powerof2Roots}(w,k,n,m,b)$ 1. $z_{1}=\textrm{SQRT}(w,n,m,b)$ $\leq 2\left(\frac{3}{4}\right)^{b-2m}(2+b+\log_{2}b)$ $i=1,2,\ldots k$ $b\geq\max\{2m,4\}$ 2. Call SQRT() repeatedly, i.e., $s=\lceil\log_{2}b\rceil$ for $z_{i}=\textrm{SQRT}(z_{i-1},m+b,m,b)$, each call of SQRT() for $i=1,2,\ldots k$ 3. Return $\{z_{i}\}$ $\ln w$ $w\geq 1$ ${\rm LN}(w,n,m,\ell)$ 1. $w_{p}=w\cdot 2^{1-p}$ $\leq\left(\frac{3}{4}\right)^{5\ell/2}\left(m+\frac{32}{9}+2\left(\frac{32}{9}+\frac{n}{\ln 2}\right)^{3}\right)$ $b=\max\{5\ell,25\}$ 2. Call $\ell\geq\lceil\log_{2}8n\rceil$ $\textrm{PowerOf2Roots}(w_{p},\ell,n,1,b)$ $r\approx\ln 2$, with $b$ bits accuracy and let $\hat{t}_{p}$ be the $\frac{1}{2^{\ell}}$th root of $w_{p}$ $p=\lceil\log_{2}w\rceil$ 3. Approx. $\ln\hat{t}_{p}$ with $\hat{y}_{p}$, i.e., the first two terms of its power series expansion. 4. Return $z_{p}=2^{\ell}\hat{y}_{p}+(p-1)r$ $w^{f}$ $w\geq 1$ ${\rm FractionalPower}(w,f,n,m,n_{f},\ell)$ 1. Calculate $\leq\left(\frac{1}{2}\right)^{\ell-1}$ $f\in[0,1]$ $b=\max\{n,n_{f},\lceil 5(\ell,2m,\ln n_{f})\rceil\}$ $\hat{w}_{i}=\textrm{PowerOf2Roots}(w,n_{f},n,m,b)$ $f$ is $n_{f}$ bits long $\ell\in{\mathbb{N}}$ determines the error for $i=1,2,\ldots,n_{f}$. 2. Return $\Pi_{i\in\mathcal{P}}\hat{w}_{i}$ where $\mathcal{P}=\{1\leq i\leq n_{f}:f_{i}=1\}$ $w^{f}$ $0\leq w<1$ ${\rm FractionalPower2}(w,f,n,m,n_{f},\ell)$ 1. Compute $w^{\prime}\geq 1$ $\leq\frac{1}{2^{\ell-3}}$ $f\in[0,1]$ $b=\max\{n,n_{f},\lceil 2\ell+6m+2\ln n_{f}\rceil,40\}$ by left shifting $w$ $f$ is $n_{f}$ bits $\ell\in{\mathbb{N}}$ determines the error 2. Call $\textrm{FractionalPower}(w^{\prime},f,n,m,n_{f},\ell)$ 3. Undo the initial shift of $w$ using right shifts, FractionalPower, and INV, and return
+
+Table 1: Summary of Algorithms. All parameters are polynomial in $n$ and $b$ and so is the cost of all algorithms.
+
+### 2.1 Reciprocal
+
+An algorithm computing the reciprocal of a number is shown in Section 4.2 and Theorem B.1 of [6]. The algorithm is based on Newton iteration. Below we provide a slight modification of that algorithm.
+
+Recall that $w$ is represented with $n$ bits of which the first $m$ correspond to its integer part. Algorithm 0 INV below approximates the reciprocal of a number $w\geq 1$, applying Newton iteration to the function $f(x)=\frac{1}{w}-x$. This yields a sequence of numbers $x_{i}$ according to the iteration
+
+$$
+x_{i}=g_{1}(x_{i-1}):=-w\hat{x}_{i-1}^{2}+2\hat{x}_{i-1}, \tag{1}
+$$
+
+$i=1,2,\ldots,s$. Observe that the expression above can be computed using two applications of a quantum circuit of the type shown in Fig. 2. The initial approximation $\hat{x}_{0}=2^{-p}$, with $2^{p}>w\geq 2^{p-1}$. The number of iterations $s$ is specified in Algorithm 0 INV. Note that $x_{0}<1/w$ and the iteration converges to $1/w$ from below, i.e., $\hat{x}_{i}\leq 1/w$. Within each iterative step the arithmetic operations are performed in fixed precision and $x_{i}$ is computed exactly. We truncate $x_{i}$ to $b\geq n$ bits after the decimal point to obtain $\hat{x}_{i}$ and pass it on as input to the next iterative step. Each iterative step is implemented using an elementary module of the form given in Fig. 2 that requires only addition and multiplication. The final approximation error is
+
+$$
+|\hat{x}_{s}-\frac{1}{w}|\leq\frac{2+\log_{2}b}{2^{b}}.
+$$
+
+For the derivation of this error bound see Corollary 0 in the Appendix. We remark that although the iteration function (1) is well known in the literature [24, Ex. 5-1], an important property of Algorithm 0 INV is the fixed-precision implementation of Newton iteration for a specific initial approximation and a prescribed number of steps, so that the error bound of Corollary 0 is satisfied.
+
+Turning to the cost, we iterate $O(\log_{2}b)$ times and as we mentioned each $x_{i}$ is computed exactly. Therefore, each iterative step requires $O(n+b)$ qubits and a number of quantum operations for implementing addition and multiplication that is a low degree polynomial in $n+b$. The cost to obtain the initial approximation is relatively minor when compared to the overall cost of the multiplications and additions used in the algorithm.
+
+```text
+0:
+              
+             w≥1w\geq 1, held in an nn qubit register, of which the first mm qubits are reserved for its integer part.
+
+0:
+              
+             b∈ℕb\in{\mathbb{N}}, b≥mb\geq m. We perform fixed precision arithmetic and results are truncated to bb bits of accuracy after the decimal point.
+
+1:
+              
+             if w=1w=1 then
+
+2:
+              
+              return  1
+
+3:
+              
+             end if
+
+4:
+              
+             x^0←2−p\hat{x}_{0}\leftarrow 2^{-p}, where p∈ℕp\in{\mathbb{N}} such that 2p>w≥2p−12^{p}>w\geq 2^{p-1}
+
+5:
+              
+             s←⌈log2⁡b⌉s\leftarrow\lceil\log_{2}b\rceil
+
+6:
+              
+             for i=1i=1 to ss do
+
+7:
+              
+              xi←−w​x^i−12+2​x^i−1x_{i}\leftarrow-w\hat{x}_{i-1}^{2}+2\hat{x}_{i-1}
+
+8:
+              
+              x^i←xi\hat{x}_{i}\leftarrow x_{i} truncated to bb bits after the decimal point
+
+9:
+              
+             end for
+
+10:
+              
+             return x^s\hat{x}_{s}
+```
+
+Algorithm 0 INV($w$, $n$, $m$, $b$)
+
+### 2.2 Square Root
+
+Computing approximately the square root $\sqrt{w}$, $w\geq 1$, can also be approached as a zero finding problem and one can apply to it Newton iteration. However, the selection of the function whose zero is $\sqrt{w}$ has to be done carefully so that the resulting iterative steps are easy to implement and analyze in terms of error and cost. Not all choices are equally good. For example, $f(x)=x^{2}-w$, although well known in the literature [24, Ex. 5-1], is not a particularly good choice. The resulting iteration is $x_{i+1}=x_{i}-(x_{i}^{2}-w)/(2x_{i})$, $i=0,1,\dots$, which requires a division using an algorithm such as Algorithm 0 INV at each iterative step. The division also requires circuits keeping track of the position of the decimal point in its result, because its location is not fixed but depends on the values $w$ and $x_{i}$. Since the result of a division may not be represented exactly using an a priori chosen fixed number of bits, approximations are needed within each iterative step. This introduces error and overly complicates the analysis of the overall algorithm approximating $\sqrt{w}$ compared to an algorithm requiring only multiplication and addition in each iterative step. All these complications are avoided in our algorithm.
+
+Each of the steps of the algorithm we present below can be implemented using only multiplication and addition in fixed precision arithmetic as in Fig. 2. This is accomplished by first approximating $1/w$ (applying iteration $g_{1}$ of equation (1)) using steps essentially identical to those in Algorithm 0 INV. Then we apply Newton iteration again to a suitably chosen function to approximate its zero and this yields the approximation of $\sqrt{w}$. In particular, in Algorithm 0 INV we set $s=s_{1}=s_{2}$ and first we approximate $1/w$ by $\hat{x}_{s}$ which has a fixed precision representation with $b$ bits after the decimal point (steps 4–10 of Algorithm 0 INV). Then applying the Newton method to $f(y)=\tfrac{1}{y^{2}}-\tfrac{1}{w}$ we obtain the iteration
+
+$$
+y_{j}=g_{2}(y_{j-1}):=\frac{1}{2}(3\hat{y}_{j-1}-\hat{x}_{s}\hat{y}^{3}_{j-1}), \tag{2}
+$$
+
+where $j=1,2,\dots,s$. Each $y_{i}$ is computed exactly and then truncated to $b$ bits after the decimal point to obtain $\hat{y}_{i}$, which is passed on as input to the next iterative step. See Algorithm 1 SQRT for the values of the parameters and other details. Steps 4 and 10 of the algorithm compute initial approximations for the two Newton iterations, the first computing the reciprocal and the second shown in (2). They are implemented using the quantum circuits of Fig. 4 and Fig. 5, respectively. A block diagram of the overall circuit of the algorithm computing $\sqrt{w}$ is shown in Fig. 3.
+
+For $w\geq 1$ represented with $n$ bits of which the first $m$ correspond its integer part, Algorithm 1 SQRT computes $\sqrt{w}$ by $\hat{y}_{s}$ in fixed precision with $b\geq\max\{2m,4\}$ bits after its decimal point and we have
+
+$$
+|\hat{y}_{s}-\sqrt{w}|\leq\left(\frac{3}{4}\right)^{b-2m}\left(2+b+\log_{2}b\right).
+$$
+
+The proof can be found in Theorem 1 in the Appendix.
+
+Turning to the cost of the quantum circuit in Fig. 3 implementing Algorithm 1 SQRT, we set the number of iterative steps of each of the two iterations to be $s=s_{1}=s_{2}=O(\log_{2}b)$. Observe that each of the iterations $g_{1}$ and $g_{2}$ can be computed using at most three applications of a quantum circuit of the type shown in Fig. 2. Therefore, each iterative step requires $O(n+b)$ qubits and a number of quantum operations for implementing addition and multiplication that is a low degree polynomial in $n+b$. Observe that the cost to obtain the initial approximations is again relatively minor compared to the overall cost of the additions and multiplications in the algorithm.
+
+```text
+0:
+              
+             w≥1w\geq 1, held in an nn qubit register, of which the first mm qubits are reserved for its integer part.
+
+0:
+              
+             b≥max⁡{2​m,4}b\geq\max\{2m,4\}. Results are truncated to bb bits of accuracy after the decimal point.
+
+1:
+              
+             if w=1w=1 then
+
+2:
+              
+              return  1
+
+3:
+              
+             end if
+
+4:
+              
+             x^0←2−p\hat{x}_{0}\leftarrow 2^{-p}, where p∈ℕp\in{\mathbb{N}} such that 2p>w≥2p−12^{p}>w\geq 2^{p-1}
+
+5:
+              
+             s←⌈log2⁡b⌉s\leftarrow\lceil\log_{2}b\rceil
+
+6:
+              
+             for i=1i=1 to ss do
+
+7:
+              
+              xi←−w​x^i−12+2​x^i−1x_{i}\leftarrow-w\hat{x}_{i-1}^{2}+2\hat{x}_{i-1}
+
+8:
+              
+              x^i←xi\hat{x}_{i}\leftarrow x_{i} truncated to bb bits after the decimal point
+
+9:
+              
+             end for
+
+10:
+              
+             y^0←2⌊(q−1)/2⌋\hat{y}_{0}\leftarrow 2^{\lfloor(q-1)/2\rfloor}, where q∈ℕq\in{\mathbb{N}} such that 21−q>x^s≥2−q2^{1-q}>\hat{x}_{s}\geq 2^{-q}
+
+11:
+              
+             for j=1j=1 to ss do
+
+12:
+              
+              yj←12​(3​y^j−1−x^s​y^j−13)y_{j}\leftarrow\frac{1}{2}(3\hat{y}_{j-1}-\hat{x}_{s}\hat{y}^{3}_{j-1})
+
+13:
+              
+              y^j←yj\hat{y}_{j}\leftarrow y_{j} truncated to bb bits after the decimal point
+
+14:
+              
+             end for
+
+15:
+              
+             return y^s\hat{y}_{s}
+```
+
+Algorithm 1 SQRT($w$, $n$, $m$, $b$)
+
+### 2.3 $2^{k}$-Root
+
+Obtaining the roots, $w^{1/2^{i}}$, $i=1,\dots,k$, $k\in{\mathbb{N}}$, is straightforward. It is accomplished by calling Algorithm 1 SQRT iteratively $k$ times, since $w^{1/2^{i}}=\sqrt{w^{1/2^{i-1}}}$, $i=1,\dots,k$. In particular, Algorithm 2 PowerOf2Roots calculates approximations of $w^{1/2^{i}}$, for $i=1,2,\ldots,k$. The circuit implementing this algorithm consists of $k$ repetitions of the circuit in Fig. 3 approximating the square root. The results are truncated to $b\geq\max\{2m,4\}$ bits after the decimal point before passed on to the next stage. The algorithm produces $k$ numbers $\hat{z}_{i}$, $i=1,\dots,k$. We have
+
+$$
+|\hat{z}_{i}-w^{1/{2^{i}}}|\leq 2\left(\frac{3}{4}\right)^{b-2m}\left(2+b+\log_{2}b\right),
+$$
+
+$i=1,\dots,k$. The proof can be found in Theorem 3 in the Appendix.
+
+```text
+0:
+              
+             w≥1w\geq 1, held in an nn qubit register, of which the first mm qubits are reserved for its integer part.
+
+0:
+              
+             k≥1k\geq 1 an integer. The algorithm returns approximations of w12iw^{\frac{1}{2^{i}}}, i=1,…,ki=1,\dots,k.
+
+0:
+              
+             b≥max⁡{2​m,4}b\geq\max\{2m,4\}. Results are truncated to bb bits of accuracy after the decimal point.
+
+1:
+              
+             z^1←\hat{z}_{1}\leftarrow SQRT(ww, nn, mm, bb). Recall that SQRT returns a number with a fractional part bb bits long. The integer part of of z^1\hat{z}_{1} is represented by mm bits.
+
+2:
+              
+             for i=2i=2 to kk do
+
+3:
+              
+              z^i←\hat{z}_{i}\leftarrow SQRT(z^i−1\hat{z}_{i-1}, m+bm+b, mm, bb). Note that z^1\hat{z}_{1} and the z^i\hat{z}_{i} are held in registers of size m+bm+b bits of which the bb bits are for the fractional part.
+
+4:
+              
+             end for
+
+5:
+              
+             return z^1\hat{z}_{1},z^2\hat{z}_{2},…,z^k\hat{z}_{k}
+```
+
+Algorithm 2 PowerOf2Roots($w$, $k$, $n$, $m$, $b$)
+
+Algorithm 2 PowerOf2Roots uses $k$ calls to Algorithm 1 SQRT. Hence it requires $k\log b\cdot O(n+b)$ qubits and $k\log b\cdot p(n+b)$ quantum operations, where $p$ is a low-degree polynomial depending on the specific implementation of the circuit of Fig. 2.
+
+### 2.4 Logarithm
+
+To the best of our knowledge, the method presented in this section is entirely new. Let us first introduce the idea leading to the algorithm approximating $\ln(w)$, $w>1$; the case $w=1$ is trivial. First we shift $w$ to the left, if necessary, to obtain the number $2^{-\nu}w\in[1,2)$. It suffices to approximate $\ln(2^{-\nu}w)$ since $\ln(w)=\ln(2^{-\nu}w)+\nu\ln 2$ and we can precompute $\ln 2$ up to any desirable number of bits.
+
+We use the following observation. When one takes the $2^{\ell}$-root of a number that belongs to the interval $(1,2)$ the fractional part $\delta$ of the result is roughly speaking proportional to $2^{-\ell}$, i.e, its is quite small for relatively large $\ell$. Therefore, for $1+{\delta}=[2^{-\nu}w]^{1/2^{\ell}}$ we use the power series expansion for the logarithm to approximate $\ln(1+{\delta})$ by ${\delta}-{\delta}^{2}/2$, with any desired accuracy since $\delta$ can be made arbitrarily small by appropriately selecting $\ell$. Then the approximation of the logarithm follows from
+
+$$
+\ln(w)\approx\nu\ln 2+2^{\ell}({\delta}-\frac{{\delta}^{2}}{2}). \tag{3}
+$$
+
+In particular, Algorithm 3 LN approximates $\ln(w)$ for $w\geq 1$ represented by $n$ bits of which the first $m$ are used for its integer part. (The trivial case $w=1$ is dealt with first.) In step 7, $p-1$ is the value of $\nu$, i.e., $\nu=p-1$, where $2^{p}>w\geq 2^{p-1}$, $p\in{\mathbb{N}}$. We compute $w_{p}=2^{1-p}w\in[1,2)$ using a right shift of $w$. We explain how to implement the shift operation below. Then, $\hat{t}_{p}$, an approximation of $w_{p}^{1/(2\ell)}$, is calculated using Algorithm 2 PowerOf2Roots, where $\ell$ is a parameter that determines the error. Note that $\hat{t}_{p}$ can be written as $1+{\delta}$, for $0<{\delta}<1$. We provide precise bounds for ${\delta}$ in Theorem 3 in the Appendix. Next, an approximation $\hat{y}_{p}$ of $\ln\hat{t}_{p}=\ln(1+{\delta})$ is calculated, using the first two terms of the power series for the logarithm as we explained above. The whole procedure yields an estimate of $(\ln w_{p})/2^{\ell}$. Finally the algorithm in steps 16 – 20 uses equation (3), with $\nu=p-1$, to derive $z_{p}+(p-1)r$ as an approximation to $\ln w$. All intermediate calculation results are truncated to $b$ bits after the decimal point. The value of $b$ is determined by the value of $\ell$ in step 1 of the algorithm. Note that the precision of the algorithm grows with $\ell$, which is a user selected parameter that must satisfy $\ell\geq\lceil\log_{2}8n\rceil$.
+
+The block diagram of the overall circuit implementing Algorithm 3 LN can be found in Fig. 6. The first module is a right shift operation that calculates $w_{p}$. During a presentation of these results, we were asked about the implementation of the shift operation. There are a number of ways to implement it. One is to implement the shift by a multiplication of $w$ by a suitable negative power of two. This is convenient since we have elementary quantum circuits for multiplication. In Fig. 7 we show a circuit computing the necessary power of two, which we denote by $x$ in that figure. In particular, for $w\geq 2$ we set $x=2^{1-p}$, where $p-1=\lfloor\log_{2}w\rfloor\geq 1$. For $1\leq w<2$ we set $x=1$. Thus $m$ bits are needed for the representation of $x$, with the first bit $x^{(0)}$ denoting its integer part and all the remaining bits $x^{(-1)},\dots,x^{-(m-1)}$ denoting its fractional part. We implement the shift of $w$ in terms of multiplication between $w$ and $x$, i.e., $w_{p}=w\,x$. Since $w$ and $x$ are held in registers of known size and we use fixed precision representation we know a priori the position of the decimal point in their product $w_{p}$. Moreover, since $w_{p}\in[1,2-2^{1-n}]$ ($w$ is an $n$ bit number) we have that $n$ bits (qubits), of which $1$ is used for its integer part, suffice to hold $w_{p}$ exactly.
+
+The next module is the circuit for the PowerOf2Roots algorithm and calculates $\hat{t}_{p}$. The third module calculates $\hat{y}_{p}$ and is comprised of modules that perform subtraction and multiplication in fixed precision. The fourth module of the circuit performs a series of left shift operations. Observe that $\ell$ is an accuracy parameter whose value is set once at the very beginning and does not change during the execution of the algorithm. Thus the left shift $\ell$ times is, in general, much easier to implement than the right shift of $w$ at the beginning of the algorithm and we omit the details.
+
+In its last step Algorithm 3 LN computes the expression $\hat{z}:=z_{p}+(p-1)r$ which is the estimate of $\ln w$. The value of $p-1$ in this expression is obtained using the quantum circuit of Fig. 8. The error of the algorithm satisfies
+
+$$
+|\hat{z}-\ln w|\leq\left(\frac{3}{4}\right)^{5\ell/2}\left(m+\frac{32}{9}+2\left(\frac{32}{9}+\frac{n}{\ln 2}\right)^{3}\right).
+$$
+
+For the proof details see Theorem 3 in the Appendix.
+
+Considering the cost of the quantum circuit in Fig. 6 implementing Algorithm 3 LN, we have that the cost of computing the initial and the last shifts (first and fourth modules in Fig. 6), as well as the cost of the arithmetic expression in the third module in Fig. 6, the cost of computing $p-1$ (see the circuits in Fig. 7 and Fig. 8 ) and the cost of the expression $z_{p}+(p-1)r$, are each relatively minor compared to the other costs of the algorithm. The algorithm calls Algorithm 2 PowerOf2Roots with input parameter $k:=\ell$, which requires $O(\ell(n+b)\log b)$ qubits and $\ell\log b\cdot p(n+b)$ quantum operations, as explained in the previous subsection. Observe that the expression in Step 17 of Algorithm 3 LN can be computed using a constant number of applications of a quantum circuit of the type shown in Fig. 2. Hence, the overall cost of Algorithm 3 LN is $O(\ell(n+b)\log b)$ qubits and requires a number of quantum operations proportional to $\ell\log b\cdot p(n+b)$.
+
+```text
+0:
+              
+             w≥1w\geq 1, held in an nn qubit register, of which the first mm qubits are reserved for its integer part.
+
+0:
+              
+             ℓ≥⌈log2⁡8​n⌉\ell\geq\lceil\log_{2}8n\rceil is a parameter upon which the error will depend and we will use to determine the number of bits bb after the decimal points in which arithmetic will be performed.
+
+1:
+              
+             b←max⁡{5​ℓ,25}b\leftarrow\max\{5\ell,25\}. Results are truncated to bb bits of accuracy after the decimal point in the intermediate calculations.
+
+2:
+              
+             rr ←\leftarrow ln⁡2\ln 2 with bb bits of accuracy, i.e. |r−ln⁡2|≤2−b|r-\ln 2|\leq 2^{-b}. An approximation of ln⁡2\ln 2 can be precomputed with sufficiently many bits of accuracy and stored in a register, from which we take the first bb bits.
+
+3:
+              
+             if w=1w=1 then
+
+4:
+              
+              return  0
+
+5:
+              
+             end if
+
+6:
+              
+             Let p∈ℕp\in{\mathbb{N}} is such that 2p>w≥2p−12^{p}>w\geq 2^{p-1}
+
+7:
+              
+             if p−1=0p-1=0 then
+
+8:
+              
+              wp←ww_{p}\leftarrow w. In this case w=wp∈[1,2−21−n]w=w_{p}\in[1,2-2^{1-n}].
+
+9:
+              
+             else
+
+10:
+              
+              wp←w​21−pw_{p}\leftarrow w2^{1-p}. Note that wp∈[1,2−21−n]w_{p}\in[1,2-2^{1-n}] for w≥2w\geq 2. The number of bits (qubits) used for wpw_{p} is nn of which 11 is for its integer part as explained in the text and the caption of Fig. 7.
+
+11:
+              
+              xp←wp−1x_{p}\leftarrow w_{p}-1. This is the fractional part of wpw_{p}.
+
+12:
+              
+             end if
+
+13:
+              
+             if xp=0x_{p}=0 then
+
+14:
+              
+              zp←0z_{p}\leftarrow 0
+
+15:
+              
+             else
+
+16:
+              
+              t^p←\hat{t}_{p}\leftarrowPowerOf2Roots(wpw_{p}, ℓ\ell, nn, 11, bb)[ℓ][\ell]. The function P​o​w​e​r​O​f​2​R​o​o​t​sPowerOf2Roots returns a list of numbers and we take the last element, the 1/2ℓ1/2^{\ell}th root. Note that in this particular case 1≤t^p<21\leq\hat{t}_{p}<2.
+
+17:
+              
+              y^p←(t^p−1)−12​(t^p−1)2\hat{y}_{p}\leftarrow(\hat{t}_{p}-1)-\frac{1}{2}(\hat{t}_{p}-1)^{2}, computed to bb bits of accuracy after the decimal point. Note that t^p=1+δ\hat{t}_{p}=1+\delta with δ∈(0,1)\delta\in(0,1), and we approximate ln⁡(1+δ)\ln(1+\delta) by δ−12​δ2\delta-\frac{1}{2}\delta^{2}, the first two terms of its power series expansion.
+
+18:
+              
+              zp←2ℓ​y^pz_{p}\leftarrow 2^{\ell}\hat{y}_{p}. This corresponds to a logical right shift of the decimal point.
+
+19:
+              
+             end if
+
+20:
+              
+             return zp+(p−1)​rz_{p}+(p-1)r
+```
+
+Algorithm 3 LN($w$, $n$, $m$, $\ell$)
+
+### 2.5 Fractional Power
+
+Another application of interest is the approximation of fractional powers of the form $w^{f}$, where $w\geq 1$ and $f\in[0,1]$ a number whose binary form is $n_{f}$ bits long. The main idea is to calculate appropriate powers of the form $w^{1/2^{i}}$ according to the value of the bits of $f$ and multiply the results. Hence initially, the algorithm PowersOf2Roots is used to derive a list of approximations $\hat{w}_{i}$ to the powers $w_{i}=w^{1/2^{i}}$, for $i=1,2,\ldots,n_{f}$. The final result that approximates $w^{f}$ is $\Pi_{i\in\mathcal{P}}\hat{w}_{i}$, where $\mathcal{P}=\{1\leq i\leq n_{f}:f_{i}=1\}$ and $f_{i}$ denotes the $i$th bit of the number $f$. The process is described in detail in Algorithm 4 Fractional Power.
+
+For $w>1$ the value $\hat{z}$ returned by the algorithm satisfies
+
+$$
+|\hat{z}-w^{f}|\leq\left(\frac{1}{2}\right)^{\ell-1},
+$$
+
+where $w$ is represented by $n$ bits of which $m$ are used for its integer part, $n_{f}$ is number of bits in the representation of the exponent $f$, $\ell\in{\mathbb{N}}$ is a user selected parameter determining the accuracy of the result. The results of all intermediate steps are truncated to $b\geq\max\{n,n_{f},[5(\ell+2m+\ln n_{f})],40\}$ bits before passing them on to the next step. The proof can be found in Theorem 4 in the Appendix.
+
+The algorithm can be extended to calculate $w^{p/q}$, $w>1$, where the exponent is a rational number $p/q\in[0,1]$. First $f$, an $n_{f}$ bit number, is calculated such that it approximates $p/q$ within $n_{f}$ bits of accuracy, namely $|f-\frac{p}{q}|\leq 2^{-n_{f}}$. Then $f$ is used as the exponent in the parameters of Algorithm 4 FractionalPower to get an approximation of $w^{f}$, which in turn is an approximation of $w^{p/q}$. The value $\hat{z}$ returned by the algorithm satisfies
+
+$$
+|\hat{z}-w^{p/q}|\leq\left(\frac{1}{2}\right)^{\ell-1}+\frac{w\ln w}{2^{n_{f}}}.
+$$
+
+The proof can be found in Corollary 1 in the Appendix.
+
+**Remark 1.**
+
+For example, for $p/q=1/3$, one can use Algorithm 0 INV to produce an approximation $f$ of $1/3$ and pass that to the algorithm. In such a case, the approximation error $|w^{p/q}-w^{f}|\leq 2^{-n_{f}}w\ln w$, obtained using the mean value theorem for the function $w^{x}$, appears as the last term of the equation above. For the details see corollaries 1 and 2 in the Appendix.
+
+When $w\in(0,1)$ we can shift it appropriately to obtain a number greater than one to which we can apply Algorithm 4 FractionalPower. However when approximating the fractional power undoing the initial shift to obtain an estimate of $w^{f}$ is a bit more involved than it is for the previously considered functions. For this reason we provide the details in Algorithm 5FractionalPower2. The algorithm first computes $k$ such that $2^{k}w\geq 1>2^{k-1}w$; see Fig. 9. Using $k$ the algorithm shifts $w$ to the left to obtain $x:=2^{k}w$. The next step is to approximate $x^{f}$. Observe that $x^{f}=2^{kf}w^{f}$. Therefore to undo the initial shift we have to divide by $2^{kf}=2^{c}2^{\{c\}}$, where $c$ denotes the integer part of $kf$ and $\{c\}$ denotes its fractional part. Dividing by $2^{c}$ is straightforward and is accomplished using shifts. Dividing by $2^{\{c\}}$ is accomplished by first approximating $2^{\{c\}}$ and then multiplying by its approximate reciprocal. See Algorithm 5 FractionalPower2 for all the details.
+
+The value $\hat{t}$ the algorithm returns as an approximation of $w^{f}$, $w\in(0,1)$, satisfies
+
+$$
+|\hat{t}-w^{f}|\leq\frac{1}{2^{\ell-3}},
+$$
+
+where $\ell$ is a user-defined parameter just like before. The proof can be found in Theorem 5 in the Appendix.
+
+```text
+0:
+              
+             w≥1w\geq 1, held in an nn qubit register, of which the first mm qubits are reserved for its integer part.
+
+0:
+              
+             ℓ∈ℕ\ell\in{\mathbb{N}} is a parameter upon which the error will depend. We use it to determine the number of bits bb after the decimal points in which arithmetic will be performed.
+
+0:
+              
+             1≥f≥01\geq f\geq 0 is a binary string corresponding to a fractional number given with nfn_{f}
+bits of accuracy after the decimal point. The algorithm returns an approximation of wfw^{f}.
+
+1:
+              
+             b←max⁡{n,nf,⌈5​(ℓ+2​m+ln⁡nf)⌉,40}b\leftarrow\max\{n,n_{f},\lceil 5(\ell+2m+\ln n_{f})\rceil,40\}. Results are truncated to bb bits of accuracy after the decimal point.
+
+2:
+              
+             if f=1f=1 then
+
+3:
+              
+              return  w
+
+4:
+              
+             end if
+
+5:
+              
+             if f=0f=0 then
+
+6:
+              
+              return  1
+
+7:
+              
+             end if
+
+8:
+              
+             {w^i}←\{\hat{w}_{i}\}\leftarrowPowerOf2Roots(ww, nfn_{f}, nn, mm, bb). The function returns a list of numbers w^i\hat{w}_{i} approximating wi=w12iw_{i}=w^{\frac{1}{2^{i}}}, i=1,…,nfi=1,\dots,n_{f}.
+
+9:
+              
+             z^←1\hat{z}\leftarrow 1
+
+10:
+              
+             for i=1i=1 to nfn_{f} do
+
+11:
+              
+              if the iith bit of ff is 11 then
+
+12:
+              
+               z←z^​w^iz\leftarrow\hat{z}\hat{w}_{i}
+
+13:
+              
+               z^←z\hat{z}\leftarrow z truncated to bb bits after the decimal point
+
+14:
+              
+              end if
+
+15:
+              
+             end for
+
+16:
+              
+             return z^\hat{z}
+```
+
+Algorithm 4 FractionalPower($w$, $f$, $n$, $m$, $n_{f}$, $\ell$)
+
+Just like before we can approximate $w^{p}/q$, $w\in(0,1)$, and a rational exponent $p/q\in[0,1]$, by first approximating $p/q$ and then calling Algorithm 5 FractionalPower2. The value $\hat{t}$ the algorithm returns satisfies
+
+$$
+|\hat{t}-w^{p/q}|\leq\left(\frac{1}{2}\right)^{\ell-2}+\frac{w\ln w}{2^{n_{f}}}.
+$$
+
+See Corollary 2 in the Appendix.
+
+```text
+0:
+              
+             0≤w<10\leq w<1, held in an nn qubit register, of which the first mm qubits are reserved for its integer part. (For w≥1w\geq 1, use Algorithm 4.)
+
+0:
+              
+             ℓ∈ℕ\ell\in{\mathbb{N}} is a parameter upon which the error will depend. We use it to determine the number of bits bb after the decimal points in which arithmetic will be performed.
+
+0:
+              
+             1≥f≥01\geq f\geq 0 specified to nfn_{f} bits of accuracy. The algorithm returns an approximation of wfw^{f}.
+
+1:
+              
+             b←max⁡{n,nf,⌈2​ℓ+6​m+2​ln⁡nf⌉,40}b\leftarrow\max\{n,n_{f},\lceil 2\ell+6m+2\ln n_{f}\rceil,40\}. Results are truncated to bb bits of accuracy after the decimal point.
+
+2:
+              
+             if w=0w=0 then
+
+3:
+              
+              return  0
+
+4:
+              
+             end if
+
+5:
+              
+             if f=1f=1 then
+
+6:
+              
+              return  w
+
+7:
+              
+             end if
+
+8:
+              
+             if f=0f=0 then
+
+9:
+              
+              return  1
+
+10:
+              
+             end if
+
+11:
+              
+             x←2k​wx\leftarrow 2^{k}w, where kk is a positive integer such that 2k​w≥1>2k−1​w2^{k}w\geq 1>2^{k-1}w. This corresponds to a logical right shift of the decimal point. An example of the quantum circuit computing kk is given in Fig. 9.
+
+12:
+              
+             c←k​fc\leftarrow kf
+
+13:
+              
+             z^←\hat{z}\leftarrowFractionalPower(xx, ff, nn, mm, nfn_{f}, ℓ\ell). This statement computes an approximation of z=xfz=x^{f}.
+
+14:
+              
+             y^←\hat{y}\leftarrowFractionalPower(22, {c}{\{c\}}, nn, mm, nfn_{f}, ℓ\ell). This statement computes an approximation of y=2{c}y=2^{\{c\}}, where {c}=c−⌊c⌋\{c\}=c-\lfloor c\rfloor (for c≥0c\geq 0) denotes the fractional part of cc. Since we use fixed precision arithmetic, the integer and fractional parts of numbers are readily available.
+
+15:
+              
+             s^←\hat{s}\leftarrow INV(y^,n,1,2​ℓ)(\hat{y},n,1,2\ell). This statement computes an approximation of s=y^−1s=\hat{y}^{-1}.
+
+16:
+              
+             v←2−⌊c⌋​z^v\leftarrow 2^{-\lfloor c\rfloor}\hat{z}. This corresponds to a logical left shift of the decimal point.
+
+17:
+              
+             t←v​s^t\leftarrow v\hat{s}
+
+18:
+              
+             t^←t\hat{t}\leftarrow t, truncated to bb bits after the decimal point.
+
+19:
+              
+             return t^\hat{t}
+```
+
+Algorithm 5 FractionalPower2($w$, $f$, $n$, $m$, $n_{f}$, $\ell$)
+
+We now address the cost of our Algorithms computing $w^{f}$. First consider Algorithm 4 FractionalPower, which calls Algorithm 2 PowerOf2Roots with input parameters $k:=n_{f}$ and $b:=\max\{n,n_{f},\lceil 5(\ell+2m+\ln n_{f})\rceil,40\}$, which requires $O(n_{f}(n+b)\log b)$ qubits and of order $n_{f}\log b\cdot p(n+b)$ quantum operations, as explained in the previous subsections. At most $n_{f}$ multiplications are then required, using a quantum circuit of the type shown in Fig. 2. Hence, Algorithm 4 FractionalPower requires a number of qubits and a number of quantum operations that is a low-degree polynomial in $n,n_{f}$, and $\ell$, respectively.
+
+Now consider Algorithm 5 FractionalPower2, which requires two calls to Algorithm 4 FractionalPower, one call to Algorithm 0 INV, and a constant number of calls to a quantum circuit of the type shown in Fig. 2. Hence, using the previously derived bounds for the costs of each of these modules, the cost of Algorithm 5 FractionalPower2 in terms of both the number of quantum operations and the number of qubits is a low-degree polynomial in $n,n_{f}$, and $\ell$, respectively.
+
+## 3 Numerical Results
+
+We present a number of tests comparing our algorithms to the respective ones implemented using floating point arithmetic in Matlab. To ensure that we compare against highly accurate values in Matlab we have used variable precision arithmetic (vpa) with 100 significant digits. In particular, we simulate the execution of each of our algorithms and obtain the result. We obtain the corresponding result using a built-in function in Matlab. We compare the number of equal significant digits in the two results. Our tests show that using a moderate amount of resources, our algorithms compute values matching the corresponding ones obtained by commercial, widely used scientific computing software with 12 to 16 decimal digits. In our tests, the input $w$ was chosen randomly.
+
+### 3.1 Algorithm: SQRT
+
+In Table 2, all calculations for SQRT are performed with $b=64$ bits (satisfying $b>2m$ for all inputs). The first column in the table gives the different values of $w$ in our tests, the second and third columns give the computed value using Matlab and our algorithm respectively, and the last column gives the number of identical significant digits between the output of our algorithm and Matlab.
+
+Table 2: Numerical results for SQRT.
+
+| $w$ | Matlab: $w^{1/2}$ | Our Algorithm: $w^{1/2}$ | # of Identical Digits |
+|---|---|---|---|
+| $0.0198$ | $0.140712472794703$ | $0.140712472794703$ | $16$ |
+| $48$ | $6.928203230275509$ | $6.928203230275507$ | $15$ |
+| $91338$ | $302.2217728754829$ | $302.2217728754835$ | $14$ |
+| $171234050$ | $13085.64289593752$ | $13085.64289596872$ | $12$ |
+
+In Fig. 10 we give simulation results showing the error of our algorithm for different values of the parameter $b$. In particular, we show how the worst-case error of the algorithm depends on $b$, and then, using the results of Matlab as the correct values of $\sqrt{w}$, we show the actual error of our algorithm in relation to $b$ in a number of test cases.
+
+### 3.2 Algorithm: PowerOf2Roots
+
+In Table 3, we show only the result for the $2^{k}$th root (the highest root), where $k$ was chosen randomly such that $5\leq k\leq 10$. Again, all our calculations are performed with $b=64$ bits.
+
+Table 3: Numerical results for PowerOf2Roots.
+
+| $w$ | $k$ | Matlab: $w^{1/2^{k}}$ | Our Algorithm: $w^{1/2^{k}}$ | # of Identical Digits |
+|---|---|---|---|---|
+| $0.3175$ | $6$ | $0.982233508377946$ | $0.982233508377946$ | $16$ |
+| $28$ | $10$ | $1.003259406317532$ | $1.003259406317532$ | $16$ |
+| $15762$ | $5$ | $1.352618595919273$ | $1.352618595919196$ | $13$ |
+| $800280469$ | $8$ | $1.083373703681284$ | $1.083373703681403$ | $13$ |
+
+### 3.3 Algorithm: LN
+
+In Fig. 11 below we give simulation results showing the error of our algorithm for different values of the parameter $\ell$. In particular, we show how the worst-case error of the algorithm depends on $\ell$, and then, using the results of Matlab as the correct values of $\ln(w)$, we show the actual error of our algorithm in relation to $\ell$ in a number of test cases.
+
+Table 4: Numerical results for LN.
+
+| $w$ | Matlab: $\ln(w)\quad$ | Our Algorithm: $\ln(w)$ | # of Identical Digits |
+|---|---|---|---|
+| $96$ | $4.564348191467836$ | $4.564348191467836$ | $16$ |
+| $65575$ | $11.090949804735075$ | $11.090949804735075$ | $17$ |
+| $35711679$ | $17.390988336107455$ | $17.390988336107455$ | $17$ |
+
+In the algorithm that computes the logarithm, there is a user-determined parameter $\ell$ that controls the desired accuracy of the result. We have used $\ell=50$ in the tests shown in Table 4.
+
+### 3.4 Algorithm: FractionalPower
+
+The table below shows tests for the approximation of $w^{f}$ for randomly generated $f\in(0,1)$. This result of this algorithm also depends on a user-determined parameter $\ell$ controlling the accuracy. We have used $\ell=50$ in the tests shown in Table 5.
+
+Table 5: Numerical results for FractionalPower.
+
+| $w$ | $f$ | Matlab: $w^{f}\qquad$ | Our Algorithm: $w^{f}$ | # of Identical Digits |
+|---|---|---|---|---|
+| $0.7706$ | $0.1839$ | $0.953208384891996$ | $0.953208384891998$ | $15$ |
+| $76$ | $0.7431$ | $24.982309269657478$ | $24.982309269657364$ | $14$ |
+| $1826$ | $0.1091$ | $2.268975123215851$ | $2.268975123215838$ | $14$ |
+| $631182688$ | $0.5136$ | $33094.79142555447$ | $33094.79142555433$ | $14$ |
+
+## 4 Implementation Remarks
+
+In designing algorithms for scientific computing the most challenging task is to control the error propagation. In our case, we derive the algorithms by combining elementary modules and provide worst-case error bounds. The resulting algorithms have cost that is polynomial in the problem parameters. In this section, we wish to discuss the implementation of the algorithms, and to give some estimates of their cost for certain choices of their parameters.
+
+Since we are interested in quantum algorithms, the algorithms must be reversible. To the extent that the modules are based on classical computations, their reversibility is not a major issue since [4, 13, 17] show how to simulate them reversibly. There are time/space trade-offs in an implementation that are of theoretical and practical importance. These considerations, as well as other constraints such as (fault-tolerant) gate sets or locality restrictions [23], should be optimized by the compiler, but we are not concerned with them here. For a discussion of the trade-offs, see, for example, [16] and the references therein. Nevertheless, for the algorithms in this paper we indicate a possible way to implement them, realizing that there are alternatives that one may opt for.
+
+The design of a library of algorithms for scientific computing must be modular, using components with a certain functionality and worst-case accuracy while hiding the implementation details. The low-level implementation of the modules, i.e., actual derivation of the quantum circuits realizing them, should not be a concern for the scientist or the application programmer deriving the algorithms. In fact it should be possible to change the low-level implementation of the modules in a transparent way. The goal is to have a library of quantum circuit templates which can be instantiated as needed.
+
+We are at an early stage in the development of quantum computation, quantum programming languages and compilers. It is anticipated that implementation decisions will be made taking into account technological limitations concerning the different quantum computer architectures, but also it is expected that things will change with time and some of the present constraints may no longer be as important.
+
+Although optimization of the individual quantum circuits realizing the algorithms for scientific computing described in this paper is desirable, to a certain degree, it is not a panacea. Quantum algorithms may use one or more of our modules in different ways while performing their tasks. Therefore, global optimization of the resulting quantum circuit and resource management is a much more important and will have to be performed by the compiler and optimizer. One additional possibility would be to have templates for multiple versions of quantum circuit implementations of each of our quantum algorithms which can be selected according to optimization goals set during compilation. Quantum programming languages and compilers is an active area of research with many open questions. We do not pursue this direction since it is outside the scope of this paper.
+
+We now present some implementation ideas for our algorithms. We start our discussion with the elementary module of Fig. 2 because all algorithms use it. The quantum circuit realizing this module needs to perform multiplication, and addition. Let $a,b$ be fixed precision numbers held in $n$ qubit registers. One can perform an addition “in-place”, i.e., ${\left|{a}\right\rangle}{\left|{b}\right\rangle}\to{\left|{a}\right\rangle}{\left|{a+b}\right\rangle}$, with the understanding that the second register size has to be $n+1$ qubits long to hold the result exactly. A multiplication can be computed “out-of-place”, i.e., ${\left|{a}\right\rangle}{\left|{b}\right\rangle}{\left|{0}\right\rangle}\to{\left|{a}\right\rangle}{\left|{b}\right\rangle}{\left|{a+b}\right\rangle}$. This requires an additional $2n$ qubits to hold the result. The same could have been done for the addition but performing it in-place saves some space. Similar considerations apply in a straightforward way when the inputs are held in registers of different sizes.
+
+In the literature there are numerous ways that basic arithmetic operations can be performed reversibly, and there are trade-offs between the resulting quantum circuits in terms of the number of ancilla bits/qubits used and the resulting circuit size and depth; for example, see [8, 9, 10, 12, 17, 18, 19, 21, 23, 25, 22]. Table 1 in [23] summarizes some of the trade-offs. There we see that the circuit in [9] does not use Toffoli gates or ancilla qubits for addition, but has size $O(n^{2})$, while the circuit in [8] uses one ancilla qubit, $O(n)$ Toffoli gates, and has size $O(n)$. We believe that low-level implementation details have to be decided taking into account the target architecture because the unit cost of the different resources is not equal. As we mentioned, one may wish to have different circuits for the same arithmetic operation, and at compile time to let the optimizer decide which one is preferable.
+
+In summary, the circuit implementing the elementary module of Fig. 2 contains sub-circuits for addition and multiplication, plus ancilla registers to facilitate these operations, some of which are cleared at the end of the module application and can be reused, while others save intermediate results and may be cleared at a later time.
+
+Our algorithms, in addition to the applications of the elementary module of Fig. 2, use a constant number of extra arithmetic operations. Thus the cost of the algorithms can be expressed in a succinct and fairly accurate way by counting the number of arithmetic operations required, which is the approach taken in classical algorithms for scientific computing. The number of arithmetic operations can provide precise resource estimates once particular choices for the quantum circuits implementing these operations have been made. We remark that the costs of the quantum circuits of figures 4, 5, 7, 8, and 9 are subsumed by the cost of the arithmetic operations.
+
+Our algorithms use Newton Iteration. Each iterative step is realized by cascading a small number of modules like the one of Fig. 2, whose implementation we discussed above. In addition, at each iterative step, we keep the inputs and the truncated output which is the next approximation. This information alone makes the step reversible. Note that keeping the intermediate results introduces a relatively insignificant overhead since Newton iteration converges quadratically, and thus the number of iterations is proportional to the logarithm of the bits of accuracy, i.e $\log_{2}b$. For example, for $b=64$, keeping the intermediate results of Newton iteration requires storing $6$ fixed-precision numbers. The number of intermediate results kept by algorithms that apply Newton iteration multiple times, such as Algorithm 1 SQRT that applies Newton iteration twice, and the algorithms that require the computation of $2^{k}$-roots, is derived accordingly.
+
+For the convenience of the reader, we provide some illustrative cost and qubit estimates. However, these numbers must be interpreted keeping in mind the larger picture. Our functions are expected to be used as subroutines. Note, the cost of a quantum algorithm that computes one or more of our functions a number of times in sequence is quite different to that of an algorithm that performs the same computations concurrently.
+
+The tables below give estimates of the cost of our algorithms for specific choices of the problem parameters. As explained, we assume the intermediate approximations of each step of Newton iteration are kept in memory until the end of the computation. It is thus possible to uncompute all intermediate approximations if necessary with the same number of qubits and at most a doubling the number of arithmetic operations.
+
+Table 6: Number of arithmetic operations and qubit estimates rounded to the nearest $10$ for $n=2m=b=32$.
+
+| Algorithm | # Multiplications | # Additions | # Qubits |
+|---|---|---|---|
+| INV | $20$ | $10$ | $370$ |
+| SQRT | $60$ | $20$ | $790$ |
+| PowerOf2Roots($k=5$) | $600$ | $200$ | $910$ |
+| PowerOf2Roots($k=10$) | $1200$ | $400$ | $1110$ |
+
+Let us discuss the entries of Table 6, where we have selected $n=2m=b=32$. Consider Algorithm 0 INV. There are $\log b=5$ iterative steps. Each step has two multiplications and one addition (ignoring the multiplication by $2$) as seen in (1). At each iterative step, clearing the ancilla registers, with the exception of the register holding the truncated next approximation, doubles the number of arithmetic operations. The number of qubits follows from the fact that we have an initial approximation and $5$ successive approximations, each held in a $b=32$ qubit register, plus we have $n=32$ qubits holding the input $w$, plus we use about $150$ ancilla qubits, which are sufficient to store the intermediate results, and which are reused at each iterative step.
+
+Algorithm 1 SQRT follows similarly by observing that it applies five steps of Newton iteration twice. The second iteration function (2) requires two more multiplications than iteration function (1) and the same number of additions. Just like before, at each iterative step we keep the truncated next approximation and uncompute the other ancilla qubits used within the step. To estimate the number of qubits, observe that we keep twice as many intermediate truncated approximations as before, and just over $300$ qubits are sufficient to hold the other intermediate results exactly in each iterative step.
+
+Algorithm 2 PowerOf2Roots$(k)$ computes $k$ square roots in turn. After each square root call we uncompute the ancilla registers holding intermediate approximations to economize on qubits. Thus, the number of arithmetic operations is $2k$ times that of Algorithm 1 SQRT, and the number of qubits is given by the number of qubits needed for SQRT, plus sufficiently many qubits to hold the $k-1$ additional outputs (recall that this algorithm outputs approximations for for all $w^{1/2^{k}}$, $=1,\dots,k$).
+
+For Algorithm 3 LN, we compute with high accuracy the $1/2^{\ell}$-power of the shifted input in the range $[1,2)$. Then we use the first two terms of the Taylor series to save on computational cost (i.e. no divisions or powers beyond squaring are required). The dominant cost factor is the PowerOf2Roots subroutine. We give cost estimates for some values of $\ell$. Note that $\ell$ is an input that determines the desired accuracy of the result and number of significant bits $b$ used in the calculation.
+
+Table 7: Number of arithmetic operations and qubit estimates rounded to the nearest $10$ for Algorithm 3 LN for $n=2m=32$ and various values of the error parameter $\ell$. Note that $b=5\ell$ as in the algorithm.
+
+| $\ell$ | $b$ | # Multiplications | # Additions | # Qubits |
+|---|---|---|---|---|
+| 10 | 50 | $1440$ | $480$ | $1780$ |
+| 15 | 75 | $2520$ | $840$ | $3160$ |
+| 20 | 100 | $3360$ | $1120$ | $4690$ |
+
+Similarly, the cost and qubits of Algorithm 4 FractionalPower follows from that of Algorithm 2 PowerOf2Roots. The multiplication steps at the end of the algorithm require extra qubits for the intermediate products. Algorithm 5 FractionalPower2 calls Algorithm 4 FractionalPower twice. To save qubits, one can assume the intermediate results of Algorithm 4 FractionalPower are uncomputed after each application.
+
+Table 8: Number of arithmetic operations and qubit estimates rounded to the nearest $10$ for $n=2m=16$, $n_{f}=3$, and $\ell=10$.
+
+| Algorithm | # Multiplications | # Additions | # Qubits |
+|---|---|---|---|
+| FractionalPower | $580$ | $190$ | $4020$ |
+| FractionalPower2 | $2330$ | $780$ | $4330$ |
+
+The respective numbers of arithmetic operations and qubits estimated for Algorithm 4 FractionalPower and Algorithm 5 FractionalPower2 are larger than those of the previous algorithms. There are two reasons for this. The first reason is that in these algorithms the error accumulates in two ways. One is the error in computing the $2^{i}$-roots, $i=1,\dots,n_{f}$, and the other is the error in multiplying these results. Thus we must use a large number of accuracy bits $b$ to control the overall error. The second reason is that the worst-case error estimates of Theorems 4 and 5, from which the costs follow, are conservative, since we have opted for simplicity in the error bounds presented. Cost improvements can be obtained by tightening the error bounds at the expense of more complicated error bound formulas. This can be done using the details already found in the theorem proofs.
+
+## 5 Summary
+
+Recent results [6, 11, 20] suggest that quantum computers may have a substantial advantage over classical computers for solving numerical linear algebra problems and, more generally, problems of computational science and engineering. Scientific computing applications require the evaluation of elementary functions like those found in mathematics libraries of programming languages, where the calculations are performed using floating point arithmetic. Although in principle quantum computers can always directly simulate any classical algorithm, generally there is no guarantee that such simulations remain practical. Hence, we need to develop efficient quantum algorithms and circuits implementing such functions and to provide performance and cost guarantees. It is also important to eventually develop a standard for the implementation of quantum algorithms for scientific computing similar to that of IEEE 754-2008 for floating point arithmetic.
+
+In the design of algorithms for scientific computing, the challenging task is to control the error propagation and to do so efficiently. In this sense, it is important to derive reusable modules with well-controlled error bounds. In this paper, we have given efficient, reversible, and scalable quantum algorithms for computing power of two roots, the logarithm, and the fractional power functions common to scientific computing. In particular, we have shown our algorithms to have both controllable error and reasonable (i.e. polynomially-bounded) cost in terms of the number of qubits and quantum operations required. The design is modular, combining a number of elementary quantum circuits to implement the functions. Each new algorithm builds on the previously developed ones as much as possible.
+
+This paper extends the results of [6], where we exhibit quantum circuits computing the reciprocal, the sine, the cosine and their inverses. As explained, these circuits give fundamental building blocks critical to actual implementations of quantum algorithms involving numerical computations, such as those of [6, 11]. Our goal is to extend our work and ultimately develop a comprehensive library of quantum circuits for scientific computing.
+
+## Acknowledgements
+
+This work was supported in part by NSF/DMS.
+
+## Appendix
+
+In this section, we derive theorems showing the worst-case error of the algorithms in Section 2.
+
+The following Corollary follows from Theorem B.1 of [6].
+
+**Corollary 0.**
+
+For $w>1$, represented by $n$ bits of which the first $m$ correspond to its integer part, and for $b\geq n$, Algorithm 0 returns a value $\hat{x}_{s}$ approximating $\frac{1}{w}$ with error
+
+$$
+|\hat{x}-\frac{1}{w}|\leq\frac{2+\log_{2}b}{2^{b}} \tag{4}
+$$
+
+This is accomplished by performing Newton’s iteration and truncating the results of each iterative step to $b$ bits after the decimal point.
+
+**Proof.**
+
+From [6], the Newton iteration of Algorithm 0 performed with $b$ bits of accuracy and $s$ iterations, produces an approximation $\hat{x}$ of $\frac{1}{w}$ such that
+
+$$
+|\hat{x}-\frac{1}{w}|\leq\left(\frac{1}{2}\right)^{2^{s}}+s2^{-b}.
+$$
+
+For $s=\lceil\log_{2}b\rceil$, we have
+
+$$
+|\hat{x}-\frac{1}{w}|\leq\frac{1}{2^{b}}+\lceil\log_{2}b\rceil\frac{1}{2^{b}}\leq\frac{1}{2^{b}}(2+\log_{2}b).
+$$
+
+∎
+
+**Theorem 1.**
+
+For $w>1$, represented by $n$ bits of which the first $m$ correspond to its integer part, and for $b\geq\max\{2m,4\}$, Algorithm 1 returns a value $\hat{y}_{s}$ approximating $\sqrt{w}$ with error
+
+$$
+|\hat{y}_{s}-\sqrt{w}|\leq\left(\frac{3}{4}\right)^{b-2m}\left(2+b+\log_{2}b\right). \tag{5}
+$$
+
+This is accomplished by performing Newton’s iteration and truncating the results of each iterative step to $b$ bits after the decimal point before passing it on the next iterative step.
+
+**Proof.**
+
+The overall procedure consists of two stages of Newton’s iteration, as illustrated in Fig. 3 above. We analyze each stage in turn.
+
+Observe that the iteration $x_{i}=g_{1}(x_{i-1}):=-w\hat{x}_{i-1}^{2}+2\hat{x}_{i-1}$, $i=1,2,\dots,s_{1}$, $s_{1}=\lceil\log_{2}b\rceil$, corresponds to Newton’s iteration applied to the function $f_{1}\left(x\right):=\frac{1}{x}-w$ for approximating $\frac{1}{w}$, with initial guess $\hat{x}_{0}=2^{-p}$ where $p\in{\mathbb{N}}$ and $2^{p}>w\geq 2^{p-1}$. It has been analyzed in detail in Theorem B.1 of [6]. Here, we briefly review some of the results. An efficient circuit for generating the initial state $2^{-p}$ is shown in Fig. 4 above, similar to that in [6].
+
+Note that the approximations $x_{i}<\frac{1}{w}$, i.e. the iteration underestimates $\frac{1}{w}$. Indeed, $g_{1}\left(x\right)-\frac{1}{w}=\frac{1}{w}\left(2xw-w^{2}x^{2}-1\right)=-\frac{1}{w}\left(wx-1\right)^{2}<0$. Taking into account the truncation error, we have
+
+$$
+|{\hat{x}_{s_{1}}}-\frac{1}{w}|\leq\left(we_{0}\right)^{2^{s_{1}}}\frac{1}{w}+2^{-b}s_{1}\leq\left(\frac{1}{2}\right)^{2^{s_{1}}}+2^{-b}s_{1}=:E. \tag{6}
+$$
+
+This follows from the facts $w>1$ and $we_{0}\leq\frac{1}{2}$, where $e_{0}=|2^{-p}-\frac{1}{w}|$, and is shown in [6]. The first term in the upper bound corresponds to the error of Newton’s iteration, while the second term is the truncation error. Now we turn to the second stage. Iteration $y_{j}=g_{2}(y_{j-1}):=\frac{1}{2}(3y_{j-1}-\hat{x}_{s_{1}}y^{3}_{j-1})$, $j=1,2,\dots,s_{2}$, $s_{2}=\lceil\log_{2}b\rceil$, is obtained by using Newton’s method to approximate the zero of the function $f_{2}\left(y\right)=\frac{1}{y^{2}}-{\hat{x}_{s_{1}}}$, with initial guess $\hat{y}_{0}=2^{\lfloor\frac{q-1}{2}\rfloor}$ where $q\in{\mathbb{N}}$ and $2^{1-q}>\hat{x}_{s_{1}}\geq 2^{-q}$. An efficient circuit for generating the initial state $2^{\lfloor\frac{q-1}{2}\rfloor}$ is shown in Fig. 5. We have
+
+$$
+g_{2}\left(y\right)-\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}} = y-\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}+\frac{1}{2}\left(y-y^{3}{\hat{x}_{s_{1}}}\right)
+$$
+$$
+= y-\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}+\frac{{\hat{x}_{s_{1}}}y}{2}\left(\frac{1}{{\hat{x}_{s_{1}}}}-y^{2}\right)
+$$
+$$
+= \left(y-\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}\right)\left(1-\frac{1}{2}{\hat{x}_{s_{1}}}y\left(y+\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}\right)\right)
+$$
+$$
+= -\frac{1}{2}\left(y-\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}\right)\left(y^{2}{\hat{x}_{s_{1}}}+y\sqrt{{\hat{x}_{s_{1}}}}-2\right)
+$$
+$$
+= -\frac{1}{2}\left(y-\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}\right)\left(\left(y\sqrt{{\hat{x}_{s_{1}}}}-1\right)^{2}+3y\sqrt{{\hat{x}_{s_{1}}}}-3\right)
+$$
+$$
+= -\frac{1}{2}\left(y-\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}\right)\left(y-\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}\right)\sqrt{{\hat{x}_{s_{1}}}}\left(y\sqrt{{\hat{x}_{s_{1}}}}-1+\frac{3y\sqrt{{\hat{x}_{s_{1}}}}-3}{y\sqrt{{\hat{x}_{s_{1}}}}-1}\right)
+$$
+$$
+= -\frac{1}{2}\left(y-\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}\right)^{2}\sqrt{{\hat{x}_{s_{1}}}}\left(y\sqrt{{\hat{x}_{s_{1}}}}+2\right)
+$$
+
+The last quantity is non-positive assuming $y\geq 0$. The iteration function $g_{2}$ is non-decreasing in the interval $[0,\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}]$ and $g_{2}\left(0\right)=0$. Since $y_{0}=2^{-\lfloor\frac{q-1}{2}\rfloor}$, we get $y_{1}\geq 0$, and inductively we see that all iterations produce positive numbers that are approximations underestimating $\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}$, i.e. $y_{i}\leq\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}$ for $i=0,1,2,\dots$. Then
+
+$$
+e_{i+1}:=|y_{i+1}-\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}|=e_{i}^{2}\frac{1}{2}\sqrt{{\hat{x}_{s_{1}}}}|y_{i}\sqrt{{\hat{x}_{s_{1}}}}+2|\leq\frac{3}{2}\sqrt{{\hat{x}_{s_{1}}}}e_{i}^{2}, \tag{7}
+$$
+
+since $|y_{i}\sqrt{{\hat{x}_{s_{1}}}}+2|\leq 3$ ($y_{i}$ underestimates ${\hat{x}_{s_{1}}}^{-\frac{1}{2}})$, where $e_{0}=\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}-2^{-\lfloor\frac{q-1}{2}\rfloor}\leq 2^{-\lfloor\frac{q-1}{2}\rfloor}$.
+
+Let $A=\frac{3}{2}\sqrt{{\hat{x}_{s_{1}}}}$. We unfold the recurrence to obtain $e_{i}\leq\frac{1}{A}{\left(Ae_{0}\right)}^{2^{i}}$, $i=1,2,\dots$. We have $\sqrt{{\hat{x}_{s_{1}}}}2^{\lfloor\frac{q-1}{2}\rfloor}\geq 2^{-q/2}2^{\lfloor\frac{q-1}{2}\rfloor}$. For $q$ odd, this quantity is bounded from below by $\frac{1}{\sqrt{2}}$, and for $q$ even this is bounded by $\frac{1}{2}$. Thus $\sqrt{{\hat{x}_{s_{1}}}}e_{0}=|\sqrt{{\hat{x}_{s_{1}}}}2^{\lfloor\frac{q-1}{2}\rfloor}-1|=1-\sqrt{{\hat{x}_{s_{1}}}}2^{\lfloor\frac{q-1}{2}\rfloor}\leq\frac{1}{2}$ because we have selected the initial approximation $y_{0}$ to underestimate $\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}$. From this, we obtain $e_{i}\leq\frac{1}{A}\left(\frac{3}{4}\right)^{2^{i}}$. Using equation (6), we have that ${\hat{x}_{s_{1}}}\geq\frac{1}{w}-E$. Without loss of generality, $wE\leq\frac{1}{2}$. This will become apparent in a moment once we select the error parameters. Thus, $\frac{1}{A}\leq\frac{2}{3}\sqrt{2w}$. Therefore,
+
+$$
+e_{i}\leq\frac{2}{3}\sqrt{2w}\left(\frac{3}{4}\right)^{2^{i}},\;\;i=1,\dots,s_{2}. \tag{8}
+$$
+
+We now turn to the roundoff error analysis of the second stage of the algorithm. The iterations of the second stage of the algorithm would produce a sequence of approximations $y_{1},\dots,y_{s_{2}}$ if we did not have truncation error. Since we truncate the result of each iteration to $b$ bits of accuracy before performing the next iteration, we have a sequence of approximations $\hat{y}_{1},\dots,\hat{y}_{s_{2}}$, with
+
+$$
+\hat{y}_{0} = {y}_{0}
+$$
+$$
+\hat{y}_{1} = g\left(\hat{y}_{1}\right)+\xi_{1}
+$$
+$$
+\hat{y}_{i} = g\left(\hat{y}_{i}\right)+\xi_{i}
+$$
+
+where $|\xi_{i}|\leq 2^{-b}$, $i\geq 1$. Using the fact that $\sup_{x\geq 0}|g_{2}^{\prime}\left(y\right)|\leq\frac{3}{2}$, we obtain
+
+$$
+|\hat{y}_{s_{2}}-y_{s_{2}}| \leq |g_{2}\left(\hat{y}_{s_{2}-1}\right)-g_{2}\left(y_{s_{2}-1}\right)|+|\xi_{s_{2}}|
+$$
+$$
+\leq \frac{3}{2}|\hat{y}_{s_{2}-1}-y_{s_{2}-1}|+|\xi_{s_{2}}|
+$$
+$$
+\leq \sum_{j=1}^{s_{2}}\left(\frac{3}{2}\right)^{s_{2}-j}|\xi_{j}|\leq 2^{-b}\frac{\left(\frac{3}{2}\right)^{s_{2}}-1}{\frac{3}{2}-1}
+$$
+$$
+\leq 2^{1-b}\left(\frac{3}{2}\right)^{s_{2}}.
+$$
+
+Therefore, the total error of the second stage of the algorithm is
+
+$$
+|\hat{y}_{s_{2}}-\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}|\leq\frac{2}{3}\sqrt{2w}\left(\frac{3}{4}\right)^{2^{s_{2}}}+2^{1-b}\left(\frac{3}{2}\right)^{s_{2}}. \tag{9}
+$$
+
+For $b\geq\max\{2m,4\}$ and $s_{2}=\lceil\log_{2}b\rceil$, and recall that $w\leq 2^{m}$. Then we have
+
+$$
+|\hat{y}_{s_{2}}-\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}| \leq \frac{2}{3}\sqrt{2}\;2^{\frac{m}{2}}\left(\frac{3}{4}\right)^{b}+2^{1-b}\left(\frac{3}{2}\right)^{\log_{2}b+1} \tag{10}
+$$
+$$
+\leq \frac{2}{3}\sqrt{2}\;\left(\sqrt{2}\right)^{m}\left(\left(\frac{3}{4}\right)^{2}\right)^{b/2}+2^{1-b}\;2^{\log_{2}b+1}
+$$
+$$
+\leq \frac{2}{3}\sqrt{2}\;\left(\frac{\sqrt{2}\;9}{16}\right)^{m}\left(\frac{9}{16}\right)^{b/2-m}+2^{2-b}\;b
+$$
+$$
+\leq \left(\frac{3}{4}\right)^{b-2m}+2^{2-b}\;b,
+$$
+
+Let us now consider the total error of our algorithm,
+
+$$
+|\hat{y}_{s_{2}}-\sqrt{w}|\leq|\hat{y}_{s_{2}}-\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}|+|\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}-\sqrt{w}| \tag{11}
+$$
+
+We use equation (10) above to bound the first term. For the second term we have
+
+$$
+|\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}-\sqrt{w}|\leq\frac{1}{2}|\frac{1}{{\hat{x}_{s_{1}}}}-w|=\frac{1}{2}\frac{w}{{\hat{x}_{s_{1}}}}|{\hat{x}_{s_{1}}}-\frac{1}{w}|\leq\frac{1}{2}\frac{w}{{\hat{x}_{s_{1}}}}E, \tag{12}
+$$
+
+where the first inequality follows from the mean value theorem ($|\sqrt{a}-\sqrt{b}|\leq\frac{1}{2}|a-b|$ for $a,b\geq 1$). Since ${\hat{x}_{s_{1}}}\geq\frac{1}{w}-E$,
+
+$$
+{\hat{x}_{s_{1}}}^{-1}\leq\left(1-\frac{1}{w}-E\right)^{-1}\leq 2w, \tag{13}
+$$
+
+for $wE\leq\frac{1}{2}$. Then (12) becomes
+
+$$
+|\frac{1}{\sqrt{{\hat{x}_{s_{1}}}}}-\sqrt{w}| \leq w^{2}E\leq w^{2}\left(\left(\frac{1}{2}\right)^{2^{s_{1}}}+2^{-b}s_{1}\right) \tag{14}
+$$
+$$
+\leq 2^{2m}\left(\left(\frac{1}{2}\right)^{2^{s_{1}}}+2^{-b}s_{1}\right)
+$$
+$$
+\leq 2^{2m}\left(2^{-b}+2^{-b}\lceil\log_{2}b\rceil\right)
+$$
+$$
+\leq 2^{2m-b}\left(1+\lceil\log_{2}b\rceil\right),
+$$
+
+where we set $s_{1}=\lceil\log_{2}b\rceil$. Combining this with equation (11),
+
+$$
+|\hat{y}_{s_{2}}-\sqrt{w}| \leq \left(\frac{3}{4}\right)^{b-2m}+2^{2-b}\;b+2^{2m-b}\left(1+\lceil\log_{2}b\rceil\right) \tag{15}
+$$
+$$
+\leq \left(\frac{3}{4}\right)^{b-2m}\left(2+b+\log_{2}b\right),
+$$
+
+and the error bound in the statement of the theorem follows for $s=s_{1}=s_{2}$.
+
+Finally, for completeness we show that for $b\geq\max\{2m,4\}$, $wE\leq\frac{1}{2}$. Indeed,
+
+$$
+wE \leq 2^{m}\left(2^{-b}+2^{-b}\lceil\log_{2}b\rceil\right)
+$$
+$$
+\leq 2^{-b+m}\left(2+\log_{2}b\right)
+$$
+$$
+\leq \left(\frac{1}{2}\right)^{b/2-m}\frac{2+\log_{2}b}{2^{b/2}}.
+$$
+
+The first factor above is at most $\frac{1}{2}$ since $b\geq\max\{2m,4\}$, while the second is at most $1$ and this completes the proof. ∎
+
+**Theorem 2.**
+
+For $w>1$, represented by $n$ bits of which the first $m$ correspond to its integer part, Algorithm 2 computes approximations $\hat{z}_{1}$,$\hat{z}_{2}$,…,$\hat{z}_{k}$ such that
+
+$$
+|\hat{z}_{i}-w^{\frac{1}{2^{i}}}|\leq 2\left(\frac{3}{4}\right)^{b-2m}\left(2+b+\log_{2}b\right),\;i=1,2,\dots,k,\rm{\ for\ any\ }k\in{\mathbb{N}}. \tag{16}
+$$
+
+This is accomplished by repetitively calling Algorithm 1. Each $z_{i}$ has $b\geq\max\{2m,4\}$ bits after its decimal point, and by convention its integer part is $m$ bits long.
+
+**Proof.**
+
+We have
+
+$$
+\hat{z}_{1} = \sqrt{w}+\xi_{1}
+$$
+$$
+\hat{z}_{2} = \sqrt{z_{1}}+\xi_{2}
+$$
+$$
+\hat{z}_{k} = \sqrt{z_{k}}+\xi_{k}.
+$$
+
+Since $\hat{z}_{i}$ is obtained using Algorithm 1 with input $\hat{z}_{i-1}$, we use Theorem 1 to obtain $|\xi_{i}|\leq\left(\frac{3}{4}\right)^{b-2m}\left(2+b+\log_{2}b\right)$, $i=1,2,\dots,k$. We have
+
+$$
+|\hat{z}_{k}-w^{\frac{1}{2^{k}}}| \leq |\sqrt{\hat{z}_{k-1}}-w^{\frac{1}{2^{k}}}|+|\xi_{k}|
+$$
+$$
+\leq \frac{1}{2}|\hat{z}_{k-1}-w^{\frac{1}{2^{k-1}}}|+|\xi_{k}|
+$$
+$$
+\leq \sum_{j=0}^{k-1}\frac{1}{2^{j}}|\xi_{k-j}|
+$$
+$$
+\leq 2\left(\frac{3}{4}\right)^{b-2m}\left(2+b+\log_{2}b\right),
+$$
+
+where the second inequality above follows again from $|\sqrt{a}-\sqrt{b}|\leq\frac{1}{2}|a-b|$ for $a,b\geq 1$. ∎
+
+**Theorem 3.**
+
+For $w>1$, represented by $n$ bits of which the first $m$ bits correspond to its integer part, Algorithm 3 computes an approximation ${\hat{z}:=\hat{z}_{p}+(p-1)r}$ of $\ln w$, where $2^{p}>w\geq 2^{p-1}$, $p\in{\mathbb{N}}$, and $|r-\ln 2|\leq 2^{-b}$, such that
+
+$$
+|\hat{z}-\ln w|\leq\left(\frac{3}{4}\right)^{5\ell/2}\left(m+\frac{32}{9}+2\left(\frac{32}{9}+\frac{n}{\ln 2}\right)^{3}\right),
+$$
+
+where $\ell\geq\lceil\log_{2}8n\rceil$ is a parameter specified in the algorithm that is used to determine the number $b=\max\{5\ell,25\}$ of bits after the decimal point in which arithmetic is be performed, and from that the error.
+
+**Proof.**
+
+An overall illustration of the algorithm is given in Fig. 6.
+
+Our algorithm utilizes the identity $\ln w=\ln 2\log_{2}w$, as well as other common properties of logarithms. For completeness, an example circuit for computing $p$ is given in Fig. 9 above. We proceed in detail.
+
+If the clause of the second if statement evaluates to true, in the case $w=2^{p-1}$, then the algorithm sets $z_{p}=0$ and returns $(p-1)r$. This quantity approximates $\ln 2^{p-1}$ with error bounded from above by $(m-1)2^{-b}$, since $p\leq m$ in the algorithm. We deal with the case $w$ not a power of $2$, for which $z_{p}\neq 0$. Using the same notation as the algorithm, we have
+
+$$
+|z_{p}+(p-1)r-\ln(w)| \leq |z_{p}+\ln 2^{p-1}-\ln(w)|+|(p-1)r-\ln 2^{p-1}| \tag{17}
+$$
+$$
+= |z_{p}-\ln 2^{-(p-1)}w|+(m-1)2^{-b}
+$$
+$$
+\leq |z_{p}-2^{\ell}\ln w_{p}^{\frac{1}{2^{\ell}}}|+(m-1)2^{-b}
+$$
+$$
+\leq |z_{p}-2^{\ell}\ln\hat{t}_{p}|+|2^{\ell}\ln\hat{t}_{p}-2^{\ell}\ln w_{p}\frac{1}{2^{\ell}}|+(m-1)2^{-b}
+$$
+$$
+\leq |2^{\ell}\hat{y}_{p}-2^{\ell}y_{p}|+|2^{\ell}y_{p}-2^{\ell}\ln\hat{t}_{p}|
+$$
+$$
+\qquad+|2^{\ell}\ln\hat{t}_{p}-2^{\ell}\ln w_{p}^{\frac{1}{2^{\ell}}}|+(m-1)2^{-b},
+$$
+
+where $w_{p}=2^{1-p}w$, $z_{p}=2^{\ell}y_{p}$, $\hat{z}_{p}=2^{\ell}\hat{y}_{p}$ and by $y_{p}$ we denote the value $(\hat{t}_{p}-1)-\frac{1}{2}(\hat{t}_{p}-1)^{2}$ before it is truncated to obtain $\hat{y}_{p}$. The first term is due to truncation error and is bounded from above by $2^{\ell-b}$. The last term is bounded from above by $2^{\ell}|\hat{t}_{p}-w_{p}^{\frac{1}{2^{\ell}}}|;$ this is obtained using the mean value theorem for $\ln$ with argument greater than or equal to one. The second term is bounded from above by $2^{\ell}|2(\hat{t}_{p}-1)^{3}|$. Indeed, recall that $\hat{t}_{p}-1=\delta\in(0,1)$ according to line 12 of the algorithm, and we have
+
+$$
+|\ln(1+\delta)|-(\delta-\frac{1}{2}\delta^{2})| = \left|\sum_{i=3}^{\infty}(-1)^{i+1}\frac{\delta^{i}}{i}\right|=\left|\delta^{2}\sum_{i=0}^{\infty}\frac{i+1}{i+3}\int_{0}^{\delta}(-x)^{i}dx\right|
+$$
+$$
+= \left|\delta^{2}\int_{0}^{\delta}\sum_{i=0}^{\infty}\frac{i+1}{i+3}(-x)^{i}dx\right|\leq\delta^{2}\int_{0}^{\delta}\sum_{i=0}^{\infty}|x|^{i}dx
+$$
+$$
+\leq \delta^{2}\int_{0}^{\delta}\frac{1}{1-|x|}dx\leq\delta^{2}\int_{0}^{\delta}2dx=2\delta^{3},
+$$
+
+assuming $\delta\leq\frac{1}{2}$. We now show that in general $\delta$ is much smaller than $\frac{1}{2}$. Since we have used Algorithm 2 to compute $\hat{t}_{p}$ which is an approximation of $w_{p}^{\frac{1}{2^{\ell}}}$. Algorithm 2 uses Algorithm 1. Since the error bounds of Theorem 1 and 2 depend on the magnitude of $w_{p}$, the estimates of these theorems hold with $m=1$ because $w_{p}\in(1,2)$. We have
+
+$$
+|\hat{t}_{p}-w_{p}^{\frac{1}{2^{\ell}}}|\leq 2\left(\frac{3}{4}\right)^{b-2}\left(2+b+\log_{2}b\right)\leq\frac{1}{8},
+$$
+
+where we have set $b=\max\{5\ell,25\}$. Thus
+
+$$
+\hat{t}_{p}\leq w_{p}^{\frac{1}{2^{\ell}}}+2\left(\frac{3}{4}\right)^{b-2}\left(2+b+\log_{2}b\right)\leq w_{p}^{\frac{1}{2^{\ell}}}+\frac{1}{8}. \tag{18}
+$$
+
+Now we turn to $w_{p}^{\frac{1}{2^{\ell}}}$. Let $w_{p}=1+x_{p}$, $x_{p}\in(0,1)$. Consider the function $g(x_{p}):=(1+x_{p})^{\frac{1}{2^{\ell}}}$. We take its Taylor expansion about $0$, and observing that
+
+$$
+g^{(j)}(x_{p})=\left(\prod_{i=0}^{j-1}\frac{1-i2^{\ell}}{2^{\ell}}\right)\;(1+x_{p})^{\frac{1-j2^{\ell}}{2^{\ell}}}\leq\frac{(j-1)!}{2^{\ell}},\;\;j\geq 1,
+$$
+
+we have
+
+$$
+w_{p}^{\frac{1}{2^{\ell}}}-1=(1+x_{p})^{\frac{1}{2^{\ell}}}-1 \leq \frac{1}{2^{\ell}}\sum_{j=1}^{\infty}\frac{(j-1)!}{j!}x_{p}^{j}=\frac{1}{2^{\ell}}\sum_{j=1}^{\infty}\frac{1}{j}x_{p}^{j}
+$$
+$$
+= \frac{1}{2^{\ell}}\sum_{j=1}^{\infty}\int_{0}^{x_{p}}s^{j-1}ds=\frac{1}{2^{\ell}}\int_{0}^{x_{p}}\sum_{j=1}^{\infty}s^{j-1}ds
+$$
+$$
+\leq \frac{1}{2^{\ell}}\int_{0}^{x_{p}}\frac{1}{1-s}ds=\frac{1}{2^{\ell}}\ln{\frac{1}{1-x_{p}}}
+$$
+$$
+\leq \frac{1}{2^{\ell}}\frac{n-m+p-1}{\log_{2}e}\leq\frac{n-m+p-1}{2^{\ell}},
+$$
+
+because $x_{p}\leq 1-2^{-(n-m+p-1)}$, since $w$ has a fractional part of length $n-m$. Observing that $n-m+p-1\leq n$, and by setting $\ell\geq\lceil\log_{2}8n\rceil$, we get
+
+$$
+w_{p}^{\frac{1}{2^{\ell}}}-1\leq\frac{n}{2^{\ell}}\leq\frac{n}{8n}\leq\frac{1}{8}. \tag{19}
+$$
+
+Using equations (18) and (19), we get
+
+$$
+\hat{t}_{p}-1\leq\frac{1}{2^{\ell}}\frac{n}{\ln 2}+2\left(\frac{3}{4}\right)^{b-2}\left(2+b+\log_{2}b\right)\leq\frac{1}{4}. \tag{20}
+$$
+
+Now we turn to the error of the algorithm. We have
+
+$$
+|z_{p}+\ln 2^{p-1}-\ln(w)| \leq |2^{\ell}\hat{y}_{p}-2^{\ell}y_{p}|+|2^{\ell}y_{p}-2^{\ell}\ln\hat{t}_{p}|+|2^{\ell}\ln\hat{t}_{p}-2^{\ell}\ln w_{p}^{\frac{1}{2^{\ell}}}|
+$$
+$$
+\leq 2^{\ell-b}+2^{\ell}|2(\hat{t}_{p}-1)^{3}|+2^{\ell}|\hat{t}_{p}-w_{p}^{\frac{1}{2^{\ell}}}|
+$$
+$$
+\leq 2^{\ell-b}+2^{\ell}2\left(\frac{1}{2^{\ell}}\frac{n}{\ln 2}+2\left(\frac{3}{4}\right)^{b-2}\left(2+b+\log_{2}b\right)\right)^{3}
+$$
+$$
++ 2^{\ell}\left(2\left(\frac{3}{4}\right)^{b-2}\left(2+b+\log_{2}b\right)\right)
+$$
+
+Since $b\geq\max\{5\ell,25\}$, we have $\left(\frac{3}{4}\right)^{b/2}2^{\ell}\leq 1$ and $\frac{2+b+\log_{2}b}{\left(\frac{4}{3}\right)^{b/2}}\leq 1$. This yields
+
+$$
+|z_{p}+\ln 2^{p-1}-\ln(w)| \leq 2^{\ell}\left(2^{-b}+\frac{2}{2^{3\ell}}\left(\frac{32}{9}+\frac{n}{\ln 2}\right)^{3}+\frac{32}{9}\left(\frac{3}{4}\right)^{b/2}\right) \tag{21}
+$$
+$$
+\leq 2^{-4\ell}+\frac{2}{2^{2\ell}}\left(\frac{32}{9}+\frac{n}{\ln 2}\right)^{3}+\frac{32}{9}\left(\frac{3}{4}\right)^{5\ell/2}
+$$
+$$
+\leq \left(\frac{3}{4}\right)^{5\ell/2}\left(1+\frac{32}{9}+2\left(\frac{32}{9}+\frac{n}{\ln 2}\right)^{3}\right)
+$$
+
+Finally, from $b\geq 5\ell$ we have
+
+$$
+(m-1)2^{-b}\leq(m-1)2^{-5\ell}\leq(m-1)\left(\frac{1}{4}\right)^{5\ell/2}\leq(m-1)\left(\frac{3}{4}\right)^{5\ell/2} \tag{22}
+$$
+
+Combining equations (17), (21), and (22) then gives
+
+$$
+|z_{p}+(p-1)r-\ln(w)| \leq \left(\frac{3}{4}\right)^{5\ell/2}\left(1+\frac{32}{9}+2\left(\frac{32}{9}+\frac{n}{\ln 2}\right)^{3}\right)+(m-1)\left(\frac{3}{4}\right)^{5\ell/2}
+$$
+$$
+\leq \left(\frac{3}{4}\right)^{5\ell/2}\left(m+\frac{32}{9}+2\left(\frac{32}{9}+\frac{n}{\ln 2}\right)^{3}\right),
+$$
+
+which is our desired bound. ∎
+
+**Theorem 4.**
+
+For $w>1$, given by $n$ bits of which the first $m$ correspond to its integer part, and $1\geq f\geq 0$ given by $n_{f}$ bits of accuracy, Algorithm 4 computes an approximation $\hat{z}$ of $w^{f}$ such that
+
+$$
+|\hat{z}-w^{f}|\leq\left(\frac{1}{2}\right)^{\ell-1}, \tag{23}
+$$
+
+where $\ell\in{\mathbb{N}}$ is a parameter specified in the algorithm that is used to determine the number $b=\max\{n,n_{f},\lceil 5(\ell+2m+\ln n_{f})\rceil,40\}$ of bits after the decimal point in which arithmetic will be performed, and therefore it determines the error. Algorithm 4 uses Algorithm 2 which computes power of 2 roots of a given number.
+
+**Proof.**
+
+First observe that the algorithm is exact for the cases $f=1$ or $f=0$. Therefore, without loss of generality assume $0<f<1$.
+
+Consider the $n_{f}$ bit number $f$ and write its binary digits $f_{i}\in\{0,1\}$ explicitly as $f=0.f_{1}f_{2}...f_{n_{f}}=\sum_{i=1}^{n_{f}}f_{i}/2^{i}$. Denote the set of non-zero digits ${\mathcal{P}}:=\{1\leq i\leq n_{f}:f_{i}\neq 0\}$, $p:=|{\mathcal{P}}|$ with $1\leq p\leq n_{f}$. Observe
+
+$$
+w^{f}=w^{0.f_{1}f_{2}...f_{n_{f}}}=w^{\sum_{i=1}^{n_{f}}f_{i}/2^{i}}=\prod_{i=1}^{n_{f}}w_{i}^{f_{i}}=\prod_{i\in{\mathcal{P}}}w_{i},
+$$
+
+where again $w_{i}:=w^{\frac{1}{2^{i}}}$. Let $\hat{w}_{i}\simeq w^{\frac{1}{2^{i}}}$ denote the outputs of Algorithm 2. We have
+
+$$
+\left|\hat{z}-w^{f}\right|\leq\left|\hat{z}-\prod_{i\in{\mathcal{P}}}\hat{w}_{i}\right|+\left|\prod_{i\in{\mathcal{P}}}\hat{w}_{i}-\prod_{i\in{\mathcal{P}}}w_{i}\right|, \tag{24}
+$$
+
+where these terms give bounds for the repeated multiplication error, and the error from the $2^{i}$th roots as computed by Algorithm 2, respectively.
+
+Consider the second term. Partition ${\mathcal{P}}$ disjointly into two sets as ${\mathcal{P}}_{1}:=\{i\in{\mathcal{P}}:\hat{w}_{i}\geq w_{i}\}$ and ${\mathcal{P}}_{2}:=\{i\in{\mathcal{P}}:\hat{w}_{i}<w_{i}\}$. Observe that, for any $i$, from equation (16) of Theorem 2 we have $|\hat{w}_{i}-w_{i}|\leq 2\left(\frac{3}{4}\right)^{b-2m}\left(2+b+\log_{2}b\right)=:\varepsilon$. Observe $w_{i},\hat{w}_{i}\geq 1$. First assume $\prod_{i\in{\mathcal{P}}}\hat{w}_{i}\geq\prod_{i\in{\mathcal{P}}}w_{i}$. Then
+
+$$
+\left|\prod_{i\in{\mathcal{P}}}\hat{w}_{i}-\prod_{i\in{\mathcal{P}}}w_{i}\right| = \prod_{i\in{\mathcal{P}}_{1}}\hat{w}_{i}\prod_{j\in{\mathcal{P}}_{2}}\hat{w}_{j}-\prod_{i\in{\mathcal{P}}_{1}}w_{i}\prod_{j\in{\mathcal{P}}_{2}}w_{j}
+$$
+$$
+\leq \prod_{i\in{\mathcal{P}}_{1}}(w_{i}+\varepsilon)\prod_{j\in{\mathcal{P}}_{2}}w_{j}-\prod_{i\in{\mathcal{P}}_{1}}w_{i}\prod_{j\in{\mathcal{P}}_{2}}w_{j}
+$$
+$$
+\leq \prod_{i\in{\mathcal{P}}_{1}}w_{i}\prod_{j\in{\mathcal{P}}_{2}}w_{j}\left(\prod_{k\in{\mathcal{P}}_{1}}\left(1+\frac{\varepsilon}{w_{k}}\right)-1\right)
+$$
+$$
+\leq w^{f}\left(\left(1+\varepsilon)^{p}-1\right)\right)
+$$
+$$
+\leq w^{f}\left(e^{p\varepsilon}-1\right)
+$$
+
+Conversely, assume $\prod_{i\in{\mathcal{P}}}\hat{w}_{i}<\prod_{i\in{\mathcal{P}}}w_{i}$. Then similarly we have
+
+$$
+\left|\prod_{i\in{\mathcal{P}}}\hat{w}_{i}-\prod_{i\in{\mathcal{P}}}w_{i}\right| = \prod_{i\in{\mathcal{P}}_{1}}w_{i}\prod_{j\in{\mathcal{P}}_{2}}w_{j}-\prod_{i\in{\mathcal{P}}_{1}}\hat{w}_{i}\prod_{j\in{\mathcal{P}}_{2}}\hat{w}_{j}
+$$
+$$
+\leq \prod_{i\in{\mathcal{P}}_{1}}w_{i}\prod_{j\in{\mathcal{P}}_{2}}w_{j}-\prod_{i\in{\mathcal{P}}_{1}}w_{i}\prod_{j\in{\mathcal{P}}_{2}}(w_{j}-\varepsilon)
+$$
+$$
+\leq \prod_{i\in{\mathcal{P}}_{1}}w_{i}\prod_{j\in{\mathcal{P}}_{2}}w_{j}\left(1-\prod_{k\in{\mathcal{P}}_{2}}\left(1-\frac{\varepsilon}{w_{k}}\right)\right)
+$$
+$$
+\leq w^{f}\left(1-\left(1-\varepsilon)^{p}\right)\right)
+$$
+$$
+\leq w^{f}\left(1-\left(2-e^{p\varepsilon}\right)\right)
+$$
+$$
+\leq w^{f}\left(e^{p\varepsilon}-1\right),
+$$
+
+where we have used the inequality $\left(1-\varepsilon\right)^{p}-1\geq 1-e^{pe}$.[^1] So conclude that $\left|\prod_{i\in{\mathcal{P}}}\hat{w}_{i}-\prod_{i\in{\mathcal{P}}}w_{i}\right|\leq w^{f}\left(e^{p\varepsilon}-1\right)$ always. Furthermore, for $a\geq 0$ we have
+
+[^1]: This inequality follows trivially from term by term comparison of the binomial expansion of the left hand side with the Taylor expansion of the right hand side.
+
+$$
+e^{a}-1=a+a^{2}/2!+a^{3}/3!+\dots=a(1+a/2!+a^{2}/3!+\dots)\leq a(1+a+a^{2}/2!+\dots)=ae^{a}
+$$
+
+which yields
+
+$$
+\left|\prod_{i\in{\mathcal{P}}}\hat{w}_{i}-\prod_{i\in{\mathcal{P}}}w_{i}\right|\leq w^{f}\;p\varepsilon\;e^{p\varepsilon} \tag{25}
+$$
+
+Next consider the error resulting from truncation to $b$ bits of accuracy in the products computed in step 13 of the algorithm. For each multiplication, we have $\hat{z}=z+\xi$, with error $|\xi|\leq 2^{-b}$. For notational simplicity, reindex the set ${\mathcal{P}}$ as $\{1,2,\dots,p\}$ so that $\prod_{i\in{\mathcal{P}}}\hat{w}_{i}=\prod_{i=1}^{p}\hat{w}_{i}$. Let $z_{i}=\hat{w}_{1}\hat{w}_{2}\dots\hat{w}_{i}$, $i=1,2,\dots,p$ be the exact products, and let the approximate products be $\hat{z}_{i}=\hat{z}_{i-1}\hat{w_{i}}+\xi_{i}$, $i=2,\dots,p$, $\hat{z}_{1}=1$. We have
+
+$$
+\hat{z}_{1} = \hat{w}_{1}
+$$
+$$
+\hat{z}_{2} = \hat{z}_{1}\hat{w}_{2}+\xi_{2}
+$$
+$$
+\hat{z}_{p} = \hat{z}_{p-1}\hat{w}_{p}+\xi_{p}.
+$$
+
+Then we have
+
+$$
+\left|\hat{z}_{p}-\prod_{i\in{\mathcal{P}}}\hat{w}_{i}\right| = |\hat{z}_{p}-z_{p}|=|\hat{z}_{p-1}\hat{w}_{p}+\xi_{p}-z_{p-1}\hat{w}_{p}|\leq|\hat{z}_{p-1}\hat{w}_{p}-z_{p-1}\hat{w}_{p}|+|\xi_{p}|
+$$
+$$
+\leq |\hat{z}_{p-1}-z_{p-1}|\hat{w}_{p}+|\xi_{p}|
+$$
+$$
+\leq \left(|\hat{z}_{p-2}-z_{p-2}|\hat{w}_{p-1}+|\xi_{p-1}|\right)\hat{w}_{p}+|\xi_{p}|
+$$
+$$
+\leq |\hat{z}_{p-2}-z_{p-2}|\hat{w}_{p-1}\hat{w}_{p}+|\xi_{p-1}|\hat{w}_{p}+|\xi_{p}|
+$$
+$$
+\leq |\hat{z}_{1}-z_{1}|\hat{w}_{2}\hat{w}_{3}\hat{w}_{4}\dots\hat{w}_{p-1}\hat{w}_{p}+|\xi_{2}|\hat{w}_{3}\hat{w}_{4}\dots\hat{w}_{p-1}\hat{w}_{p}+\dots+|\xi_{p-1}|\hat{w}_{p}+|\xi_{p}|
+$$
+$$
+\leq 2^{-b}\left(\hat{w}_{3}\hat{w}_{4}\dots\hat{w}_{p-1}\hat{w}_{p}+\hat{w}_{4}\dots\hat{w}_{p-1}\hat{w}_{p}+\dots+\hat{w}_{p}\hat{w}_{p-1}+\hat{w}_{p}+1\right)
+$$
+$$
+\leq 2^{-b}\left(p-1\right)w^{\frac{1}{4}}\leq 2^{-b}n_{f}w^{f}\leq 2^{-b}n_{f}w
+$$
+
+where the last line follows from observing each of the $p-1$ terms in the sum is less than $w_{2}=w^{\frac{1}{4}}$.
+
+Thus, equation (24) yields total error
+
+$$
+\left|\hat{z}-w^{f}\right| \leq \left|\hat{z}-\prod_{i\in{\mathcal{P}}}\hat{w}_{i}\right|+\left|\prod_{i\in{\mathcal{P}}}\hat{w}_{i}-\prod_{i\in{\mathcal{P}}}w_{i}\right|
+$$
+$$
+\leq 2^{-b}\left(p-1\right)w^{\frac{1}{4}}+w^{f}\>p\varepsilon\>e^{p\varepsilon}
+$$
+$$
+\leq 2^{-b}\;n_{f}w+w\>n_{f}\varepsilon\>e^{n_{f}\varepsilon}
+$$
+
+Furthermore, using $\varepsilon=2\left(\frac{3}{4}\right)^{b-2m}\left(2+b+\log_{2}b\right)$, $1\leq w\leq 2^{m}$, and as we have chosen $b$ sufficiently large such that $n_{f}\varepsilon\leq 1$ (to be shown later), we have
+
+$$
+\left|\hat{z}-w^{f}\right| \leq 2^{-b}\;n_{f}w+w\>n_{f}\;2\left(\frac{3}{4}\right)^{b-2m}\left(2+b+\log_{2}b\right)e
+$$
+$$
+\leq n_{f}2^{m-b}+n_{f}2^{m}\left(\frac{3}{4}\right)^{b-2m}2e\left(2+b+\log_{2}b\right)
+$$
+
+We have selected $b\geq\max\{n,n_{f},\lceil 5(\ell+2m+\log_{2}n_{f})\rceil,40\}$ such that several inequalities are satisfied. From $b\geq\lceil 5(\ell+2m+\log_{2}n_{f})\rceil\geq\ell+m+\log_{2}n_{f}$, it follows that $n_{f}2^{m-b}\leq 2^{-\ell}$. Furthermore, for $b\geq 40$ , we have $2e\left(2+b+\log_{2}b\right)\leq(\frac{4}{3})^{b/2}$. Finally, $b\geq 5\left(\ell+2m+\log_{2}n_{f}\right)\geq\left(\frac{2}{\log_{2}4/3}\right)\left(\log_{2}n_{f}+\ell+2m\right)$ implies that $n_{f}2^{2m}\left(\frac{3}{4}\right)^{b/2}\leq 2^{-\ell}$. Plugging these inequalities into the previous equation yields
+
+$$
+\left|\hat{z}-w^{f}\right| \leq n_{f}2^{m}\frac{1}{2^{b}}+n_{f}2^{m}\left(\frac{4}{3}\right)^{2m}\left(\frac{3}{4}\right)^{b/2}\left(\left(\frac{3}{4}\right)^{b/2}2e\left(2+b+\log_{2}b\right)\right)
+$$
+$$
+\leq \left(\frac{1}{2}\right)^{\ell}+n_{f}2^{m}\left(\left(\frac{4}{3}\right)^{2}\right)^{m}\left(\frac{3}{4}\right)^{b/2}
+$$
+$$
+\leq \left(\frac{1}{2}\right)^{\ell}+n_{f}2^{2m}\left(\frac{3}{4}\right)^{b/2}
+$$
+$$
+\leq 2\left(\frac{1}{2}\right)^{\ell}=\left(\frac{1}{2}\right)^{\ell-1}
+$$
+
+as was to be shown.
+
+Finally, for completeness, from the above inequalities and $b\geq 5\left(\log_{2}n_{f}+\ell+2m\right)\geq\frac{2}{\log_{2}4/3}\left(\log_{2}n_{f}-\log_{2}e\right)+4m$, we have
+
+$$
+n_{f}\varepsilon = n_{f}2\left(\frac{3}{4}\right)^{b-2m}\left(2+b+\log_{2}b\right)\leq n_{f}\left(\frac{3}{4}\right)^{b/2-2m}\left(\frac{1}{e}\right)
+$$
+$$
+\leq n_{f}\left(\frac{3}{4}\right)^{\log_{4/3}n_{f}/e}\left(\frac{1}{e}\right)\leq 1
+$$
+
+∎
+
+**Corollary 1.**
+
+Let $w>1$ and $1\geq f\geq 0$ as in Theorem 4 above. Suppose $f$ is an approximation of a number $1\geq F\geq 0$ accurate to $n_{f}$ bits. Then Algorithm 4, with $f$ as input, computes an approximation $\hat{z}$ of $w^{F}$ such that
+
+$$
+|\hat{z}-w^{F}|\leq\left(\frac{1}{2}\right)^{\ell-1}+\frac{w\ln w}{2^{n_{f}}}, \tag{26}
+$$
+
+**Proof.**
+
+Consider the error from the approximation of the exponent $F$ by $f$. We have $|F-f|\leq 2^{-n_{f}}$. Let $g(f):=w^{f}$. Then $g^{\prime}(f)=w^{f}\ln w$. By the mean value theorem, we have
+
+$$
+\left|w^{f}-w^{F}\right|\leq\sup_{f\in(0,1)}g^{\prime}(f)|F-f|\leq 2^{-n_{f}}\>w\ln w,
+$$
+
+which gives
+
+$$
+|\hat{z}-w^{F}|\leq|\hat{z}-w^{f}|+|w^{f}-w^{F}|\leq\left(\frac{1}{2}\right)^{\ell-1}+\frac{w\ln w}{2^{n_{f}}}.
+$$
+
+∎
+
+**Theorem 5.**
+
+For $0\leq w<1$, represented by $n$ bits of which the first $m$ correspond to its integer part, and $1\geq f\geq 0$ given by $n_{f}$ bits of accuracy, Algorithm 5 computes an approximation $\hat{t}$ of $w^{f}$ such that
+
+$$
+|\hat{t}-w^{f}|\leq\frac{1}{2^{\ell-3}} \tag{27}
+$$
+
+where $\ell\in{\mathbb{N}}$ is a parameter specified in the algorithm that is used to determine the number $b=\max\{n,n_{f},\lceil 2\ell+6m+2\ln n_{f}\rceil,40\}$ of bits after the decimal point in which arithmetic will be performed, and therefore also will determine the error. Algorithm 5 uses Algorithm 4, which computes $w^{f}$ for the case $w\geq 1$, and also Algorithm 0 which computes the reciprocal of a number $w\geq 1$.
+
+**Proof.**
+
+First observe that the algorithm is exact for the cases $f=1$, $f=0$, or $w=0$. Therefore, without loss of generality assume $0<f<1$ and $0<w<1$.
+
+Let all variables be defined as in Algorithm 5. We shall first consider the error of each variable and use this to bound the overall error of algorithm.
+
+Firstly, the input $0<w<1$ is rescaled to $x:=2^{k}w\geq 1>2^{k-1}w$ exactly, by $k$-bit left shift,where $k$ is a positive integer. An example circuit for computing $k$ is given in Fig. 9 above. Observe that we have
+
+$$
+w^{f}=x^{f}/2^{kf}=x^{f}/(2^{\lfloor kf\rfloor}2^{\{kf\}}).
+$$
+
+We also have $\log_{2}\frac{1}{w}\leq k<\log_{2}\frac{1}{w}+1$.
+
+The product $c=kf<k\leq n-m$ is computed exactly in fixed precision arithmetic because the number of bits after the decimal point in $kf$ is at most $n_{f}\leq b$, where $b$ is the number of bits in which arithmetic is performed.
+
+Next consider $\hat{z}=$ FractionalPower($x$, $f$, $n$, $m$, $n_{f}$, $\ell$), which approximates $z=x^{f}$. From Theorem 4 we have $e_{z}:=|\hat{z}-z|\leq\frac{1}{2^{\ell-1}}$. Similarly, $\hat{y}=$ FractionalPower($2$, ${\{c\}}$, $n$, $m$, $n_{f}$, $\ell$) approximates $y=2^{\{c\}}$, with $e_{y}:=|\hat{y}-y|\leq\frac{1}{2^{\ell-1}}$. Furthermore, for $\hat{s}=$ INV($\hat{y},n,1,2\ell$) which approximates $s=1/\hat{y}$, from Corollary 0 we have $e_{s}:=|\hat{s}-s|\leq\frac{2+\log_{2}\ell}{2^{2\ell}}$, which satisfies $e_{s}\leq\frac{1}{2^{\ell}}$ for $\ell\geq 2$.
+
+Finally, observe $2^{-\lfloor c\rfloor}\hat{z}$ is computed exactly by a right shift of $\hat{z}$. This is used to compute $t=2^{-\lfloor c\rfloor}\hat{z}\hat{s}$, which is again truncated to $b$ decimal bits to give $\hat{t}$ with $e_{t}:=|\hat{t}-t|\leq 2^{-b}$, and returned.
+
+Now we turn to the total error of our algorithm. By our variable definitions, $w^{f}=2^{-\lfloor c\rfloor}z/y$. We have
+
+$$
+|\hat{t}-w^{f}| \leq |\hat{t}-t|+|2^{-\lfloor c\rfloor}\hat{z}\hat{s}-2^{-\lfloor c\rfloor}z\hat{s}|+|2^{-\lfloor c\rfloor}z\hat{s}-2^{-\lfloor c\rfloor}zs|+|2^{-\lfloor c\rfloor}zs-2^{-\lfloor c\rfloor}\frac{z}{y}|
+$$
+$$
+\leq 2^{-b}+2^{-\lfloor c\rfloor}\hat{s}|\hat{z}-z|+2^{-\lfloor c\rfloor}z|\hat{s}-s|+2^{-\lfloor c\rfloor}z|s-\frac{1}{y}|
+$$
+$$
+\leq 2^{-b}+\frac{1}{2^{\lfloor c\rfloor}}\frac{1}{2^{\ell-1}}+w^{f}2^{\{c\}}|\hat{s}-s|+\frac{x^{f}}{2^{\lfloor c\rfloor}}\frac{1}{2^{\{c\}}}|\frac{2^{\{c\}}}{\hat{y}}-1|,
+$$
+
+where we have used $\hat{s}\leq s=\frac{1}{\hat{y}}\leq 1$ because as remarked in the proof of Theorem 1, the algorithm computing the reciprocal underestimates it value, i.e. $\frac{1}{\hat{y}}\leq\frac{1}{y}=2^{-\lfloor kf\rfloor}\leq 1$. Observe we have $w^{f}=\frac{x^{f}}{2^{\lfloor c\rfloor}}\frac{1}{2^{\{c\}}}\leq 1$. Moreover, $2^{\{kf\}}\leq 2$. Hence, as shown in the proof of Theorem 1, that $\hat{y}\geq 1$. This, together with the error bounds of Theorem 4 and of Corollary 0 yields
+
+$$
+|\hat{t}-w^{f}| \leq 2^{-b}+\frac{1}{2^{\ell-1}}+2|\hat{s}-s|+\frac{1}{\hat{y}}|2^{\{c\}}-\hat{y}|
+$$
+$$
+\leq 2^{-b}+\frac{1}{2^{\ell-1}}+\frac{2}{2^{\ell}}+\frac{1}{2^{\ell-1}}
+$$
+$$
+\leq 4\frac{1}{2^{\ell-1}}=\frac{1}{2^{\ell-3}}
+$$
+
+∎
+
+**Corollary 2.**
+
+Let $0\leq w<1$ and $1\geq f\geq 0$ as in Theorem 5 above. Suppose $f$ is an approximation of a number $1\geq F\geq 0$ accurate to $n_{f}$ bits. Then Algorithm 5, with $f$ as input, computes an approximation $\hat{t}$ of $w^{F}$ such that
+
+$$
+|\hat{t}-w^{F}|\leq\left(\frac{1}{2}\right)^{\ell-2}+\frac{w\ln w}{2^{n_{f}}}. \tag{28}
+$$
+
+**Proof.**
+
+The proof is similar to that of Corollary 1. ∎
+
+## References
+
+[1] IEEE standard for Floating-Point Arithmetic. IEEE Std 754-2008, pages 1–70, Aug 2008.
+
+[2] J. J. Alvarez-Sanchez, J. V. Alvarez-Bravo, and L. M. Nieto. A quantum architecture for multiplying signed integers. Journal of Physics: Conference Series, 128(1):012013, 2008.
+
+[3] D. Beckman, A. N. Chari, S. Devabhaktuni, and J. Preskill. Efficient networks for quantum factoring. Phys. Rev. A, 54:1034–1063, Aug 1996.
+
+[4] C. H. Bennett. Time/space trade-offs for reversible computation. SIAM Journal on Computing, 18(4):766–776, 1989.
+
+[5] E. Bocchieri. Fixed-point arithmetic. In Automatic Speech Recognition on Mobile Devices and over Communication Networks, pages 255–275. Springer, 2008.
+
+[6] Y. Cao, A. Papageorgiou, I. Petras, J. F. Traub, and S. Kais. Quantum algorithm and circuit design solving the Poisson equation. New Journal of Physics, 15:013021, 2013.
+
+[7] I. Chuang and D. S. Modha. Reversible arithmetic coding for quantum data compression. IEEE Transactions on Information Theory, 46:1104–1116, 2000.
+
+[8] S. A. Cuccaro, T. G. Draper, S. A. Kutin, and D. P. Moulton. A new quantum ripple-carry addition circuit. The Eighth Workshop on Quantum Information Processing, 2004.
+
+[9] T. G. Draper. Addition on a quantum computer. arXiv preprint quant-ph/0008033, 2000.
+
+[10] T. G. Draper, S. A. Kutin, E. M. Rains, and K. M. Svore. A logarithmic-depth quantum carry-lookahead adder. Quantum Information and Computation, 6(4):351–369, July 2006.
+
+[11] A. W. Harrow, A. Hassidim, and S. Lloyd. Quantum algorithm for linear systems of equations. Phys. Rev. Lett., 103:150502, Oct 2009.
+
+[12] S. Kepley and R. Steinwandt. Quantum circuits for $\mathbb{F}_{2^{n}}$-multiplication with subquadratic gate count. Quantum Information Processing, 11:2373–2386, 2015.
+
+[13] R. Y. Levine and A. T. Sherman. A note on Bennett’s time-space tradeoff for reversible computation. SIAM Journal on Computing, 19(4):673–677, 1990.
+
+[14] M. Nielsen and I. Chuang. Quantum Computation and Quantum Information. Cambridge University Press, Cambridge UK, 2000.
+
+[15] A. Papageorgiou and J. F. Traub. Quantum algorithms for continuous problems and their applications, volume 154 of Advances in Chemical Physics, pages 151–178. Wiley, Hoboken, NJ, 2014.
+
+[16] A. Parent, M. Roetteler, and K. M. Svore. Reversible circuit compilation with space constraints. arXiv preprint arXiv:1510.00377, 2015.
+
+[17] R. Portugal and C. M. H. Figueiredo. Reversible Karatsuba’s algorithm. Journal of Universal Computer Science, 12(5):499–511, 2006.
+
+[18] E. G. Rieffel and W. H. Polak. Quantum computing: A gentle introduction. MIT Press, 2011.
+
+[19] M. Saeedi and I. L. Markov. Synthesis and optimization of reversible circuits - a survey. ACM Computing Surveys (CSUR), 45(2):21, 2013.
+
+[20] A. Ta-Shma. Inverting well conditioned matrices in quantum logspace. Proc. 45th annual ACM symposium on Symposium on theory of computing, STOC 2013, pages 881–890, 2013.
+
+[21] Y. Takahashi and N. Kunihiro. A linear-size quantum circuit for addition with no ancillary qubits. Quantum Information and Computation, 5(6):440–448, September 2005.
+
+[22] Y. Takahashi and N. Kunihiro. A fast quantum circuit for addition with few qubits. Quantum Information and Computation, 8(6):636–649, 2008.
+
+[23] Y. Takahashi, S. Tani, and N. Kunihiro. Quantum addition circuits and unbounded fan-out. Quantum Information and Computation, 10(9&10):0872–0890, 2010.
+
+[24] J. F. Traub. Iterative methods for the solution of equations. American Mathematical Soc., 1982.
+
+[25] R. Van Meter and K. M. Itoh. Fast quantum modular exponentiation. Phys. Rev. A, 71(5):052320, 2005.
+
+[26] V. Vedral, A. Barenco, and A. Ekert. Quantum networks for elementary arithmetic operations. Phys. Rev. A, 54:147–153, Jul 1996.
+
+[27] N. Wiebe and M. Roetteler. Quantum arithmetic and numerical analysis using repeat-until-success circuits. arXiv preprint arXiv:1406.2040, 2014.

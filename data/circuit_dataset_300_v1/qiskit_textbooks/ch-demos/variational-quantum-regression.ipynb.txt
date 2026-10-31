@@ -1,0 +1,489 @@
+# Variational Quantum Regression
+
+$$
+\newcommand{\ket}[1]{\left|{#1}\right\rangle}
+\newcommand{\bra}[1]{\left\langle{#1}\right|}
+\newcommand{\braket}[2]{\left\langle{#1}\middle|{#2}\right\rangle}
+$$
+
+## Introduction
+
+Here we create a protocol for linear regression which can exploit the properties of a quantum computer. For this problem, we assume that we have two data sets, x and y, where x is the independent data and y is the dependent data. There are N data points in each data set. We first want to fit this data to the following equation:
+
+$$y = ax + b$$
+
+and then we will include higher powers of x. First, we will theoretically explore this proposed algorithm, and then we will tweak the code slightly so that it can be run on a real quantum computer. This algorithm has no known advantage over the most widely-used classical algorithm (Least Squares Method), but does nicely demonstrate the different elements of variational quantum algorithms.
+
+
+## Variational Quantum Computing
+
+Variational quantum computing exploits the advantages of both classical computing and quantum computing. In a very general sense, we propose an initial solution to a problem, called an ansatz. In our case our ansatz will be an ansatz parametrised by a and b. We then prepare our qubits (the quantum equivalent of bits on a normal computer) and test how good the ansatz is, using the quantum computer. Testing the ansatz equates to minimising a cost function. We feed the result of this cost function back to the classical computer, and use some classical optimisers to improve on our ansatz, i.e. our initial guesses for a and b. We repeat this process until the ansatz is good enough within some tolerance.
+
+
+## Translate to Quantum Domain
+
+We now need to explore how we will translate the data set, y, onto a quantum computer. Let us think of y as a length N vector. The easiest way to encode this data set onto a quantum computer is by initialising qubits in the state $\ket{y}$, where 
+
+$$\ket{y} = \frac{1}{C_y}\vec{y}$$
+
+and $C_y$ is a normalisation factor.
+
+Now we propose a trial solution, or ansatz, which is parametrised by a and b, as follows:
+
+$$\ket{\Phi} = \frac{1}{C_{\Phi}}(a\vec{x} + b)$$ 
+
+where $C_{\Phi}$ is again a normalisation factor.
+
+Due to the definition of the tensor product and the fact that the general statevector of a single qubit is a vector of length 2, $n$ qubits can encode length-$2^n$ vectors. 
+
+### Cost Function
+
+Our proposed cost function, which we wish to minimise is equal to
+
+$$C_P = \big(1 - \braket{y}{\Phi}\big)^2$$
+
+This computes the normalised fidelity (similarity) of $\ket{y}$ and $\ket{\Phi}$. We see that if $\ket{y}$ and $\ket{\Phi}$ are equal, our cost function will equal 0, otherwise it will be greater than 0. Thus, we need to compute this cost function with our quantum hardware, and couple it with classical minimising algorithms. 
+
+### Computing Inner Products on a Quantum Computer
+
+It is clear we now need a quantum algorithm for computing inner products. Let us go through the theory of computing the inner product $\braket{x}{y}$ here, which will be translated to quantum hardware in a couple of sections. 
+
+Firstly, assume we have a state:
+
+$$ \ket{\phi} = \frac{1}{\sqrt{2}}\big(\ket{0}\ket{x} + \ket{1}\ket{y}\big) $$
+
+where we want to find the inner product, $\braket{x}{y}$. Applying a Hadamard gate on the first qubit, we find:
+
+$$ \ket{\tilde{\phi}} = \frac{1}{2}\Big(\ket{0}\big(\ket{x}+\ket{y}\big) + \ket{1}\big(\ket{x}-\ket{y}\big)\Big) $$
+
+This means that the probability to measure the first qubit as $\ket{0}$ in the computational basis equals:
+
+$$ P(0) = \frac{1}{2}\Big(1+Re\big[\braket{x}{y}\big]\Big) $$
+
+This follows because:
+
+$$
+\begin{aligned}
+    P(0) &= \Big|\bra{0}\otimes\mathbb{1}\ket{\tilde{\phi}}\Big|^2 \\
+    &= \frac{1}{4}\Big|\ket{x}+\ket{y}\Big|^2 \\
+    &= \frac{1}{4}\big(\braket{x}{x}+\braket{x}{y}+\braket{y}{x}+\braket{y}{y}\big) \\
+    &= \frac{1}{4}\Big(2 + 2 Re\big[\braket{x}{y}\big]\Big) \\
+    &= \frac{1}{2}\Big(1+Re\big[\braket{x}{y}\big]\Big)
+\end{aligned}
+$$
+
+After a simple rearrangement, we see that
+
+$$Re\big[\braket{x}{y}\big] = 2P(0) - 1$$
+
+It follows from a similar logic that if we apply a phase rotation on our initial state:
+
+$$ \ket{\phi} = \frac{1}{\sqrt{2}}\big(\ket{0}\ket{x} -i \ket{1}\ket{y}\big) $$
+
+then the probability of the same measurement:
+
+$$ P(0) = \frac{1}{2}\Big(1+Im\big[\braket{x}{y}\big]\Big) $$
+
+We can then combine both probabilities to find the true $\braket{x}{y}$. For this work, we assume that our states are fully real, and so just need the first measurement.
+
+
+## Code Implementation - Theoretical Approach
+
+It should be noted here that qiskit orders its qubits with the last qubit corresponding to the left of the tensor product. For this run through, we are computing the inner product of length-8 vectors. Thus, we require 4 qubits ($8 + 8 = 16 = 2^4$) to encode the state:
+
+$$
+\begin{aligned}
+    \ket{\phi} &= \frac{1}{\sqrt{2}}(\ket{0}\ket{x} + \ket{1}\ket{y}) \\ &= \frac{1}{\sqrt{2}}\left(\begin{bmatrix}1\\0\end{bmatrix}\otimes\begin{bmatrix}x_1\\x_2\\\vdots\\x_n \end{bmatrix} +\begin{bmatrix}0\\1\end{bmatrix}\otimes\begin{bmatrix}y_1\\y_2\\\vdots\\y_n \end{bmatrix} \right) \\
+    &= \frac{1}{\sqrt{2}}\left(\begin{bmatrix}x_1\\x_2\\\vdots\\x_n \\y_1\\y_2\\\vdots\\y_n \end{bmatrix} \right)
+\end{aligned}
+$$
+
+Finally, in order to measure the probability of measuring the bottom (leftmost) qubit as $\ket{0}$ in the computational basis, we can find the exact theoretical value by finding the resultant statevector and summing up the amplitude squared of the first $2^{n-1}$ entries (i.e. half of them). On a real quantum computer, we would just have to perform the actual measurement many times over, and compute the probability that way. We will show the theoretical approach in practice first.
+
+
+[Python source: cell 4]
+# importing necessary packages
+import qiskit
+from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister
+from qiskit import Aer, execute
+import math
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+
+
+Now, let's draw the required diagram for theoretically computing the inner product of any two states. Note that the only difference between this circuit diagram and the real, practical diagram for actually running on a quantum computer is that we do not measure the left-most qubit in the computational basis. Again, note that the left-most qubit corresponds to the bottom qubit.
+
+
+[Python source: cell 6]
+x = np.arange(0,8,1)    # define some vectors x and y
+y = x
+
+N = len(x)              
+nqubits = math.ceil(np.log2(N))    # compute how many qubits needed to encode either x or y
+
+xnorm = np.linalg.norm(x)          # normalise vectors x and y
+ynorm = np.linalg.norm(y)
+x = x/xnorm
+y = y/ynorm
+
+circ = QuantumCircuit(nqubits+1)   # create circuit
+vec = np.concatenate((x,y))/np.sqrt(2)    # concatenate x and y as above, with renormalisation
+
+circ.initialize(vec, range(nqubits+1))
+circ.h(nqubits)                    # apply hadamard to bottom qubit
+
+circ.draw()                        # draw the circuit
+
+
+Now let's build a function around this circuit, so that we can theoretically compute the inner product between any two normalised vectors.
+
+
+[Python source: cell 8]
+#Creates a quantum circuit to calculate the inner product between two normalised vectors
+
+def inner_prod(vec1, vec2):
+    #first check lengths are equal
+    if len(vec1) != len(vec2):
+        raise ValueError('Lengths of states are not equal')
+        
+    circ = QuantumCircuit(nqubits+1)
+    vec = np.concatenate((vec1,vec2))/np.sqrt(2)
+    
+    circ.initialize(vec, range(nqubits+1))
+    circ.h(nqubits)
+
+    backend = Aer.get_backend('statevector_simulator')
+    job = execute(circ, backend, backend_options = {"zero_threshold": 1e-20})
+
+    result = job.result()
+    o = np.real(result.get_statevector(circ))
+
+    m_sum = 0
+    for l in range(N):
+        m_sum += o[l]**2
+        
+    return 2*m_sum-1
+
+x = np.arange(0,8,1)
+y = x
+
+N = len(x)
+nqubits = math.ceil(np.log2(N))
+xnorm = np.linalg.norm(x)
+ynorm = np.linalg.norm(y)
+x = x/xnorm
+y = y/ynorm
+
+print("x: ", x)
+print()
+print("y: ", y)
+print()
+print("The inner product of x and y equals: ", inner_prod(x,y))
+
+
+Now, let's build a function to compute the cost function associated with any choice of a and b. We have set up x and y such that the correct parameters are (a,b) = (1,0).
+
+
+[Python source: cell 10]
+#Implements the entire cost function by feeding the ansatz to the quantum circuit which computes inner products
+
+def calculate_cost_function(parameters):
+
+    a, b = parameters
+    
+    ansatz = a*x + b                        # compute ansatz
+    ansatzNorm = np.linalg.norm(ansatz)     # normalise ansatz
+    ansatz = ansatz/ansatzNorm
+    
+    y_ansatz = ansatzNorm/ynorm * inner_prod(y,ansatz)     # use quantum circuit to test ansatz
+                                                           # note the normalisation factors
+    return (1-y_ansatz)**2
+
+x = np.arange(0,8,1)
+y = x
+
+N = len(x)
+nqubits = math.ceil(np.log2(N))
+ynorm = np.linalg.norm(y)
+y = y/ynorm
+
+a = 1.0
+b = 1.0
+print("Cost function for a =", a, "and b =", b, "equals:", calculate_cost_function([a,b]))
+
+
+Now putting everything together and using a classical optimiser from the scipy library, we get the full code.
+
+
+[Python source: cell 12]
+#first set up the data sets x and y
+
+x = np.arange(0,8,1)
+y = x   # + [random.uniform(-1,1) for p in range(8)]    # can add noise here
+N = len(x)
+nqubits = math.ceil(np.log2(N))
+       
+ynorm = np.linalg.norm(y)      # normalise the y data set
+y = y/ynorm
+
+x0 = [0.5,0.5]                 # initial guess for a and b
+
+#now use different classical optimisers to see which one works best
+
+out = minimize(calculate_cost_function, x0=x0, method="BFGS", options={'maxiter':200}, tol=1e-6)
+out1 = minimize(calculate_cost_function, x0=x0, method="COBYLA", options={'maxiter':200}, tol=1e-6)
+out2 = minimize(calculate_cost_function, x0=x0, method="Nelder-Mead", options={'maxiter':200}, tol=1e-6)
+out3 = minimize(calculate_cost_function, x0=x0, method="CG", options={'maxiter':200}, tol=1e-6)
+out4 = minimize(calculate_cost_function, x0=x0, method="trust-constr", options={'maxiter':200}, tol=1e-6)
+
+out_a1 = out1['x'][0]
+out_b1 = out1['x'][1]
+
+out_a = out['x'][0]
+out_b = out['x'][1]
+
+out_a2 = out2['x'][0]
+out_b2 = out2['x'][1]
+
+out_a3 = out3['x'][0]
+out_b3 = out3['x'][1]
+
+out_a4 = out4['x'][0]
+out_b4 = out4['x'][1]
+
+plt.scatter(x,y*ynorm)
+xfit = np.linspace(min(x), max(x), 100)
+plt.plot(xfit, out_a*xfit+out_b, label='BFGS')
+plt.plot(xfit, out_a1*xfit+out_b1, label='COBYLA')
+plt.plot(xfit, out_a2*xfit+out_b2, label='Nelder-Mead')
+plt.plot(xfit, out_a3*xfit+out_b3, label='CG')
+plt.plot(xfit, out_a4*xfit+out_b4, label='trust-constr')
+plt.legend()
+plt.title("y = x")
+plt.xlabel("x")
+plt.ylabel("y")
+plt.show()
+
+
+## Code Implementation - Practical Approach
+
+In order to modify the above slightly so that it can be run on a real quantum computer, we simply have to modify the `inner_prod` function. Instead of theoretically extracting the probabilility of measuring a 0 on the leftmost qubit in the computational basis, we must actually measure this qubit a number of times and calculate the probability from these samples. Our new circuit can be created as follows, which is identical to the theoretical circuit, but we just add a measurement, and hence need a classical bit.
+
+
+[Python source: cell 14]
+x = np.arange(0,8,1)    # define some vectors x and y
+y = x
+
+N = len(x)              
+nqubits = math.ceil(np.log2(N))    # compute how many qubits needed to encode either x or y
+
+xnorm = np.linalg.norm(x)          # normalise vectors x and y
+ynorm = np.linalg.norm(y)
+x = x/xnorm
+y = y/ynorm
+
+circ = QuantumCircuit(nqubits+1,1)   # create circuit
+vec = np.concatenate((x,y))/np.sqrt(2)    # concatenate x and y as above, with renormalisation
+
+circ.initialize(vec, range(nqubits+1))
+circ.h(nqubits)                    # apply hadamard to bottom qubit
+circ.measure(nqubits,0)            # measure bottom qubit in computational basis
+
+circ.draw()                        # draw the circuit
+
+
+Now, we can build a new inner_prod function around this circuit, using a different simulator from qiskit.
+
+
+[Python source: cell 16]
+#Creates quantum circuit which calculates the inner product between two normalised vectors
+
+def inner_prod(vec1, vec2):
+    #first check lengths are equal
+    if len(vec1) != len(vec2):
+        raise ValueError('Lengths of states are not equal')
+        
+    circ = QuantumCircuit(nqubits+1,1)
+    vec = np.concatenate((vec1,vec2))/np.sqrt(2)
+    
+    circ.initialize(vec, range(nqubits+1))
+    circ.h(nqubits)
+    circ.measure(nqubits,0)
+
+    backend = Aer.get_backend('qasm_simulator')
+    job = execute(circ, backend, shots=20000)
+
+    result = job.result()
+    outputstate = result.get_counts(circ)
+
+    if ('0' in outputstate.keys()):
+        m_sum = float(outputstate["0"])/20000
+    else:
+        m_sum = 0
+     
+    return 2*m_sum-1
+
+x = np.arange(0,8,1)
+y = x
+
+N = len(x)
+nqubits = math.ceil(np.log2(N))
+xnorm = np.linalg.norm(x)
+ynorm = np.linalg.norm(y)
+x = x/xnorm
+y = y/ynorm
+
+print("x: ", x)
+print()
+print("y: ", y)
+print()
+print("The inner product of x and y equals: ", inner_prod(x,y))
+
+
+Our cost function calculation is the same as before, but we now just use this new method for computing the inner product, so the full code can be run as follows.
+
+
+[Python source: cell 18]
+#first set up the data sets x and y
+
+x = np.arange(0,8,1)
+y = x   # + [random.uniform(-1,1) for p in range(8)]  # can add noise here
+N = len(x)
+nqubits = math.ceil(np.log2(N))
+
+ynorm = np.linalg.norm(y)    # normalise y data set
+y = y/ynorm
+
+x0 = [0.5,0.5]       # initial guess for a and b
+
+#now use different classical optimisers to see which one works best
+
+out = minimize(calculate_cost_function, x0=x0, method="BFGS", options={'maxiter':200}, tol=1e-6)
+out1 = minimize(calculate_cost_function, x0=x0, method="COBYLA", options={'maxiter':200}, tol=1e-6)
+out2 = minimize(calculate_cost_function, x0=x0, method="Nelder-Mead", options={'maxiter':200}, tol=1e-6)
+out3 = minimize(calculate_cost_function, x0=x0, method="CG", options={'maxiter':200}, tol=1e-6)
+out4 = minimize(calculate_cost_function, x0=x0, method="trust-constr", options={'maxiter':200}, tol=1e-6)
+
+out_a1 = out1['x'][0]
+out_b1 = out1['x'][1]
+
+out_a = out['x'][0]
+out_b = out['x'][1]
+
+out_a2 = out2['x'][0]
+out_b2 = out2['x'][1]
+
+out_a3 = out3['x'][0]
+out_b3 = out3['x'][1]
+
+out_a4 = out4['x'][0]
+out_b4 = out4['x'][1]
+
+plt.scatter(x,y*ynorm)
+xfit = np.linspace(min(x), max(x), 100)
+plt.plot(xfit, out_a*xfit+out_b, label='BFGS')
+plt.plot(xfit, out_a1*xfit+out_b1, label='COBYLA')
+plt.plot(xfit, out_a2*xfit+out_b2, label='Nelder-Mead')
+plt.plot(xfit, out_a3*xfit+out_b3, label='CG')
+plt.plot(xfit, out_a4*xfit+out_b4, label='trust-constr')
+plt.legend()
+plt.title("y = x")
+plt.xlabel("x")
+plt.ylabel("y")
+plt.show()
+
+
+## Extending to Higher Order Fits
+
+We can also extend to fitting to quadratic, cubic, and higher order polynomials. The code remains relatively unchanged, but will update the cost function slightly. We can of course use either the theoretical or practical method for computing the inner products in the following cost function. We are now fitting to an n$^{th}$-order polynomial:
+
+$$y = a_0+ a_1 x + a_2 x^2 + \dots + a_n x^n$$
+
+
+[Python source: cell 20]
+# New cost function calculation, allowing for higher order polynomials
+# Implements the entire cost function by feeding the ansatz to the quantum circuit which computes inner products
+def calculate_cost_function_n(parameters):
+    
+    ansatz = parameters[0]                   # compute ansatz
+
+    for i in range(1,len(parameters)):
+
+        ansatz += parameters[i] * x**i
+        
+    ansatzNorm = np.linalg.norm(ansatz)      # normalise ansatz
+    ansatz = ansatz/ansatzNorm
+    y_ansatz = ansatzNorm/ynorm * inner_prod(y,ansatz)     # use quantum circuit to test ansatz
+                                                           # note the normalisation factors
+
+    return (1-y_ansatz)**2
+
+
+[Python source: cell 21]
+#first set up the data sets x and y
+
+x = np.arange(0,8,1)
+y = (2*x-1)**3 + [random.uniform(-1,1) for p in range(8)]
+N = len(x)
+nqubits = math.ceil(np.log2(N))
+       
+ynorm = np.linalg.norm(y)       #normalise y data set
+y = y/ynorm
+
+order = 3
+
+x0 = [random.uniform(0,2) for p in range(order+1)]    #random initial guess for a and b
+
+#now use different classical optimisers to see which one works best
+
+out = minimize(calculate_cost_function_n, x0=x0, method="BFGS", options={'maxiter':200}, tol=1e-6)
+out1 = minimize(calculate_cost_function_n, x0=x0, method="COBYLA", options={'maxiter':200}, tol=1e-6)
+out2 = minimize(calculate_cost_function_n, x0=x0, method="Nelder-Mead", options={'maxiter':200}, tol=1e-6)
+out3 = minimize(calculate_cost_function_n, x0=x0, method="CG", options={'maxiter':200}, tol=1e-6)
+out4 = minimize(calculate_cost_function_n, x0=x0, method="trust-constr", options={'maxiter':200}, tol=1e-6)
+
+class_fit = np.polyfit(x,y*ynorm,order)
+class_fit = class_fit[::-1]
+
+xfit = np.linspace(min(x), max(x), 100)
+
+def return_fits(xfit):
+    c_fit = np.zeros(100)
+    q_fit = np.zeros(100)
+    q_fit1 = np.zeros(100)
+    q_fit2 = np.zeros(100)
+    q_fit3 = np.zeros(100)
+    q_fit4 = np.zeros(100)
+    for i in range(order+1):
+        c_fit += xfit**i*class_fit[i]
+        q_fit += xfit**i*out['x'][i]
+        q_fit1 += xfit**i*out1['x'][i]
+        q_fit2 += xfit**i*out2['x'][i]
+        q_fit3 += xfit**i*out3['x'][i]
+        q_fit4 += xfit**i*out4['x'][i]
+        
+
+    return c_fit, q_fit, q_fit1, q_fit2, q_fit3, q_fit4
+
+c_fit, q_fit, q_fit1, q_fit2, q_fit3, q_fit4 = return_fits(xfit)
+
+plt.scatter(x,y*ynorm)
+xfit = np.linspace(min(x), max(x), 100)
+plt.plot(xfit, c_fit, label='Classical')
+plt.plot(xfit, q_fit, label='BFGS')
+plt.plot(xfit, q_fit1, label='COBYLA')
+plt.plot(xfit, q_fit2, label='Nelder-Mead')
+plt.plot(xfit, q_fit3, label='CG')
+plt.plot(xfit, q_fit4, label='trust-constr')
+plt.legend()
+plt.title("$y = (2x-1)^3$ + Random Perturbation")
+plt.xlabel("x")
+plt.ylabel("y")
+plt.show()
+
+
+## Acknowledgements
+
+I would like to thank Dr. Lee O'Riordan for his supervision and guidance on this work. The work was mainly inspired by work presented in the research paper "Variational Quantum Linear Solver: A Hybrid Algorithm for Linear Systems", written by Carlos Bravo-Prieto, Ryan LaRose, M. Cerezo, Yiğit Subaşı, Lukasz Cincio, and Patrick J. Coles, which is available at this link. I would also like to thank the Irish Centre for High End Computing for allowing me to access the national HPC infrastructure, Kay.

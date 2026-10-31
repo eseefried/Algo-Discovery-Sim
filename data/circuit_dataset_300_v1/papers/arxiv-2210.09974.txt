@@ -1,0 +1,1457 @@
+## INTRODUCTION
+
+Symmetry studies and formalizes the invariance of objects under some set of operations. A wealth of theory has gone into describing symmetries as mathematical entities through the concept of groups and representations. While the analysis of symmetries in nature has greatly improved our understanding of the laws of physics, the study of symmetries in data has just recently gained momentum within the framework of learning theory. In the past few years, classical machine learning practitioners realized that models tend to perform better when constrained to respect the underlying symmetries of the data. This has led to the blossoming field of geometric deep learning [1-5], where symmetries are incorporated as geometric priors into the learning architectures, improving trainability and generalization performance [6-13].
+
+The tremendous success of geometric deep learning has recently inspired researchers to import these ideas to the realm of quantum machine learning (QML) [14-16]. QML is a new and exciting field at the intersection of classical machine learning, and quantum computing. By running routines in quantum hardware, and thus exploiting the exponentially large dimension of the Hilbert space, the hope is that QML algorithms can outperform their classical counterparts when learning from data [17].
+
+∗ louisms2@illinois.edu
+
+† The two first authors contributed equally.
+
+‡ cerezo@lanl.gov
+
+The infusion of ideas from geometric deep learning to QML has been termed "geometric quantum machine learning"(GQML) [18-24]. GQML leverages the machinery of group and representation theory [25] to build quantum architectures that encode symmetry information about the problem at hand. For instance, when the model is parametrized through a quantum neural network (QNN) [16, 26-28], GQML indicates that the layers of the QNN should be equivariant under the action of the symmetry group associated to the dataset. That is, applying a symmetry transformation on the input to the QNN layers should be the same as applying it to its output.
+
+One of the main goals of GQML is to create architectures that solve, or at least significantly mitigate, some of the known issues of standard symmetry non-preserving QML models [16]. For instance, it has been shown that the optimization landscapes of generic QNNs can exhibit a large number of local minima [29-32], or be prone to the barren plateau phenomenon [33-45] whereby the loss function gradients vanish exponentially with the problem size. Crucially, it is known that barren plateaus and excessive local minima are connected to the expressibility [30, 32, 37, 43, 46] of the QNN, so that problem-agnostic architectures are more likely to exhibit trainability issues. In this sense, it is expected that following the GQML program of baking symmetry directly into the algorithm, will lead to models with sharp inductive biases that suitably limit their expressibility and search space.
+
+In this work we leverage the GQML toolbox to create models that are permutation invariant, i.e., models whose outputs remain invariant under the action of the symmetric group Sn (see Fig. 1). We focus on this particular symmetry as learning problems with permutation symmetries abound. Examples include learning over sets of elements [47, 48], modeling relations between pairs (graphs) [49-54] or multiplets (hypergraphs) of entities [55-57], problems defined on grids (such as condensed matter systems) [58-61], molecular systems [62-64], evaluating genuine multipartite entanglement [65-68], or working with distributed quantum sensors [69-71].
+
+Our first contribution is to provide guidelines to build unitary Sn-equivariant QNNs. We then derive rigorous theoretical guarantees for these architectures in terms of their trainability and generalization capabilities. Specifically, we prove that Sn-equivariant QNNs do not lead to barren plateaus, can be overparametrized with polynomially deep circuits, and generalize well with a only a polynomial number of training points. We also identify problems (i.e., datasets) for which the model is trainable, but also datasets leading to untrainability. All these appealing properties are also demonstrated in numerical simulations of a graph classification task. Our empirical results verify our theoretical ones, and even show that the performance of Sn-equivariant QNNs can, in practice, be better than that guaranteed by our theorems.
+
+## RESULTS
+
+## Preliminaries
+
+While the formalism of GQML can be readily applied to a wide range of tasks with Sn symmetry, here we will focus on supervised learning problems. We note however that our results can be readily extended to more general scenarios such as unsupervised learning [72, 73], reinforced learning [74, 75], generative modeling [76-79], or to the more task-oriented computational paradigm of variational quantum algorithms [63, 80].
+
+Generally, a supervised quantum machine learning task can be phrased in terms of a data space R -a set of quantum states on some Hilbert space H- and a real-valued label space Y. We will assume H to be a tensor product of n twodimensional subsystems (qubits) and thus of dimension d = 2n . We are given repeated access to a training dataset S = {(ρi, yi)}Mi=1 , where ρi is sampled from R according to some probability P, and where yi ∈ Y. We further assume that the labels are assigned by some underlying (but unknown) function f : R ↦→ Y, that is, yi = f(ρi). We make no assumptions regarding the origins of ρi, meaning that these can correspond to classical data embedded in quantum states [81, 82], or to quantum data obtained from some quantum mechanical process [60, 61, 83].
+
+> *Generated caption of `2210.09974_-_Theoretical_Guarantees_for_Permutation-Equivariant_Quantum_Neural_Networks_assets/figure-001.png` (ollama:gemma4:26b, prompt sci-v1):* This is a scientific diagram illustrating a framework for a problem with $S_n$ symmetry. At the top, the title "Problem with $S_n$ Symmetry" is centered. Below the title, there are two distinct data types represented: on the left, "Classical Data" is shown as a vector $v \in \mathbb{R}^n$ (a vertical column of four colored squares) and a matrix $A \in \mathbb{R}^{n \times n}$ (a $4 \times 4$ grid of colored squares). On the right, "Quantum Data" is shown as a density operator $\rho \in \mathcal{B}(\mathcal{H})$ represented by a graph of six nodes with directed and undirected edges, and a second quantum state represented as a collection of six interconnected colored spheres. In the center, a large rectangular box labeled "Geometric priors" with an information icon (a lowercase letter $i$ inside a circle) sits above a vertical bar labeled "GQML". Both the classical and quantum data types have arrows pointing toward the central "Geometric priors" and "GQML" structure. At the bottom, an "Input Data" arrow points into a green rectangular box labeled "$S_n$-Equivariant Quantum Neural Network and Measurement Operator," which then has an "Invariant Output" arrow pointing away from it. Below this green box, there are four bullet points: "(+) No Barren Plateaus", "(+) Overparameterization", "(-) Low Data Requirements", and "(+) Good Generalization".
+
+The goal is to produce a parametrized function hθ : R ↦→ Y closely modeling the outputs of the unknown target f, where θ are trainable parameters. That is, we want hθ to accurately predict labels for the data in the training set S (low training error), as well as to predict the labels for new and previously unseen states (small generalization error). We will focus on QML models that are parametrized through a QNN, a unitary channel Uθ : B(H) → B(H) such that Uθ(ρ) = U(θ)ρU(θ)† . Here, B(H) denotes the space of bounded linear operators in H. Throughout this work we will restrict to L-layered QNNs
+
+$$
+\begin{array} { r l } { g _ { t a s k } } & { \mathcal { U } _ { \theta } = \mathcal { U } _ { \theta _ { L } } ^ { L } \circ \dots \circ \mathcal { U } _ { \theta _ { 1 } } ^ { 1 } \, , \, w h e r e \, \mathcal { U } _ { \theta _ { l } } ^ { l } ( \rho ) = e ^ { - i \theta _ { l } H _ { l } } \rho e ^ { i \theta _ { l } H _ { l } } \, , \, ( 1 ) } \end{array}
+$$
+
+for some Hermitian generators {Hl}, so that U(θ) = ∏Ll=1 e-iθlHl . Moreover, we consider models that depend on a loss function of the form
+
+$$
+\ell _ { \theta } ( \rho _ { i } ) = \text {Tr} [ \mathcal { U } _ { \theta } ( \rho _ { i } ) O ] \, ,
+$$
+
+where O is a Hermitian observable. We quantify the training error via the so-called empirical loss, or training error, which is defined as
+
+$$
+\widehat { \mathcal { L } } ( \theta ) = \sum _ { i = 1 } ^ { M } c _ { i } \ell _ { \theta } ( \rho _ { i } ) \, .
+$$
+
+The model is trained by solving the optimization task argminθ ̂ L(θ) [63]. Once a desired convergence in the optimization is achieved, the optimal parameters, along with the loss function ℓθ, are used to predict labels. For the case of binary classification, where Y = {+1,-1}, one can choose ci := - yiM . Then, if the measurement operator is normalized such that ℓθ(ρi) ∈ [-1, 1], this corresponds to the hinge loss, a standard loss function but not the only relevant one [84]) in machine learning.
+
+We further remark that while Eq. (3) approximates the error of the learned model, the true loss is defined as
+
+$$
+\mathcal { L } ( \theta ) = \mathbb { E } _ { \rho \sim P } [ c ( y ) \ell _ { \theta } ( \rho ) ] \, . \quad \quad ( 4 ) \quad \begin{matrix} \ e r a t { e } \\ L = 0 \end{matrix}
+$$
+
+Here we have denoted the weights as c(y) to make their dependency on the labels y explicit. The difference between the true loss and the empirical one, known as the generalization error, is given by
+
+$$
+\ g e n ( \theta ) = | \mathcal { L } ( \theta ) - \hat { \mathcal { L } } ( \theta ) | . & & ( 5 ) \\ & \quad
+$$
+
+We now turn to GQML, where the first step is identifying the underlying symmetries of the dataset, as this allows us to create suitable inductive biases for hθ. In particular, many problems of interest exhibit so-called label symmetry, i.e., the function f produces labels that remain invariant under a set of operations on the inputs. Concretely, one can verify that such set of operations forms a group [18], which leads to the following definition.
+
+Definition 1 (Label symmetries and G-invariance). Given a compact group G and some unitary representation R acting on quantum states ρ, we say f has a label symmetry if it is G-invariant, i.e., if
+
+$$
+f ( R ( g ) \rho R ( g ) ^ { \dagger } ) = f ( \rho ) , \, \forall g \in G \, .
+$$
+
+Here, we recall that a representation is a mapping of a group into the space of invertible linear operators on some vector space (in this case the space of quantum states) that preserves the structure of the group [25]. Also, we note that some problems may have functions f whose outputs change (rather than being invariant) in a way entirely determined by the action of G on their inputs. While still captured by general GQML theory, these do not pertain to Definition 1 and are not discussed further. Label invariance captures the scenario where the relevant information in ρ is unchanged under the action of G.
+
+Evidently, when searching for models hθ that accurately predict outputs of f, it is natural to restrict our search to the space of models that respect the label symmetries of f. In this context, the theory of GQML provides a constructive approach to create G-invariant models, resting on the concept of equivariance [23].
+
+> *Generated caption of `2210.09974_-_Theoretical_Guarantees_for_Permutation-Equivariant_Quantum_Neural_Networks_assets/figure-002.png` (ollama:gemma4:26b, prompt sci-v1):* This is a diagram of a quantum circuit. The circuit consists of four horizontal lines representing qubits. Above the first qubit line is the label $\theta_1$, above the second is $\theta_2$, and above the third and fourth is $\theta_3$. The circuit is organized as follows from left to right: on the first qubit line, there are four boxes labeled 'X'; on the second qubit line, there are four boxes labeled 'Y'; on the third qubit line, there are four boxes labeled 'ZZ'; on the fourth qubit line, there are four boxes labeled 'ZZ'. The boxes are arranged in vertical columns: the first column contains four 'X' boxes, the second column contains four 'Y' boxes, the third column contains four 'ZZ' boxes, the fourth column contains two 'ZZ' boxes on the first and second qubits (with the third and fourth qubits empty), and the fifth column contains two 'ZZ' boxes on the third and fourth qubits (with the first and second qubits empty). The 'ZZ' boxes are larger than the 'X' and 'Y' boxes. Vertical lines connect the qubits, and there are horizontal lines passing through all qubits.
+
+Definition 2 (Equivariance). We say that an observable O is G-equivariant iff for all elements g ∈ G, [O,R(g)] = 0. We say that a layer U lθl of a QNN is G-equivariant iff it is generated by a G-equivariant Hermitian operator.
+
+By the previous definition, G-equivariant layers are maps that commute with the action of the group
+
+$$
+\mathcal { U } _ { \theta _ { l } } ^ { l } ( R ( g ) \rho R ( g ) ^ { \dagger } ) = R ( g ) \mathcal { U } _ { \theta _ { l } } ^ { l } ( \rho ) R ( g ) ^ { \dagger } \, .
+$$
+
+Definition 2 can be naturally extended to QNNs.
+
+Definition 3 (Equivariant QNN). We say that a Llayered QNN is G-equivariant iff each of its layers is Gequivariant.
+
+Altogether, equivariant QNNs and measurement operators provide a recipe to design invariant models, i.e. models that respect the label symmetries. Akin to their classical machine learning counterparts [1-5], such GQML models consist in a composition of many equivariant operations (realized by the L layers of the equivariant QNN) and an invariant one (realized by the measurement of the equivariant observable) [23]. Furthermore, model invariance extends to the loss function itself, as captured by the following Lemma.
+
+Lemma 1 (Invariance from equivariance). A loss function of the form in Eq. (2) is G-invariant if its composed of a G-equivariant QNN and measurement.
+
+A proof of this Lemma along with that of the following Lemmas and Theorems are presented in Supplementary Methods 2 and 3.
+
+## Sn-Equivariant QNNs and measurements
+
+In the previous section we have described how to build generic G-invariant models. We now specialize to the case where G is the symmetric group Sn, and where R is the qubit-defining representation of Sn, i.e., the one permuting qubits which for any π ∈ Sn acts as
+
+$$
+R ( \pi ) \bigotimes _ { i = 1 } ^ { n } | \psi _ { i } \rangle & = \bigotimes _ { i = 1 } ^ { n } | \psi _ { \pi \ \iota ( i ) } \rangle \, . \\ \intertext { w o i g n } \text { Definitions } 2 \text { and } 3 , \ t h e f r i s t e p t w a r d s
+$$
+
+Following Definitions 2 and 3, the first step towards building Sn-equivariant QNNs is defining Sn-equivariant generators for each layer. In the Methods section we describe how such operators can be obtained, but here we will restrict our attention to the following set of generators
+
+$$
+\text {will restrict our attention to the following set of generators} & \quad \text {cally,} \\ & \quad \mathcal { G } = \left \{ \frac { 1 } { n } \sum _ { j = 1 } ^ { n } X _ { j } , \frac { 1 } { n } \sum _ { j = 1 } ^ { n } Y _ { j } , \frac { 2 } { n ( n - 1 ) } \sum _ { k < j } Z _ { j } Z _ { k } \right \} . \quad ( 9 ) \quad \text {where} \\ & \quad \text {Note that there is some freedom in the choice of genera-
+tors.  Any two sums over two distinct single quibit Pauli
+(}
+$$
+
+Note that there is some freedom in the choice of generators. Any two sums over two distinct single qubit Pauli operators (the first two generators) plus a sum over pairs of the remaining Pauli operator (the third generator) suffices and we choose the above set without loss of generality. In Fig. 2 we show an example of an L = 3 layered Sn-equivariant QNN acting on n = 4 qubits. While the single-qubit rotations generated by G are readily achievable in most quantum computing platforms, the collective ZZ interactions are best suited to architectures allowing for reconfigurable connectivity [85-87] or platforms that implement mediated all-to-all interactions [88, 89]. In fact, such interactions are referred to as one-axis twisting [90] in the context of spin squeezing [91] and form the basis of many quantum sensing protocols.
+
+In addition, we will consider observables of the following form
+
+$$
+\mathcal { M } = \begin{cases} 1 & ^ { n } \sum _ { j = 1 } ^ { n } \chi _ { j } , \frac { 2 } { n ( n - 1 ) } \sum _ { k < j ; j = 1 } ^ { n } \chi _ { j } \chi _ { k } , \prod _ { j = 1 } ^ { n } \chi _ { j } \right \} , & ( 1 0 ) \quad \text {Let} \quad
+$$
+
+where χ is a (fixed) Pauli matrix. It is straightforward to see that any Hl ∈ G and O ∈ M will commute with R(π) for any π ∈ Sn. We note that one could certainly consider other observables as well.
+
+We now leverage tools from representation theory to understand and unravel the underlying structure of Snequivariant QNNs and measurement operators. The previous will allow us to derive, in the next section, theoretical guarantees for these GQML models.
+
+One of the most notable results from representation theory is that a given finite dimensional representation of a group decomposes into an orthogonal direct sum of fundamental building-blocks known as irreducible representations (irreps). As further explained in the Methods, the qubit-defining representation takes, under some appropriate global change of basis (which we denote with ∼=), the block-diagonal form
+
+$$
+R ( \pi \in S _ { n } ) \cong \bigoplus _ { \lambda } \bigoplus _ { \mu = 1 } ^ { d _ { \lambda } } r _ { \lambda } ( \pi ) = \bigoplus _ { \lambda } r _ { \lambda } ( \pi ) \otimes \mathbb { 1 } _ { d _ { \lambda } } \, . \quad ( 1 1 ) \\ \intertext { s t } R ( \pi \in S _ { n } ) \cong \bigoplus _ { \lambda } \bigoplus _ { \mu = 1 } ^ { d _ { \lambda } } r _ { \lambda } ( \pi ) = \bigoplus _ { \lambda } r _ { \lambda } ( \pi ) \otimes \mathbb { 1 } _ { d _ { \lambda } } \, . \quad ( 1 1 ) \\
+$$
+
+Here λ labels the irreps of Sn and rλ is the corresponding irrep itself, which appears dλ times. The collection of these repeated irreps is called an isotypic component. Crucially, the only irreps appearing in R correspond to two-row Young diagrams (see Methods) and can be parametrized by a single non-negative integer m, as λ ≡ λ(m) = (n-m, m), where m = 0, 1, . . . , ⌊ n2 ⌋. It can be shown that
+
+$$
+d _ { \lambda } & = n - 2 m + 1 \, , \quad \text {and} \\ m _ { \lambda } & = \frac { n ! ( n - 2 m + 1 ) ! } { ( n - m + 1 ) ! m ! ( n - 2 m ) ! } \\ \text {are again } d _ { \lambda } & \text { is the number of times the irrep appears}
+$$
+
+where again dλ is the number of times the irrep appears and mλ is the dimension of the irrep itself. Note that every dλ is in O(n), whereas some mλ can grow exponentially with the number of qubits. For instance, if n is even and m = n/2, one finds that mλ = Ω(4n/n2 ). We finally note
+
+that Eq. (11) implies ∑λ mλdλ = 2n . Given the block-diagonal structure of R, Sn-equivariant unitaries and measurements must necessarily take the form
+
+$$
+\text { fact} , \quad \text {and} \, \text { if } \, \text { a } \Omega \, \text { and } \, \text { a } \Omega \, \text { only } \, \text { a } \Omega \, \text { and } \, \text { a } \Omega \, \text { of } \, \text { a } \Omega \, \text { } \, \intertext { g.  [ 90 ] } \text { as is of } \quad U ( \theta ) \cong \bigoplus _ { \lambda } \mathbb { 1 } _ { m _ { \lambda } } \otimes U _ { \lambda } ( \theta ) , \quad \text {and} \, \text { } O \cong \bigoplus _ { \lambda } \mathbb { 1 } _ { m _ { \lambda } } \otimes O _ { \lambda } . \ ( 1 3 ) \\ \text {nowing} \quad T \text { that
+$$
+
+That is, both U(θ) and O decompose into a direct sum of dλ-dimensional blocks repeated mλ times (with mλ called the multiplicity) on each isotypic component λ. This decomposition is illustrated in Fig. 3.
+
+Let us highlight several crucial implications of the block diagonal structure arising from Sn-equivariance. First and foremost, we note that, under the action of an Snequivariant QNN, the Hilbert space decomposes as
+
+$$
+\mathcal { H } \cong \bigoplus _ { \lambda } \bigoplus _ { \nu = 1 } ^ { m _ { \lambda } } \mathcal { H } _ { \lambda } ^ { \nu } , \\
+$$
+
+where each Hνλ denotes a dλ-dimensional invariant subspace. Moreover, one can also see that when the QNN acts on an input quantum state as Uθ(ρ) = U(θ)ρU(θ† ), it can only access the information in ρ which is contained in the invariant subspaces Hνλ (see also [23]). This means that to solve the learning task, we require two ingredients: i) the data must encode the relevant information required for classification into these subspaces [23, 25], and ii) the QNN must be able to accurately process the information within each Hνλ . As discussed in the Methods, we can guarantee that the second condition will not be an issue, as the set of generators in Eq. (9) is universal within each invariant subspace, i.e., the QNN can map any state in Hνλ to any other state in Hνλ (see also Ref. [92]).
+
+> *Generated caption of `2210.09974_-_Theoretical_Guarantees_for_Permutation-Equivariant_Quantum_Neural_Networks_assets/figure-003.png` (ollama:gemma4:26b, prompt sci-v1):* This is a scientific diagram containing three panels, labeled a), b), and c), illustrating matrix structures. Panel a) shows a large square matrix labeled $U(\theta) = \left( \dots \right)$ composed of several smaller square diagonal blocks of different colors and sizes. The blocks are labeled with partitions $\lambda$: the top-left block is dark blue and $\lambda = (5, 0)$; the next diagonal block is purple and $\lambda = (4, 1)$; the next is light blue and $\lambda = (3, 2)$; and the final bottom-right block is light green. Panel b) shows a large square matrix labeled $R(\pi) = \left( \dots \right)$ which has a similar block-diagonal structure as panel a), with the same colors and $\lambda$ labels: a dark blue block $\lambda = (5, 0)$, a purple block $\lambda = (4, 1)$, a light blue block $\lambda = (3, 2)$, and a light green block. Panel c) provides a conceptual schematic for the two matrix types. The left side of panel c) is labeled $U(\theta)$ in a yellow box and has the caption "Polynomially Large Blocks, Exponential Multiplicity". It shows a series of diagonal blocks of decreasing size, indicated by an arrow labeled $d_\lambda$ representing the block dimension, and a large double-headed arrow labeled $\times m_\lambda$ spanning the diagonal. The right side of panel c) is labeled $R(\pi)$ in a yellow box and has the caption "Exponentially Large Blocks, Polynomial Multiplicity". It shows a large, dense, light-blue block with a small sub-block of size $d_\lambda$ indicated by an arrow, and the overall structure suggests very large blocks.
+
+> *Generated caption of `2210.09974_-_Theoretical_Guarantees_for_Permutation-Equivariant_Quantum_Neural_Networks_assets/figure-004.png` (ollama:gemma4:26b, prompt sci-v1):* This image consists of two labeled diagrams, a) and b), illustrating a mathematical sequence. Diagram a) shows a three-dimensional pyramid-like stack composed of spheres. The bottom layer has 6 spheres, the middle layer has 3 spheres, and the top layer has 1 sphere. The spheres are colored either light gray or a darker muted teal. Below diagram a), there is a mathematical sequence: $\text{Te}_n = 1, 4, 10, 20, 35, 56, 84, 120 \dots$. Diagram b) is a vertical schematic representation of the same structure, showing three distinct groupings of spheres labeled with numbers on the right. The top group consists of 1 sphere, labeled with a $1$ and a small box containing $1$. Below it, a grouping of 3 spheres is labeled with a $3$ and a box containing $4$ that encompasses both the first and second groups. The bottom group consists of 6 spheres, labeled with a $6$. A large bracket to the far right encompasses all three groups and is labeled with a box containing $10$. An arrow points downwards from the bottom group.
+
+A second fundamental implication of Eq.(13) is that the manifold of equivariant unitaries is of low-dimension. We make this explicit in the following lemma.
+
+Lemma 2 (Dimension of Sn-equivariant unitaries). The submanifold of Sn-equivariant unitaries is of dimension equal to the Tetrahedral numbers Ten+1 = (n+3 3 ) (see
+
+## Fig. 4), and therefore on the order of Θ(n3 ).
+
+Crucially, Lemma 2 shows that the equivariance constraint limits the degrees of freedom in the QNN (and concomitantly in any observable) from 4n to only polynomially many.
+
+## Absence of barren plateaus in Sn-equivariant QNNs
+
+Barren plateaus have been recognized as one of the main challenges to overcome in order to guarantee the success of QML models using QNNs [16]. When a model exhibits a barren plateau, the loss landscape becomes, on average, exponentially flat and featureless as the problem size increases [33-45]. This severely impedes its trainability, as one needs to spend an exponentially large amount of resources to correctly estimate a loss minimizing direction. Issues of barren plateaus arise primarily due to the structure of the models (including the choice of QNN, the input state and the observables) employed [33-43, 45] but can also be caused solely by effects of noise [44]. In the rest of this section, we will only be concerned with the former type of barren plateaus, that is the most studied.
+
+Recently, a great deal of effort has been put forward towards creating strategies capable of mitigating the effect of barren plateaus [78, 93-105]. While these are promising and have shown moderate success, the 'holy grail' is identifying architectures which are immune to barren plateaus altogether, and thus enjoy trainability guarantees. Examples of such architectures are shallow hardware efficient ansatzes [34], quantum convolutional neural networks [106], or the transverse field Ising model Hamiltonian variational ansatz [43, 45]. Here, we prove that another architecture can be added to this list: Sn-equivariant QNNs.
+
+When studying barren plateaus, one typically analyzes the variance of the empirical loss function partial derivatives, ∂µ L̂(θ) = ∂ L̂(θ)/∂θµ, where θµ ∈ θ. We say that there is a barren plateau in the θµ direction if Eθ[∂µ L̂(θ)] = 0 and Varθ[∂µ L̂(θ)] is exponentially vanishing.
+
+Before stating our main results, we introduce a bit of notation. Let us define Qνλ to be the operator that maps vectors from H to Hνλ , such that (Qνλ )†Qνλ realizes a projection onto Hνλ (see Supplementary Methods 4 for additional details). Given a matrix B ∈ Cd×d , we will denote its restriction to Hνλ as
+
+$$
+B _ { \lambda } ^ { \nu } = Q _ { \lambda } ^ { \nu } B ( Q _ { \lambda } ^ { \nu } ) ^ { \dagger } \, ,
+$$
+
+with Bνλ ∈ Cdλ×dλ . We remark that the restriction of Snequivariant generators is independent of the ν multiplicity index (see Eq. (13)). On the other hand, the restriction of non-equivariant operators (such as the input states ρ1) are not independent of ν, meaning that that the set composed of all the restrictions ρνλ contain an exponentially large amount of non-redundant information that the QNN can act on (see also [23]).
+
+Denoting the weighted average of the input states as σ = ∑Mi=1 ciρi, we find:
+
+$$
+V a r _ { \theta } [ \partial _ { \mu } \hat { \mathcal { L } } ( \theta ) ] = & \sum _ { \lambda } \frac { 2 d _ { \lambda } } { ( d _ { \lambda } ^ { 2 } - 1 ) ^ { 2 } } \Delta ( H _ { \mu , \lambda } ) \Delta ( O _ { \lambda } ) \Delta \left ( \sum _ { \nu = 1 } ^ { m } \sigma _ { \lambda } ^ { \nu } \right ) \, . \quad \text {to arg} \\ H a r _ { \theta } \, \Delta ( R ) = & T r [ R ^ { 2 } ] \quad T r [ B ] ^ { 2 }
+$$
+
+Theorem 1 (Variance of partial derivatives). Let Uθ be an Sn-equivariant QNN, with generators in G, and O an Sn-equivariant measurement operator from M. Consider an empirical loss L̂(θ) as in Eq. (3). Assuming a circuit depth L such that the QNN forms independent 2-designs on each isotypic block, we have ⟨∂µ L̂(θ)⟩θ = 0, and
+
+$$
+H e r e , \, \Delta ( B ) = \text {Tr} [ B ^ { 2 } ] - \frac { \text {Tr} [ B ] ^ { 2 } } { \dim ( B ) } . \\ \text {In the Methods we present a sketch of}
+$$
+
+In the Methods we present a sketch of the proof for Theorem 1, as well as its underlying assumptions.
+
+We remark that while we have derived Theorem 1 for Snequivariant QNNs and measurement operators, given some general finite-dimensional compact group G, the form of Eq. (16) is valid provided that one uses a G-equivariant QNN that is universal with each invariant subspace. In this case, the summation over λ will run over the irreps of the representation of G.
+
+Let us now analyze each term in Eq. (16) to identify potential sources of untrainability. First, let us consider the prefactors 2dλ (d2λ-1)2 . From Eq. (12) we can readily see that 2dλ (d2λ-1)2 ∈ Ω( 1 n3 ) for any λ. Next, it is convenient to separate the two remaining potential sources of barren plateaus into two categories: i) those that are QNN or measurement dependent, ∆(Hµ,λ ) and ∆(Oλ), and ii) those that are dataset-dependent, ∆(∑ν σνλ ). This identification commonly appears when analyzing the absence of barren plateaus (see Refs. [34, 42, 43, 106, 107]) and allows one to study how the architecture and dataset individually affect the trainability. In what follows, we will say that some architecture does not induce barren plateaus if the terms that are QNN or measurement dependent are not exponentially vanishing.
+
+Using tools from representation theory we can obtain the following exact expressions for Sn-equivariant operators.
+
+Theorem 2. Let A be a Sn-equivariant operator.
+
+$$
+& \text {Theorem 2.} \, \text {Let } A \ b e \ a \ S _ { n } { \text {-equivariant operator} } ; \\ \text {of } S _ { n } { \text {-} } \quad & \begin{cases} \text {If } A = \sum _ { j = 1 } ^ { n } \chi _ { j } \, , & \text {then } \Delta ( A _ { \lambda } ) = 2 \left ( \lambda _ { 1 } ^ { d _ { \lambda } + 1 } \right ) , \\ \text {If } A = \sum _ { k < j } \chi _ { j } \chi \, , & \text {then } \Delta ( A _ { \lambda } ) = \frac { 8 } { 3 } \left ( \lambda _ { 5 } ^ { d _ { \lambda } + 2 } \right ) , \end{cases} \quad ( 1 7 ) \\ \text {action} & \quad \text {In } A = \prod _ { j = 1 } ^ { n } \chi _ { j } \, , \quad \text {then } \Delta ( A _ { \lambda } ) = \frac { d _ { \lambda } ^ { 2 } - 1 + n \, m o d 2 } { d _ { \lambda } } \, , \\ \text {com} & \quad \text {where } \chi \in \{ X , Y , Z \} . \\ \text {finally} & \quad \text {ON} \quad
+$$
+
+where χ ∈ {X, Y, Z}.
+
+In Supplementary Methods 6 we also derive formulas for the case of A being k-body operators.
+
+Let us review the implications of Theorem 2. First, note that all elements of our gate-set G and measurement-set M are of the form in Theorem 2, and therefore belong in Ω(dλ). This follows from the fact that the binomial coefficient (n+a b ) scales as a polynomial of degree b in n. Since dλ itself is in Θ(n) (see Eq. (12)), for all λ and µ
+
+$$
+\Delta ( O _ { \lambda } ) \text { and } \Delta ( H _ { \mu , \lambda } ) \in \Omega ( n ) \, .
+$$
+
+Hence, combining this result with Theorem 1 allows us to argue that Sn-equivariant QNNs do not induce barren plateaus.
+
+Corollary 1. Under the same assumptions as Theorem 1, it follows that, if ∆(∑mλ ν=1 σνλ ) ∈ Ω(1/poly(n)), then the empirical loss function satisfies
+
+$$
+V a _ { \theta } [ \partial _ { \mu } \hat { \mathcal { L } } ] \in \Omega \left ( \frac { 1 } { \text {poly} ( n ) } \right ) . \\
+$$
+
+We note that a crucial requirement for Corollary 1 to hold is that ∆(∑ν σνλ ) needs to be, at most, polynomially vanishing. In Sec. , we identify cases of datasets leading to trainability but also to untrainability. Finally, we note that as discussed in Supplementary Methods 9, Corollary 1 is sufficient to guarantee that the loss function does not exhibit the narrow gorge phenomenon, whereby the minima of the loss occupy an exponentially small volume of parameter space [108]. In other words, we show that absence of barren plateau implies absence of narrow gorges and loss function anti-concentration.
+
+## Efficient overparametrization
+
+Absence of barren plateaus is a necessary, but not sufficient, condition for trainability, as there could be other issues compromising the parameter optimization. In particular, it has been shown that quantum landscapes can exhibit a large number of local minima [29-31]. As such, here we consider a different aspect of the trainability of Sn-equivariant QNNs: their ability to converge to global minima. For this purpose, we find it convenient to recall the concept of overparametrization.
+
+Overparametrization denotes a regime in machine learning where models have a capacity much larger than that necessary to represent the distribution of the training data. For example, when the number of parameters is greater than the number of training points. Models operating in the overparametrized regime have seen tremendous success in classical deep learning, as they closely fit the training data but still generalize well when presented with new data instances [109-112]. Recently, Ref. [32] studied overparametrization in the context of QML models. A clear phase transition in the trainability of under- and overparametrized QNNs was evidenced: Below some critical number of parameters (underparametrized) the optimizer greatly struggles to minimize the loss function, whereas beyond that number of parameters (overparametrized) it converges exponentially fast to solutions (see Methods for further details).
+
+Given the desirable features of overparametrization, it is important to estimate how many parameters are needed to achieve this regime. Here, we can derive the following theorem.
+
+Theorem 3. Let Uθ be a Sn-equivariant QNN with generators in G. Then, Uθ can be overparametrized with O(n3 ) parameters.
+
+Theorem 3 guarantees that Sn-equivariant QNNs only require a polynomial number of parameters to reach overparametrization.
+
+## Generalization from few data points
+
+Thus far we have seen that Sn-equivariant QNNs can be efficiently trained, as they exhibit no barren plateaus and can be overparametrized. However, in QML we are not only interested in achieving a small training error, we also aim at low generalization error [26, 61, 113-116].
+
+Computing the generalization error in Eq. (4) is usually not possible, as the probability distribution P over which the data is sampled is generally unknown. However, one can still derive bounds for gen(θ) which guarantee a certain performance when the model sees new data. Here, we obtain an upper bound for the generalization error via the covering numbers (see Methods) [61, 117], and prove that the following theorem holds.
+
+Theorem 4. Consider a QML problem with loss function as described in Eq. (4). Suppose that an n-qubit Snequivariant QNN U(θ) is trained on M samples to obtain some trained parameters θ∗ . Then the following inequality holds with probability at least 1- δ
+
+$$
+\intertext { t h o d a s } \ g e n ( \theta ^ { * } ) \leqslant \mathcal { O } \left ( \sqrt { \frac { T e _ { n + 1 } } { M } } + \sqrt { \frac { \log ( 1 / \delta ) } { M } } \right ) . \quad ( 2 0 )
+$$
+
+The crucial implication of Theorem 4 is that we can guarantee gen(θ∗ ) ⩽ ϵ with high probability, if M ∈ O ( Ten+1+log(1/δ) ϵ2 ). For fixed δ and ϵ, this implies M ∈ O(n3 ), i.e., we only need a polynomial number of training points. Also note that this results shows that minimizing the empirical loss closely minimizes the true loss with high probability. Say that L̂∗ = infθ L̂(θ) is the minimal empirical loss and L∗ = infθ L(θ) the minimal true loss. Then, with M ∈ O ( Ten+1+log(1/δ) ϵ2 ) training data point the inequality | L̂∗ -L∗ | ⩽ ϵ holds with probability at least 1 - δ.
+
+Lastly, we remark that Theorem 4 can be readily adapted to other GQML models. As shown in Methods, this theorem stems from the fact that the equivariant unitary submanifold, in its block-diagonal form in Eq. (13), can be covered [117] by ε-balls in a block-wise manner. In Supplementary Methods 8, we also show that the VC dimension [118] of equivariant QNNs (and also more general parameterized channels) can be upper bounded by the dimension of the commutant of the symmetry group, a fact which could be of independent interest.
+
+## Trainable States
+
+As discussed in the previous section, Sn-equivariant QNNs and measurement operators cannot induce barren plateaus. Thus, the trainability of the model hinges on the behavior of ∆(∑ν σνλ ). We note that this datasetdependent trainability it not unique to Sn-equivariant QNNs, but is rather present in all absence of barren plateaus results (see Refs. [34, 42, 43, 106, 107, 119]) as there always exist datasets for which an otherwise trainable model can be rendered untrainable.
+
+Table I. Input pure states and their effect on the trainability of Sn-equivariant QNNs. Trainable means that ∆(∑ν σνλ) ∈ Ω(1/poly(n)), whereas untrainable means ∆(∑ν σνλ) ∈ O(1/2n ). Analytical method indicates that we can exactly compute the scaling of ∆(∑ν σνλ), whereas numerical one means that we evaluate it numerically. The analytical proofs and details of the simulations can be found in Supplementary Methods 7. We note that, these results are obtained by computing the loss with a single data instance (i.e., for M = 1 in Eq. (3)).
+
+| Input state                    | Trainable?   | Method     |
+|--------------------------------|--------------|------------|
+| Symmetric                      | Yes          | Analytical |
+| Fixed Hamming-weight encoding  | Yes          | Analytical |
+| Local Haar random              | Yes          | Numerical  |
+| Fixed depth random circuit     | Yes          | Numerical  |
+| Disconnected graph state       | Yes          | Numerical  |
+| 3-regular graph state          | Yes          | Numerical  |
+| n/2-regular graph state        | Yes          | Numerical  |
+| Global Haar Random             | No           | Analytical |
+| Linear depth random circuit    | No           | Numerical  |
+| Erdös-Rényi random graph state | No           | Numerical  |
+
+To understand the conditions that lead to an exponentially vanishing of ∆(∑ν σνλ ) we note that for a Hermitian operator B, we have ∆(B) = DHS (B, Tr[B] dim(B) 11), where DHS(A,B) = ∥A-B∥22 is the Hilbert-Schmidt distance. Alternatively, we can interpret ∆(B) as the variance of the eigenvalues of B. From here, we can see that one will obtain trainability if at least one σλ is not exponentially close to a multiple of the identity in some subspace Hνλ .
+
+In Table I we present examples of states for which ∆(∑ν σνλ ) vanishes polynomially, leading to a trainable model, but also cases where the input state leads to exponentially vanishing ∆(∑ν σνλ ) and thus to a barren plateau. While we leave the details of how each type of input state is generated for the Methods section, we note that the results in Table I demonstrate the critical role that the input states play in determining the trainability of a model (this will be further elucidated in numerical results below). Such insight is particularly important as one can create adversarial datasets yielding barren plateaus (see Supplementary Methods 10). Moreover, it indicates that care must be taken when encoding classical data into quantum states as the embedding scheme can induce trainability issues [42, 119].
+
+## Numerical results
+
+Here, we consider the task of classifying connected graph states from disconnected graph states, which are prepared as follows. First, we generate n-node random graphs from the Erdös-Rényi distribution [120], with an edge probability of 40%. The ensuing graphs are binned into two categories: connected and disconnected. We then embed these graphs into quantum graph states via the canonical scheme of [121, 122] (see Methods section). We highlight that such encoding preserves symmetries in the input data, in the sense that a permutation of the underlying graph yields a permutation of the qubits constituting its graph state (i.e., of the form Eq. (8)). The previous allows us to create a dataset where half of the states encodes connected graphs (label yi = +1), and the other half encodes disconnected graphs (label yi = -1). To analyze the data, we use an Sn-equivariant QNN with generators in Eq. (9) (see also Fig. 2), and measure the operator O = 2 n(n-1) ∑nk<j;j=1 XjXk.
+
+In the following, we characterize the trainability and generalization properties of Sn-equivariant QNNs for this classification task, but we note that further aspects of the problem are discussed in the Supplementary Note. These include analyzing the effect of the graph encoding scheme in the trainability, the irrep contributions to the gradient variance, and comparing Sn-equivariant QNNs against problem-agnostic ones. In particular, the latter shows that for the present graph classification task, problem-agnostic models are hard to train and tend to greatly overfit the data, i.e., they have large generalization errors despite performing well on the training data.
+
+## Numerics on barren plateaus
+
+In Fig. 5(a) we show the variance of the cost function partial derivatives for a parameter θµ in the middle of the QNN. Each point is evaluated for a total of 50 random input states, and with 20 random sets of parameters θ per input. We can see that when the variance is evaluated for states randomly drawn from the whole dataset - with an equal number of connected and disconnected graphs - then Varθ[∂µ L̂] only decreases polynomially with the system size (as evidenced by the curved line in the log-linear scale), meaning that the model does not exhibit a barren plateau. We note that, as shown in Fig. 5(a), when the input to the QNN is a disconnected graph state, then the variance vanishes polynomially, whereas if we input a connected graph state it vanishes exponentially. This illustrates a key fact of QML: when trained over a dataset, the data from different classes can contribute very differently to the model's trainability (see [18] for a discussion on how this result enables new forms of classification).
+
+> *Generated caption of `2210.09974_-_Theoretical_Guarantees_for_Permutation-Equivariant_Quantum_Neural_Networks_assets/figure-005.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains three side-by-side plots labeled (a), (b), and (c). Plot (a), titled "Gradients", shows a line graph of $\text{Var}[\partial_{\theta} \hat{L}]$ on a logarithmic y-axis ranging from $10^{-4}$ to $1$ against $n$ on a linear x-axis from $4$ to $20$. Three data series are plotted: "All labels" (blue line with square markers) which stays around $10^{-2}$ for $n \ge 10$; "Conn. labels" (orange dashed line with circle markers) which decreases steadily to approximately $10^{-4}$ at $n=20$; and "Disconn. labels" (green line with star markers) which decreases to approximately $10^{-3}$ at $n=20$. Plot (b), titled "Overparameterization", consists of two subplots. The left subplot shows $\text{rank}(\text{QF}(\text{P}))$ on a linear y-axis from $0$ to $600$ against $L$ on a linear x-axis from $0$ to $750$. A solid magenta line increases from $0$ to approximately $550$ as $L$ approaches $750$. A dashed grey vertical line is at $L \approx 500$. The right subplot shows $L_{\text{ovp}}$ on a logarithmic y-axis from $10^0$ to $10^3$ against $n$ on a linear x-axis from $4$ to $20$. A solid black line follows an upward curve, while a dashed grey line labeled "Rdm. graph" sits below it. A vertical dashed pink line labeled "$Te_{n+1}$" is at $n \approx 10$, and a series of black circles labeled "Selected" lie along the solid black curve. Plot (c), titled "Generalization", shows $g(\theta)$ on a linear y-axis from $0$ to $0.6$ against $n$ on a linear x-axis from $6$ to $14$. There are five series: $M=10$ (blue line with star markers) remains high near $0.55$; $M=25$ (orange line with circle markers) stays near $0.45$; $M=100$ (green line with square markers) is near $0.35$; $M=n$ (red line with diamond markers) starts near $0.4$ and decreases to $0.3$; and $M=n^2$ (purple line with star markers) stays near $0.35$.
+
+## Numerics on overparametrization
+
+Following the results in Ref. [32], let us analyze the overparametrization phenomenon by studying the rank of the quantum fisher information matrix (QFIM) [123, 124], denoted F(θ) and whose entries are given by
+
+[F (θ)]jk = 4Re[⟨∂jψ(θ)|∂kψ(θ)⟩-⟨∂jψ(θ)|ψ(θ)⟩ ⟨ψ(θ)|∂kψ(θ)⟩], with |ψ(θ)⟩ = U(θ) |ψ⟩, and |∂iψ(θ)⟩ = ∂ |ψ(θ)⟩ /∂θi = ∂i |ψ(θ)⟩ for θi ∈ θ. The rank of the QFIM quantifies the number of potentially accessible directions in state space. In this sense, the model is overparametrized if the QFIM rank is saturated, i.e., if adding more parameters (or layers) to the QNN does not further increase the QFIM rank. When this occurs, one can access all possible directions in state space and efficiently reach the solution manifold [32, 125, 126]. On the other hand, the model is underparametrized if the QFIM rank is not maximal. In this case, there exists inaccessible directions in state space, leading to false local minima, that is, local minima that are not actual minima of the loss function.
+
+In Fig. 5(b, left panel) we report representative results of the QFIM rank versus the number of layers L for problems with even numbers n ∈ [4, 16] of qubits. These results correspond to random connected graphs and random values of θ. Here we can see that, for a given n, as the number of layers increases, the rank of the QFIM also increases until it reaches a saturation point. Once this critical number of layers (denoted as Lovp) is reached, the model is considered to be overparametrized [32]. In Fig. 5(b, middle panel) we plot the scaling of Lovp (for 10 random connected or disconnected graphs per system size) versus n, as well as the Tetrahedral numbers Ten+1. As can be seen, in all cases, the overparametrization onset occurs for a number of layers Lovp < Ten+1, indicating efficient overparametrization.
+
+To appreciate the practical effects of overparametrization, we report in Fig. 5(b, right panel) optimization performances of Sn-equivariant QNNs as a function of the number L of layers employed. All the optimizations are performed using the hinge loss function, with the L-BFGSB optimization algorithm [127]. The system sizes are in n ∈ [4, 16] qubits, and correspond to the graphs that were studied in the left panel and highlighted in the middle one. The relative loss error reported indicates how close an optimized QNN is from the best achievable model. Explicitly, it is defined as | L̂L - L̂min|/| L̂min|, where L̂L is the loss achieved after optimization of a QNN with a given L, and where L̂min is the minimum loss achieved for any of the values L considered, i.e., L̂min = argminL L̂L (we systematically verify that for sufficient large L all optimizations reliably converge to this same loss L̂min). For every value of n studied, we see that for a small number of layers the optimizer struggles to significantly minimize the loss. However, as L increases, there exists a computational phase transition whereby the optimizer is able to easily identify optimal parameters and reach much smaller loss values. Notably, such computational phase transition occurs slightly before Lovp (indicated by a dashed vertical line), meaning that even before the QFIM rank saturates, the model has sufficient directions to efficiently reach the solution manifold. Overall, we see that for number of layers growing at most polynomially with n, one can ensure convergence to solution of the model.
+
+## Numerics on generalization error
+
+In Fig. 5(c) we study the generalization error of an overparametrized Sn-equivariant QNN (with L = Ten+1) for different training dataset sizes M and with respect to test sets of size Mtest = 2×Ten+1 that are independently drawn from the training ones. Generalization errors are evaluated for random QNNs parameters θ and we report the 90-th percentile of the errors obtained, i.e., for δ = 90% in Eq. (20). In the plot, we show the normalized generalization error g(θ) = gen(θ) Var1/2 θ,ρ [ℓ(θ,ρ)] . We stress that such normalization can only increase the generalization errors obtained, and is only used in order to compare generalization errors across different values of n without artifacts resulting from loss concentration effects as the system sizes grow. As seen in Fig. 5(c), when the size of the training set is constant, the generalization error is also approximately constant across problem sizes. However, when the training set size scales with n, the generalization error decreases with n, with this even occurring for M = n. Notably, if M = Ten+1 ∈ Θ(n3 ), we can see that the generalization error significantly decreases with problem size. That is, for this problem, we found generalization errors to be better than the scaling of the bounds derived in Eq. (20).
+
+## DISCUSSION
+
+GQML has recently been proposed as a framework for systematically creating models with sharp geometric priors arising from the symmetries of the task at hand [18-22]. Despite its great promise, this nascent field has only seen heuristic success as no true performance guarantees have been proved for its models. In this work we provide the first theoretical guarantees for GQML models aimed at problems with permutation invariance. Our first contribution is the introduction of the Sn-equivariant QNN architecture. Using tools from representation theory, we rigorously find that these QNNs present salient features such as absence of barren plateaus (and narrow gorges), generalization from very few data points, and a capability of being efficiently overparametrized. All these favorable properties can be viewed as being direct consequences of the inductive biases embedded in the model, which greatly limits their expressibility [37, 46, 128]. Namely, these Sn-equivariant QNNs act only on the -polynomially largemultiplicity spaces of the qubit-defining representation of Sn. To complete our analysis, we performed numerical simulations for a graph classification task and heuristically found that the model's performance is even better than that predicted by our theoretical results.
+
+Taken together, our results provide the first rigorous guarantees for equivariant QNNs, and demonstrate that GQML may be a powerful tool in the QML repertoire. We highlight that while we focus on problems with Sn symmetry, many of our proof techniques hold for general finite-dimensional compact groups. Hence, we hope that the representation-theory-based techniques used here can serve as blueprints to analyze the performance of other models. We envision that in the near future, GQML models with provable guarantees will be widely spread among the QML literature.
+
+Finally, we note that while our results were derived in the absence of noise, it would be interesting to account for hardware imperfections. Clearly, the presence of noise would change our analysis, and most likely weaken our trainability guarantees. As such, while we can guarantee that Sn-equivariant QNNs will be useful on fault-tolerant quantum devices, we do not abandon hope that they can be used in the near-term era provided that noise levels are small enough.
+
+Note added: In light of the recent preprint [129], we have added a detailed discussion in the Supplementary Note regarding the possibility of classically simulating Snequivariant QNNs. As we argue there, for most relevant cases in QML, the algorithm in [129] is not fully classical, as it require access to a quantum computer to obtain a "classical description" of the input data. Moreover, even if one is given such "classical description", the ensuing algorithm that replaces the use of a QNN scales extremely poorly with the number of qubits. Taken together these results indicate that if one has access to a quantum computer, it is not entirely obvious whether one should use it to obtain a classical description of the data followed by expensive post-processing, or if one should run the QNN on the quantum device and exploit its favorable properties like efficient overparametrization and absence of barren plateaus. We will save such comparison for future work.
+
+Now we will briefly compare Sn-equivariant QNNs to other barren-plateau-avoiding architectures.
+
+First, let us consider the shallow hardware efficient ansatz (HEA) [34, 130] and the quantum convolutional neural network (QCNN) [60, 106]. While our goal is not to provide a comprehensive description of these models, we recall the three key properties leading to their trainability: locality of the gates, shallowness of the circuit, locality of the measurement operator. Both the HEA and QCNN are composed of parametrized gates acting in a brick-like fashion on alternating pairs of neighboring qubits (local gates), and are composed of only a few -logarithmically manylayers of such gates (shallowness of the circuit). The combination of these two factors leads to a low scrambling power and greatly limited expressibility of the QNN. Then, the final ingredient for their trainability requires measuring a local operators (i.e., an operator acting non-trivially on a small number of qubits). While this assumption is guaranteed for QCNNs -due to their feature-space reduction property-, the HEA can be shown to be untrainable for global measurement (i.e., operators acting non-trivially on all qubits). Here we can already see that Sn-equivariant QNNs do not share the properties leading to trainability in HEAs and QCNNs. To begin, we can see from the set of generators G in Eq. (9) that the Sn-equivariant architecture allows for all long-range interactions in each layer, breaking the locality of gates assumption. Moreover, and in stark contrast to HEAs, one can train the Sn-equivariant QNN even when measuring global observables (for instance, we allow for the O = ∏nj=1 Xj in Eq. (10)). Finally, we remark that HEAs and QCNNs cannot be efficiently overparametrized, as they require an exponentially large number of parameters to reach overparametrization [43]. On the other hand, according to Theorem 3 the Sn-equivariant QNN can be overparametrized with polynomially many layers.
+
+Next, let us consider the transverse field Ising model Hamiltonian variational ansatz (TFIM-HVA) [43, 45]. The mechanism leading to absence of barren plateaus in this architectures is more closely related to that of the Snequivariant model, although there are still some crucial differences. On the one hand, it can be shown that the TFIMHVA has an extremely limited expressibility, having only a maximum number of free parameters in O(n2 ), and being able to reach overparametrization with polynomially many layers. While this is similar to the case of Sn-equivariant architectures (see Lemma 2 and Theorem 3), the block diagonal structure of the TFIM-HVA is fundamentally different than that arising from Sn-equivariant: The TFIM- HVA unitary has four exponentially large blocks repeated a single time each, while Sn-equivariant unitaries have polynomially small blocks repeated exponentially many times. This subtle, albeit important, distinction makes it such that Sn-equivariant QNNs enjoy generalization guarantees (from Theorem 4) which are not directly applicable to TFIM-HVA architectures.
+
+The previous shows that Sn-equivariant QNNs standout amid the other trainable architectures, exhibit many favorable properties that other models only partially enjoy.
+
+Lastly, we now consider future directions and possible extensions of our work. We recall that Definition 3 requires every layer of the QNN to be equivariant. This is evidently not general, as one could have several consecutive layers which are not individually equivariant, but compose to an equivariant unitary for certain θ [18, 131]. While in this manuscript we do not consider this scenario, it is worth exploring how less strict equivariance conditions affect the performance and the trainability guarantees here derived. Second, we note that as indicated in this work, the block diagonal structure of the Sn-equivariant QNN restricts the information in the input data that the model can access. This could lead to conditions where the model cannot solve the learning task as it cannot 'see' the relevant information in the input states. Such issue can be in principle solved by allowing the model to simultaneously act on multiple copies of the data, and even to change the representation of Sn throughout the circuit [23]. We also leave this exploration for future work.
+
+Another potentially interesting research direction would be equivariant embeddings and re-uploading of classical data. For the purposes of this work, we make no assumptions to the source or form of the data, such as whether it is quantum or classical. However, when considering analyzing classical data on quantum computer, embeddings become important. We give one such example, which we call a "fixed Hamming-weight encoding". Another example is the standard encoding of a graph into a graph state, which we considered in our numerics. This is far from exhaustive and more sophisticated methods exist, including trainable encoding [54]. Similarly, we have not studied how our results change in the presence of data re-uploading [132]. We know that if the data is re-uploaded via equivariant generators (e.g., if the data re-uploading unitary takes the form V (x) = ∏l′ e-ixlHl , with Hl being Sn-equivariant), then our theoretical guarantees results do not change. This follows from the fact that the DLA of the circuit will remain the same, and hence our results follow. We leave the study of more general encoding and re-uploading schemes for future work.
+
+## METHODS
+
+This section provides an overview of the different tools used in the main text. Here we also present a sketch of the proof of our main results. Full details can be found in the Supplementary Methods.
+
+## Building Sn-equivariant operators
+
+Here we briefly describe how to build Sn-equivariant operators that can be used as generators of the QNN, or as measurement operators. In particular, we will focus on the so-called twirling method [19, 23]. Take a unitary representation R of a discrete group G over a vector space V . Then the twirl operator is the linear map TG : GL(V ) → GL(V ), defined as
+
+$$
+\mathcal { T } _ { G } ( A ) = \frac { 1 } { | G | } \sum _ { g \in G } R ( g ) A R ( g ) ^ { \dagger } \, . \quad \quad ( 2 1 )
+$$
+
+It can be readily verified that the twirling of any operator A yields a G-equivariant operator, i.e., we have [TG(A), R(g)] = 0 for any g ∈ G.
+
+The previous allows us to obtain a G-equivariant operator from any operator A ∈ GL(V ). For instance, let us consider the case in the case of G = Sn, R the qubit-defining representation and A = X1. Then, we have TG(X1) = 1 n! ∑π∈Sn R(π)X1R(π)† = 1n ∑ni=1 Xi = TG(Xj) for any 1 ⩽ j ⩽ n. Note that twirling over Sn cannot change the locality of an operator. That is, twirling a k-body operator leads to a sum of k-body operators.
+
+## Representation theory of Sn
+
+In this section we review a few basic notions from representation theory. For a more thorough treatment we refer the reader to Refs. [133-136], and more specifically to the tutorial in Ref. [25] which provides an introduction to representation theory from the perspective of QML. We recall that we are interested in the qubit-defining representation of Sn, i.e., the one permuting qubits
+
+$$
+R ( \pi \in S _ { n } ) \bigotimes _ { i = 1 } ^ { n } | \psi _ { i } \rangle = \bigotimes _ { i = 1 } ^ { n } | \psi _ { \pi _ { i } \ 1 } ( i ) \rangle \ . \\ \text {mentioned in the main text, representations break}
+$$
+
+As mentioned in the main text, representations break down into fundamental building blocks called irreducible representations (irreps).
+
+Definition 4 (Irrep decomposition). Given some unitary representation R of a compact group G, there exists a basis under which it takes a block diagonal form
+
+$$
+R ( g \in G ) \cong \bigoplus _ { \lambda } \bigoplus _ { \mu = 1 } ^ { m _ { r _ { \lambda } } } r _ { \lambda } ( \pi ) = \bigoplus _ { \lambda } r _ { \lambda } ( \pi ) \otimes \iota _ { m _ { r _ { \lambda } } } \, , \quad ( 2 2 )
+$$
+
+with rλ(π) irreps of G appearing mrλ times.
+
+The irreps of the symmetric group are commonly labeled by the set of partitions of the integer n. A partition of a positive integer n ∈ N is a non-decreasing sequence of positive integers λ = (λ1, · · · , λk) satisfying ∑i λi = n. Partitions are typically visualized using young diagrams, a set of empty, left-justified boxes arranged in rows such that there are λi boxes in the i-th row. For instance, the integer n = 3 can split into
+
+$$
+( 3 , 0 ) = \boxed { \prod \prod , \quad ( 2 , 1 ) = \prod \prod , \quad ( 1 , 1 , 1 ) = \prod \prod } .
+$$
+
+We note that in the case of the qubit-defining representation, the only λ appearing in Eq. (22) have at most two rows (e.g., would not include the last partition in Eq. (23)).
+
+The dimension of an Sn irrep rλ can be computed from the hook length formula
+
+$$
+\dim ( r _ { \lambda } ) = \frac { n ! } { \prod _ { b \in \lambda } h _ { \lambda } ( b ) } \, , \\ h _ { \lambda } ( b ) \, \text { is the hook length for box $b$ in $\lambda$, which}
+$$
+
+where each hλ(b) is the hook length for box b in λ, which is the total number of boxes in a 'hook' (or 'l' shape) composed of box b and every box beneath (in the same column) and to its right (in the same row).
+
+Given the block-diagonal structure of R in Eq. (22), one can see that a general G-equivariant operator has to be of the form
+
+$$
+A \cong \bigoplus _ { \lambda } \mathbb { 1 } _ { \dim ( r _ { \lambda } ) } \otimes A _ { \lambda } , \\
+$$
+
+where Aλ are mrλ -dimensional matrices repeated dim(rλ) times. In general, the number of times an irrep appears in an arbitrary representation R (i.e., mrλ in Eq. (22)) can be determined through character theory. Instead, in our case, we will take a shortcut and exploit one of the most remarkable results in representation theory, called the Schur-Weyl duality [137].
+
+Consider the representation Q of the unitary group U(2) acting on H = (C2 )⊗n through the n-fold tensor product Q(W ∈ U(2)) = W ⊗n . Evidently, according to Eq. (22), Q will also have an isotypic decomposition
+
+$$
+Q ( W \in \mathbb { U } ( 2 ) ) = \bigoplus _ { s } \mathbb { 1 } _ { m _ { s } } \otimes q _ { s } ( W ) \, , \quad ( 2 6 ) \quad \text {potency} \\ \intertext { w i t h e l l } Q ( W \in \mathbb { U } ( 2 ) ) = \bigoplus _ { s } \mathbb { 1 } _ { m _ { s } } \otimes q _ { s } ( W ) \, , \quad ( 2 6 ) \quad \text {potency} \\ \intertext { w i t h e l l } \intertext { w i t h e l l } \intertext { w i t h e l l } Q ( W ) = \intertext { w i t h e l l } Q ( W ) \, , \quad \intertext { w i t h e l l } \intertext { w i t h e l l } \intertext { w i t h e l l } \intertext { w i t h e l l } Q ( W ) = Q ( W ) \, , \quad \intertext { w i t h e l l } \intertext { w i t h e l l } \intertext { w i t h e l l } Q ( W ) \, , \quad \intertext { w i t h e l l } Q ( W ) = Q ( W ) \, , \quad \intertext { w i t h e l l } Q ( W ) = Q ( W ) \, , \quad \intertext { w i t h e l l }
+$$
+
+where s labels the different (spin) irreps of U(2). The Schur-Weyl duality, states that the matrix algebras C[R] and C[Q] mutually centralize each other, meaning that C[R] is the space of U(2)-equivariant linear operators, and similarly C[Q] is the space of Sn-equivariant ones. As a consequence of this duality, H can be decomposed as H ∼= ⊕λ Vλ ⊗ Wλ, where λ simultaneously labels irrep spaces Vλ and Wλ for Sn and U(2), respectively. That is, H supports a simultaneous action of Sn and U(2), where the irreps of each appear exactly once and are correlated: Each of the two-row Young diagrams λ = (n-m,m) labeling the irreps in R can be associated unequivocally with a spin label s(λ) for an U(2) irrep appearing in Q
+
+$$
+s ( \lambda ) = \frac { \lambda _ { 1 } - \lambda _ { 2 } } { 2 } = \frac { n - 2 m } { 2 } \, . \quad \quad ( 2 7 ) \quad \stackrel { s u c h t e r { s o t h e r } } { \ln }
+$$
+
+Moreover, since under the joint action of Sn × U(2) the multiplicities are one, one can assert that the irrep qλ of U(2) appears dim(rλ)-times in Q, and conversely, the irrep rλ of Sn appears dim(qλ)-times in R. Using the well known dimension of spin irreps dim(qs) = 2s + 1, we can derive an expression for the multiplicity of Sn irreps
+
+$$
+m _ { r _ { \lambda } } = \dim ( q _ { s ( \lambda ) } ) = 2 s ( \lambda ) + 1 = n - 2 m + 1 \, .
+$$
+
+Also, it is straightforwards to adapt the formula in Eq. (24) to two-row diagrams λ = (n - m, m)
+
+$$
+\dim ( r _ { \lambda } ) = \frac { n ! ( n - 2 m + 1 ) ! } { ( n - m + 1 ) ! m ! ( n - 2 m ) ! } . \\ \intertext { d i m ( r _ { \lambda } ) = \frac { n ! ( n - 2 m + 1 ) ! } { ( n - m + 1 ) ! m ! ( n - 2 m ) ! } . } \\ \intertext { L e m } \intertext { s u p t a r r e } \intertext { i n t a r s } \intertext { e q w i n } \intertext { s u p t a r r e } \intertext { i n t a r s } \intertext { s u p t a r r e } \intertext { e q w i n
+$$
+
+We finally note that, since we are ultimately interested in Sn-equivariant operators, in the main text we have defined dλ ≡ mrλ and mλ ≡ dim(rλ). That is, the dimension and multiplicity of an irrep in the main text are for the representations of U.
+
+## Universality, expressibility and dynamical Lie algebra
+
+In the main text we have argued that the set of generators in Eq. (9) is universal within each invariant subspace. Here we will formalize this statement.
+
+First, let us recall that we say that a parametrized unitary is universal if it can generate any unitary (up to a global phase) in the space over which it acts. One can quantify the capacity of being able to create different unitaries through the so-called measures of expressibility [37, 43, 46, 128]. Here we will focus on the notion of potential expressibility of a given QNN, which is formalized via the dynamical Lie algebra of the architecture [138].
+
+Definition 5 (Dynamical Lie algebra). Given a set of generators G defining a QNN, its dynamical Lie algebra g is the span of the Lie closure ⟨·⟩Lie of G. That is, g = spanR⟨G⟩Lie, where ⟨G⟩Lie is defined as the set of all the nested commutators generated by the elements of G.
+
+In particular, the dynamical Lie algebra (DLA) fully characterizes the group of unitaries that can be ultimately expressed by the circuit: for any unitary U realized by a QNN with generators in G there exists an anti-hermitian operator η ∈ g = ⟨G⟩Lie such that U = eη . Evidently, g ⊆ u(d), that is, it is a subalgebra of the space of antihermitian operators. When g is su(d) or u(d) we say that the QNN is controllable or universal since for any pair of states |ψ⟩ and |ϕ⟩, there exists a unitary U = eη with η ∈ g such that |⟨ϕ|U|ψ⟩|2 = 1.
+
+In the framework of GQML one designs symmetryrespecting QNNs by using group-equivariant generators. This implies that the corresponding DLA is constrained and necessarily takes the form
+
+$$
+\mathfrak { g } = \bigoplus _ { \lambda } \mathbb { 1 } _ { m _ { \lambda } } \otimes \mathfrak { g } _ { \lambda } \, , \\ ( 1 ) \, \Gamma _ { 0 } ( 1 ) \colon \quad \vdots \quad \vdots \quad \vdots \quad \vdots \quad \vdots \quad \vdots \quad \vdots \quad \vdots
+$$
+
+where gλ ⊆ u(dλ). For this scenario, we provide a notion of controllability restricted to each of the invariant subspaces: We say that a QNN is subspace-controllable in the isotypic component λ if gλ is su(dλ) or u(dλ). This means that the QNN can map between any pair of states in every Hνλ . Notably, the following result follows from Refs. [92, 139].
+
+Lemma 3 (Subspace controllability). The set of Snequivariant generators in Eq. (9) is subspace-controllable in every λ.
+
+As shown below, this result will be crucial for the proof of Theorem 1.
+
+## Proof of absence of barren plateaus
+
+Here we sketch our proof of Theorem 1. Our goal is to calculate Varθ[∂µ ̂ L(θ)] = Eθ[(∂µ ̂ L(θ))2 ] - Eθ[∂µ ̂ L(θ)]2 . In general, we will have to deal with integrals of the form ∫Dθ f(U(θ)) where f is some parametrized function -for example the cost function or its partial derivatives- and Dθ : [0, 2π]M → [0, 1] is some distribution over parameter space -typically the uniform distribution. The first step is to transform the integration over parameter space to an integration over the resulting QNN unitary distribution D. Since D is known to converge (given enough depth) to ϵ-approximate 2-designs over the Lie group e g [43, 140], assuming f is a polynomial of degree ⩽ 2 in the entries of U (as is the case of interest), we can replace the integration over D with an integration over the Haar measure over eg . In general, g is a reductive Lie algebra consisting of multiple orthogonal ideals g = ⊕λ gλ, where gi is either simple or abelian, and the Lie group e g is the product group ⊗λ e gλ . It can be shown (see Supplementary Methods 4) that the Haar measure over such a product group is the product of the Haar measures over the normal subgroups e gλ . Finally, the ansatz with generators in Eq. (9) has a DLA g that is subspace controllable, meaning that each simple gλ is either su(dλ) or u(dλ) [92, 139]. Summarizing, we have∫ Dθ
+
+$$
+\begin{array} { r l } & { d \theta _ { \lambda } \text { is either $5U(d_{\lambda})$ or $U(d_{\lambda})$ [92, 139]$.  Summarizing, } \\ & { \text {save} } \\ & { \int _ { \mathcal { D } _ { 0 } } d \theta f ( U ( \theta ) ) = \int _ { \mathcal { D } } d U f ( U ) } \\ & { \quad \to \int _ { \mathcal { E } ^ { s } } d \mu ( U ) f ( U ) } \\ & { = \prod _ { \lambda } \int _ { U ( d _ { \lambda } ) } d \mu _ { \lambda } ( U _ { \lambda } ) f ( \{ U _ { \lambda } \} ) \, . \quad ( 3 1 ) } \\ & { \quad \text {only} } \\ & { \quad \text {where main advantage of Eq. (31) is that we can use tools } \quad \text {is, local} } \end{array} \text { } & { s i t i o n } \\ & { = \prod _ { \lambda } \int _ { U ( d _ { \lambda } ) } d \mu _ { \lambda } ( U _ { \lambda } ) f ( \{ U _ { \lambda } \} ) \, . \quad ( 3 1 ) } \\ & { \quad \text {only} } \\ & { \quad \text {strain} } \\ & { s i t i o n } \end{array}
+$$
+
+The main advantage of Eq. (31) is that we can use tools from Weingarten calculus to perform symbolic integration over the Haar measure of unitary groups [141]. Explicitly, we care for the variance of ∂µ ̂ L(θ) = ∑Mi=1 ci∂µℓθ(ρi) where
+
+where UB and UA denote the unitary circuits before and after the parametrized gate we are differentiating. Assuming that the depth L of the QNN is enough to guarantee that both UA and UB form independent 2-designs on e g , we can use Weingarten calculus to evaluate the terms in Eθ[(∂µ ̂ L(θ))2 ] Eθ[∂µ ̂ L(θ)]2 , and obtain Eq. (16) in Theorem 1. The details of this calculation are presented in Supplementary Methods 4.
+
+$$
+\partial _ { \mu } \ell _ { \theta } ( \rho _ { i } ) = i \text { Tr} \left [ U _ { B } \rho _ { i } U _ { B } ^ { \dagger } [ H _ { \mu } , U _ { A } ^ { \dagger } O U _ { A } ] \right ] , \\ \text {here } U _ { B } \text { and } U _ { A } \text { denote the unitary circuits before and}
+$$
+
+While the previous, along with the results in Theorem 2, allow to prove by direct construction that Sn-equivariant QNNs do not lead to barren plateaus, we here provide further intuition for this result in terms of the expressibility reduction induced by the equivariance inductive biases. As shown in Ref. [37], QNNs that are too expressible exhibit exponentially vanishing gradients, whereas models whose expressibility is restricted can exhibit large gradients. Hence, we can expect the result in Corollary 1 to be a direct consequence of the reduced expressibility of the model. We can further formalize this statement using the results of Ref. [43]. Therein, it was found that there exists a link between the presence or absence of barren plateaus and the dimension of the DLA. In particular, the authors conjecture, and prove for several examples (see also Ref. [142] for an independent verification of the conjecture), that deep QNNs have gradients that scale inversely with the size of the DLA, that is, Varθ[∂ L̂(θ)] ∼ 1 poly(dim(g)) . For the case of Sn-equivariant QNNs we know from Lemma 3 that dim(g) ∈ Θ(n3 ) thus indicating that the variance should only vanish polynomially with n (for an appropriate dataset). We note this conjecture was recently proven [140, 143].
+
+## Intuition behind the overparametrization phenomenon
+
+Recently, Ref. [32] studied the overparametrization of QNNs from the perspective of a complexity phase transition in the loss landscape. In the underparametrized regime, we experience rough loss landscapes, which in turn can be traced back to a lack of control in parametrized state space. When the number of parameters is below the number of directions in state space, the parameter update can only access a subset of those potential directions. This constraint can be shown to introduce false local minima, that is, local minima that are not actual minima of the loss function (as a function of state space) but instead artifacts of a poor parametrization. Instead, upon introduction of more parameters the parametrized state starts accessing these previously unavailable directions, and false minima disappear as we transition into the overparametrized regime. Because in the overparametrized regime the number of parameters is greater than the number of ever accessible directions, solutions in the control landscape are degenerate and form multidimensional submanifolds, allowing the optimizer to reach them more easily [125, 126].
+
+The main contribution in Ref. [32] is the realization that, under standard assumptions, one needs one parameter per potentially accessible direction in state space, and that the latter can be formalized as the dimension of the orbit of the initial state under the Lie group eg resulting from the exponential of the DLA g. In particular, this means that exponential DLA architectures require an exponential number of parameters to be overparametrized, whereas polynomial DLA architectures only need a polynomial number of them.
+
+With these definitions, the proof of Theorem 3 is immediate. Since the ansatz is subspace controllable (Lemma 3), the dimension of the DLA is equal to the dimension of the commutant, which is Θ(n3 ) (Lemma 2).
+
+To finish, we note that the definition of overparametrization employed here (in terms of saturating the number of available directions) might differ from some definitions of overparametrization in the classical neural network community. Namely, in classical machine learning researchers have studied overparametrization through the optics of generalization [109, 144-147], while others have investigated the effect of overparametrization on the training processes. In particular, it has been proposed that the onset of overparametrization can be detected using metrics such as parameter redundancy which is captured by the rank of the classical Fisher information matrix [148-150]. It is precisely this notion of overparametrization that Ref. [32] ported to quantum, and the one used in the present work.
+
+## Generalization
+
+We consider the QML setting in this paper where the empirical loss function is of the form ̂ L(θ) = ∑Mi=1 ci Tr[Uθ(ρi)O]. We assume that the operator norm of O is bounded by a constant and also |ci| ⩽ 1/M. We follow closely the covering number-based generalization bound in [61]. First recall that a set V is ε-covered by a subset K ⊆ V with respect to a distance metric d if ∀x ∈ V , ∃y ∈ K such that d(x, y) ⩽ ε. The ε-covering number (w.r.t. metric d) of V , denoted as N(V, d, ε), is the cardinality of the smallest such subset [117]. The following theorem bounds the ε-covering number of Sn-equivariant QNNs.
+
+Theorem 5. The ε-covering number of the set Vn of nqubit unitary Sn-equivariant QNNs w.r.t. the operator norm ∥ · ∥ can be bounded as N(Vn, ∥ · ∥, ε) ⩽ ( 6ε )2Ten+1 .
+
+Proof. Recall that an Sn-EQNN U can be blockdiagonalized as U ∼= ⊕λ 11mλ ⊗ Uλ, where each Uλ is a unitary for U to be unitary. Let U(dλ) denote the set of all unitaries of dimension dλ. Following Lemma 6 in [61] and Section 4.2 in [151] we can bound the ε-covering number of Udλ as follows
+
+$$
+\mathcal { N } ( \mathbb { U } ( d _ { \lambda } ) , \| \cdot \| , \varepsilon ) \leqslant \left ( \frac { 6 } { \varepsilon } \right ) ^ { 2 d _ { \lambda } ^ { 2 } } . \quad ( 3 2 ) \quad \ t a r y \\
+$$
+
+Next, we construct an ε-covering subset of the Snequivariant unitary set, Vn, from the ε-covering subsets, Kλ, of the blocks λ. Indeed, given any U ∼= ⊕λ 11mλ ⊗Uλ, we can identify unitaries Ũλ fromKλ such that ∥Uλ-Ũλ∥ ⩽ ε, ∀λ. The unitary Ũ ∼= ⊕λ 11mλ ⊗ Ũλ then satisfies
+
+$$
+\| U - \tilde { U } \| \leqslant \max _ { \lambda } \| U _ { \lambda } - \tilde { U } _ { \lambda } \| \leqslant \varepsilon . \quad ( 3 3 ) \quad \text {state} \quad
+$$
+
+Therefore, there exists an ε-covering net of Vn of size ∏λ ( 6ε )2d2λ = ( 6ε )2Ten+1 , concluding the proof.
+
+Having established this bound on the ε-covering numbers of Sn-EQNN, we apply a known result from [61] (with some extra care) to obtain Theorem 4.
+
+Proof of Theorem 4. We assume knowledge of Theorem 6 in [61]. In step two of the proof where the authors use the chaining argument [152] to bound the generalization error, notice that the covering number Nj in their Eq. (64) is replaced by ( 6ε )2Ten+1 in our case. In other words, there is no architecture-dependence (the number of gates T in their case) inside the logarithm in the resulting Eq. (65). Applying this change to the rest of their proof leads to our claimed generalization bound.
+
+We note that in the previous derivation, we have used knowledge of the isotypic decomposition of the Snequivariant QNN, which allows us to obtain a specialized generalization error bound that does not follow from a direct application of the results in [61].
+
+## Trainable and untrainable states
+
+Here we describe how the states in Table I are obtained. The "symmetric states" are obtained from the symmetric subspace [153], i.e., the set of states {|ψ⟩ ∈ H|R(π) |ψ⟩ = |ψ⟩ , ∀π ∈ Sn}. The so-called "fixed Hamming-weight encoded" states correspond to states representing classical data: Given an array of real values {xi}, such that ∑i x2i = 1, each xi is encoded as the weight of a unique bitstring z of Hamming weight k, where k is some fixed constant. That is, prepare the state |x⟩ = ∑z s.t. w(z)=k xz |z⟩, where we are now indexing xi with a bitstring z. "Local Haar random" states are obtained by preparing the state |0⟩⊗n and applying a Haar random single-qubit unitary to each qubit. "Global Haar random" states are obtained by preparing the state |0⟩⊗n and applying a random n-qubit unitary sampled from the Haar measure over U(d). The "fixed and linear depth random circuit" states correspond to the states obtained by preparing the state |0⟩⊗n and respectively applying a constant-depth, or lineardepth layered hardware-efficient quantum circuit [34, 130] with random parameters. For the "graph states", we use a canonical encoding to embed a graph into a quantum state [121, 122]. Specifically, to create a graph state, one starts with the state |+⟩⊗n , and applies a controlled-Z rotation for every edge in the graph. We consider 3-regular and n/2-regular graphs, as well as random graphs generated according to the Erdös-Rényi model [120].
+
+## DATA AVAILABILITY
+
+Data generated and analyzed during current study are available from the corresponding author upon reasonable request.
+
+## CODE AVAILABILILTY
+
+Code used to generate data in this study are available from the corresponding author upon reasonable request.
+
+## ACKNOWLEDGMENTS
+
+We thank Michael Ragone and Paolo Braccia for insightful discussion on geometric quantum machine learning. We also thank Felix Leditzky for discussion regarding Hermitian Young operators and Dylan Herman for useful questions and comments. L.S. was partially supported by the NSF Quantum Leap Challenge Institute for Hybrid Quantum Architectures and Networks (NSF Award 2016136). L.S. also acknowledges supported by LANL ASC Beyond Moore's Law project. M.L. acknowledges initial support by the Center for Nonlinear Studies at Los Alamos National Laboratory (LANL) and by the U.S. Department of Energy (DOE), Office of Science, Office of Advanced Scientific Computing Research, under the Accelerated Research in Quantum Computing (ARQC) program. F.S. acknowledges support by the Directed Research and Development (LDRD) program of LANL under project number 20220745ER. M.C. and M.L. were partially supported by Directed Research and Development (LDRD) program of LANL under project number 20210116DR and 20230049DR. This work was also supported by NSEC Quantum Sensing at LANL.
+
+## AUTHOR CONTRIBUTIONS
+
+The project was conceived by ML and MC. The manuscript was written by LS, ML, QTN, FS and MC. Theoretical results were derived by LS, ML, QTN and MC. Numerical simulations were performed by LS, ML and FS. LS and ML contributed equally and are to be considered co-first authors.
+
+## COMPETING INTERESTS
+
+The authors declare no competing interests.
+
+- [1] Cohen, T. &Welling, M. Group equivariant convolutional networks. International Conference on Machine Learning 33, (2016).
+- [2] Bronstein, M. M., Bruna, J., Cohen, T. & Veličković, P. Geometric deep learning: Grids, groups, graphs, geodesics, and gauges. Preprint at https://arxiv.org/ abs/2104.13478 (2021).
+- [3] Kondor, R. & Trivedi, S. On the generalization of equivariance and convolution in neural networks to the action of compact groups. International Conference on Machine Learning 35, (2018).
+- [4] Bogatskiy, A. et al. Symmetry group equivariant architectures for physics. Preprint at https://arxiv.org/abs/ 2203.06153 (2022).
+- [5] Bekkers, E. J. et al. Roto-translation covariant convolutional networks for medical image analysis. International conference on medical image computing and computerassisted intervention, 440-448 (2018).
+- [6] Schütt, K. T. et al. Schnet: A continuous-filter convolutional neural network for modeling quantum interactions. Adv. Neural Inf. Process. Sys. 31, (2017).
+- [7] Boyda, D. et al. Sampling using su (n) gauge equivariant flows. Phys. Rev. D 103, 074504 (2021).
+- [8] Rezende, D. J., Racanière, S., Higgins, I. & Toth, P. Equivariant Hamiltonian flows. Preprint at https:// arxiv.org/abs/1909.13739 (2019).
+- [9] Thomas, N. et al. Tensor field networks: Rotationand translation-equivariant neural networks for 3d point clouds. Preprint at https://arxiv.org/abs/1802.08219 (2018).
+- [10] Toth, P. et al. Hamiltonian generative networks. Preprint at https://arxiv.org/abs/1909.13789 (2019).
+- [11] Köhler, J., Klein, L. & Noé, F. Equivariant flows: Exact likelihood generative learning for symmetric densities. International Conference on Machine Learning 37, (2020).
+- [12] Anderson, B., Hy, T. S. & Kondor, R. Cormorant: Covariant molecular neural networks. Adv. Neural Inf. Process. Sys. 32 (2019).
+- [13] Bogatskiy, A. et al. Lorentz group equivariant neural network for particle physics. International Conference on Machine Learning 37, (2020).
+- [14] Schuld, M., Sinayskiy, I. & Petruccione, F. An introduction to quantum machine learning. Contemp. Phys. 56, 172-185 (2015).
+- [15] Biamonte, J. et al. Quantum machine learning. Nature 549, 195-202 (2017).
+
+- [16] Cerezo, M., Verdon, G., Huang, H.-Y., Cincio, L. & Coles, P. J. Challenges and opportunities in quantum machine learning. Nat. Comput. Sci. (2022).
+- [17] Huang, H.-Y., Kueng, R., Torlai, G., Albert, V. V. & Preskill, J. Provably efficient machine learning for quantummany-body problems. Science 377, eabk3333 (2022).
+- [18] Larocca, M. et al. Group-invariant quantum machine learning. PRX Quantum 3, 030341 (2022).
+- [19] Meyer, J. J. et al. Exploiting symmetry in variational quantum machine learning. PRX Quantum 4, 010328 (2023).
+- [20] Sauvage, F., Larocca, M., Coles, P. J. & Cerezo, M. Building spatial symmetries into parameterized quantum circuits for faster training. Preprint at https://arxiv.org/ abs/2207.14413 (2022).
+- [21] Zheng, H., Li, Z., Liu, J., Strelchuk, S. & Kondor, R. On the super-exponential quantum speedup of equivariant quantum machine learning algorithms with su(d) symmetry. Preprint at https://arxiv.org/abs/2207.07250 (2022).
+- [22] Zheng, H., Li, Z., Liu, J., Strelchuk, S. & Kondor, R. Speeding up learning quantum states through group equivariant convolutional quantum ansätze. PRX Quantum 4, 020327 (2023).
+- [23] Nguyen, Q. T. et al. A theory for equivariant quantum neural networks. Preprint at https://arxiv.org/abs/ 2210.08566 (2022).
+- [24] Wang, X. et al. Symmetric pruning in quantum neural networks. Preprint at https://arxiv.org/abs/2208. 14057 (2022).
+- [25] Ragone, M. et al. Representation theory for geometric quantum machine learning. Preprint at https://arxiv. org/abs/2210.07980 (2022).
+- [26] Abbas, A. et al. The power of quantum neural networks. Nat. Comput. Sci. 1, 403-409 (2021).
+- [27] Liu, J. et al. An analytic theory for the dynamics of wide quantum neural networks. Preprint at https://arxiv. org/abs/2203.16711 (2022).
+- [28] Liu, J., Tacchino, F., Glick, J. R., Jiang, L. &Mezzacapo, A. Representation learning via quantum neural tangent kernels. Preprint at https://arxiv.org/abs/2111.04225 (2021).
+- [29] Bittel, L. & Kliesch, M. Training variational quantum algorithms is NP-hard. Phys. Rev. Lett. 127, 120502 (2021).
+- [30] Anschuetz, E. R. & Kiani, B. T. Beyond barren plateaus: Quantum variational algorithms are swamped with traps. Nat. Commun. 13, 7760 (2022).
+- [31] Fontana, E., Cerezo, M., Arrasmith, A., Rungger, I. & Coles, P. J. Non-trivial symmetries in quantum landscapes and their resilience to quantum noise. Quantum 6, 804; 10.22331/q-2022-09-15-804 (2022).
+- [32] Larocca, M., Ju, N., García-Martín, D., Coles, P. J. & Cerezo, M. Theory of overparametrization in quantum neural networks. Nat. Comput. Sci. 3, 542--551 (2023).
+- [33] McClean, J. R., Boixo, S., Smelyanskiy, V. N., Babbush, R. & Neven, H. Barren plateaus in quantum neural network training landscapes. Nat. Commun. 9, 1-6 (2018).
+- [34] Cerezo, M., Sone, A., Volkoff, T., Cincio, L. & Coles, P. J. Cost function dependent barren plateaus in shallow parametrized quantum circuits. Nat. Commun. 12, 1-12 (2021).
+- [35] Sharma, K., Cerezo, M., Cincio, L. & Coles, P. J. Trainability of dissipative perceptron-based quantum neural networks. Phys. Rev. Lett. 128, 180505 (2022).
+- [36] Holmes, Z. et al. Barren plateaus preclude learning scramblers. Phys. Rev. Lett. 126, 190501 (2021).
+- [37] Holmes, Z., Sharma, K., Cerezo, M. & Coles, P. J. Connecting ansatz expressibility to gradient magnitudes and barren plateaus. PRX Quantum 3, 010313 (2022).
+- [38] Cerezo, M. & Coles, P. J. Higher order derivatives of quantum neural networks with barren plateaus. Quantum Sci. Technol. 6, 035006 (2021).
+- [39] Marrero, C. O., Kieferová, M. &Wiebe, N. Entanglementinduced barren plateaus. PRX Quantum 2, 040316 (2021).
+- [40] Patti, T. L., Najafi, K., Gao, X. & Yelin, S. F. Entanglement devised barren plateau mitigation. Phys. Rev. Res. 3, 033090 (2021).
+- [41] Uvarov, A. & Biamonte, J. D. On barren plateaus and cost function locality in variational quantum algorithms. Journal of Physics A: Mathematical and Theoretical 54, 245301 (2021).
+- [42] Thanasilp, S., Wang, S., Nghiem, N. A., Coles, P. J. & Cerezo, M. Subtleties in the trainability of quantum machine learning models. Preprint at https://arxiv.org/ abs/2110.14753 (2021).
+- [43] Larocca, M. et al. Diagnosing Barren Plateaus with Tools from Quantum Optimal Control. Quantum 6, 824; 10.22331/q-2022-09-29-824 (2022).
+- [44] Wang, S. et al. Noise-induced barren plateaus in variational quantum algorithms. Nat. Commun. 12, 1-11 (2021).
+- [45] Wiersema, R. et al. Exploring entanglement and optimization within the Hamiltonian variational ansatz. PRX Quantum 1, 020319 (2020).
+- [46] Sim, S., Johnson, P. D. & Aspuru-Guzik, A. Expressibility and entangling capability of parameterized quantum circuits for hybrid quantum-classical algorithms. Adv. Quantum Technol. 2, 1900070 (2019).
+- [47] Zaheer, M. et al. Deep sets. Guyon, I. et al. (eds.) Adv. Neural Inf. Process. Sys. 30, (2017).
+- [48] Maron, H., Litany, O., Chechik, G. & Fetaya, E. On learning sets of symmetric elements. International Conference on Machine Learning 37, (2020).
+- [49] Maron, H., Ben-Hamu, H., Shamir, N. & Lipman, Y. Invariant and equivariant graph networks. In International Conference on Learning Representations (2019).
+- [50] Keriven, N. & Peyré, G. Universal invariant and equivariant graph neural networks. Adv. Neural Inf. Process. Sys. 32, (2019).
+- [51] Maron, H., Ben-Hamu, H., Serviansky, H. & Lipman, Y. Provably powerful graph networks. Adv. Neural Inf. Process. Sys. 32, (2019).
+- [52] Verdon, G. et al. Quantum graph neural networks. Preprint at https://arxiv.org/abs/1909.12264 (2019).
+
+- [53] Mernyei, P., Meichanetzidis, K. & Ceylan, I. I. Equivariant quantum graph circuits. International Conference on Machine Learning 39, (2022).
+- [54] Skolik, A., Cattelan, M., Yarkoni, S., Bäck, T. & Dunjko, V. Equivariant quantum circuits for learning on weighted graphs. Npj Quantum Inf. 9, 47 (2023).
+- [55] Maron, H., Fetaya, E., Segol, N. & Lipman, Y. On the universality of invariant networks. International Conference on Machine Learning 36, (2019).
+- [56] Thiede, E. H., Hy, T. S. & Kondor, R. The general theory of permutation equivarant neural networks and higher order graph variational encoders. Preprint at https://arxiv.org/abs/2004.03990 (2020).
+- [57] Pan, H. & Kondor, R. Permutation equivariant layers for higher order interactions. In Camps-Valls, G., Ruiz, F. J. R. & Valera, I. (eds.) Proceedings of The 25th International Conference on Artificial Intelligence and Statistics, vol. 151 of Proceedings of Machine Learning Research, 5987-6001 (PMLR, 2022).
+- [58] Farhi, E., Goldstone, J. & Gutmann, S. A quantum approximate optimization algorithm. Preprint at https: //arxiv.org/abs/1411.4028 (2014).
+- [59] Hadfield, S. et al. From the quantum approximate optimization algorithm to a quantum alternating operator ansatz. Algorithms 12, 34 (2019).
+- [60] Cong, I., Choi, S. & Lukin, M. D. Quantum convolutional neural networks. Nat. Phys. 15, 1273-1278 (2019).
+- [61] Caro, M. C. et al. Generalization in quantum machine learning from few training data. Nat. Commun. 13 (2022).
+- [62] Peruzzo, A. et al. A variational eigenvalue solver on a photonic quantum processor. Nat. Commun. 5, 1-7 (2014).
+- [63] Cerezo, M. et al. Variational quantum algorithms. Nat. Rev. Phys. 3, 625-644 (2021).
+- [64] Tang, H. L. et al. qubit-adapt-vqe: An adaptive algorithm for constructing hardware-efficient ansätze on a quantum processor. PRX Quantum 2, 020310 (2021).
+- [65] Horodecki, R., Horodecki, P., Horodecki, M. & Horodecki, K. Quantum entanglement. Rev. Mod. Phys. 81, 865 (2009).
+- [66] Walter, M., Gross, D. & Eisert, J. Multipartite entanglement. Quantum Information: From Foundations to Quantum Technology Applications 293-330 (2016).
+- [67] Beckey, J. L., Gigena, N., Coles, P. J. & Cerezo, M. Computable and operationally meaningful multipartite entanglement measures. Phys. Rev. Lett. 127, 140501 (2021).
+- [68] Schatzki, L., Liu, G., Cerezo, M. & Chitambar, E. A hierarchy of multipartite correlations based on concentratable entanglement. Preprint at https://arxiv.org/pdf/ 2209.07607.pdf (2022).
+- [69] Guo, X. et al. Distributed quantum sensing in a continuous-variable entangled network. Nat. Phys. 16, 281-284 (2020).
+- [70] Zhang, Z. & Zhuang, Q. Distributed quantum sensing. Quantum Sci. Technol. 6, 043001 (2021).
+- [71] Huerta Alderete, C. et al. Inference-based quantum sensing. Phys. Rev. Lett. 129, 190501 (2022).
+- [72] Otterbach, J. S. et al. Unsupervised machine learning on a hybrid quantum computer. Preprint at https://arxiv. org/abs/1712.05771 (2017).
+- [73] Kerenidis, I., Landman, J., Luongo, A. & Prakash, A. qmeans: A quantum algorithm for unsupervised machine learning. Adv. Neural Inf. Process. Sys. 32, (2019).
+- [74] Saggio, V. et al. Experimental quantum speed-up in reinforcement learning agents. Nature 591, 229-233 (2021).
+- [75] Skolik, A., Jerbi, S. & Dunjko, V. Quantum agents in the gym: a variational quantum algorithm for deep q-learning. Preprint at https://arxiv.org/abs/2103.15084 (2021).
+- [76] Dallaire-Demers, P.-L. & Killoran, N. Quantum generative adversarial networks. Phys. Rev. A 98, 012324 (2018).
+- [77] Benedetti, M. et al. A generative modeling approach for benchmarking and training shallow quantum circuits. Npj Quantum Inf. 5, 45 (2019).
+- [78] Kieferova, M., Carlos, O. M. & Wiebe, N. Quantum generative training using rényi divergences. Preprint at https://arxiv.org/abs/2106.09567 (2021).
+- [79] Romero, J. & Aspuru-Guzik, A. Variational quantum generators: Generative adversarial quantum machine learning for continuous distributions. Adv. Quantum Technol. 4, 2000003 (2021).
+- [80] Bharti, K. et al. Noisy intermediate-scale quantum algorithms. Rev. Mod. Phys. 94, 015004 (2022).
+- [81] Havlíček, V. et al. Supervised learning with quantumenhanced feature spaces. Nature 567, 209-212 (2019).
+- [82] Schuld, M. & Petruccione, F. Supervised learning with quantum computers, vol. 17 (Springer, 2018).
+- [83] Schatzki, L., Arrasmith, A., Coles, P. J. & Cerezo, M. Entangled datasets for quantum machine learning. Preprint at https://arxiv.org/abs/2109.03400 (2021).
+- [84] Janocha, K. & Czarnecki, W. M. On loss functions for deep neural networks in classification. Preprint at https: //arxiv.org/abs/1702.05659 (2017).
+- [85] Grzesiak, N. et al. Efficient arbitrary simultaneously entangling gates on a trapped-ion quantum computer. Nat. Commun. 11, 2963 (2020).
+- [86] Pino, J. M. et al. Demonstration of the trapped-ion quantum ccd computer architecture. Nature 592, 209-213 (2021).
+- [87] Bluvstein, D. et al. A quantum processor based on coherent transport of entangled atom arrays. Nature 604, 451-456 (2022).
+- [88] Pedrozo-Peñafiel, E. et al. Entanglement on an optical atomic-clock transition. Nature 588, 414-418 (2020).
+- [89] Marciniak, C. D. et al. Optimal metrology with programmable quantum sensors. Nature 603, 604-609 (2022).
+- [90] Kitagawa, M. & Ueda, M. Squeezed spin states. Phys. Rev. A 47, 5138-5143 (1993).
+- [91] Wineland, D. J., Bollinger, J. J., Itano, W. M., Moore, F. & Heinzen, D. J. Spin squeezing and reduced quantum noise in spectroscopy. Phys. Rev. A 46, R6797 (1992).
+- [92] Albertini, F. & D'Alessandro, D. Controllability of symmetric spin networks. J. Math. Phys. 59, 052102 (2018).
+
+- [93] Grant, E., Wossnig, L., Ostaszewski, M. & Benedetti, M. An initialization strategy for addressing barren plateaus in parametrized quantum circuits. Quantum 3, 214; 10.22331/q-2019-12-09-214 (2019).
+- [94] Skolik, A., McClean, J. R., Mohseni, M., van der Smagt, P. & Leib, M. Layerwise learning for quantum neural networks. Quantum Mach. Intell. 3, 1-11 (2021).
+- [95] Sauvage, F. et al. Flip: A flexible initializer for arbitrarilysized parametrized quantum circuits. Preprint at https: //arxiv.org/abs/2103.08572 (2021).
+- [96] Sack, S. H., Medina, R. A., Michailidis, A. A., Kueng, R. & Serbyn, M. Avoiding barren plateaus using classical shadows. PRX Quantum 3, 020365 (2022).
+- [97] Rad, A., Seif, A. & Linke, N. M. Surviving the barren plateau in variational quantum circuits with bayesian learning initialization. Preprint at https://arxiv.org/ abs/2203.02464 (2022).
+- [98] Broers, L. & Mathey, L. Optimization of quantum algorithm protocols without barren plateaus. Preprint at https://arxiv.org/abs/2111.08085 (2021).
+- [99] Liu, H.-Y., Sun, T.-P., Wu, Y.-C., Han, Y.-J. & Guo, G.-P. A parameter initialization method for variational quantum algorithms to mitigate barren plateaus based on transfer learning. Preprint at urlhttps://arxiv.org/abs/2112.10952 (2021).
+- [100] Friedrich, L. & Maziero, J. Avoiding barren plateaus with classical deep neural networks. Phys. Rev. A 106, 042433 (2022).
+- [101] Kulshrestha, A. & Safro, I. Beinit: Avoiding barren plateaus in variational quantum algorithms. In 2022 IEEE International Conference on Quantum Computing and Engineering (QCE), 197-203 (IEEE, 2022).
+- [102] Mele, A. A., Mbeng, G. B., Santoro, G. E., Collura, M. & Torta, P. Avoiding barren plateaus via transferability of smooth solutions in Hamiltonian variational ansatz. Preprint at https://arxiv.org/abs/2206.01982 (2022).
+- [103] Zhang, K., Hsieh, M.-H., Liu, L. & Tao, D. Gaussian initializations help deep variational quantum circuits escape from the barren plateau. Preprint at https://arxiv.org/ abs/2203.09376 (2022).
+- [104] Grimsley, H. R., Mayhall, N. J., Barron, G. S., Barnes, E. & Economou, S. E. Adaptive, problem-tailored variational quantum eigensolver mitigates rough parameter landscapes and barren plateaus. Npj Quantum Inf. 9, 19 (2023).
+- [105] Cerezo, M., Sharma, K., Arrasmith, A. & Coles, P. J. Variational quantum state eigensolver. Npj Quantum Inf. 8, 1-11 (2022).
+- [106] Pesah, A. et al. Absence of barren plateaus in quantum convolutional neural networks. Phys. Rev. X 11, 041011 (2021).
+- [107] Liu, Z., Yu, L.-W., Duan, L.-M. & Deng, D.-L. The presence and absence of barren plateaus in tensor-network based machine learning. Phys. Rev. Lett. 129, 270501 (2022).
+- [108] Arrasmith, A., Holmes, Z., Cerezo, M. & Coles, P. J. Equivalence of quantum barren plateaus to cost concen-
+
+tration and narrow gorges. Quantum Sci. Technol. 7, 045015 (2022).
+
+- [109] Zhang, C., Bengio, S., Hardt, M., Recht, B. & Vinyals, O. Understanding deep learning (still) requires rethinking generalization. Communications of the ACM 64, 107-115 (2021).
+- [110] Allen-Zhu, Z., Li, Y. & Song, Z. A convergence theory for deep learning via over-parameterization. International Conference on Machine Learning 36, (2019).
+- [111] Allen-Zhu, Z., Li, Y. & Liang, Y. Learning and generalization in overparameterized neural networks, going beyond two layers. Adv. Neural Inf. Process. Sys. 33 ,(2019).
+- [112] Buhai, R.-D., Halpern, Y., Kim, Y., Risteski, A. & Sontag, D. Empirical study of the benefits of overparameterization in learning latent variable models. International Conference on Machine Learning 37, (2020).
+- [113] Banchi, L., Pereira, J. & Pirandola, S. Generalization in quantum machine learning: A quantum information standpoint. PRX Quantum 2, 040321 (2021).
+- [114] Caro, M. C. et al. Out-of-distribution generalization for learning quantum dynamics. Preprint at https://arxiv. org/abs/2204.10268 (2022).
+- [115] Du, Y., Tu, Z., Yuan, X. & Tao, D. Efficient measure for the expressivity of variational quantum algorithms. Phys. Rev. Lett. 128, 080506 (2022).
+- [116] Huang, H.-Y. et al. Power of data in quantum machine learning. Nat. Commun. 12, 1-9 (2021).
+- [117] Shalev-Shwartz, S. & Ben-David, S. Understanding machine learning: From theory to algorithms (Cambridge university press, 2014).
+- [118] Hajek, B. & Raginsky, M. Ece 543: Statistical learning theory (2021). URL http://maxim.ece.illinois.edu/ teaching/SLT/.
+- [119] Thanasilp, S., Wang, S., Cerezo, M. & Holmes, Z. Exponential concentration and untrainability in quantum kernel methods. Preprint at https://arxiv.org/abs/2208. 11060 (2022).
+- [120] Erdos, P. & Renyi, A. On random graphs i. Publ. M.ath. Debrecen 6, 18 (1959).
+- [121] Raussendorf, R., Browne, D. E. & Briegel, H. J. Measurement-based quantum computation on cluster states. Phys. Rev. A 68, 022312 (2003).
+- [122] Hein, M., Eisert, J. & Briegel, H. J. Multiparty entanglement in graph states. Phys. Rev. A 69, 062311 (2004).
+- [123] Cheng, R. Quantum geometric tensor (fubini-study metric) in simple quantum system: A pedagogical introduction. Preprint at https://arxiv.org/abs/1012.1337 (2010).
+- [124] Meyer, J. J. Fisher Information in Noisy IntermediateScale Quantum Applications. Quantum 5, 539; 10.22331/q-2021-09-09-539 (2021).
+- [125] Larocca, M., Calzetta, E. & Wisniacki, D. A. Exploiting landscape geometry to enhance quantum optimal control. Phys. Rev. A 101, 023410 (2020).
+- [126] Larocca, M., Calzetta, E. & Wisniacki, D. Fourier compression: A customization method for quantum control protocols. Phys. Rev. A 102, 033108 (2020).
+
+- [127] Zhu, C., Byrd, R. H., Lu, P. & Nocedal, J. Algorithm 778: L-bfgs-b: Fortran subroutines for large-scale boundconstrained optimization. ACM Transactions on mathematical software (TOMS) 23, 550-560 (1997).
+- [128] Nakaji, K. & Yamamoto, N. Expressibility of the alternating layered ansatz for quantum computation. Quantum 5, 434; 10.22331/q-2021-04-19-434 (2021).
+- [129] Anschuetz, E. R., Bauer, A., Kiani, B. T. & Lloyd, S. Efficient classical algorithms for simulating symmetric quantum systems. Preprint at https://arxiv.org/abs/2211. 16998 (2022).
+- [130] Kandala, A. et al. Hardware-efficient variational quantum eigensolver for small molecules and quantum magnets. Nature 549, 242-246 (2017).
+- [131] Cincio, L., Subaşı, Y., Sornborger, A. T. & Coles, P. J. Learning the quantum algorithm for state overlap. New J. Physical. 20, 113022 (2018).
+- [132] Pérez-Salinas, A., Cervera-Lierta, A., Gil-Fuster, E. & Latorre, J. I. Data re-uploading for a universal quantum classifier. Quantum 4, 226; 10.22331/q-2020-02-06-226 (2020).
+- [133] Serre, J.-P. et al. Linear representations of finite groups, vol. 42 (Springer, 1977).
+- [134] Fulton, W. & Harris, J. Representation Theory: A First Course (Springer, 1991).
+- [135] Sagan, B. The symmetric group: representations, combinatorial algorithms, and symmetric functions, vol. 203 (Springer Science & Business Media, 2001).
+- [136] Knapp, A. W. Representation theory of semisimple groups: an overview based on examples (Princeton university press, Princeton, 2001).
+- [137] Goodman, R. & Wallach, N. R. Symmetry, representations, and invariants, vol. 255 (Springer, 2009).
+- [138] Zeier, R. & Schulte-Herbrüggen, T. Symmetry principles in quantum systems theory. J. Math. Phys. 52, 113510 (2011).
+- [139] Kazi, S., Larocca, M. & Cerezo, M. On the universality of sn-equivariant k-body gates. Preprint at https://arxiv. org/abs/2303.00728 (2023).
+- [140] Ragone, M. et al. A unified theory of barren plateaus for deep parametrized quantum circuits. Preprint at urlhttps://arxiv.org/abs/2309.09342 (2023).
+- [141] Puchala, Z. & Miszczak, J. A. Symbolic integration with respect to the haar measure on the unitary groups. Bulletin of the Polish Academy of Sciences Technical Sciences 65, 21-27 (2017).
+- [142] Zhang, B., Sone, A. & Zhuang, Q. Quantum computational phase transition in combinatorial problems. Npj Quantum Inf. 8, 1-11 (2022).
+- [143] Fontana, E. et al. The adjoint is all you need: Characterizing barren plateaus in quantum ansätze. Preprint at urlhttps://arxiv.org/abs/2309.07902 (2023).
+- [144] Fan, J., Yang, Z. & Yu, M. Understanding implicit regularization in over-parameterized single index model. J. Am. Stat. Assoc. 1-14 (2022).
+- [145] Du, S. S., Zhai, X., Poczos, B. & Singh, A. Gradient descent provably optimizes over-parameterized neural networks. In International Conference on Learning Representations (2019).
+- [146] Brutzkus, A., Globerson, A., Malach, E. & ShalevShwartz, S. SGD learns over-parameterized networks that provably generalize on linearly separable data. In International Conference on Learning Representations (2018).
+- [147] Bartlett, P. L., Montanari, A. & Rakhlin, A. Deep learning: a statistical viewpoint. Acta numerica 30, 87-201 (2021).
+- [148] Fukumizu, K. A regularity condition of the information matrix of a multilayer perceptron network. Neural networks 9, 871-879 (1996).
+- [149] Liu, M. & Zhang, H. H. Overparameterization in the seminonparametric density estimation. Econ. Lett. 60, 11-18 (1998).
+- [150] RoyChowdhury, A., Sharma, P., Learned-Miller, E. & Roy, A. Reducing duplicate filters in deep neural networks. Adv. Neural. Inf. Process. Sys. Workshop on Deep Learning 1, (2017).
+- [151] Vershynin, R. High-Dimensional Probability: An Introduction with Applications in Data Science (Cambridge University Press, 2018).
+- [152] Dudley, R. M. Uniform Central Limit Theorems (Cambridge University Press, 1999).
+- [153] Harrow, A. W. The church of the symmetric subspace. Preprint at https://arxiv.org/abs/1308.6595 (2013).
+
+## Supplementary Information for 'Theoretical Guarantees for Permutation-Equivariant Quantum Neural Networks'
+
+Louis Schatzki, 1, 2, ∗ Martín Larocca, 3, 4, † Quynh T. Nguyen, 3, 5 Frédéric Sauvage, 3 and M. Cerezo 1, ‡
+
+1 Information Sciences, Los Alamos National Laboratory, Los Alamos, New Mexico 87545, USA
+
+3 Theoretical Division, Los Alamos National Laboratory, Los Alamos, New Mexico 87545, USA
+
+2 Electrical and Computer Engineering, University of Illinois Urbana-Champaign, Urbana, Illinois, 61801, USA
+
+4 Center for Nonlinear Studies, Los Alamos National Laboratory, Los Alamos, New Mexico 87545, USA
+
+5 Harvard Quantum Initiative, Harvard University, Cambridge, Massachusetts 02138, USA
+
+In this supplementary information we present additional details, as well as proofs of our main results. We start by presenting preliminary results regarding Haar integration in Sec. I. In Secs. II and III we present a proof for Lemmas 1 and 2, respectively. Section IV contains a proof of Theorem 1, while we prove Theorem 2 in Sec. V, with a generalization to k-Local Pauli Strings presented in Sec. VI. In Sec. VII we discuss the trainability of different input states. Then, we elaborate on the VC dimension of QML models in Sec. VIII. Additional numerics are reported in Secs. X and XI.
+
+## I. SUPPLEMENTARY METHODS 1: HAAR INTEGRATION
+
+Since the derivation of our main results requires computing expectation values of Haar distributed unitaries, we here recall some fundamental results that will be used below. First, let us denote as dµ(V ) the volume element of the Haar measure, where V ∈ U(d), with U(d) being the unitary group of degree d. Using the Weingarten calculus [1], we can prove the following identities:
+
+$$
+\begin{array} {
+$$
+
+$$
+\int _ { \mathbb { W } ( d ) } d ^ { 2 } \int _ { \real ^ { V ( d ) } } ^ { 2 } \partial ^ { 2 } \int _ { \real ^ { V ( d ) } } ^ { 2 } \otimes & \frac { 1 } { d ^ { 2 } - 1 } \left ( \text {Tr} [ B ] - \frac { \text {Tr} [ B \text { SWAP} ] } { d } \right ) ^ { } { 1 } \otimes { 1 } + \frac { 1 } { d ^ { 2 } - 1 } \left ( \text {Tr} [ B \text { SWAP} ] - \frac { \text {Tr} [ B ] } { d } \right ) \text {SWAP} \, , \\ \intertext { \stackrel { \hookrightarrow } { \nabla } } \int _ { \real ^ { V ( d ) } } d \mu ( V ) V ^ { \otimes 2 } B ( V ) ^ { \dagger } ) ^ { \otimes 2 } = & \frac { 1 } { d ^ { 2 } - 1 } \left ( \text {Tr} [ B ] - \frac { \text {Tr} [ B \text { SWAP} ] } { d } \right ) ^ { } { 1 } \otimes { 1 } + \frac { 1 } { d ^ { 2 } - 1 } \left ( \text {Tr} [ B \text { SWAP} ] - \frac { \text {Tr} [ B ] } { d } \right ) \text {SWAP} \, , \\ \intertext { \stackrel { \hookrightarrow } { \nabla } } \int _ { \real ^ { V } } \Delta _ { \mu } \mathcal { R } ( \mathcal { Y } ) = & \Delta _ { \mu } \mathcal { R } ( \mathcal { Y } ) \Omega _ { 0 } ^ { 2 } \Delta _ { \mu } \Delta _ { \mu } = \Delta _ { \mu } \Delta _ { \mu } \Omega _ { 0 } ^ { 2 } \Delta _ { \mu } \Delta _ { \mu } + \Delta _ { \mu } \Delta _ { \mu } + \Delta _ { \mu } \Delta _ { \mu } \Omega _ { 0 } ^ { 2 } + \Delta _ { \mu } \Delta _ { \mu } \Omega _ { 0 } ^ { 2 } \Delta _ { \mu } \Omega _ { 0 } ^ { 2 } .
+$$
+
+where A ∈ B(H) and B ∈ B(H⊗2 ). Here 11 denotes the d × d identity matrix, and SWAP is the operator acting H⊗2 whose action is SWAP |i⟩ ⊗ |j⟩ = |j⟩ ⊗ |i⟩ for any two vectors |i⟩ , |j⟩ ∈ H.
+
+$$
+\begin{array} {
+$$
+
+From Eqs. (1) and (2) can can derive the following identities (see [2] for a proof):
+
+$$
+\begin{array} {
+$$
+
+where A,B,C, and D are linear operators on H.
+
+$$
+\stackrel { \stackrel { \rightarrow } { \gtrsim } } { \times } & \quad \int _ { U ( d ) } d \mu ( U ) \, \text {Tr} \left [ U A U ^ { \dagger } B \right ] \, \text {Tr} \left [ U C U ^ { \dagger } D \right ] = \frac { \text {Tr} [ A ] \, \text {Tr} [ B ] \, \text {Tr} [ C ] \, \text {Tr} [ D ] + \text {Tr} [ A C ] + \text {Tr} [ B D ] } { d ^ { 2 } - 1 } - \frac { \text {Tr} [ A ] \, \text {Tr} [ B ] \, \text {Tr} [ D ] + \text {Tr} [ A ] \, \text {Tr} [ C ] \, \text {Tr} [ D ] } { d ( d ^ { 2 } - 1 ) } , \\ \text {where } & \, A \, B \, C \, \text { and } D \, \text { are linear operators on } \mathcal { H }
+$$
+
+## II. SUPPLEMENTARY METHODS 2: PROOF OF LEMMA 1
+
+Here, we provide a proof for Lemma 1, which we recall for convenience.
+
+∗ louisms2@illinois.edu
+
+† The two first authors contributed equally.
+
+‡ cerezo@lanl.gov
+
+Lemma 1 (Invariance from equivariance). A loss function of the form lθ(ρi) = Tr[Uθ(ρi)O] is G-invariant if its composed of G-equivariant QNN and measurement.
+
+Proof. For any g ∈ G we have
+
+$$
+\ell _ { \Theta } ( R ( g ) \rho R ( g ) ^ { \dagger } ) & = \text {Tr} [ \mathcal { U } _ { \Theta } ( R ( g ) \rho R ( g ) ^ { \dagger } ) O ] \\ & = \text {Tr} [ R ( g ) \mathcal { U } _ { \Theta } ( \rho ) R ( g ) ^ { \dagger } O ] \\ & = \text {Tr} [ \mathcal { U } _ { \Theta } ( \rho ) R ( g ) ^ { \dagger } O R ( g ) ] \\ & = \text {Tr} [ \mathcal { U } _ { \Theta } ( \rho ) O ] = \ell _ { \Theta } ( \rho ) \, , \\ \text {we used the equivalence of the QNN, in the third line of}
+$$
+
+where in the second line we have used the equivariance of the QNN, in the third line cyclicity of the trace, and in the fourth the equivariance of the measurement.
+
+## III. SUPPLEMENTARY METHODS 3: PROOF OF LEMMA 2
+
+Here, we provide a proof for Lemma 2, which characterizes the number of free parameters in Sn-equivariant unitaries.
+
+Lemma 2 (Dimension of Sn-equivariant unitaries). The submanifold of Sn-equivariant unitaries is of dimension equal to the Tetrahedral numbers Ten+1 = (n+3 3 ) (see Fig.4 in the main text), and therefore on the order of Θ(n3 ).
+
+Proof. As shown in Eq. 13 of the main text, any Sn-equivariant unitary U(θ) is fully characterized by its dλ-dimensional isotypic components Uλ(θ), each having d2λ free real-valued parameters. Thus, the unitary U(θ) has ∑λ d2λ free parameters, which can be shown (by induction) to be equal to the Tetrahedral numbers Ten+1.
+
+## IV. SUPPLEMENTARY METHODS 4: PROOF OF THEOREM 1
+
+Here, we provide a proof for Theorem 1, yielding an exact expression for the variance of the partial derivatives of the loss function
+
+$$
+\widehat { \mathcal { L } } ( \Theta ) = & \sum _ { i = 1 } ^ { M } c _ { i } \ell _ { \Theta } ( \rho _ { i } ) \, . \\ \intertext { i r a n t } Q N N , \, w i t h \ g e n e r a t o r s \ i n \ \mathcal { G } . \, \ L e t \ O \ b e a n \ S _ { n } { \cdot } e q u i v a r i a n t \ m e a s u r e m e n t \, o p r a t o r
+$$
+
+Theorem 1. Let Uθ be an Sn-equivariant QNN, with generators in G. Let O be an Sn-equivariant measurement operator fromM, and consider an empirical loss function L̂(θ) with the form in Eq. 6, for some given training set S. Assuming a circuit depth L such that the QNN forms independent 2-designs on each isotypic block, we have ⟨∂µ L̂(θ)⟩θ = 0, and
+
+Here, ∆(B) = Tr[B2 ] - Tr[B]2 dim(B) .
+
+where we have
+
+$$
+V _ { \L o } [ \partial _ { \mu } \hat { \mathcal { L } } ( \theta ) ] = & \sum _ { \lambda } \frac { 2 d _ { \lambda } } { ( d _ { \lambda } ^ { 2 } - 1 ) ^ { 2 } } \Delta ( H _ { \mu , \lambda } ) \Delta ( O _ { \lambda } ) \Delta ( \sum _ { \nu = 1 } ^ { m _ { \lambda } } \sigma _ { \lambda } ^ { \nu } ) \, . \\
+$$
+
+Proof. First, let us recall from the main text that under the action of an Sn-equivariant QNN, the Hilbert space decomposes as
+
+$$
+\mathcal { H } \cong \bigoplus _ { \lambda } \bigoplus _ { \nu = 1 } ^ { m _ { \lambda } } \mathcal { H } _ { \lambda } ^ { \nu } ,
+$$
+
+$$
+d _ { \lambda } = \dim ( \mathcal { H } _ { \lambda } ^ { \nu } ) \, .
+$$
+
+Note that, for a given λ all the subspaces Hνλ have the same dimension irrespective of ν.
+
+$$
+e \, d _ { \lambda } \times d \, \matrix { \pi r i x } \, \text {that results from horizontally stacking the basis elements of } \mathcal { H } _ { \lambda } ^ { \lambda } \\ ( Q _ { \lambda } ^ { \prime } ) ^ { \dagger } = \left [ | v _ { 1 } ^ { \lambda } \rangle , \, | v _ { 2 } ^ { \lambda } \rangle , \, | v _ { d _ { \lambda } } ^ { \lambda } \rangle \right ] , \\ \intertext { o m } \mathcal { H } \, \text {to } \mathcal { H } _ { \lambda } ^ { \lambda } \text {. These matrices satisfy the following property}
+$$
+
+Then, let us define as Qνλ the dλ ×d matrix that results from horizontally stacking the basis elements of Hνλ
+
+such that Qνλ maps vectors from H to Hνλ . These matrices satisfy the following property
+
+$$
+Q _ { \lambda } ^ { \nu } ( Q _ { \eta } ^ { \nu ^ { \prime } } ) ^ { \dagger } = \mathbb { 1 } _ { d _ { \lambda } } \delta _ { \lambda \eta } \delta _ { \nu \nu ^ { \prime } } \, ,
+$$
+
+allowing us to define the projector Pνλ onto each subspace as
+
+In what follows we will denote as
+
+$$
+\text {p} \sigma ( \mathbf P ) \stackrel { \mathbf P } { = } ( Q _ { \lambda } ^ { \nu } ) ^ { \dagger } Q _ { \lambda } ^ { \nu } \, , \ \text { such that } \ \sum _ { \lambda } \sum _ { \nu } \mathbb { P } _ { \lambda } ^ { \nu } = \mathbb { I } \, . \\ \intertext { l d e n o t e a s }
+$$
+
+$$
+A _ { \lambda } ^ { \nu } = Q _ { \lambda } ^ { \nu } A ( Q _ { \lambda } ^ { \nu } ) ^ { \dagger } \, ,
+$$
+
+the operator obtained by reducing A onto the subspace labeled by λ and ν. In particular, we note that if A = A† then (Aνλ )† = Aνλ (the converse is not necessarily true). Moreover, if A is positive semi-definite, then so is Aνλ . This can be seen from the fact that given a dλ-dimensional vector |x⟩, then ⟨x|Aνλ |x⟩ = ⟨x̃|A|x̃⟩, where |x̃⟩ is a d-dimensional vector where x is padded with zeros. Here we also recall that both the QNN and measurement operator are block diagonal, such that
+
+or alternatively, such that
+
+$$
+\text {each that both the $Q$N and the measurement operator are $\mathbf{block}$ diagonal, such that} \\ U ( \theta ) \cong \bigoplus _ { \lambda } 1 _ { m _ { \lambda } } \otimes U _ { \lambda } ( \theta ) , \text { and } \ O \cong \bigoplus _ { \lambda } \mathbb { 1 } _ { m _ { \lambda } } \otimes O _ { \lambda } \, , \\ \intertext { c u h t a r } \text {such that}
+$$
+
+$$
+U ( \theta ) = \sum _ { \lambda } \sum _ { \nu = 1 } ^ { m _ { \lambda } } \mathbb { P } _ { \lambda } ^ { \nu } U ( \theta ) \mathbb { P } _ { \lambda } ^ { \nu } \, , \quad \text {and} \quad O = \sum _ { \lambda } \sum _ { \nu = 1 } ^ { m _ { \lambda } } \mathbb { P } _ { \lambda } ^ { \nu } O \mathbb { P } _ { \lambda } ^ { \nu } \, . \\ \text {explicitly evaluate the loss function partial derivative with respect to the parameter $\theta$ in the paper}
+$$
+
+We can now explicitly evaluate the loss function partial derivative with respect to the parameter θµ in the µ-th layer. First, we recall that the loss function is
+
+$$
+\ell _ { \theta } ( \rho _ { i } , y _ { i } ) = \text {Tr} [ \mathcal { U } _ { \theta } ( \rho _ { i } ) O _ { i } ] \, , \\ \\
+$$
+
+with the Sn-equivariant quantum neural network unitary being
+
+$$
+U ( \theta ) = \prod _ { l = 1 } ^ { L } e ^ { - i \theta _ { l } H _ { l } } \, . \\ \intertext { t h e f l o w i n g t a n t i o n }
+$$
+
+For convenience, let us also introduce the following notation
+
+$$
+U _ { B } = \prod _ { l = 0 } ^ { \mu } e ^ { - i \theta _ { l } H _ { l } } \, , \quad U _ { A } = \prod _ { l = \mu + 1 } ^ { L } \, e ^ { - i \theta _ { l } H _ { l } } \, , \\ \ U _ { A } \, \max \, h _ { \ } a r i t i o d \, \cdot \, h _ { \ } a r i t i o d \, \cdot \, \sum \, d o n d o n d o n \, \cdot \, 0 \, \text { for } \min \, \iota \, i \, \iota \, \intertext { U _ { B } = \prod _ { l = 0 } ^ { \mu } e ^ { - i \theta _ { l } H _ { l } } \, , }
+$$
+
+such that U(θ) = UAUB. Here we have omitted the explicit dependence on θ for simplicity of notation. An explicit calculation yields
+
+$$
+\partial _ { \mu } \ell _ { \theta } ( \rho _ { i } ) & = \text {Tr} \left [ ( \partial _ { \mu } U ( \theta ) ) \rho _ { i } U ^ { \dagger } ( \theta ) O \right ] + \text {Tr} \left [ U ( \theta ) \rho _ { i } ( \partial _ { \mu } U ^ { \dagger } ( \theta ) ) O \right ] \\ & = i \text {Tr} \left [ U _ { B } \rho _ { i } U _ { B } ^ { \dagger } [ H _ { \mu } , U _ { A } ^ { \dagger } O U _ { A } ] \right ] .
+$$
+
+Using Eqs. (15) we can see that
+
+$$
+\text {Using Eqs. (15) we can see that} \\ \text {Tr} [ U _ { B } \rho _ { B } ^ { \dagger } [ H _ { \mu } , U _ { A } ^ { \dagger } O _ { A } ] ] & = \sum _ { \lambda } \text {Tr} \left [ \mathbb { P } _ { \lambda } ^ { \mu } U _ { B } \rho _ { \lambda } ^ { \mu } \rho _ { \lambda _ { 2 } } \mathbb { P } _ { B ^ { 2 } } ^ { \mu } \mathbb { P } _ { \lambda _ { 3 } } ^ { \mu _ { 3 } } \mathbb { P } _ { \lambda _ { 4 } } ^ { \mu _ { 4 } } U _ { A } ^ { \mu _ { 4 } } \mathbb { P } _ { \lambda _ { 5 } } ^ { \mu _ { 5 } } \mathbb { P } _ { \lambda _ { 5 } } ^ { \mu _ { 5 } } \mathbb { P } _ { \lambda _ { 6 } } ^ { \mu _ { 6 } } U _ { A } \mathbb { P } _ { \lambda _ { 6 } } ^ { \mu _ { 6 } } \right ] \\ & = \sum _ { \lambda } \sum _ { 1 } ^ { m } \text {Tr} \left [ \mathbb { P } _ { \lambda } ^ { \mu } U _ { B } \rho _ { \lambda } ^ { \mu } \rho _ { \lambda } \mathbb { U } _ { B } ^ { \dagger } \mathbb { P } _ { \lambda } ^ { \mu } \mathbb { P } _ { \lambda } ^ { \mu } \mathbb { P } _ { A } ^ { \mu } \mathbb { P } _ { \lambda } ^ { \mu } \mathbb { O } _ { A } ^ { \mu } \mathbb { P } _ { A } ^ { \mu } \right ] \\ & = \sum _ { \lambda } \sum _ { 1 } ^ { m } \text {Tr} \left [ U _ { B , \lambda _ { 0 } } \rho _ { \lambda _ { 1 } } ^ { \mu } ( U _ { B , \lambda _ { 1 } } ^ { \mu } , ( U _ { A , \lambda _ { 1 } } ) ^ { \dagger } O _ { A } U _ { A , \lambda _ { 1 } } ) \right ] . \\ & = \sum _ { \lambda } \sum _ { 1 } ^ { m } \text {Tr} \left [ U _ { B , \lambda _ { 0 } } \rho _ { \lambda _ { 1 } } ^ { \mu } ( U _ { B , \lambda _ { 1 } } ) ^ { \dagger } ( H _ { k , \lambda } , ( U _ { A , \lambda } ) ^ { \dagger } O _ { A } U _ { A , \lambda } ) \right ] . \\ \intertext { Here, } \mathbb { A } = \lambda ( \lambda _ { 1 } , \lambda _ { 2 } , \lambda _ { 3 } , \lambda _ { 4 } , \lambda _ { 5 } , \lambda _ { 6 } ) , \text { and we have used in the second line the fact that the projectors } \\ \mathbb { P } ^ { \mu } \text { are orthogonal. Thus, we can write}
+$$
+
+Here, λ = (λ1, λ2, λ3, λ4, λ5, λ6), ν = (ν1, ν2, ν3, ν4, ν5, ν6), and we have used in the second line the fact that the projectors Pνλ are orthogonal. Thus, we can write
+
+$$
+\partial _ { \mu } \ell _ { \theta } ( \rho _ { i } ) & = \sum _ { \lambda } \sum _ { \nu = 1 } ^ { m _ { \lambda } } \text {Tr} \left [ U _ { B , \lambda } \rho _ { i , \lambda } ^ { \nu } ( U _ { B , \lambda } ) ^ { \dagger } [ H _ { k , \lambda } , \tilde { O } _ { A , \lambda } ] \right ] , \\ \text {defined } \tilde { O } _ { A , \lambda } ^ { \nu } = Q _ { \lambda } ^ { \nu } U _ { A } ^ { \dagger } O U _ { A } ( Q _ { \lambda } ^ { \nu } ) ^ { \dagger } . \text { Equation (21) shows that the loss function can be expressed as a }
+$$
+
+For a dataset, we evaluate our model with the training error L̂(θ). Via linearity of expectation,
+
+where we have defined ÕνA,λ = QνλU †AOUA(Qνλ )† . Equation (21) shows that the loss function can be expressed as a summation of contributions from the blocks associated to the different invariant subspaces. While both U(θ) and O are block diagonal in this bases, the same is not necessarily true for ρi. That is, while the states ρi may not be block diagonal in the irreps of U(2), the loss function one only takes into account their projection into the irrep subspaces.
+
+$$
+\partial _ { \mu } \hat { \mathcal { L } } ( \theta ) = \sum _ { i = 1 } ^ { M } c _ { i } \partial _ { \mu } \ell _ { \theta } ( \rho _ { i } ) \, . \\
+$$
+
+Ultimately, we are interested in computing the variance of the loss function partial derivative, which is defined as
+
+$$
+\text {Var} _ { \theta } [ \partial _ { \mu } \hat { \mathcal { L } } ( \theta ) ] & = \langle ( \partial _ { \mu } \hat { \mathcal { L } } ( \theta ) ) ^ { 2 } \rangle _ { \theta } - \langle \partial _ { \mu } \hat { \mathcal { L } } ( \theta ) \rangle _ { \theta } ^ { 2 } \, , \\ \\ \\
+$$
+
+where ⟨·⟩θ indicates the average over the set of parameters θ in the Sn-equivariant quantum neural network.
+
+$$
+\text {unitary or special unitary} \text { and that its Haar measure is the product over the Haar measure of } \\ \text {subgroups} \, 1 . \text { We have } \\ \int _ { \mathcal { D } _ { e } } d f ( U ( \mathbf e ) ) & = \int _ { \mathcal { D } } d U f ( U ) \\ & \to \int _ { \mathbb { E } ^ { s } } d \mu ( U ) f ( U ) \\ & = \prod _ { \lambda } \int _ { \mathbb { E } ^ { \lambda } } d \mu _ { \lambda } ( U _ { \lambda } ) f ( \{ U _ { \lambda } \} ) \\ & = \prod _ { \lambda } \int _ { U ( d \lambda ) } d \mu _ { \lambda } ( U _ { \lambda } ) f ( \{ U \} ) . \\ \intertext { in text, integration over Haar of the unitary group can be done via Weingarten calculus. }
+$$
+
+As discussed in the main text, we can always replace the integral over parameter space by an integral over a distribution of unitaries, which is known to converge to 2-designs in the Lie group e g allowing us to in turn replace -under the assumption that f is a polynomial of degree ⩽ 2 in the matrix elements of U-the previous with an integration over the Haar measure of this Lie group. We then use the fact that this Lie group is in general a product group (in our case all the simple groups are unitary or special unitary) and that its Haar measure is the product over the Haar measure of each of the simple normal subgroups 1 . We have
+
+As mentioned in the main text, integration over Haar of the unitary group can be done via Weingarten calculus.
+
+1 We can see that this is the case by proposing the product over the Haar measure of each of the simple normal subgroups as the Haar measure over the Lie group, and realizing that it satisfies all the desired properties (e.g., normalized, left- and right-invariant). Then, since the Haar measure is unique, they must match.
+
+Let us begin with the second term in Eq. (23). That is, we want to compute ∑Mi=1 ci⟨∂µℓθ(ρi)⟩θ. Explicitly, we have for the mean of the single-state expectation value ℓθ(ρi)
+
+where f ν λ (UB,λ(θ), UA,λ(θ)) = Tr[UB,λ(θ)ρνi,λ (UB,λ(θ))† [Hk,λ, ÕA,λ(θ)]]. Using Eq. (24) on both UA and UB
+
+$$
+\Im g ( \L a d a c { \exp a } { \Omega a n } \, \L a d a c { \Theta } { ( \varphi _ { i } ) } ) \\ \langle \partial _ { \mu } \ell _ { \theta } ( \rho _ { i } ) \rangle _ { \theta } = i \sum _ { \lambda } \sum _ { \nu = 1 } ^ { m _ { \lambda } } \int _ { \Theta } d \theta f _ { \lambda } ^ { \nu } ( U _ { B , \lambda } ( \Theta ) , U _ { A , \lambda } ( \theta ) ) , \\ \\ U _ { \Omega } ( \Omega ) = T \left [ U _ { \Omega } ( \Omega ) , \kappa ( U _ { \Omega } ) , \doteq _ { \Omega } \widetilde { \varOmega } _ { \Omega } ( \Omega ) \right ] U _ { \Omega } ; \quad D _ { \Omega } ( \Omega ) , \ \Omega , U _ { \Omega } \\
+$$
+
+$$
+\text {where} \, j _ { ( U _ { B , \lambda } ( \theta ) , U _ { A , \lambda } ( \theta ) ) } = & \text {Tr} [ O _ { B , \lambda } ( \theta ) \dot { \rho } _ { i , \lambda } ( U _ { B , \lambda } ( \theta ) ) ^ { \dagger } [ H _ { k , \lambda } , C _ { A , \lambda } ( \theta ) ] ] . \text {Using Eq. (24) on both U$_{ A } and U_{B} } \\ & \langle \partial _ { \mu } \ell _ { \theta } ( \rho _ { i } ) \rangle _ { \theta } = i \sum _ { \lambda } \sum _ { \lambda ^ { \prime } } \prod _ { U ( d _ { \lambda ^ { \prime } } ) } d \mu ( U _ { A , \lambda ^ { \prime } } ) \int _ { \mathbb { U } ( d _ { \lambda ^ { \prime } } ) } d \mu ( U _ { B , \lambda ^ { \prime } } ) \text {Tr} \left [ U _ { B , \lambda } \rho _ { i , \lambda } ^ { \nu } ( U _ { B , \lambda } ) ^ { \dagger } [ H _ { k , \lambda } , \tilde { O } _ { A , \lambda } ] \right ] \\ & = i \sum _ { \lambda } \sum _ { \lambda = 1 } ^ { \lambda } \int _ { U ( d _ { \lambda } ) } d \mu ( U _ { A , \lambda } ) \int _ { U ( d _ { \lambda } ) } d \mu ( U _ { B , \lambda } ) \text {Tr} \left [ U _ { B , \lambda } \rho _ { i , \lambda } ^ { \nu } ( U _ { B , \lambda } ) ^ { \dagger } [ H _ { k , \lambda } , \tilde { O } _ { A , \lambda } ] \right ] , \\ \intertext { where in the second equation we have used the trivial integration over all } \text {terms} &
+$$
+
+$$
+\text {terms} \\ \int _ { \mathbb { U } ( d _ { \lambda } ) } d \mu ( U _ { B , \lambda } ) \, \text {Tr} \left [ U _ { B , \lambda } \rho _ { i , \lambda } ^ { \nu } ( U _ { B , \lambda } ) ^ { \dagger } [ H _ { k , \lambda } , \widetilde { O } _ { A , \lambda } ] \right ] = \frac { \text {Tr} \left [ \rho _ { i , \lambda } ^ { \nu } \right ] } { d _ { \lambda } } \, \text {Tr} \left [ [ H _ { k , \lambda } , \widetilde { O } _ { A , \lambda } ] \right ] = 0 \, , \\ \text {where we have used that the trace of a commutator is always zero.  From the previous we have shown that the first } \\ \text {moment of the cost function partial derivative is zero.  i.e., we have proved that}
+$$
+
+where in the second equation we have used the trivial integration over all λ′ ̸= λ. Using Eq. (3), we can evaluate the terms
+
+where we have used that the trace of a commutator is always zero. From the previous we have shown that the first moment of the cost function partial derivative is zero, i.e., we have proved that
+
+$$
+\langle \partial _ { \mu } \ell _ { \theta } ( \rho _ { i } ) \rangle _ { \theta } = 0 \, ,
+$$
+
+Next, let us evaluate the variance via the second moment
+
+and clearly, in turn ⟨∂µ L̂(θ)⟩θ = 0.
+
+$$
+\text {Var} _ { \theta } [ \partial _ { \mu } \mathcal { L } ( \theta ) ] & = \mathbb { E } _ { [ \partial _ { \mu } \mathcal { L } ( \theta ) ] ^ { 2 } } \\ & = - \sum _ { i , j = 1 } ^ { M } c _ { i } c _ { j } \sum _ { \lambda , \lambda ^ { \prime } \in \mathfrak { U } ( 2 ) } \sum _ { \nu } \sum _ { \nu ^ { \prime } = 1 } ^ { M } \prod _ { \alpha , \alpha ^ { \prime } } \int _ { \mathbb { U } ( d _ { \alpha } ) } d \mu ( U _ { A , \alpha } ) \int _ { \mathbb { U } ( d _ { \alpha ^ { \prime } } ) } d \mu ( U _ { B , \alpha ^ { \prime } } ) I _ { i } ^ { ( \nu } ( U _ { A , \lambda } , U _ { B , \lambda } ) I _ { j } ^ { \nu ^ { \prime } } ( U _ { A , \lambda ^ { \prime } } , U _ { B , \lambda ^ { \prime } } ) , \\
+$$
+
+$$
+S _ { \lambda , \lambda ^ { \prime } } ^ { \nu , \nu ^ { \prime } , i , j } & = \prod _ { \alpha , \alpha ^ { \prime } } \int _ { ( d _ { \alpha } ) } d \mu ( U _ { A , \alpha } ) \int _ { U ( d _ { \alpha ^ { \prime } } ) } d \mu ( U _ { B , \alpha } ) \, I _ { i } ^ { \nu } ( U _ { A , \lambda } , U _ { B , \lambda } ) I _ { j } ^ { \nu ^ { \prime } } ( U _ { A , \lambda ^ { \prime } } , U _ { B , \lambda ^ { \prime } } ) \\ & \int _ { U ( d _ { \alpha } ) } \left ( I _ { \alpha } ( U _ { A } ) \int _ { U ( d _ { \alpha } ) ^ { \prime } } \left ( I _ { \alpha } ( U _ { A ^ { \prime } } ) \right ) \right )
+$$
+
+where we have defined I ν i (UA,λ,UB,λ) = Tr[UB,λρνi,λ (UB,λ)† [Hk,λ, ÕA,λ]] and α and α′ label irreps. Let us focus on a single summand, which we denote by Sν,ν ′ ,i,j λ,λ′ . Two cases arise: either λ′ ̸= λ or λ = λ′ . Let us first consider λ′ ̸= λ
+
+$$
+& \alpha , _ { \alpha ^ { \prime } } , ^ { \prime } U ( d _ { \alpha } ) \\ & = \int _ { U ( d _ { \lambda } ) } d \mu ( U _ { A , \lambda } ) \int _ { U ( d _ { \lambda } ) } d \mu ( U _ { B , \lambda } ) \int _ { U ( d _ { \lambda ^ { \prime } } ) } d \mu ( U _ { A , \lambda ^ { \prime } } ) \int _ { U ( d _ { \lambda ^ { \prime } } ) } d \mu ( U _ { B , \lambda ^ { \prime } } ) I _ { i } ^ { \nu } ( U _ { A , \lambda } , U _ { B , \lambda } ) I _ { j } ^ { \nu ^ { \prime } } ( U _ { A , \lambda ^ { \prime } } , U _ { B , \lambda ^ { \prime } } ) \, , \\ \intertext { u l e r } = & \int _ { U ( d _ { \lambda } ) } d \mu ( U _ { A , \lambda } ) \int _ { U ( d _ { \lambda } ) } d \mu ( U _ { B , \lambda } ) \int _ { U ( d _ { \lambda ^ { \prime } } ) } d \mu ( U _ { A , \lambda ^ { \prime } } ) \int _ { U ( d _ { \lambda ^ { \prime } } ) } d \mu ( U _ { B , \lambda ^ { \prime } } ) I _ { i } ^ { \nu } ( U _ { A , \lambda } , U _ { B , \lambda } ) I _ { j } ^ { \nu ^ { \prime } } ( U _ { A , \lambda ^ { \prime } } , U _ { B , \lambda ^ { \prime } } ) \, , \\
+$$
+
+where after taking the trivial integrations we are left with four integrals. An explicit integration of UB (either λ or λ′ ) via Eq. (5) leads to
+
+$$
+\ v i a \text { Eq. (5) leads to } \\ \int _ { \mathbb { U } ( d \lambda ) } d \mu ( U _ { B , \lambda } ) I _ { i } ^ { \nu } ( U _ { A , \lambda } , U _ { B , \lambda } ) I _ { j } ^ { \nu ^ { \prime } } ( U _ { A , \lambda ^ { \prime } } , U _ { B , \lambda ^ { \prime } } ) & = I _ { j } ^ { \nu ^ { \prime } } ( U _ { A , \lambda ^ { \prime } } , U _ { B , \lambda ^ { \prime } } ) \int _ { \mathbb { U } ( d \lambda ) } d \mu ( U _ { B , \lambda } ) \text {Tr} \left [ U _ { B , \lambda } \rho _ { i } ^ { \nu } ( U _ { B , \lambda } ) ^ { \dagger } [ H _ { k , \lambda } , \widetilde { O } _ { A , \lambda } ] \right ] \\ & = 0 ,
+$$
+
+where in the last equality we have used Eq. (29). On the other hand, when λ = λ′ , we have
+
+$$
+\text {last equality we have used Eq. (29). On the other hand, when } \lambda = \lambda ^ { \prime } , \text { we have} \\ S _ { \lambda , \lambda ^ { \prime } } ^ { \nu , \nu , i , i , j } = \prod _ { \alpha , \alpha ^ { \prime } } \int _ { U ( d _ { \alpha } ) } d \mu ( U _ { A , \alpha } ) \int _ { U ( d _ { \alpha ^ { \prime } } ) } d \mu ( U _ { B , \alpha ^ { \prime } } ) I _ { i } ^ { \nu } ( U _ { A , \lambda } , U _ { B , \lambda } ) I _ { j } ^ { \nu ^ { \prime } } ( U _ { A , \lambda ^ { \prime } } , U _ { B , \lambda ^ { \prime } } ) \\ = \int _ { U ( d _ { \lambda } ) } d \mu ( U _ { A , \lambda } ) \int _ { \mathbb { U } ( d _ { \lambda } ) } d \mu ( U _ { B , \lambda } ) I _ { i } ^ { \nu } ( U _ { A , \lambda } , U _ { B , \lambda } ) I _ { j } ^ { \nu ^ { \prime } } ( U _ { A , \lambda ^ { \prime } } , U _ { B , \lambda ^ { \prime } } ) ,
+$$
+
+$$
+\text {in the last equality we have used} \, \text {Eq. (29)} . \text {On the other hand, when } \lambda = \lambda \, , \, \text {we have} \\ S _ { \lambda , \lambda ^ { \prime } } ^ { \nu , \nu ^ { \prime } , i , j } = \prod _ { \alpha , \alpha ^ { \prime } = U ( d _ { \alpha } ) } d \mu ( U _ { A , \alpha } ) \int _ { U ( d _ { \alpha } ) ^ { \prime } } d \mu ( U _ { B , \alpha ^ { \prime } } ) \, J _ { i } ^ { \nu } ( U _ { A , \lambda } , U _ { B , \lambda } ) I _ { j } ^ { \nu ^ { \prime } } ( U _ { A , \lambda ^ { \prime } } , U _ { B , \lambda ^ { \prime } } )
+$$
+
+$$
+( 3 6 )
+$$
+
+and in the end we are left with only two integrals. Integration over UB leads to
+
+$$
+& \text {and in the end we are left with only two integralials. } \, \text {ingestion} \, \sigma \, U _ { B } \, \text { leads to} \, \text {6} \\ & \quad \int _ { U ( d \lambda ) } d \mu ( U _ { B , \lambda } ) I _ { i } ^ { \nu } ( U _ { A , \lambda } , U _ { B , \lambda } ) I _ { j } ^ { \nu ^ { \prime } } ( U _ { A , \lambda } , U _ { B , \lambda } ) = \frac { \Delta ( \rho _ { i , \lambda } ^ { \nu ^ { \prime } } , \rho _ { j , \lambda } ^ { \nu ^ { \prime } } ) } { d _ { \lambda } ^ { 2 } - 1 } \, \text {Tr} \left [ [ H _ { k , \lambda } , \widetilde { O } _ { A , \lambda } ] [ H _ { k , \lambda } , \widetilde { O } _ { A , \lambda } ] \right ] , \\ & \text {where we define the operator}
+$$
+
+$$
+\Delta ( A , B ) = \text {Tr} [ A B ] - \frac { \text {Tr} [ A ] \text { Tr} [ B ] } { d } \, ,
+$$
+
+for any two d × d matrices A and B. Note that A = B leads to ∆(A,A) = DHS(A,Tr[A]11/d) with DHS = Tr[(A-B)(A-B)† ] the Hilbert-Schmidt distance. We will also use the notation ∆(A) = ∆(A,A). Thus, we can write
+
+Finally, using Eq. (4) leads to
+
+$$
+& \quad \text {write} \\ & \quad \int _ { U ( d _ { \lambda } ) } d \mu ( U _ { B , \lambda } ) I _ { i } ^ { \nu } ( U _ { A , \lambda } , U _ { B , \lambda } ) I _ { j } ^ { \nu ^ { \prime } } ( U _ { A , X ^ { \prime } } , U _ { B , X ^ { \prime } } ) = \frac { \Delta ( \rho _ { i , \lambda } ^ { \nu ^ { \prime } } , \rho _ { j , \lambda } ^ { \nu ^ { \prime } } ) } { d _ { \lambda } ^ { 2 } - 1 } \, \text {Tr} \left [ [ H _ { k , \lambda } , \tilde { O } _ { A , \lambda } ] [ H _ { k , \lambda } , \tilde { O } _ { A , \lambda } ] \right ] \delta _ { \lambda , \lambda ^ { \prime } } \, . \\ & \text {Finally, using Eq. (4) leads to}
+$$
+
+$$
+y , \, \text {using Eq. (4) leads to} \\ & \int _ { \mathbb { V } ( d _ { \lambda } ) } d \mu ( U _ { A , \lambda } ) \, \text {Tr} \left [ [ H _ { k , \lambda } , \tilde { O } _ { A , \lambda } ] [ H _ { k , \lambda } , \tilde { O } _ { A , \lambda } ] \right ] = - \frac { 2 d _ { \lambda } } { ( d _ { \lambda } ^ { 2 } - 1 ) } \Delta ( H _ { k , \lambda } ) \Delta ( O _ { \lambda } ) \, . \\ \text {inning Eqs. (31), (40) and (39) leads to}
+$$
+
+Combining Eqs. (31), (40) and (39) leads to
+
+$$
+V a _ { \theta } [ \partial _ { \mu } \mathcal { L } ( \theta ) ] = \sum _ { i , j = 1 } ^ { M } c _ { i j } c \sum _ { \lambda } \frac { 2 d _ { \lambda } } { ( d _ { \lambda } ^ { 2 } - 1 ) ^ { 2 } } \Delta ( H _ { k , \lambda } ) \Delta ( O _ { \lambda } ) \sum _ { \nu , \nu ^ { \prime } = 1 } ^ { m _ { \lambda } } \Delta ( \rho _ { i , \lambda } ^ { \nu } , \rho _ { j , \lambda } ^ { \nu ^ { \prime } } ) \, . \\ \intertext { F a . ( 4 1 ) we can see that the variancce of the loss function contains a term for each irrep.  Let us analyze each of }
+$$
+
+From Eq. (41) we can see that the variance of the loss function contains a term for each irrep. Let us analyze each of those terms more closely. First, we recall that
+
+$$
+\Delta ( H _ { k , \lambda } ) = D _ { H S } ( H _ { k , \lambda } , \text {Tr} [ H _ { k , \lambda } ] \frac { \mathbb { 1 } } { d _ { \lambda } } ) \, , \quad \Delta ( O _ { \lambda } ) = D _ { H S } ( O _ { \lambda } , \text {Tr} [ O _ { \lambda } ] \frac { \mathbb { 1 } _ { \lambda } } { d _ { \lambda } } ) \, ,
+$$
+
+meaning that within each irrep, the variance contains a term that quantifies how close the reduced measurement operator O and the reduced generator Hk,λ is to the (normalized) dλ × dλ identity 11λ. As expected if O of Hµ are trivial when projected into the λ irrep, then its respective contribution to the variance will be insignificant.
+
+We now note that the summation over i and j can be pushed into ∆(ρνi,λ , ρν ′ j,λ ). Specifically,
+
+$$
+\sum _ { i , j = 1 } ^ { M } c _ { i } c _ { j } \sum _ { \nu , \nu ^ { \prime } = 1 } ^ { m _ { \lambda } } \Delta ( \rho _ { i , \lambda } ^ { \nu } , \rho _ { j , \lambda } ^ { \nu ^ { \prime } } ) = \sum _ { i , j = 1 } ^ { M } c _ { i } c _ { j } \Delta ( \sum _ { \nu = 1 } ^ { m _ { \lambda } } \rho _ { i , \lambda } ^ { \nu } , \sum _ { \nu ^ { \prime } = 1 } ^ { m _ { \lambda } } \rho _ { j , \lambda } ^ { \nu ^ { \prime } } ) \\ M \quad m _ { \lambda }
+$$
+
+$$
+= \Delta ( \sum _ { i = 1 } ^ { M } c _ { i } \sum _ { \nu = 1 } ^ { m _ { \lambda } } \rho _ { i , \lambda } ^ { \nu } , \sum _ { j = 1 } ^ { M } c _ { j } \sum _ { \nu ^ { \prime } = 1 } ^ { m _ { \lambda } } \rho _ { j , \lambda } ^ { \nu ^ { \prime } } ) \\ \quad
+$$
+
+$$
+= \Delta ( \sum _ { i = 1 } ^ { M } c _ { i } \sum _ { \nu = 1 } ^ { m _ { \lambda } } \rho _ { i , \lambda } ^ { \nu } ) . \\ \intertext { d w o n w r i v i o n g o n c }
+$$
+
+$$
+- \, = \, \Delta \cdot \hat { \varrho } ( \theta ) = \sum _ { \lambda } \frac { 2 d _ { \lambda } } { ( d _ { \lambda } ^ { 2 } - 1 ) ^ { 2 } } \Delta ( H _ { \mu , \lambda } ) \Delta ( O _ { \lambda } ) \Delta ( \sum _ { \nu = 1 } ^ { m _ { \lambda } } \sigma _ { \lambda } ^ { \nu } ) \, . \\
+$$
+
+This motivates us to define σ = ∑Mi=1 ciρi, and we can now write the variance as
+
+Recall that ∆(∑mλ ν=1 σνλ ) = DHS(∑mλ ν=1 σνλ , Tr[∑mλ ν=1 σνλ] dλ 11dλ ) ⩾ 0 and thus the variance is non-negative as expected. To evaluate the presence of barren plateaus, it remains to find ∆(Hλ) and ∆(Oλ).
+
+where we define the operator
+
+## V. SUPPLEMENTARY METHODS 5: PROOF OF THEOREM 2
+
+The formula for the variance of the partial derivatives, given in Eq. (46), involves the terms ∆(Hk,λ) and ∆(Oλ), where the subscript λ denotes 'restricted to' Hνλ . We here provide a proof for Theorem 2, yielding an exact expression for ∆(Aλ) for several general classes of equivariant operators A (which include both Sn-equivariant generators and measurements). Let us recall the result.
+
+Theorem 2. Let A be an Sn-equivariant operator.
+
+where χ = X, Y, Z.
+
+Because A is equivariant, the restrictions are independent of the index ν. That is, A ∼= ⊕λ 11mλ ⊗ Aλ. Crucially, we recall that ∆(B) = Tr[B2 ] - Tr[B]2 dim(B) is equal to the variance of the eigenvalues of B. Therefore, the core of the problem is to find the eigenvalues of the restricted operators. First, note that the choice of basis is arbitrary; Without loss of generality, we will assume χ = Z. Secondly, we note that the task can be broken down to two parts: (i) Find the eigenvalues of A in terms of the Hamming weights of the computational basis states, and (ii) find which Hamming weights are compatible with the irrep subspace Hνλ .
+
+$$
+A \, \text { be an } S _ { n } \text {-equivalent operator.} \\ \begin{cases} \text {If } A = \sum _ { j = 1 } ^ { n } \chi _ { j } , & \text {then } \Delta ( A _ { \lambda } ) = 2 \left ( ^ { d _ { \lambda } + 1 } \right ) , \\ \text {If } A = \sum _ { k < j } \chi _ { j } \chi _ { k } , & \text {then } \Delta ( A _ { \lambda } ) = \frac { 8 } { 3 } \left ( ^ { d _ { \lambda } + 2 } \right ) , \\ \text {If } A = \prod _ { j = 1 } ^ { n } \chi _ { j } , & \text {then } \Delta ( A _ { \lambda } ) = \frac { d _ { \lambda } ^ { 2 } - n \, \text {mod} 2 } { d _ { \lambda } } \, , \end{cases}
+$$
+
+Therefore, let us first derive the following intermediate result solving (i).
+
+Lemma 4 (Eigenvalues in terms of Hamming weights). Given A an operator diagonal in the computational basis {|z⟩}, let e(z) denote the eigenvalue of |z⟩ and w(z) the Hamming weight of z. Then the following is satisfied.
+
+Proof. The first case is
+
+The second case is
+
+The last case is
+
+$$
+\left \{ I f \, A = \sum _ { j = 1 } ^ { n } Z _ { j } , \quad \text {then} \ e ( z ) = n - 2 w ( z ) , \\ \left \{ I f \, A = \sum _ { k < j } Z _ { j } Z _ { k } , \quad \text {then} \ e ( z ) = \frac { n ^ { 2 } - n ( 4 w ( z ) + 1 ) + 4 w ( z ) ^ { 2 } } { 2 } , \\ I f \, A = \prod _ { j = 1 } ^ { n } Z _ { j } , \quad \text {then} \ e ( z ) = ( - 1 ) ^ { w ( z ) } \, . \\ \right \}
+$$
+
+$$
+\sum _ { i = 1 } ^ { n } \langle z | Z _ { i } | z \rangle = \sum _ { i = 1 } ^ { n } ( - 1 ) ^ { z _ { i } } = n - 2 w ( z ) .
+$$
+
+$$
+\text {se is} \\ \langle z | \sum _ { i < j } Z _ { i } Z _ { j } | z \rangle & = \sum _ { i < j } ( - 1 ) ^ { z _ { i } + z _ { j } } , \\ & - \sum _ { i < j } 1 + \sum _ { j } 1 + \sum _ { \substack { ( - 1 ) } } ( - 1 )
+$$
+
+$$
+z _ { i } = & z _ { i } = z _ { j } = 0 \quad z _ { i } = z _ { j } = 1 \quad z _ { 4 } \neq z _ { j } \\ = & \begin{pmatrix} w ( z ) \\ 2 \end{pmatrix} + \begin{pmatrix} n - w ( z ) \\ 2 \end{pmatrix} - w ( z ) ( n - w ( z ) ) , \\ n ^ { 2 } - n ( 4 w ( z ) + 1 ) + 4 w ( z ) ^ { 2 }
+$$
+
+$$
+\frac { i < j } { i < j } & & \frac { i < j } { i < j } \\ & = \sum _ { \substack { i < j \\ z _ { i } = z _ { j } = 0 } } 1 + \sum _ { \substack { i < j \\ z _ { i } = z _ { j } = 1 } } 1 + \sum _ { \substack { i < j \\ z _ { i } \neq z _ { j } } } ( - 1 ) , \\ & \left ( w ( z ) \right ) \quad ( n - w ( z ) )
+$$
+
+$$
+= \frac { n ^ { 2 } - n ( 4 w ( z ) + 1 ) + 4 w ( z ) ^ { 2 } } { 2 } \, .
+$$
+
+$$
+\langle z | \, Z ^ { \otimes n } \, | z \rangle = \langle z | \, ( - 1 ) ^ { w ( z ) } \, | z \rangle \ .
+$$
+
+Now that we have connected the eigenvalues of A in terms of Hamming weights w(z) (see Lemma 4), we can proceed to (ii): Investigate which of them are compatible with a given irrep subspace Hνλ .
+
+Proof of Theorem 2. We prove the theorem by using the connection between the irreps of U(2), Pauli operators, and spin systems. The operator A must take the block diagonal form A ∼= ⊕λ 11mλ ⊗Aλ, where Aλ acts on the irrep of U(2) indexed by λ. Notably the irreps of U(2) are spaces of fixed total spin [3-6]. That is, for λ = (n-m,m), the total spin of states in the subspace are fixed at n-2m 2 . Thus, the local spin components must lie in the range {- n-2m 2 ,- n-2m 2 +1, . . . , n-2m 2 }. As Hamming weight corresponds to the number of spin down sites, for an irrep λ the weights are restricted to the range w ∈ {m, . . . , n-m}. We can then use Eq. (48) to compute the eigenvalues and from there ∆(Aλ).
+
+Case 1. Here we consider A(1) = ∑ni=1 Zi and from Eq. (48) we have e(z) = n - 2w(z). Therefore the eigenvalues of A(1) λ are e ∈ {n-2m, · · · ,-n+2m}. Clearly, Tr[A(1) λ ] = 0 for all λ. Also,
+
+Note: for convenience going forward we will adopt the notation A(k) = ∑{j1,...,jk} ⊗ki=1χji . Again, without loss of generality we can take χ = Z. Thus, for example, A(1) = ∑ni=1 Zi.
+
+$$
+\Delta ( A _ { \lambda } ^ { ( 1 ) } ) = \text {Tr} \left [ ( A _ { \lambda } ^ { ( 1 ) } ) ^ { 2 } \right ] - \underbrace { \text {Tr} \left [ ( A _ { \lambda } ^ { ( 1 ) } ) ^ { 2 } } _ { 0 } = \sum _ { i = 0 } ^ { n - 2 m } \left ( n - 2 m - 2 i \right ) ^ { 2 } } _ { 0 } = 2 \begin{pmatrix} d _ { \lambda } + 1 \\ 3 \end{pmatrix} . \\ \intertext { t h a t for e v e n $ n $ a n d $ \lambda = ( \frac { n } { 2 } , \frac { n } { 2 } ) $ t h e s u m m a t i o n a b o v e s i m p l y e u l uates to 0 . }
+$$
+
+Case 2. In this case A(2) = ∑i<j ZiZj, and from Eq. (48) we have e(z) = n2-n(4w(z)+1)+4w(z)2 2 . Summing over these values yields
+
+Note that for even n and λ = ( n2 , n2 ) the summation above simply evaluates to 0.
+
+$$
+\text {Tr} \left [ A _ { \lambda } ^ { ( 2 ) } \right ] & = \frac { ( n - 2 m + 1 ) ( n ( n - 1 ) + 4 m ^ { 2 } - 4 m ( n + 1 ) ) } { 6 } , \\ \text {Tr} \left [ A _ { \lambda } ^ { ( 2 ) } \right ] & = \frac { ( n - 2 m + 1 ) ( 4 8 m ^ { 4 } - 9 6 m ^ { 3 } ( 1 + n ) - 8 m ( 1 + n ) ^ { 2 } ( - 2 + 3 n ) + 8 m ^ { 2 } ( 4 + 1 3 n + 9 n ^ { 2 } ) + n ( - 8 + 3 n + 2 n ^ { 2 } + 3 n ^ { 3 } ) ) } { 6 } \right )
+$$
+
+$$
+\left [ \begin{array} { c c } \hat { \lambda } & \hat { 1 } \\ & 6 \end{array} \right ] & \frac { 6 } { 6 8 m ^ { 4 } - 9 6 m ^ { 3 } ( 1 + n ) - 8 m ( 1 + n ) ^ { 2 } ( - 2 + 3 n ) + 8 m ^ { 2 } ( 4 + 1 3 n + 9 n ^ { 2 } ) + n ( - 8 + 3 n + 2 n ^ { 2 } + 3 n ^ { 3 } ) } \\ \text {Tr} \left [ A _ { \lambda } ^ { ( 2 ) } \right ] = \frac { ( n - 2 m + 1 ) ( 4 8 m ^ { 4 } - 9 6 m ^ { 3 } ( 1 + n ) - 8 m ( 1 + n ) ^ { 2 } ( - 2 + 3 n ) + 8 m ^ { 2 } ( 4 + 1 3 n + 9 n ^ { 2 } ) + n ( - 8 + 3 n + 2 n ^ { 2 } + 3 n ^ { 3 } ) ) } { 6 0 } \\
+$$
+
+Thus, the variance of the eigenvalues is
+
+Note that for m> ⌊ n2 ⌋ -1 this evaluates to 0.
+
+$$
+\text {Tr} \left [ A _ { \lambda } ^ { ( n ) } \right ] = \sum _ { w = m } ^ { n - m } ( - 1 ) ^ { w } = ( - 1 ) ^ { w } \sum _ { k = 0 } ^ { n - 2 m } ( - 1 ) ^ { k } = ( - 1 ) ^ { w } \begin{cases} 1 & n \equiv 0 \pmod { 2 } \\ 0 & n \equiv 1 \pmod { 2 } \end{cases} \, .
+$$
+
+$$
+\Delta ( A _ { \lambda } ^ { ( 2 ) } ) = \frac { 8 } { 3 } \begin{pmatrix} d _ { \lambda } + 2 \\ 5 \end{pmatrix} .
+$$
+
+Case 3. In this case A(n) = ⊗ni=1Zi, and from Eq. 48 we have e(z) = (-1)w(z) . Thus, (A(n) λ )2 = 11dλ and Tr[(A(n) λ )2 ] = dλ. It is left to compute Tr[A(n) λ ].
+
+Thus, Tr[A(n) λ ] = (n+1) mod 2. Combining,
+
+$$
+\Delta ( A _ { \lambda } ^ { ( n ) } ) = \frac { d _ { \lambda } ^ { 2 } - 1 + ( n \bmod 2 ) } { d _ { \lambda } } \, .
+$$
+
+## VI. SUPPLEMENTARY METHODS 6: GENERALIZATION OF THEOREM 2
+
+We here generalize the result in Theorem 2 to the case of arbitrary k-local Pauli strings.
+
+Consider the operator A(k) = ∑{j1,...,jk} ⊗ki=1χji . Again, χ is arbitrary thus we assume χ = Z. The eigenvalue corresponding to a bitstring |z⟩ is
+
+$$
+\sum _ { \{ j _ { 1 } , \dots , j _ { k } \} } \otimes _ { i = 1 } ^ { k } Z _ { j _ { i } } \, | z \rangle & = \sum _ { l = 0 } ^ { k } \sum _ { \xi _ { i } , \xi _ { j } , l = 1 } ( - 1 ) ^ { l } \, | z \rangle \\ & - \sum _ { l = 0 } ^ { k } \left ( n - w ( z ) \right ) \left ( w ( z ) \right ) ( - 1 ) ^ { l } | z \rangle
+$$
+
+$$
+l = & 0 \sum _ { z _ { i } = l } z _ { i } = l \\ = & \sum _ { l = 0 } ^ { k } \left ( \begin{matrix} n - w ( z ) \\ k - l \end{matrix} \right ) \left ( \begin{matrix} w ( z ) \\ l \end{matrix} \right ) ( - 1 ) ^ { l } | z \rangle \\ = & \mathcal { K } _ { k } ( w ( z ) ; n ) \, | z \rangle \, ,
+$$
+
+where Kk(x; n) are the binary Krawtchouk polynomials. Then we have that
+
+and
+
+$$
+\text {Tr} \left [ A _ { \lambda } ^ { ( k ) } \right ] = \sum _ { w = m } ^ { n - m } \mathcal { K } _ { k } ( w ; n ) \, , \ \text {Tr} \left [ ( A _ { \lambda } ^ { ( k ) } ) ^ { 2 } \right ] = \sum _ { w = m } ^ { n - m } \mathcal { K } _ { k } ( w ; n ) ^ { 2 } \, ,
+$$
+
+$$
+\Delta ( A _ { \lambda } ^ { ( k ) } ) = \sum _ { w = m } ^ { n - m } \mathcal { K } _ { k } ( w ; n ) ^ { 2 } - \frac { \sum _ { w , w ^ { \prime } = m } ^ { n - m } \mathcal { K } _ { k } ( w ; n ) \mathcal { K } _ { k } ( w ^ { \prime } ; n ) } { n - 2 m + 1 } .
+$$
+
+## VII. SUPPLEMENTARY METHODS 7: TRAINABILITY OF STATES
+
+We here consider certain families of states and argue for, or against, their trainability under an Sn-equivariant architecture.
+
+As discussed in the main text, Theorem 1 asserts that there can be several sources of untrainability, those QNN and measurement related, and those dataset related. Since Corollary 1 of the main the text states that the former source cannot lead to exponentially vanishing gradients, the trainability of the model hinges on the behavior of the latter dataset-related source. We note that this dataset-dependent trainability is not unique for Sn-equivariant QNNs, but rather present in all absence of barren plateaus results (see Refs. [2, 7-10]) as there always exist datasets for which an otherwise trainable model can be rendered untrainable. In this section we briefly discuss the trainability of Sn-equivariant models for different types of datasets.
+
+First, we recall from Theorem 1 that the dataset will induce a barren plateau if, for every λ, ∆(∑mλ ν=1 σνλ ) is exponentially small. Here, σ = ∑Mi=1 ciρi and σνλ is the reduction of σ to Hνλ . This highlights a clear connection between the underlying block structure and the trainability condition for a given dataset: Because σ is Hermitian, we can interpret ∆(∑mλ ν=1 σνλ ) as measuring the variance of the eigenvalues of the multiplicity-averaged reduced operators σνλ , and to guarantee trainability we need at least one irrep λ where such eigenvalue variance is not exponentially vanishing.
+
+In the following, we will make some distinction between training single states versus datasets. The former is a natural framework for variational quantum algorithms [11, 12]. In this case, we need only to show that ∆(∑ν σνλ ) ∈ Ω( 1 poly(n) ) for some λ ∈ Ŝn. For the latter, trainability also depends on the weights ci. Let us clarify this with an example.
+
+Example 1. Consider the set {|ψ⟩ ∈ H|R(π) |ψ⟩ = |ψ⟩ , ∀π ∈ Sn}. This is commonly known as the symmetric subspace [13] and corresponds to the irrep λ = (n, 0) where d(n,0) = n+1 and m(n,0) = 1. Now, suppose our dataset is composed of n + 1 pure states forming an orthonormal basis for this subspace, which we label as ρi = |vi⟩⟨vi|. Individually, ∆(ρ(n,0)) = 1- 1 n+1 ∈ Θ(1) and these states are trainable. However, this may not be the case when we train on the entire dataset. Assume that we are performing binary classification, for which ci := - 1M yi. If all inputs have the same label, then σ = ± 1 n+1 PSym, where PSym is the projector into the symmetric subspace, and thus σ(n,0) = 1 n+1 11(n,0) implying
+
+∆(σ(n,0)) = 0 (this follows from the fact that PSym is the identity matrix in Hνλ , and hence its eigenvalues have zero variance). Now instead consider c1 = -1 and ci = 1 for i > 1. In this case, ∆(σ(n,0)) = 4n (n+1)3 and there will not be barren plateaus. Note that the true average, ci = 1N , is a sort of worst case as each state is treated the same with no dependence on yi. Regardless, in Sec. XD we present numerics showing that the true average of certain families of states is trainable.
+
+While the previous shows that σ may not be trainable, even when each ρi is, we can instead say that if each ρi is not trainable, then nor will σ be. We formalize this with the following theorem:
+
+Proposition 1. Given an ensemble of states {ρi} and their corresponding σ = ∑i ciρi, then
+
+$$
+\Delta ( \sum _ { \nu = 1 } ^ { m _ { \lambda } } \sigma _ { \lambda } ^ { \nu } ) \leqslant ( \sum _ { i = 1 } ^ { M } | c _ { i } | ( \Delta ( \sum _ { \nu = 1 } ^ { m _ { \lambda } } \rho _ { i , \lambda } ^ { \nu } ) ) ^ { 1 / 2 } ) ^ { 2 } .
+$$
+
+Proof. This result is easily proven by recalling that ∆(A) =DHS(A, Tr[A] d 11d) = ∥A- Tr[A] d 11d∥22 . Then,
+
+$$
+\Delta ( \sum _ { \nu = 1 } ^ { m _ { \lambda } } \sigma _ { \lambda } ^ { \nu } ) & = \| \sum _ { i = 1 } ^ { M } c _ { i } \sum _ { \nu = 1 } ^ { m _ { \lambda } } \rho _ { i , \lambda } ^ { \nu } - \frac { \sum _ { i = 1 } ^ { M } c _ { i } \sum _ { \nu = 1 } ^ { m _ { \lambda } } \text {Tr} \left [ \rho _ { i , \lambda } ^ { \nu } \right ] } { d _ { \lambda } } 1 _ { d _ { \lambda } \wedge } \| ^ { 2 } _ { 2 } \\ & = \sum _ { M } ^ { M _ { \lambda } } m _ { \lambda } \text {Tr} \left [ \rho _ { i } ^ { \nu } \right ] _ { i }
+$$
+
+$$
+= \| \sum _ { i = 1 } ^ { \infty } c _ { i } ( \sum _ { \nu = 1 } ^ { \hat { \zeta } } \rho _ { i , \lambda } ^ { \nu } - \frac { \sum _ { \nu = 1 } ^ { \infty } \mathbf 1 \left [ \rho _ { i , \lambda } \right ] } { d _ { \lambda } } \mathbf 1 _ { d _ { \lambda } } ) \| _ { 2 } ^ { 2 }
+$$
+
+$$
+& \| \sum _ { i = 1 } ^ { M } \frac { m _ { \lambda } } { \nu = 1 } \, \Gamma _ { i , \lambda } ^ { \nu } \, d _ { \lambda } \\ & = \| \sum _ { i = 1 } ^ { M } c _ { i } ( \sum _ { \nu = 1 } ^ { m _ { \lambda } } \rho _ { i , \lambda } ^ { \nu } - \frac { \sum _ { \nu = 1 } ^ { m _ { \lambda } } \text {Tr} \left [ \rho _ { i , \lambda } ^ { \nu } \right ] } { d _ { \lambda } } \mathbb { I } _ { d _ { \lambda } } ) \| _ { M _ { \lambda } } \\ & \quad M \sum _ { m _ { \lambda } } ^ { m _ { \lambda } } \left ( \sum _ { \substack { m _ { \lambda } \\ m _ { \lambda } } } ^ { m _ { \lambda } } \text {Tr} \left [ \rho _ { i } ^ { \nu } \right ] \right )
+$$
+
+$$
+& = ( \sum _ { i = 1 } ^ { M } | c _ { i } | ( \Delta ( \sum _ { \nu = 1 } ^ { m _ { \lambda } } \rho _ { i , \lambda } ^ { \nu } ) ) ^ { 1 / 2 } ) ^ { 2 } \, .
+$$
+
+$$
+& \quad \| \sum _ { i = 1 } ^ { M } \frac { \sum _ { \nu = 1 } ^ { m _ { \lambda } } } { \nu = 1 } d _ { \lambda } \\ & \leqslant ( \sum _ { i = 1 } ^ { M } | c _ { i } | | \sum _ { \nu = 1 } ^ { m _ { \lambda } } \rho _ { i , \lambda } ^ { \nu } - \frac { \sum _ { \nu = 1 } ^ { m _ { \lambda } } \text {Tr} \left [ \rho _ { i , \lambda } ^ { \nu } \right ] } { d _ { \lambda } } 1 _ { d _ { \lambda } } ) \| _ { 2 } ) ^ { 2 } \\ & \quad \overset { M } { \sum _ { \lambda } ^ { m _ { \lambda } } } + \overset { m _ { \lambda } } { \sum _ { \sigma } ^ { n _ { \lambda } } } , \, y _ { \sigma } > 1 / 2 , 3
+$$
+
+The utility of this result is that if ∆(∑mλ ν=1 ρνi,λ ) is small for an ensemble of states {ρi}, then it will still be small for the weighted average σ.
+
+## A. Analytical results for trainability of single states
+
+## 1. Fixed Hamming-weight encoding
+
+Building on the intuition that states with an at most polynomially vanishing component in the symmetric subspace can have a ∆(ρ(n,0)) that is at most polynomially vanishing (see Example 1), let us devise an encoding scheme with trainability guarantees: Given some array of real values {xi}, perhaps representing some high dimensional vector, such that ∑i x2i = 1, encode each xi as the weight of a unique bitstring z of Hamming weight k, where k is some fixed constant. That is, prepare the quantum state
+
+$$
+| x \rangle = \sum _ { w ( z ) = k } x _ { z } | z \rangle \, ,
+$$
+
+where w(z) is the Hamming weight and we are now indexing {xi} with z. To analyze the trainability of this encoding we consider the projection into the symmetric subspace. From the analysis above we know that we need only show that Tr[Psym |x⟩⟨x|] ∈ Ω( 1 poly(n) ). Recalling that Psym = 1 n! ∑g∈Sn R(g), we can evaluate this trace directly. First, we note that where again k = w(z). Thus, and Note that since ∑i x2i = 1, we have
+
+$$
+P _ { \text {sym} } | z \rangle = \frac { \max ( k ! , ( n - k ) ! ) } { n ! } \sum _ { w ( y ) = k } | y \rangle ,
+$$
+
+$$
+P _ { s y m } \left | x \right \rangle = \frac { \max ( k ! , ( n - k ) ! ) } { n ! } ( \sum _ { i } x _ { i } ) \sum _ { w ( y ) = k } | y \rangle \ ,
+$$
+
+$$
+\langle x | P _ { s y m } | x \rangle = \frac { \max ( k ! , ( n - k ) ! ) } { n ! } ( \sum _ { i } x _ { i } ^ { 2 } + 2 \sum _ { i < j } x _ { i } x _ { j } ) \, .
+$$
+
+$$
+\langle x | P _ { s y m } | x \rangle = \frac { \max ( k ! , ( n - k ) ! ) } { n ! } ( 1 + 2 \sum _ { i < j } x _ { i } x _ { j } ) . \\ \intertext { c o n s e f r i s t h a t h e r $ x _ { i } > 0 $ $ \forall i $ $ F o r e x a m p l e $ i n e c o d i n g a n i m a g e $ t h e p i l x e l $ v a r e a l l }
+$$
+
+It is not unreasonable to assume that xi is symmetric in distribution around 0. That is, P(xi ⩽ -a) = P(xi ⩾ a). If we also assume that only the magnitudes of the data are correlated, and not the signs, then E[xixj] = 0 (for i ̸= j). In this case, E[⟨x|Psym|x⟩] = max(k!,(n-k)!) n! . Without loss of generality take k ⩽ n2 . Then, (n-k)! n! ∈ Θ(n-k ). For a fixed k, then the expected component in the symmetric subspace ∆(ρ(n,0)) is inverse-polynomial.
+
+Here we consider two cases. First, that where xi ⩾ 0, ∀i. For example, in encoding an image, the pixel values are all non-negative. In this case clearly ⟨x|Psym|x⟩ ⩾ max(k!,(n-k)!) n! . As a second scenario, consider drawing data {zi}(nk) i=1 from some process such that E[zizj] = 0, i ̸= j.
+
+## 2. Global Haar random state
+
+While the previous family of input states were trainable, we now provide an example leading to untrainability. Consider sending a single global Haar random pure state ρ through the Sn-equivariant QNN. That is, states of the form ρ = V |ψ⟩⟨ψ| V † where V is a Haar-random unitary and |ψ⟩ is an arbitrary pure state.
+
+$$
+\mathbb { E } [ \Delta ( \rho _ { \lambda } ^ { \nu } , \rho _ { \lambda } ^ { \nu ^ { \prime } } ) ] & = \mathbb { E } [ \text {Tr} \left [ \rho _ { \lambda } ^ { \nu } \rho _ { \lambda } ^ { \nu ^ { \prime } } \right ] ] - \frac { 1 } { d _ { \lambda } } \mathbb { E } [ \text {Tr} [ \rho _ { \lambda } ^ { \nu } ] \text {Tr} [ \rho _ { \lambda } ^ { \nu ^ { \prime } } ] ] . \\ \intertext { t h a t } \mathbb { a } { \rho } ^ { \nu } _ { \lambda } = Q _ { \lambda } ^ { \nu } \varrho ( Q _ { \lambda } ^ { \nu } ) ^ { \dagger } , \text { we can then rewrite the first exponentiation value above as }
+$$
+
+$$
+\text {intue, recall that } \rho _ { \lambda } ^ { \prime } = Q _ { \lambda } ^ { \prime } \rho ( Q _ { \lambda } ^ { \prime } ) . \ \text { we can then rewrite the first expectation value above as} \\ \mathbb { E } [ T r \left [ \rho _ { \lambda } ^ { \prime } \rho _ { \lambda } ^ { \prime } \right ] ] = \int _ { U ( d ) } d \mu ( V ) \, T r \left [ V \left | \psi \right \rangle \langle \psi | V ^ { \dagger } ( Q _ { \lambda } ^ { \prime } ) ^ { \dagger } Q _ { \lambda } ^ { \prime } V \left | \psi \right \rangle \langle \psi | V ^ { \dagger } ( Q _ { \lambda } ^ { \prime } ) ^ { \dagger } Q _ { \lambda } ^ { \prime } \right ] \\ = \int _ { U ( d ) } d \mu ( V ) \, T r \left [ V \left | \psi \right \rangle \langle \psi | V ^ { \dagger } P ^ { \prime } \nu ^ { \prime } V \left | \psi \right \rangle \langle \psi | V ^ { \dagger } M \right ]
+$$
+
+Consider the expectation value:
+
+To continue, recall that ρνλ = Qνλρ(Qνλ )† . We can then rewrite the first expectation value above as
+
+$$
+[ \, ^ { 2 } [ x \, x \, ] ^ { 2 } \int _ { U ( d ) } \int _ { U ( d ) } \left ( 1 \right ) ( 1 ) ( 1 ) ( 1 ) ( 1 ) ( 1 ) ( 1 ) ( 1 ) \\ = \int _ { U ( d ) } d \mu ( V ) \, \text {Tr} \left [ V | \psi \rangle \langle \psi | V ^ { \dagger } P _ { \lambda } ^ { \prime \nu , \prime } V | \psi \rangle \langle \psi | V ^ { \dagger } M ^ { \dagger } \right ] , \\ \\ \rho _ { 1 } , \nu _ { 1 } , \nu _ { 2 } , \dots ( O ( \gamma ) \dagger O ^ { \prime } ) , \, \text {V} _ { 1 } , \dots ( O ( \gamma ) \dagger O ^ { \prime } ) ,
+$$
+
+$$
+\text {where we have defined } P _ { \lambda } ^ { \sigma } & = ( Q _ { \lambda } ^ { \sigma } ) ^ { \dagger } Q _ { \lambda } \cdot \text { we employ the isomorphism identity} \left ( E _ { \sigma } \right ) .
+$$
+
+where we have defined P ν,ν ′ λ := (Qνλ )†Qν ′ λ . We employ the following identity (Eq. (4))
+
+$$
+- \, \frac { 1 } { d ( d ^ { 2 } - 1 ) } ( \text {Tr} [ A C ] \text {Tr} [ B D ] + \text {Tr} [ A ] \text {Tr} [ B ] \text {Tr} [ C ] \text {Tr} [ D ] ) .
+$$
+
+If ν = ν ′ then Qνλ (Qνλ )† = 11dλ and Tr[P ν,ν ′ λ ] = dλ. If ν ̸= ν ′ then Tr[P ν,ν ′ λ ] = 0. Take {|vν i ⟩} and {∣∣∣vν ′ i 〉} to be the orthogonal sets of vectors in the full Hilbert space corresponding to the subspaces Hνλ and Hν ′ λ . Then Tr[P ν,ν ′ λ ] = ∑i ⟨vν i |vν ′ i ⟩ = 0. It is left for us to compute Tr[P ν,ν ′ λ (P ν,ν ′ λ )† ]. Note that P ν,ν ′ λ (P ν,ν ′ λ )† = (Qνλ )†Qν ′ λ (Qν ′ λ )†Qνλ = (Qνλ )†Qνλ . Thus, Tr[P ν,ν ′ λ (P ν,ν ′ λ )† ] = dλ. Using Eq. (79) we then see that
+
+$$
+\mathbb { E } [ T r \left [ \rho _ { \lambda } ^ { \nu } \rho _ { \lambda } ^ { \nu ^ { \prime } } \right ] ] = \frac { d _ { \lambda } + d _ { \lambda } ^ { 2 } \delta _ { \nu \nu ^ { \prime } } } { d ( d + 1 ) } \, . \\
+$$
+
+To evaluate the second expectation value we first rewrite the expression as
+
+$$
+To evaluate the second expectation value we first rewrite the expression as \\ & \mathbb { E } [ T r [ \rho _ { X } ^ { \ell } ] \, T r [ \rho _ { X } ^ { \ell ^ { \prime } } ] ] = \int _ { U ( d ) } d \mu ( V ) \, T r [ V \, | \psi \rangle \langle \psi | \, V ^ { \dagger } ( Q _ { X } ^ { \ell ^ { \prime } } ) ^ { \dagger } Q _ { X } ^ { \prime } ] \\ & = \int _ { U ( d ) } d \mu ( V ) \, T r [ V \, | \psi \rangle \langle \psi | \, V ^ { \dagger } \, \lambda ^ { \prime \prime } _ { x } ] \, T r \left [ V \, | \psi \rangle \langle \psi | \, V ^ { \dagger } \, P _ { X } ^ { \prime \prime } , \psi ^ { \prime } \right ] , \\ \intertext { We now employ the following identity (Eq. (5)) }
+$$
+
+We now employ the following identity (Eq. (5))
+
+$$
+\text { we know } & \text { simply } ( \text {Eqn} ) ^ { 2 } ( 0 ) ^ { 5 } \\ & \int _ { U ( d ) } d \mu ( V ) \text { Tr} [ V A V ^ { \dagger } B ] \text { Tr} [ V C V ^ { \dagger } D ] = \frac { 1 } { d ^ { 2 } - 1 } ( \text {Tr} [ A ] \text { Tr} [ B ] \text {Tr} [ C ] \text {Tr} [ D ] + \text {Tr} [ A C ] \text {Tr} [ B D ] ) \\ & - \frac { 1 } { \sqrt { 2 } \cdot \sqrt { 1 - ( \text {Tr} [ A C ] \text { Tr} [ B ] \text {Tr} [ D ] + \text {Tr} [ A ] \text { Tr} [ C ] \text {Tr} [ B D ] ) } } .
+$$
+
+This allows us to evaluate the expectation value
+
+$$
+\mathbb { E } [ \text {Tr} [ \rho _ { \lambda } ^ { \nu } ] \text { Tr} \left [ \rho _ { \lambda } ^ { \nu ^ { \prime } } \right ] ] = \frac { d _ { \lambda } ( d _ { \lambda } + \delta _ { \nu \nu ^ { \prime } } ) } { d ( d + 1 ) } \, . \\
+$$
+
+Combining the expectation values derived above yields
+
+$$
+\mathbb { E } [ \Delta ( \rho _ { \lambda } ^ { \nu } , \rho _ { \lambda } ^ { \nu ^ { \prime } } ) ] = \begin{cases} \frac { d _ { \lambda } ^ { 2 } - 1 } { d ( d + 1 ) } & \nu = \nu ^ { \prime } \\ 0 & \text {otherwise} \end{cases} .
+$$
+
+We turn back to E[∆(∑mλ ν=1 ρνλ )], which is now easy to evaluate.
+
+Recall that, mλ ∈ O(2n ), dλ ∈ O(n) and d = 2n . Thus, E[∆(∑mλ ν=1 ρνλ )] ∈ O( n2 2n ) and, on average, Haar random states will not be trainable. Of course, this is not surprising as it is known that Haar random states are highly entangled and make poor computational resources [14].
+
+$$
+\mathbb { E } [ \Delta ( \sum _ { \nu = 1 } ^ { m _ { \lambda } } \rho _ { \lambda } ^ { \nu } ) ] = \frac { m _ { \lambda } ( d _ { \lambda } ^ { 2 } - 1 ) } { d ( d + 1 ) } .
+$$
+
+## VIII. SUPPLEMENTARY METHODS 8: VC DIMENSION BOUNDS (FOR GENERAL SYMMETRIES)
+
+Besides the covering number bound in the main text, here we show a bound on the VC dimension of equivariant QNNs.
+
+Theorem 7. Let Uθ be an Sn-equivariant QNN with generators in G, and O an Sn-equivariant measurement from M. The VC dimension of classifiers of the form Tr[U(θ)ρU(θ)†O] ⩾ b is less than or equal to ∑λ d2λ = Ten+1 ∈ Θ(n3 ).
+
+$$
+- \frac { 1 } { d ( d ^ { 2 } - 1 ) } ( \text {Tr} [ A C ] \text {Tr} [ B ] \text {Tr} [ D ] + \text {Tr} [ A ] \text {Tr} [ C ] \text {Tr} [ B D ] ) \, . \\
+$$
+
+We begin by giving a general framework for GQML. Consider a quantum neural network Nθ : B(H) ↦→ B(K), where H is the input Hilbert space and K the output. Note that this needs not be a unitary mapping and can be a general quantum channel. Further, assume N is equivariant to a compact group G with representation R1(g) on H and R2(g) on K. That is,
+
+$$
+\mathcal { N } _ { \theta } ( R _ { 1 } ( g ) \rho R _ { 1 } ( g ) ^ { \dagger } ) = R _ { 2 } ( g ) \mathcal { N } _ { \theta } ( \rho ) R _ { 2 } ( g ) ^ { \dagger } , \, \forall g \in G .
+$$
+
+With this neural network we construct classifiers of the form
+
+$$
+h _ { \theta } ( \rho ) = \text {Tr} [ O \mathcal { N } _ { \theta } ( \rho ) ] \geqslant c ,
+$$
+
+where O is some Hermitian operator such that [O,R2(g)] = 0, ∀g ∈ G. Clearly, hθ(R1(g)ρR†1 (g)) = hθ(ρ).
+
+Theorem 8. The VC dimension of classifiers of the form Tr[ONθ(ρ)] ⩾ c is upper-bounded by the dimension of the commutant of R2, which we denote as comm(R2) = {H ∈ B(H) | [H, R2(g)] = 0 ∀g ∈ G}.
+
+Proof. First, note that c can be absorbed into O via setting O′ := O- c11. As 11 commutes with everything, O′ is then still in comm(R2). We can then consider classifiers of the form Tr[ON(ρ; θ)] ⩾ 0 without loss of generality.
+
+Recall that the twirling operation for a compact group is given by TG[X] = ∫G dµ(g)R(g)XR(g)† , where µ is the Haar measure. In addition, TG is known to be a projector into comm(R) [15]. Note that here we twirl with R2(g). Clearly, TG[O] = O for the chosen measurement operator. We require one last property of twirling-it is self-adjoint. That is, ⟨TG[X], Y ⟩ = ⟨X, TG[Y ]⟩, where here ⟨·, ·⟩ is the HS inner product.
+
+$$
+h _ { \theta } ( \rho ) & = \text {Tr} [ O \mathcal { N } _ { \theta } ( \rho ) ] \\ & = \text {Tr} [ \mathcal { T } _ { \mathcal { C } } [ O ] N _ { \theta } ( \rho ) ]
+$$
+
+$$
+= \text {Tr} [ O \mathcal { T } _ { G } [ \mathcal { N } _ { \theta } ( \rho ) ] ] .
+$$
+
+$$
+& = \text {Tr} [ \mathcal { T } _ { G } [ 0 ] \mathcal { N } _ { \theta } ( \rho ) ] \\ & = \text {Tr} [ \mathcal { O } \mathcal { T } _ { G } [ N _ { \theta } ( \rho ) ] ]
+$$
+
+TG[Nθ(ρ)] is some operator in comm(R2). Thus, any classifier of the form Tr[ON(ρ; θ)] ⩾ 0 is a linear classifier in comm(R2). The VC dimension of all linear classifiers is the dimension of the vector space [16]. As the space of classifiers obtained by varying θ is a subset of all linear classifiers, then the VC dimension of Fθ is less than or equal to the dimension of the commutant of R2(g).
+
+For the architecture considered in this paper, G = Sn and R1(g) = R2(g). From the isotypic decomposition the dimension of the commutant will be the sum of the squares of the multiplicities. The multiplicity space of irrep λ is an irrep of U(2) of dimension n - 2m+ 1. Summing over all irreps, we see that the total dimension of the commutant is ∑⌊ n2 ⌋ m=0 (n - 2m + 1)2 , proving Theorem 7.
+
+## IX. SUPPLEMENTARY METHODS 9: ABSENCE OF BARREN PLATEAUS IMPLIES ABSENCE OF NARROW GORGES
+
+In this section we will show that in the loss function does not exhibit a barren plateaus, and more importantly that it cannot have a narrow gorge.
+
+First, let us recall the definition of a narrow gorge from Ref. [17]. Let the loss function be defined as
+
+$$
+\ell _ { \theta } ( \rho ) = \text {Tr} [ \mathcal { U } _ { \theta } ( \rho ) O ] \, .
+$$
+
+We say that ℓθ(ρ) exhibits a narrow gorge if the following two conditions are met:
+
+1. There exist points in the landscape which are lower than the mean cost value by at least a a quantity ∆(n) with ∆(n) ∈ Ω(1/ poly(n)).
+
+2. The probability that the cost function value at a point chosen from the uniform distribution over the parameter space differs from the mean by at least δ is bounded as
+
+$$
+P ( | \ell _ { \theta } ( \rho ) - \langle \ell _ { \theta } ( \rho ) \rangle _ { \theta } | \geqslant \delta ) \leqslant \frac { G ( n ) } { \delta ^ { 2 } } \, ,
+$$
+
+with G(n) ∈ O(1/bn ) for some b > 1.
+
+Next, let us assume that ℓθ(ρ) has no barren plateau. That is, we have that
+
+$$
+V a r _ { \theta } [ \partial _ { \mu } \ell _ { \theta } ( \rho ) ] \, , V a r _ { \theta } [ \ell _ { \theta } ( \rho ) ] = H ( n ) \, , \quad \text {with} \, H ( n ) \in \Omega ( 1 / \text {poly} ( n ) ) \, ,
+$$
+
+where we have used the fact that absence of barren plateaus implies both gradients and loss function variances vanishing, at most, polynomially with n [17]. As we will see, Eq. (96) allows us to show that while the first condition is always met with overwhelming probability, the second one is never met, implying that there is no narrow gorge. We define the two complementary events A = {θ : |ℓθ(ρ) - ⟨ℓθ(ρ)⟩θ| > δ} and A⊥ = {θ : |ℓθ(ρ) - ⟨ℓθ(ρ)⟩θ| ⩽ δ}, such that
+
+Then, from Chebyshev's inequality, we know that
+
+and hence the following inequality hold
+
+$$
+\Pr [ \mathcal { A } ] + \Pr [ \mathcal { A } ^ { \perp } ] = 1 . \\ \text {we know that}
+$$
+
+$$
+\Pr [ \mathcal { A } ^ { \perp } ] \leqslant \frac { \text {Var} _ { \theta } [ \ell _ { \theta } ( \rho ) ] } { \delta ^ { 2 } } \, ,
+$$
+
+$$
+\Pr [ \mathcal { A } ] & = 1 - \Pr [ \mathcal { A } ^ { \perp } ] \\ & \geqslant 1 - \frac { \ V a r _ { \theta } [ \ell _ { \theta } ( \rho ) ] } { \delta ^ { 2 } } \, .
+$$
+
+From here, we can ask the question. What is the probability that the loss differs from its mean by a quantity δ = (H(n))κ . In particular we choose κ < 1/2 and κ ∈ Ω(1) so that δ ∈ Ω(1/poly(n)). Using Eqs. (96) and (100) leads to
+
+$$
+\Pr [ \mathcal { A } ] \geqslant 1 - ( H ( n ) ) ^ { 1 - 2 \kappa } \underset { n \to \infty } { \to } 1 \, .
+$$
+
+Hence, we can see that with overwhelming probability, the cost will differ from its mean by a quantity that is at least polynomially close to one. As such, the loss exhibits no narrow gorge. That is, the loss anti-concentrates.
+
+## X. SUPPLEMENTARY METHODS 10: NUMERICAL RESULTS
+
+In this section, we provide a comprehensive set of numerical results supporting the results and theorems presented in the main text. In Sec. XA, we report scalings of the variances of the gradients for several families of random input states. These were used in Table. 1 of the main text. In Sec. XB, we assess the gradient variances as given in Eq. (46), and compare them to variances numerically estimated. In Sec. XC, we evaluate the contributions of the different irreps to the overall gradient variances. While results of Sec.XA, Sec. XB and Sec. XC are obtained in the single state scenario (M = 1 in Eq. (6)), in Sec. XD, we probe the effect of multi-state datasets (M = 50).
+
+All the gradients results that are produced are based on a minimum of 50 random initial states with 50 random set of parameters per state (i.e., at least 2500 parameter gradient values). If not otherwise stated, gradient results correspond to a choice of measurement operator O = 1n ∑nj=1 Xj. Note that other choices of observables belonging to M (Eq. 10 of the main text) yield similar results but are not displayed here.
+
+## A. Gradient scalings for different families of input states
+
+We numerically probe the scaling of the gradients for different families of random initial states. All the results reported in Fig. 1 are obtained for a generator Hµ = 1n ∑nj=1 Xj in the middle of the Sn circuits with L = 3n layers. Similar scalings are obtained for the other generators (Eq. 9 in the main text) but not displayed here.
+
+In Fig. 1(a), we study graph states [18, 19] which, we recall, are obtained by applying a controlled-Z gate, CZ = |0⟩⟨0|⊗11+|1⟩⟨1|⊗Z for each edge (a, b) belonging to an underlying graph, onto an initial state |+⟩⊗n . The underlying random graphs considered are either k-regular graphs (with k = 3 or k = n/2), or they follow an Erdös-Rényi distribution (with a probability of any edge to be be included taken to be p = 30% or 50%). As can be seen, gradients are found exponentially decreasing for the graphs drawn from a Erdös-Rényi distribution, but only polynomially decreasing for the k-regular graphs.
+
+Gradients for local Haar random input states and also for states produced by application of a random circuit to a fiducial state |0⟩⊗n are reported in Fig. 1(b). For the random circuit preparation, we use a Hardware Efficient Ansatz (HEA) [20] composed of layers of Y rotations applied to each qubit with random angles followed by controlled-NOT gates acting onto pairs of adjacent qubits. Such circuits of HEA layers are either taken to be constant depth (L = 15 or 30), or with a number layers scaling linearly with the system size (L = n, 2n or 3n). Only in the case of a linear number of layers that the gradients are found to vanish exponentially.
+
+## B. Assessment of the analytical variances.
+
+In Fig. 2 we compare analytical expression of the gradient variances (as provided in Eq. (46)) to variances estimated numerically. Both are evaluated for a generalized graph states, where edges are now encoded by means of a controlledphase unitary CP(ϕ) = |0⟩⟨0| ⊗ 11 + |1⟩⟨1| ⊗ P , with P = |0⟩⟨0| + e iϕ |1⟩⟨1| that depends on an global angle ϕ. The case ϕ = π corresponds to the graph states discussed thus far. The underlying graphs are 3-regular graphs with number of nodes n ∈ [4, 16].
+
+> *Generated caption of `2210.09974_-_Theoretical_Guarantees_for_Permutation-Equivariant_Quantum_Neural_Networks_assets/figure-006.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains two side-by-side line plots, each with a logarithmic y-axis and a linear x-axis. Both plots share the x-axis label $n$ and have a y-axis label $\text{Var}_{\theta}[\hat{\mu}_L]$. The x-axis for both ranges from $5$ to approximately $22$. The y-axis for both ranges from $10^{-7}$ to $10^0$ using a logarithmic scale. The left plot contains four data series: - A blue line with square markers labeled "3-reg" starts at approximately $2 \cdot 10^{-1}$ for $n=5$ and decreases to approximately $10^{-3}$ at $n=22$. - An orange line with square markers labeled "$n/2\text{-reg}$" starts at approximately $10^{-1}$ for $n=5$ and decreases to approximately $10^{-3}$ at $n=22$. - A green line with square markers labeled "Erdős-Rényi, $p = 30\%$" starts at approximately $10^{-1}$ for $n=5$ and decreases sharply to approximately $10^{-6}$ at $n=22$. - A red line with square markers labeled "Erdős-Rényi, $p = 50\%$" starts at approximately $6 \cdot 10^{-2}$ for $n=5$ and decreases sharply to approximately $2 \cdot 10^{-7}$ at $n=22$. The right plot contains five data series: - A blue line with square markers labeled "Local Haar random" starts at approximately $6 \cdot 10^{-2}$ for $n=5$, fluctuates, and ends at approximately $2 \cdot 10^{-3}$ at $n=22$. - An orange line with square markers labeled "HEA, $L=15$" starts at approximately $5 \cdot 10^{-2}$ for $n=5$ and decreases to approximately $10^{-4}$ at $n=22$. - A green line with square markers labeled "HEA, $L=30$" starts at approximately $5 \cdot 10^{-2}$ for $n=5$ and decreases to approximately $5 \cdot 10^{-5}$ at $n=22$. - A red line with square markers labeled "HEA, $L=n$" starts at approximately $5 \cdot 10^{-2}$ for $n=5$ and decreases to approximately $10^{-5}$ at $n=22$. - A purple line with square markers labeled "HEA, $L=2n$" starts at approximately $5 \cdot 10^{-2}$ for $n=5$ and decreases to approximately $5 \cdot 10^{-6}$ at $n=22$. - A brown line with square markers labeled "HEA, $L=3n$" starts at approximately $5 \cdot 10^{-2}$ for $n=5$ and decreases to approximately $10^{-6}$ at $n=22$.
+
+> *Generated caption of `2210.09974_-_Theoretical_Guarantees_for_Permutation-Equivariant_Quantum_Neural_Networks_assets/figure-007.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a grid of 15 scatter plots arranged in 3 rows and 5 columns. The columns are labeled with different values of $\phi$: $\phi = 0$, $\phi = \pi/4$, $\phi = \pi/2$, $\phi = 3\pi/4$, and $\phi = \pi$. The rows are labeled on the right side with different definitions of $H_\mu$: $H_\mu = \sum x$ for the top row, $H_\mu = \sum y$ for the middle row, and $H_\mu = \sum zz$ for the bottom row. The y-axis for all plots is $\text{Var}_\theta[\partial_\mu \hat{L}]$ on a logarithmic scale, ranging from $10^{-3}$ to $10^1$. The x-axis for all plots is $n$, ranging from 5 to 15. A legend in the middle row, first column indicates that solid blue circles represent "Est." and open blue circles represent "Pred.". In all plots, the data points follow a downward trend as $n$ increases. For $\phi = 0$, the values are relatively constant or slightly increasing. For $\phi = \pi/4$, the values are mostly constant or slightly decreasing. For $\phi = \pi/2$, the values decrease moderately. For $\phi = 3\pi/4$, the values decrease sharply. For $\phi = \pi$, the values decrease very sharply. The bottom row, $\phi = 3\pi/4$ and $\phi = \pi$ columns, show the most significant decrease in $\text{Var}_\theta[\partial_\mu \hat{L}]$ as $n$ increases.
+
+To evaluate Eq. (46), we explicitly construct a basis that block diagonalizes Sn in the form of the isotypic decomposition (Eq. 11 in the main text) This so called Schur basis can be constructed recursively (for instance, see Refs. [3, 21]). In turn, this allows us to evaluate for any operator B (including the input state σ, the measurement operators O and the generators Hµ) its restriction Bνλ as defined in Eq. (13) and as required to compute Eq. (46). As shown in Fig. 2, for all the different scenarios studied, the variances yielded by Eq. (46) match closely the variance numerically estimated. Furthermore, in addition to the case with ϕ = π already discussed it can be seen that there exist choices of ϕ results in non-exponentially vanishing gradient variances.
+
+## C. Contributions of the different irreps for 3-regular graph states
+
+Given this ability to evaluate the different terms entering Eq. (46), we can further analyze the contributions of the different irreps to the total variance, for any given initial state. The contribution of a given irrep is defined as the summand indexed by λ in Eq. (46), such that the sum of all irreps contributions equals the overall variance.
+
+In Fig. 2, we report these contributions for each of the irreps involved and labeled as λ = (n - m,m) (given in legend). These data are obtained for graph states based on 3-regular graphs and a number of nodes n ∈ [4, 16]. While analytical results for trainable states in Sec. VIIA were based on symmetric component of the input state vanishing only polynomially, here we can see that the situation is different. Explicitly, despite the exponential vanishing of the contribution of λ = (n, 0) (the symmetric subspace in the top right sub-figure), the overall gradient variance only decays polynomially with n. As can be seen, each of the irreps plays a significant contribution to the overall variance (dashed line) at some point (i.e., for a specific value of n) before decreasing. Similar results are obtained for the case of local Haar random states (discussed in Sec. XA) but not displayed here.
+
+## D. Variances for single states and dataset
+
+While all the previous results were reported for the single state scenario (i.e., M = 1), we now numerically probe the effect of averaging the empirical loss in Eq. (6) over a dataset of M = 50 states. To do so, we need to define the weights employed which, in practice, would depend on the specific details of the task at hand. Here, for simplicity we will resort to a simple average yielding weights ci := 1/M.
+
+In Fig. 4 we report variances resulting from such average (square markers) and compare them to variances of the gradients for the single states (circle markers). Additionally, we report the variances that would arise for M = 50, but, under the assumption that the gradients obtained for different states are independent and identically distributed (i.i.d. in legend). These are readily obtained by rescaling the variances of single states by a factor of 1/√M. We note that by comparing gradients for the dataset case to the i.i.d. one, one can gauge the effect of the correlations in-between gradients yielded from distinct random states. The greater the correlation, the more similar these gradients are. As can be seen, while generally resulting in a decrease of the variances, the effect of averaging the empirical loss over a dataset does not change the overall scaling of the variances (exponentially decaying for the graph states corresponding to an Erdös-Rényi distribution, but only polynomially decaying otherwise).
+
+> *Generated caption of `2210.09974_-_Theoretical_Guarantees_for_Permutation-Equivariant_Quantum_Neural_Networks_assets/figure-008.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a collection of eight separate line and scatter plots arranged in a $2 \times 4$ grid. All plots have an x-axis labeled "$n$" ranging from 5 to 15 and a y-axis labeled "Contrib to var" on a logarithmic scale ranging from $10^{-6}$ to $10^0$. Each plot contains a solid blue line labeled "Var." and a set of blue data points represented by different symbols. The top row, from left to right, contains: a plot with square symbols labeled "$(n-0,0)$"; a plot with circle symbols labeled "$(n-1,1)$"; a plot with $\times$ symbols labeled "$(n-2,2)$"; and a plot with diamond symbols labeled "$(n-3,3)$". The bottom row, from left to right, contains: a plot with star symbols labeled "$(n-4,4)$"; a plot with inverted triangle symbols labeled "$(n-5,5)$"; a plot with pentagon symbols labeled "$(n-6,6)$"; and a plot with hexagon symbols labeled "$(n-7,7)$". In all plots, the "Var." line follows a smooth downward-sloping curve. The data points in the top row generally trend downward following the line, though the $(n-3,3)$ plot shows some fluctuation. The data points in the bottom row are generally lower than the "Var." line and show varying trends.
+
+> *Generated caption of `2210.09974_-_Theoretical_Guarantees_for_Permutation-Equivariant_Quantum_Neural_Networks_assets/figure-009.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains two side-by-side line plots, labeled $a)$ and $b)$, showing the variance of certain quantities as a function of $n$ on logarithmic scales. Both plots have an x-axis labeled $n$ with a linear scale ranging from 4 to 16, with major tick marks at 4, 6, 8, 10, 12, 14, and 16. The y-axes use a logarithmic scale; plot $a)$ is labeled $\text{Var}_g[\phi_{L,l}]$ and ranges from $10^{-7}$ to $10^{0}$, while plot $b)$ is labeled $\text{Var}_g[\theta_{L,l}]$ and ranges from $10^{-6}$ to $10^{0}$. Both plots share a common legend: a blue line with circles for "3-reg graphstates", an orange line with squares for "Erdo-Renyi graphstates", and a green line with circles for "Local Haar random". A black line is also present in plot $a)$ labeled "Dataset" and a dashed black line in plot $b)$ labeled "Dataset (L.l.d)". In plot $a)$, the "3-reg graphstates" (blue) decreases from approximately $10^{-1}$ at $n=4$ to $10^{-4}$ at $n=16$. The "Erdo-Renyi graphstates" (orange) decreases from approximately $10^{-2}$ at $n=4$ to $10^{-6}$ at $n=16$. The "Local Haar random" (green) fluctuates between $10^{-1}$ and $10^{-2}$ across the range of $n$. The black "Dataset" line decreases steadily from $10^{-1}$ at $n=4$ to $10^{-6}$ at $n=16$. In plot $b)$, the "3-reg graphstates" (blue) decreases from approximately $2 \cdot 10^{-1}$ at $n=4$ to $10^{-3}$ at $n=16$. The "Erdo-Renyi graphstates" (orange) decreases from approximately $5 \cdot 10^{-2}$ at $n=4$ to $10^{-5}$ at $n=16$. The "Local Haar random" (green) fluctuates between $10^{-1}$ and $10^{-3}$. The dashed black "Dataset (L.l.d)" line decreases steadily from $10^{-2}$ at $n=4$ to $10^{-6}$ at $n=16$.
+
+## XI. SUPPLEMENTARY METHODS 11: COMPARISON BETWEEN AN Sn-EQUIVARIANT QNN AND A NON-SYMMETRY RESPECTING QNN: CLASSIFYING CONNECTED VS DISCONNECTED GRAPHS
+
+To further substantiate our claims on the efficacy of Sn-equivariant QNNs compared to non-equivariant models, we consider the problem of classifying connected vs disconnected graphs encoded as graph states (ϕ = π). While this problem can be solved readily with classical methods, it still serve as an instructive example as connectivity is clearly invariant under relabeling. The number of non-isomorphic graphs is exponential, but we train with only a polynomial number of random graphs to illustrate the small data requirements of Sn-equivariant QNNs. To reach overparametrization, we train models with Θ(n3 ) layers. Our EQNN model follows the structure in Fig. 2 of the main text and ends with a measurement of O = Z ⊗n . Then, the prediction of the classifier is given by hθ(ρ) = sgn(Tr[Uθ(ρ)Z ⊗n ]).
+
+As a comparison, we also train standard hardware-efficient ansatzes [20] with the same number of parameters. Here the layers are composed of local unitaries (on single qubits) followed by ladders of CNOTs on adjacent parties. At the end, X1 +X2 is measured and again classification given by the sign of the expectation value.
+
+In Fig. 5 we give an example for n = 7. First, note that the EQNN converges in less than 100 epochs while the standard QNN requires ∼ 250. Most importantly, the training and testing accuracies of the EQNN closely match. The standard QNN, on the other hand, achieves similar training accuracy, but severely overfits and performs poorly in testing. Within 1000 epochs the QNN fails to achieve high training accuracy, unlike the EQNN.
+
+## SUPPLEMENTARY NOTE
+
+Soon after our work was completed the preprint [22] was posted on the arXiv. Therein, the authors claim that the loss function of Sn-equivariant QNNs can be classically simulated. In this section we address these claims. In particular, we aim at making two important points:
+
+- For most relevant cases in QML, the relevant algorithm in [22] is not fully classical, as it require access to a quantum computer to obtain a "classical description" of the input data.
+- Even if one is given such "classical description", the ensuing algorithm that replaces the use of a quantum neural networks scales extremely poorly with the number of qubits, meaning that it is not clear whether it is truly favorable to replace the quantum circuit by classical post-processing.
+
+> *Generated caption of `2210.09974_-_Theoretical_Guarantees_for_Permutation-Equivariant_Quantum_Neural_Networks_assets/figure-010.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains two line plots side-by-side, titled "Equivariant QNN" on the left and "Standard QNN" on the right. Both plots share a common y-axis labeled "Loss/Accuracy" ranging from $0.4$ to $1.0$ (with tick marks at $0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0$) and a common x-axis labeled "Epoch". The left plot's x-axis ranges from $0$ to $100$ with increments of $25$, while the right plot's x-axis ranges from $0$ to $1000$ with increments of $250$. Both plots feature four data series identified in a common legend: "Train Loss" (light orange), "Train Accuracy" (light purple), "Test Accuracy" (dark red), and "Test Loss" (dark blue). In the "Equivariant QNN" plot, the "Train Loss" starts at $1.0$ and decreases monotonically to approximately $0.7$; "Test Loss" starts at $0.9$ and decreases monotonically to approximately $0.68$; "Train Accuracy" starts at $0.5$ and fluctuates upward, reaching about $0.96$ at epoch $100$; "Test Accuracy" starts at $0.6$ and fluctuates, ending at $1.0$ at epoch $75$ and remaining there. In the "Standard QNN" plot, the "Train Loss" starts at $1.0$ and decreases to approximately $0.72$; "Test Loss" starts at $0.65$, drops sharply to below $0.5$, and fluctuates between $0.5$ and $0.65$ through epoch $1000$; "Train Accuracy" starts at $0.5$ and increases to $1.0$ by epoch $250$; "Test Accuracy" starts at $1.0$ and decreases slowly to approximately $0.94$ by epoch $1000$.
+
+We begin by recalling that in Ref. [22], the authors argue that for symmetries restrictive enough (such as the permutation group Sn) some computational tasks become classically tractable provided certain conditions. These conditions are defined as "given certain classical descriptions of the input or the results of efficiently obtainable quantum measurements". This are indeed crucial assumptions, which we argue in the following do not hold in many tasks of practical importance, including quantum machine learning (QML) problems as envisioned in our manuscript. We stress that we do not claim that no interesting problem can be addressed classically, but rather that this is not the case for most QML problems. For instance, we have no doubt that evaluating eigenenergies (and efficiently describing their eigenstates) of Sn-invariant Hamiltonians can indeed be performed classically as evidenced by the Theorems of Ref. [22].
+
+Let us thus henceforth focus on QML applications. In particular, we will discuss Corollary 12 and Theorem 8 of Ref. [22], since these address directly our QML setup (as evidenced by a reference to our manuscript provided just before the corollary). Here, the authors argue that one can evaluate the loss function ℓθ(ρi) provided one is given "efficiently obtainable quantum measurements" on the quantum state ρi. In practice, this materializes as being able to prepare ρi and implementing on a quantum computer the quantum Schur transform [23], which is denoted in Ref. [22] as VSTO. For completeness, we recall that the quantum Schur transform (QST) is a quantum primitive that promises to greatly accelerate several tasks provided access to quantum computing resources (e.g., see a discussion of the many known applications in Ch.6 of Ref. [23] or the introduction of Ref. [24]). The QST is deemed efficiently implementable on a quantum device in the sense that it requires a polynomial number of operations and a logarithmic number of additional ancillas (See, e.g., Refs [21, 24-26] for different possible implementations). While the previous is theoretically true, to our knowledge the QST has not been demonstrated on current devices due to its high requirements for implementation.
+
+Given that the simulability of a generic Sn-invariant QML pipeline, based on Corollary 12 in Ref. [22], effectively requires accessing a quantum state (i.e., the input data) in the first place, coherent processing (i.e., performing a QST) and additional non-trivial measurements (i.e., classical shadows as mentioned when introducing Th.8 in Ref. [22]), we feel comfortable classifying the algorithm of Ref. [22] as truly non-classical (and also non-near-term).
+
+Next, let us discuss the second scenario envisioned in Ref. [22], which assumes that one has been "given certain classical description" of the input states. Already, this assumption is non-realistic and does not hold in generic QML problems, whereby input states can be accessed rather than being "described" in a preferable basis. Still, one could question the case when the input data is classical and encoded in a quantum state. In such a case, the learner effectively has some description of the input state. Still, with the exception of most basic forms of encoding, such description is not readily transferable in a form suitable to the classical simulations of Ref. [22]. To exemplify such situation, the authors address in Ref. [22] the case where the input state is a predefined computational basis state. Indeed, it is known that description of such state can be efficiently mapped to a description in the preferable basis. This can readily be extended to superposition of polynomially many computational basis states. Yet, already the graph state encoding that was used as an example in our numerical experiments would escape such description. Hence, even in this classical input data scenario, we believe that for the majority of encoding (except, the simplest ones) obtaining an efficient classical description of the data without a quantum computer is not a viable option.
+
+Lastly, let us assume that one is given adequate measurements or access to an appropriate classical description of the input state. Then, while it is true that the loss ℓθ(ρi) can be computed classically, this requires incurring very large computational requirements. Explicitly, as mentioned by the authors of Ref. [22] (Appendix F), the classical computation involves routines scaling as O(n10 ) and O(n15 ). While polynomial in the system size n, such complexity may well prohibit any reasonable attempt of scaling past n = 20 qubits.
+
+This discussion shows that if one has access to a quantum computer (as required by the algorithm in Ref. [22]) it is not entirely obvious that one should use it to obtain a classical description of the data (followed by expensive post-processing), rather than using the device to run an Sn- equivariant quantum neural networks with trainability guarantees. One notes that the run-time of our model scales like n6 (O(n3 ) layers each composed of O(n2 ) operations). Then, our results indicate that using a quantum computer with a run-time scaling as n6 (≪ n15 ) leads to overparametrized models with no barren plateaus; and thus there is hope of achieving a quantum advantage in spite of having such large symmetries.
+
+- [1] Z. Puchala and J. A. Miszczak, Symbolic integration with respect to the haar measure on the unitary groups, Bulletin of the Polish Academy of Sciences Technical Sciences 65, 21 (2017).
+- [2] M. Cerezo, A. Sone, T. Volkoff, L. Cincio, and P. J. Coles, Cost function dependent barren plateaus in shallow parametrized quantum circuits, Nature Communications 12, 1 (2021).
+- [3] D. Bacon, I. L. Chuang, and A. W. Harrow, The quantum schur and clebsch-gordan transforms: I. efficient qudit circuits, in Proceedings of the eighteenth annual ACM-SIAM symposium on Discrete algorithms (2007) pp. 1235-1244.
+- [4] H. Zheng, Z. Li, J. Liu, S. Strelchuk, and R. Kondor, On the super-exponential quantum speedup of equivariant quantum machine learning algorithms with su(d) symmetry, arXiv e-prints , arXiv (2022).
+- [5] J. J. Sakurai and E. D. Commins, Modern quantum mechanics, revised edition (1995).
+- [6] P. Woit, Woit, and Bartolini, Quantum theory, groups and representations (Springer, 2017).
+- [7] A. Pesah, M. Cerezo, S. Wang, T. Volkoff, A. T. Sornborger, and P. J. Coles, Absence of barren plateaus in quantum convolutional neural networks, Physical Review X 11, 041011 (2021).
+- [8] M. Larocca, P. Czarnik, K. Sharma, G. Muraleedharan, P. J. Coles, and M. Cerezo, Diagnosing Barren Plateaus with Tools from Quantum Optimal Control, Quantum 6, 824 (2022).
+- [9] S. Thanasilp, S. Wang, N. A. Nghiem, P. J. Coles, and M. Cerezo, Subtleties in the trainability of quantum machine learning models, arXiv preprint arXiv:2110.14753 (2021).
+- [10] Z. Liu, L.-W. Yu, L.-M. Duan, and D.-L. Deng, The presence and absence of barren plateaus in tensor-network based machine learning, Physical Review Letters 129, 270501 (2022).
+- [11] M. Cerezo, A. Arrasmith, R. Babbush, S. C. Benjamin, S. Endo, K. Fujii, J. R. McClean, K. Mitarai, X. Yuan, L. Cincio, and P. J. Coles, Variational quantum algorithms, Nature Reviews Physics 3, 625-644 (2021).
+- [12] K. Bharti, A. Cervera-Lierta, T. H. Kyaw, T. Haug, S. Alperin-Lea, A. Anand, M. Degroote, H. Heimonen, J. S. Kottmann, T. Menke, et al., Noisy intermediate-scale quantum algorithms, Reviews of Modern Physics 94, 015004 (2022).
+- [13] A. W. Harrow, The church of the symmetric subspace, arXiv preprint arXiv:1308.6595 (2013).
+- [14] D. Gross, S. T. Flammia, and J. Eisert, Most quantum states are too entangled to be useful as computational resources, Physical review letters 102, 190501 (2009).
+- [15] M. Ragone, Q. T. Nguyen, L. Schatzki, P. Braccia, M. Larocca, F. Sauvage, P. J. Coles, and M. Cerezo, Representation theory for geometric quantum machine learning, arXiv preprint arXiv:2210.07980 (2022).
+- [16] B. Hajek and M. Raginsky, Ece 543: Statistical learning theory (2021).
+- [17] A. Arrasmith, Z. Holmes, M. Cerezo, and P. J. Coles, Equivalence of quantum barren plateaus to cost concentration and narrow gorges, Quantum Science and Technology 7, 045015 (2022).
+- [18] R. Raussendorf, D. E. Browne, and H. J. Briegel, Measurement-based quantum computation on cluster states, Physical review A 68, 022312 (2003).
+- [19] M. Hein, J. Eisert, and H. J. Briegel, Multiparty entanglement in graph states, Physical Review A 69, 062311 (2004).
+- [20] A. Kandala, A. Mezzacapo, K. Temme, M. Takita, M. Brink, J. M. Chow, and J. M. Gambetta, Hardware-efficient variational quantum eigensolver for small molecules and quantum magnets, Nature 549, 242 (2017).
+- [21] W. M. Kirby and F. W. Strauch, A practical quantum algorithm for the schur transform, Quantum Information & Computation 18, 721-742 (2018).
+- [22] E. R. Anschuetz, A. Bauer, B. T. Kiani, and S. Lloyd, Efficient classical algorithms for simulating symmetric quantum systems, arXiv preprint arXiv:2211.16998 (2022).
+- [23] A. W. Harrow, Applications of coherent classical communication and the schur transform to quantum information theory, arXiv preprint quant-ph/0512255 (2005).
+- [24] H. Krovi, An efficient high dimensional quantum schur transform, Quantum 3, 122 (2019).
+- [25] D. Bacon, I. L. Chuang, and A. W. Harrow, The quantum schur transform: I. efficient qudit circuits, arXiv preprint arXiv:0601001 (2005).
+- [26] D. Bacon, I. L. Chuang, and A. W. Harrow, Efficient quantum circuits for schur and clebsch-gordan transforms, Physical review letters 97, 170502 (2006).

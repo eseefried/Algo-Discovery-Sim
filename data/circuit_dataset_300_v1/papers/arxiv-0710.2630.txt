@@ -1,0 +1,1604 @@
+## 1 Introduction
+
+A formula ϕ on gate set S and of size N is a tree with N leaves, such that each internal node is a gate from S on its children. The read-once formula evaluation problem is to evaluate ϕ(x) given oracle access to the input string x = x1x2 . . . xN. An optimal, O(√N)-query quantum algorithm is known to evaluate "approximately balanced" formulas over the gates S = {AND, OR, NOT} [ACR+07]. We extend the gate set S. We develop an optimal quantum algorithm for evaluating balanced, read-once formulas over a gate set S that includes arbitrary three-bit gates, as well as bounded fan-in EQUAL gates and bounded-size {AND, OR, NOT, PARITY} formulas considered as single gates. The correct notion of "balanced" for a formula including different kinds of gates turns out to be "adversary-balanced," meaning that the inputs to a gate must have exactly equal adversary lower bounds. The definition of "adversary-balanced" formulas also includes as a special case layered formulas in which all gates at a given depth from the root are of the same type.
+
+The idea of our algorithm is to consider a weighted graph G(ϕ) obtained by replacing each gate of the formula ϕ with a small gadget subgraph, and possibly also duplicating subformulas. Figure 1 has several examples. We relate the evaluation of ϕ to the presence or absence of small-eigenvalue eigenvectors of the weighted adjacency matrix AG(ϕ) that are supported on the root vertex of G(ϕ). The quantum algorithm runs spectral estimation to either detect these eigenvectors or not, and therefore to evaluate ϕ.
+
+As a special case, for example, our algorithm implies:
+
+Theorem 1.1. A balanced ternary majority (MAJ3) formula of depth d, on N = 3d inputs, can be evaluated by a quantum algorithm with bounded error using O(2d ) oracle queries, which is optimal.
+
+The classical complexity of evaluating this formula is known only to lie between Ω((7/3)d ) and o((8/3)d ), and the previous best quantum algorithm, from [ACR+07], used O(√5d ) queries.
+
+∗ School of Computer Science and Institute for Quantum Computing, University of Waterloo. Part of the work conducted while at the Institute for Quantum Information, California Institute of Technology, supported by NSF Grants CCF-0524828 and PHY-0456720, and by ARO Grant W911NF-05-1-0294. Email: breic@uwaterloo.ca
+
+†Google, Inc. Part of the work conducted while at the University of California, Berkeley, supported by NSF Grant CCF0524837 and ARO Grant DAAD 19-03-1-0082. Email: spalek@google.com
+
+> *Generated caption of `0710.2630_-_Span-program-based_quantum_algorithm_for_evaluating_formulas_assets/figure-001.png` (ollama:gemma4:31b, prompt sci-v1):* This image is a series of four diagrams illustrating the transformation of logic gates into graph-like structures. The first diagram shows a NOT gate with an input $\rho$ and an output $G(\rho)$. The second diagram shows an $\text{EQUAL}_k$ gate with $k$ inputs $\rho_1, \dots, \rho_k$ and an output that branches into a tree-like structure with leaves labeled $G(\rho_1), G(\rho_k), G(\neg\rho_1), G(\neg\rho_k)$. The third diagram shows an $\text{OR}_k$ gate with $k$ inputs $\rho_1, \dots, \rho_k$ and an output that branches into a tree with leaves $G(\rho_1), \dots, G(\rho_k)$. The fourth diagram shows a $\text{MAJ}_3$ gate with three inputs $\rho_1, \rho_2, \rho_3$ and an output that connects to three nodes $G(\rho_1), G(\rho_2), G(\rho_3)$ via a crossing network of edges meeting at a central point. Each diagram consists of a gate on the left, a right-pointing arrow, and the corresponding graph representation on the right.
+
+The graph gadgets themselves are derived from "span programs" [KW93]. Span programs have been used in classical complexity theory to prove lower bounds on formula size [KW93, BGW99] and monotone span programs are related to linear secret-sharing schemes [BGP96]. (Most, though not all [ABO99], applications are over finite fields, whereas we use the definition over C.) We will only use compositions of constant-size span programs, but it is interesting to speculate that larger span programs could directly give useful new quantum algorithms.
+
+Classical and quantum background The formula evaluation problem has been well-studied in the classical computer model. Classically, the case S = {NAND} is best understood. A formula with only NAND gates is equivalent to one with alternating levels of AND and OR gates, a so-called "AND-OR formula," also known as a two-player game tree. One can compute the value of a balanced binary AND-OR formula with zero error in expected time O(N log2 [(1+√33)/4] ) = O(N 0.754 ) [Sni85, SW86], and this is optimal even for bounded-error algorithms [San95]. However, the complexity of evaluating balanced AND-OR formulas grows with the degree of the gates. For example, in the extreme case of a single OR gate of degree N, the complexity is Θ(N). The complexity of evaluating AND-OR formulas that are not "well-balanced" is unknown.
+
+If we allow the use of a quantum computer with coherent oracle access to the input, however, then the situation is much simpler; between Ω(√N) and N 12 +o(1) queries are necessary and sufficient to evaluate any {AND, OR, NOT} formula with bounded error. In one extreme case, Grover search [Gro96, Gro02] evaluates an OR gate of degree N using O(√N) oracle queries and O(√N log logN) time. In the other extreme case, Farhi, Goldstone and Gutmann recently devised a breakthrough algorithm for evaluating the depth-log2 N balanced binary AND-OR formula in O(√N) time in the unconventional Hamiltonian oracle model [FGG07]. Ambainis [Amb07] improved this to O(√N)-queries in the standard query model. Childs, Reichardt, Špalek and Zhang [CRŠZ07] gave an O(√N)-query algorithm for evaluating balanced or "approximately balanced" formulas, and extended the algorithm to arbitrary {AND, OR, NOT} formulas with N 12 +o(1) queries, and also N 1 2 +o(1) time after a preprocessing step. (Ref. [ACR+07] contains the merged results of [Amb07, CRŠZ07].)
+
+This paper shows other nice features of the formula evaluation problem in the quantum computer model. Classically, with the exception of {NAND}, {NOR} and a few trivial cases like {PARITY}, most gate sets are poorly understood. In 1986, Boppana asked the complexity of evaluating the balanced, depth-d ternary majority (MAJ3) function [SW86], and today the complexity is only known to lie between Ω((7/3)d ) and O((2.6537 . . .)d ) [JKS03]. In particular, the naïve generalization of randomized alpha-beta pruningrecursively evaluate two random immediate subformulas and then the third if they disagree-runs in expected time O((8/3)d ) and is suboptimal. This suggests that the balanced ternary majority function is significantly different from the balanced k-ary NAND function, for which randomized alpha-beta pruning is known to be optimal. In contrast, we show that the optimal quantum algorithm of [CRŠZ07] does extend to give an optimal O(2d )-query algorithm for evaluating the balanced ternary majority formula. Moreover, the algorithm also generalizes to a significantly larger gate set S.
+
+Organization We introduce span programs and explain their correspondence to weighted bipartite graphs in Section 2. The correspondence involves considering parts of a span program P as the weighted adjacency matrix for a corresponding graph GP . We prove that the eigenvalue-zero eigenvectors of this adjacency matrix evaluate P (Theorem 2.5). This theorem provides useful intuition.
+
+We develop a quantitative version of Theorem 2.5 in Section 3. We lower-bound the overlap of the eigenvalue-zero eigenvector with a known starting state. This lower-bound will imply completeness of our quantum algorithm. To show soundness of the algorithm, we also analyze small-eigenvalue eigenvectors in order to prove a spectral gap around zero. Essentially, we solve the eigenvalue equations in terms of the eigenvalue λ, and expand a series around λ = 0. The results for small-eigenvalue and eigenvalue-zero eigenvectors are closely related, and we unify them using a measure we term "span program witness size." The details of the proofs from this section are in Appendix A.
+
+Section 4 applies the span program framework to the formula evaluation problem. Theorem 4.7 is our general result, an optimal quantum algorithm for evaluating formulas that are over the gate set S of Definition 4.1, and that are adversary-balanced (Definition 4.5). The proof of Theorem 4.7 has three parts. First, in Section 4.2, we display an optimal span program for each of the gates in S. Second, we compose the span programs for the individual gates to obtain a span program for the full formula ϕ. This is equivalent to joining together the gadget graphs described in Figure 1 to obtain a graph G(ϕ). We combine the spectral analyses of the individual span programs to analyze the spectrum of G(ϕ) (Theorem 4.16). Finally, this analysis straightforwardly leads to a quantum algorithm based on phase estimation of a quantum walk on G(ϕ), in Section 4.4.
+
+Section 5 concludes with a discussion of some extensions to the algorithm.
+
+## 2 Span programs and eigenvalue-zero graph eigenvectors
+
+A span program P is a certain linear-algebraic way of specifying a function fP . For details on span programs applied in classical complexity theory, we can still recommend the original reference [KW93] as well as, e.g., the more recent [GP03].
+
+Definition 2.1 (Span program). A span program P consists of a nonzero "target" vector t in a vector space over C, together with "grouped input" vectors {vj : j ∈ J}. Each vj is labeled with a subset Xj of the literals {x1, x1, . . . , xn, xn}. To P corresponds a boolean function fP : {0, 1}n → {0, 1}; defined by fP (x) = 1 (i.e., true) if and only if there exists a linear combination ∑j ajvj = t such that aj = 0 if any of the literals in Xj evaluates to zero (i.e., false).
+
+$$
+\begin{array} { c } \quad
+$$
+
+computes the MAJ3 function. Indeed, at least two of the vj must have nonzero coefficient in any linear combination equaling the target t. Of course, the second row of (v1 v2 v3) could be any (α β γ) with α, β, γ distinct and nonzero, and the span program would still compute MAJ3. This specific setting is used to optimize the running time of the quantum algorithm (Claim 4.9).
+
+In this section, we will show that by viewing a span program P as the weighted adjacency matrix AGP of a certain graph GP , the true/false evaluation of P on input x corresponds to the existence or nonexistence of an eigenvalue-zero eigenvector of AGP (x) supported on a distinguished output node (Theorem 2.5).
+
+In turn, this will imply that writing a span program P for a function f immediately gives a quantum algorithm for evaluating f, or for evaluating formulas including f as a gate (Section 4). The algorithm works by spectral estimation on AGP (x). Its running time depends on the span program's "witness size" (Section 3). For example, if fP (x) is true, then the witness size is essentially the shortest squared length of any witness vector (aj)j∈J in Definition 2.1.
+
+> *Generated caption of `0710.2630_-_Span-program-based_quantum_algorithm_for_evaluating_formulas_assets/figure-002.png` (ollama:gemma4:31b, prompt sci-v1):* An image containing a graph diagram on the left and a corresponding matrix equation on the right. The graph consists of nodes represented by grey circles connected by black lines. On the left, there is a group of nodes labeled $b_{I_1}$ with a bracket over them, starting with a node labeled $a_1$. To the right is another group of nodes labeled $b_{I_{|J|}}$ with a bracket over them, ending with a node labeled $a_{|J|}$. Below these, there are nodes labeled $b_O$ and $b_C$. Specifically, a node labeled $a_O$ is connected to nodes in the $b_{I_1}$ group and $b_{I_{|J|}}$ group, and a set of nodes labeled $b_C$ are connected to the nodes in the $b_{I_{|J|}}$ group. The matrix equation is $A_{G_P} = \begin{pmatrix} 1 & A_{OJ} \\ 0 & A_{CJ} \\ \vdots & \vdots \\ 0 & 0 \\ \vdots & A_{IJ} \\ 0 & \vdots \end{pmatrix}$. Above the matrix, $a_O$ is aligned with the first column and $a_J$ is aligned with the second column. To the right of the matrix, a large bracket groups the rows into $b_O$ (first row), $b_C$ (middle rows), and $b_I$ (bottom rows).
+
+Remark 2.3. Let us clarify a few points in Definition 2.1.
+
+1. It is convenient, but nonstandard, to allow grouped inputs, i.e., literal subsets Xj possibly with |Xj| > 1, instead of just single literals, to label the columns. A grouped input j can be thought of as evaluating the AND of all literals in Xj. A span program P with some |Xj| > 1 can be expanded out so that all |Xj| ≤ 1, without increasing ∑j |Xj|, known as the size of P.
+2. It is sometimes convenient to allow Xj = ∅. In this case, vector vj is always available to use in the linear combination; grouped input j evaluates to true always. However, such vectors can be eliminated from P without increasing the size [KW93, Theorem 7].
+3. By a basis change, one can always adjust the target vector t to (1, 0, 0, . . . , 0).
+
+## 2.1 Span program as an adjacency matrix
+
+A span program P with target vector t = (1, 0, . . . , 0) corresponds to a certain weighted bipartite graph.
+
+Notation: For an index sequence H = (h1, . . . , h|H|) and a set of variables {ah}, let aH = (ah1 , . . . , ah|H| ). For example, vJ denotes the sequence of grouped input vectors. It will be convenient to define several more index sequences: O ("output"), C ("constraints") and I ("inputs"). Let O and C together index the coordinates of the vector space, with O = {1} being the first coordinate, and C the remainder. Let Ij index Xj for each j ∈ J, and let I = ⋃j∈J Ij a disjoint union so |I| = size(P).
+
+We will construct a graph GP on |I| + |J| + |C| + 2|O| vertices. Writing the grouped input vectors out as the columns of a matrix, let ( AOJ ACJ ) = ∑j∈J |vj〉〈j|; AOJ is a 1 × |J| matrix row, and ACJ is a |C| × |J| matrix. Let AIJ = ∑j∈J,i∈Ij |i〉〈j|; AIJ encodes P's grouped inputs. Now consider the bipartite graph GP of Figure 2, the upper right block of whose weighted Hermitian adjacency matrix is AGP . (The adjacency matrix is block off-diagonal because the graph is bipartite.) The edges (aj, bi) for j ∈ J and i ∈ Ij are "input edges," while (aO, bO) is the "output edge." The input and output edges all have weight one. The weights of edges (bO, aj) for j ∈ J are given by AOJ (the first coordinates of the grouped input vectors vJ), while the weights of edges (bc, aj) for c ∈ C, j ∈ J are given by ACJ (the remaining coordinates of vJ).
+
+Example 2.4. For the MAJ3 span program of Example 2.2, |C| = 1, |I| = |J| = 3, the graph GP is shown in Figure 1, and the matrix AGP is
+
+$$
+\left ( \begin{matrix} 1 & \frac { 1 } { \sqrt { 3 } } & \frac { 1 } { \sqrt { 3 } } & \frac { 1 } { \sqrt { 3 } } \\ 0 & 1 & e ^ { 2 \pi i / 3 } & e ^ { - 2 \pi i / 3 } \\ 0 & 1 & 0 & 0 \\ 0 & 0 & 1 & 0 \\ 0 & 0 & 0 & 1 \end{matrix} \right ) \, .
+$$
+
+## 2.2 Eigenvalue-zero eigenvectors of the span program adjacency matrix
+
+Theorem 2.5. For an input x ∈ {0, 1}n , define a weighted graph GP (x) by deleting from GP the edges (aj, bi) if the ith literal in Xj is true. Consider all the eigenvalue-zero eigenvector equations of the weighted adjacency matrix AGP (x), except for the constraint at aO. These equations have a solution with support on vertex aO if and only if fP (x) = 1, and have a solution with support on bO if and only if fP (x) = 0.
+
+Proof. Notation: Use aj, bi, bc, aO, bO to denote coefficients of a vector on the vertices of GP . Let AIJ(x) include only edges to false inputs, i.e., AIJ(x) = ∑j∈J,false i∈Ij |i〉〈j|.
+
+The eigenvalue-λ eigenvector equations of AGP (x) are
+
+$$
+\lambda b _ { O } = a _ { O } + A _ { O J } a _ { J }
+$$
+
+$$
+\lambda b _ { C } = A _ { C J } a _ { J }
+$$
+
+$$
+\lambda b _ { I } = A _ { I J } ( x ) a _ { J }
+$$
+
+$$
+\lambda a _ { O } = b _ { O }
+$$
+
+$$
+\lambda a _ { J } = A _ { O J } \bar { b } _ { O } + A _ { C J } \bar { b } _ { C } + A _ { I J } ( x ) ^ { \dagger } \bar { b } _ { I }
+$$
+
+At λ = 0, these equations say that for each vertex, the weighted sum of the adjacent vertices' coefficients must be zero. We are looking for solutions satisfying all these equations except possibly Eq. (2.1d). Since the graph is bipartite, at λ = 0 the a coefficients do not interact with the b coefficients. In particular, Eqs. (2.1d,e) (resp. 2.1a-c) can always be satisfied by setting the b (resp. a) coefficients to zero.
+
+By scaling, there is a solution with nonzero aO iff there is a solution with aO = -1. Then Eqs. (2.1a,b) are equivalent to t = ( AOJ ACJ ) aJ = ∑j ajvj. Moreover, Eq. (2.1c) implies that aj can be nonzero only if grouped input j is true. (If Xj includes any false inputs, then AIJ(x)|j〉 ̸= 0, so aj = 0.) These conditions are the same as those in Definition 2.1.
+
+Next, we argue that there is a solution of Eq. (2.1e) with λ = 0 and bO = 1 if and only if fP (x) = 0. Indeed,
+
+$$
+f _ { P } ( x ) = 0 \Leftrightarrow t \notin \text {Span} \{ v _ { j } \colon j \text { true} \} \Leftrightarrow t \notin \text {Range} \left [ \left ( \ A _ { C J } ^ { \ A _ { J } } \right ) \Pi \right ]
+$$
+
+where Π = ∑true j |j〉〈j|. In turn, this holds iff there is a vector w orthogonal to the range and having inner product one with t-precisely constraint (2.1e) with w = ( bO bC ).
+
+Remark 2.6. By Theorem 2.5, we can think of the graph GP as giving a "dual-rail" encoding of the function fP : there is a λ = 0 eigenvector of GP (x) supported on aO if and only if fP (x) = 1, and there is one supported on bO iff fP (x) = 0. This justifies calling edge (aO, bO) the output edge of GP .
+
+## 2.3 Dual span program
+
+A span program P immediately gives a dual span program, denoted P † , such that fP †(x) = ¬fP (x) for all x ∈ {0, 1}n . For our purposes, though, it suffices to define a NOT gate graph gadget to allow negation of subformulas.
+
+Definition 2.7 (NOT gate gadget). Implement a NOT gate x ↦→ x as two weight-one edges connected (Figure 1). The edge (ai, bi) is the input edge, while (aO, bO) is the output edge. The middle vertex ai = bO is shared.
+
+At λ = 0, the coefficient on aO is minus that on bi, and ai = bO by definition. Therefore, this gadget complements the dual rail encoding of Theorem 2.5.
+
+The NOT gate gadget of Definition 2.7 can be used to define a dual span program P † by complementing the output and all inputs with NOT gates, and also complementing all input literals in the sets XJ. Since it is not essential here, we leave the formal definition as an exercise. Alternative constructions of dual programs are given in [CF02, NNP05].
+
+> *Generated caption of `0710.2630_-_Span-program-based_quantum_algorithm_for_evaluating_formulas_assets/figure-003.png` (ollama:gemma4:31b, prompt sci-v1):* This image is a graph diagram consisting of nodes and edges. There are five nodes in the top row, labeled $x_1$, $x_2$, $x_3$, $x_4$, and $x_5$ from left to right. There are three nodes in a middle row: two nodes on the left side and one node on the right side. One node is positioned at the bottom. The edges are connected as follows: $x_1$ is connected to the first two nodes in the middle row; $x_2$ is connected to the first two nodes in the middle row; $x_3$ is connected to the second node in the middle row and the third node in the middle row; $x_4$ is connected to the second node and the third node in the middle row; $x_5$ is connected to the second node and the third node in the middle row. Additionally, the first node in the middle row is connected to the bottom node.
+
+Example 2.8. For distinct, nonzero α, β, γ, the span program
+
+$$
+X _ { J } = ( \, \emptyset \, \emptyset \, \{ \overline { x _ { 1 } } \} \, \{ \overline { x _ { 2 } } \} \, \{ \overline { x _ { 3 } } \} )
+$$
+
+$$
+t = \begin{pmatrix} 1 \\ 0 \\ 0 \end{pmatrix} , \ v _ { J } = \begin{pmatrix} 1 & 0 & 0 & 0 & 0 \\ 1 & \alpha & 1 & 0 & 0 \\ 1 & \beta & 0 & 1 & 0 \\ 1 & \gamma & 0 & 0 & 1 \end{pmatrix}
+$$
+
+computes ¬MAJ3(x1, x2, x3). It was constructed, by adding NOT gate gadgets, as the dual to the span program in Example 2.2, up to choice of weights.
+
+## 2.4 Span program composition
+
+Definition 2.9 (Composed graph and span program). Consider span program Q on {0, 1}n and programs Qi, i ∈ [n] ≡ {1, . . . , n}, with corresponding graphs GQ and GQi . The composed graph is defined by identifying the input edges of GQ with the output edges of copies of the other graphs. If an edge corresponds to input literal xi, then identify that edge with the output edge of a copy of GQi ; and if an edge corresponds to xi, then insert a NOT gate gadget (i.e., an extra vertex, as in Definition 2.7) before a copy of GQi . The composed span program, denoted Q ◦ Q[n], is the program corresponding to the composed graph (i.e., GQ◦Q[n] is the composed graph). Thus fQ◦Q[n] = fQ ◦ fQ[n] .
+
+Definition 2.10 (Formula graph and span program). Given span programs for each gate in a formula ϕ, span program P(ϕ) is defined as their composition according to the formula. Let G(ϕ) be the composed graph, G(ϕ) = GP (ϕ).
+
+Example 2.11. For example, the span program
+
+$$
+X _ { J } = ( \{ x _ { 1 } \} \ \{ x _ { 2 } \} \ \emptyset \ \{ x _ { 3 } \} \ \{ x _ { 4 } \} \ \{ x _ { 5 } \} )
+$$
+
+$$
+t = \begin{pmatrix} 1 \\ 0 \\ 0 \\ 0 \end{pmatrix} , \ v _ { J } = \begin{pmatrix} 1 & 1 & 1 & 1 & 0 & 0 & 0 \\ 0 & \beta & \gamma & 0 & 0 & 0 & 0 \\ 0 & 0 & 1 & 1 & 1 & 1 & 1 \\ 0 & 0 & 0 & \alpha & \beta & \gamma & \end{pmatrix}
+$$
+
+is a composed span program that computes the function MAJ3(x1, x2,MAJ3(x3, x4, x5)), provided α, β, γ are distinct and nonzero. (See Example 2.2.) Figure 3 shows the associated composed graph.
+
+Example 2.12 (Duplicating and negating inputs). To the left in Figure 4 is the composed graph for the formula MAJ3(x1, x2, x3)⊕x4 = EQUAL2(MAJ3(x[3]), x4), obtained using the substitution rules of Figure 1. (A span program for PARITY will be given in Lemma 4.12.) Note that we are effectively negating some inputs twice, by putting NOT gate gadgets below the negated literals x1, x2, x3. This is of course redundant, and is only done to maintain the strict correspondence of graphs to span programs, as in Example 2.8, by keeping the input vertices bI at odd distances from aO.
+
+To the right is the same graph evaluated on input x = 1100, i.e., with edges to true literals deleted. Since the formula evaluates to true, Theorem 2.5 promises that there is a λ = 0 eigenvector supported on aO. In this case, that eigenvector is unique. It has support on the black vertices.
+
+> *Generated caption of `0710.2630_-_Span-program-based_quantum_algorithm_for_evaluating_formulas_assets/figure-004.png` (ollama:gemma4:31b, prompt sci-v1):* This image consists of two side-by-side diagrams of rooted tree graphs with circular nodes. The left diagram features labels on its leaf nodes: the leftmost leaf is $x_1$, followed by $x_2$ and $x_3$. To the right, a separate subtree has leaves labeled $\overline{x_1}$, $x_2$, and $\overline{x_3}$ from left to right. In the middle lower section, a leaf is labeled $\overline{x_4}$, and the rightmost leaf is labeled $x_4$. Nodes are shaded in varying tones of gray, with leaf nodes being the lightest and the root node at the bottom being the darkest. The right diagram is structurally identical to the left one but contains no labels; instead, it uses node shading to distinguish roles, with the root node and two other internal nodes shaded black, and the remaining nodes shaded in light or medium gray.
+
+## 3 Span program witness size
+
+In Section 2, we established that after converting a formula ϕ into a weighted graph G(ϕ), by replacing each gate with a gadget subgraph coming from a span program, the eigenvalue-zero eigenvectors of the graph effectively evaluate ϕ. The dual-rail encoding of ϕ(x) = fP(ϕ)(x) promised by Theorem 2.5 will suffice to give a phase-estimation-based quantum algorithm for evaluating ϕ. The goal of this section is to make Theorem 2.5 more quantitative, which will enable us to analyze the algorithm's running time.
+
+In particular, we will lower-bound the achievable squared support on either aO or bO of a unit-normalized λ = 0 eigenvector. This will enable the algorithm to detect if ϕ(x) = 1 by starting a quantum walk at aO; if ϕ(x) = 1, then |aO〉 will have large overlap with the λ = 0 eigenvector.
+
+We also study eigenvalue-λ eigenvectors of GP(ϕ)(x), for |λ| ̸= 0 sufficiently small. At small enough eigenvalues, the dual-rail encoding property of Theorem 2.5 still holds, in a different fashion. Note that since the graph is bipartite, we may take λ > 0 without loss of generality. For small enough λ > 0, it will turn out that the function evaluation corresponds to the output ratio rO ≡ aO/bO. If fP (x) = 1, then rO is large and negative, roughly of order -1/λ. If fP (x) = 0, then rO is small and positive, roughly of order λ. Ultimately, the point of this analysis is to show that if the formula evaluates to false, then there do not exist any eigenvalue-λ eigenvectors supported on aO for small enough |λ| ̸= 0. This spectral gap will prevent the algorithm from outputting false positives.
+
+Consider a span program P. Let us generalize the setting of Theorem 2.5 to allow P's inputs to be themselves span programs, as in Definition 2.9. Assume that for some x, every λ ∈ [0,Λ) and each input i ∈ I, we have constructed unit-normalized states |ψi(λ)〉 satisfying the eigenvalue-λ constraints for all the ith subgraph's vertices except ai.
+
+Definition 3.1 (Subformula complexity). At λ = 0, for each input i ∈ Ij, let σi denote |ψi〉's squared support on either aj or bi, depending on whether the input evaluates to true or false, respectively.
+
+For λ > 0, assume that the coefficients of |ψi〉 along the ith input edge are nonzero, and let ri = aj/bi be their ratio. If the literal associated to input i evaluates to false, then let si = ri/λ; if it is true, then let si = -1/(riλ).
+
+For an input i ∈ I, its subformula complexity is
+
+$$
+z _ { i } = \max _ { x } \max \left \{ 1 / \sigma _ { i } , \sup _ { \lambda \in ( 0 , \Lambda ) } s _ { i } \right \} \ .
+$$
+
+For example, if zi is small, then |ψi(0)〉 has large support on either ai or bi. In general, zi ≥ 1. If input i corresponds to a literal and not the output edge of another span program, then zi = 1.
+
+We construct a normalized state |ψO(λ)〉 that satisfies all the eigenvalue-λ eigenvector constraints of the composed graph, except Eq. (2.1d) at aO. We construct |ψO〉 by putting together the scaled |ψi〉s and also assigning coefficients to the vertices in GP . Similarly to Eq. (3.1), define
+
+$$
+z _ { O } ( x ) = \max \left \{ 1 / \sigma _ { O } , \sup _ { \lambda \in ( 0 , \Lambda ) } s _ { O } \right \} \ ,
+$$
+
+where σO is the squared support of |ψO(0)〉 on aO or bO, and, for λ > 0, sO is -1/(rOλ) or rO/λ if f(x) is true or false, respectively. We will relate zO =maxx zO(x) to the input complexities zI (Theorem 3.7).
+
+First of all, notice that if |Ij| > 1, then several of the input subgraphs share the vertex aj. They must be scaled so that their coefficients at aj all match, motivating the following definition.
+
+Definition 3.2. The grouped input complexity of j ∈ J on input x is
+
+$$
+\tilde { z } _ { j } ( x ) = \begin{cases} & \max \left \{ \sum _ { i \in I _ { j } } z _ { i } , 1 \right \} & \text {if } j \ e v a l u a t e s \, \text { to } \text { true } \\ & \left ( \sum _ { f a l s e \, i \in I _ { j } } z _ { i } ^ { - 1 } \right ) ^ { - 1 } & \text {otherwise} \end{cases}
+$$
+
+Recall that grouped input j evaluates to true iff all inputs in Ij are true. (In the first case, we take the maximum with 1 to handle the case Ij = ∅.)
+
+When j is false, some input i ∈ Ij is false, so the coefficient at aj must be set to zero at λ = 0. However, for each false i ∈ Ij, |ψi〉 can be scaled arbitrarily. The definition in Eq. (3.3) comes from choosing scale factors fi in order to maximize the sum of the scaled coefficients on the vertices bi, under the constraint that the total norm be one, ∑i∈Ij |fi|2 = 1.
+
+A few more definitions are needed to state Theorem 3.7.
+
+Definition 3.3 (Asymptotic notation). Let a ≲ b mean that there exist constants c1, c2 such that a ≤ c1 + b(1 + c2|λ| maxi zi).
+
+Definition 3.4 (Matrix notations). For a given input x, let Π(x) = ∑true j |j〉〈j| a projection onto the true grouped inputs, Π(x) = 1 - Π(x), and z̃(x) = ∑j z̃j(x)|j〉〈j| a diagonal matrix of the grouped input complexities. To simplify equations, we will generally leave implicit the dependence on x, writing Π, Π and z̃. Let A = ( AOJ ACJ ) = ∑j |vj〉〈j| with columns the vectors |vj〉.
+
+Definition 3.5 (Moore-Penrose pseudoinverse). For a matrix M, let M + denote its Moore-Penrose pseudoinverse. If the singular-value decomposition of M is M = ∑k mk|k〉〈k′ | with all mk > 0 and for sets of orthonormal vectors {|k〉} and {|k′ 〉}, then M + = ∑k m-1 k |k′ 〉〈k|. Note that MM + = ∑k |k〉〈k| is the projection onto M's range.
+
+Definition 3.6 (Span program witness size). For span program P and input subformula complexities zI, the witness size of P is wsize(P) =maxx wsize(P, x), where for an input x, wsize(P, x) is defined as follows:
+
+- If fP (x) = 1, then |t〉 ∈ Range(AΠ), so there is a witness |w〉 ∈ C|J| satisfying AΠ|w〉 = |t〉. Then wsize(P, x) is the minimum squared length, weighted by z̃(x)1/2 , of any such witness:
+
+$$
+\ w s i z e ( P , x ) & = \min _ { | w \rangle \colon A \Pi | w \rangle = | t \rangle } \| \tilde { z } ^ { 1 / 2 } | w \rangle \| ^ { 2 } \\ & = \| ( A \Pi \tilde { z } ^ { - 1 / 2 } ) ^ { + } | t \rangle \| ^ { 2 } \ .
+$$
+
+- If fP (x) = 0, then |t〉 /∈ Range(AΠ). Therefore there is a witness |w′ 〉 ∈ C|C|+1 satisfying 〈t|w′ 〉 = 1 and ΠA† |w′ 〉 = 0. Then
+
+$$
+\ w s i z ( P , x ) & = \min _ { | w ^ { \prime } \rangle \cdot \langle t | w ^ { \prime } \rangle = 1 } \| \tilde { z } ^ { 1 / 2 } A ^ { \dagger } | w ^ { \prime } \rangle \| ^ { 2 } \\ & = \| ( 1 + ( \bar { \Pi } ( A \tilde { z } ^ { 1 / 2 } ) ^ { + } A \tilde { z } ^ { 1 / 2 } - 1 ) ^ { + } \Pi ) ( A \tilde { z } ^ { 1 / 2 } ) ^ { + } | t \rangle \| ^ { - 2 } \ ,
+$$
+
+the inverse squared length of the projection of (Az̃1/2 )+|t〉 onto the intersection of Π and Range(z̃1/2A† ).
+
+By |wx〉, resp. |w′x 〉, we denote a witness for input x achieving the minimum in Eq. (3.4), resp. (3.5).
+
+The span program witness size is easily computed on any given input x. Lemma A.3 below will give two alternative expressions for wsize(P, x). Now our main result is:
+
+Theorem 3.7. Consider a constant span program P. Assume that Λzi ≤ ϵ for a small enough constant ϵ > 0 to be determined and for all i ∈ I. Then
+
+$$
+z _ { O } ( x ) \lesssim \text {size} ( P , x ) \ .
+$$
+
+For λ = 0, Eq. (3.6) says that the achievable squared magnitude on aO or bO of a normalized eigenvaluezero eigenvector is at least 1/wsize(P, x), up to small controlled terms. For λ > 0, Eq. (3.6) says that the ratio rO = aO/bO is either in (0,wsize(P, x)λ] or (-∞,-1/(wsize(P, x)λ)], up to small controlled terms, depending on whether fP (x) is false or true.
+
+Proof sketch of Theorem 3.7. At λ = 0, the proof of Theorem 3.7 is the same as that of Theorem 2.5, except scaling the inputs so as to maximize the squared magnitude on aO or bO. This maximization problem is essentially the same as the problems stated in Definition 3.6 (up to additive constants). The explicit expressions for the solutions follow by geometry.
+
+For λ > 0, we solve the eigenvalue equations (2.1a,b,e) by inverting a matrix and applying the Woodbury formula. We argue that all inverses exist in the given range of λ. We obtain
+
+$$
+r _ { O } = a _ { O } / b _ { O } = \lambda + \langle o | \tilde { r } | o \rangle + \lambda \langle o | \tilde { r } A _ { C J } \, ^ { \dagger } X ^ { - 1 } A _ { C J } \tilde { r } | o \rangle \ ,
+$$
+
+where |o〉 = AOJ † , r̃ = - 1λ s̃-1Π + λs̃Π (with s̃ defined from s similarly to how z̃ is defined from z), and X = ACJ s̃-1ΠACJ †-λ2ACJ s̃ΠACJ †-λ2 . The largest term in X, ACJ s̃-1ΠACJ † , is only invertible restricted to its range, ∆ = ACJΠ(ACJΠ)+. Therefore, we compute the Taylor series in λ of the pseudoinverse of ∆X∆ and of its Schur complement, (X/(∆X∆)), separately, and then recombine them. The lowest-order term in the solution again corresponds to Definition 3.6 (if fP (x) is false, the 1/λ term is zero), and we bound the higher-order terms.
+
+The full proof of Theorem 3.7 is given in Appendix A.
+
+Remark 3.8. In case fP (x) = 0, A† |w′ 〉 appears also in the "canonical form" of the span program P [KW93].
+
+The above analysis of span programs does not apply to the NOT gate, because the ability to complement inputs was assumed in Definition 2.1. Implementing the NOT gate x ↦→ x with a span program on the literal x would be circular. Therefore we provide a separate analysis.
+
+Lemma 3.9 (NOT gate). Consider a NOT gate, implemented as two weight-one edges connected as in Definition 2.7. Assume |λ| ≤ 1/(√2zi). Then zO ≲ zi.
+
+Proof. Analysis at λ = 0. If the input is true, then σi measures the squared support on ai of a normalized λ = 0 eigenvector. Then σO = σi, since ai = bO the output vertex. If the input is false, so bi = √σi, then bi +aO = 0. Therefore, we simply need to renormalize: σO = σi/(1+σi), or equivalently 1 σO = 1 σi +1.
+
+Analysis for small λ > 0. We are given ri = ai/bi. The eigenvector equation is bi + aO = λai = λbO. Therefore, rO = aO/bO = λ- 1/ri. If the input is false, so si = ri/λ, then sO = -1/(λrO) = si/(1 -λ2 si). Therefore, si < sO ≤ si(1 + 2λ2 si) since λ2 si ≤ 1/2. If the input is true, so si = -1/(λri), then sO = rO/λ = si + 1 .
+
+Therefore zO ≲ zi as claimed. Note that w.l.o.g. we may assume there are never two NOT gates in a row in the formula ϕ, so the additive constants lost do not accumulate.
+
+## 4 Formula evaluation algorithm
+
+In Section 4.1, we specify the gate set S (Definition 4.1) and define the correct notion of "balance" for a formula that includes different kinds of gates (Definition 4.5). These two definitions allow us to formulate the general statement of our results, Theorem 4.7, of which Theorem 1.1 is a corollary.
+
+In Section 4.2, we present span programs of optimal witness size for each of the gates in S. Theorem 4.16 in Section 4.3 plugs together the spectral analyses of the individual span programs to give a spectral analysis of G(ϕ). Finally, we sketch in Section 4.4 how this implies a quantum algorithm, therefore proving Theorem 4.7.
+
+## 4.1 General formula evaluation result
+
+Definition 4.1 (Extended gate set S). Let
+
+$$
+\mathcal { S } ^ { \prime } & = \begin{cases} \ a r b i r a r y { 1 , 2 , \, } { r , \, } \, o r \, 3 - b i t \, gates , \, \} \\ \ O ( 1 ) - f a n - i n \ E Q U A l \ gates & \} \\ \mathcal { O } ( 1 ) - s i z \, \{ A N , \, O R , \, N O T , \, P A R I T Y \} & \\ & \ r e a d - o n c e \ f o r m u las \, c o m p o s e a d \ o n t o \\ & \quad t h e gates \, f r o m s ^ { \prime } \end{cases}
+$$
+
+Example 4.2. The gate set S includes simple gates like AND, as well as substantially more complicated gates like MAJ3(x1, x2, x3) ∧ (x4 ⊕ x5 ⊕ · · · ⊕ xk-1 ⊕ (xk ∨ xk+1)), provided k = O(1). It does not include gates from S ′ composed onto gates from S: for example MAJ3(x1, x2 ⊕x3, x4 ∧ x5) /∈ S.
+
+To define "adversary-balanced" formulas, we need to define the nonnegative-weight quantum adversary bound.
+
+Definition 4.3 (Nonnegative adversary bound). Let f : {0, 1}k → {0, 1}. Define
+
+$$
+\ A d v ( f ) = \max _ { \substack { \Gamma \geq 0 \\ \Gamma \neq 0 } } \frac { \| \Gamma \| } { \max _ { i } \| \Gamma \circ D _ { i } \| } \ ,
+$$
+
+where Γ ◦ Di denotes the entrywise matrix product between Γ and Di a zero-one-valued matrix defined by 〈x|Di|y〉 = 1 if and only if bitstrings x and y differ in the ith coordinate, for i ∈ {1, . . . , k}. The maximum is over all 2k ×2k symmetric matrices Γ with nonnegative entries satisfying 〈x|Γ|y〉 = 0 if f(x) = f(y).
+
+The motivation for this definition is that Adv(f) gives a lower bound on the number of queries to the phase-flip input oracle
+
+$$
+O _ { x } \colon | b , i \rangle \mapsto ( - 1 ) ^ { b \cdot x _ { i } } | i \rangle
+$$
+
+required to evaluate f on input x.
+
+Theorem 4.4 (Adversary lower bound [Amb06a, BSS03]). The two-sided ϵ-bounded error quantum query complexity of function f, Qϵ(f), is at least 1-2√ϵ(1-ϵ) 2 Adv(f).
+
+To match the lower bound of Theorem 4.4, our goal will be to use O(Adv(ϕ)) queries to evaluate ϕ.
+
+Definition 4.5 (Adversary-balanced formula). For a gate g in formula ϕ, let ϕg denote the subformula of ϕ rooted at g. Define ϕ to be adversary-balanced if for every gate g, the adversary lower bounds for its input subformulas are the same; if g has children h1, . . . , hk, then Adv(ϕh1 ) = · · · = Adv(ϕhk ).
+
+Definition 4.5 is motivated by a version of an adversary composition result [Amb06a, HLŠ07]:
+
+Theorem 4.6 (Adversary composition [HLŠ07]). Let f = g ◦ (h1, . . . , hk), where Adv(h1) = · · · = Adv(hk) and ◦ denotes function composition. Then Adv(f) = Adv(g)Adv(h1).
+
+| Gate f                | Adv(f )   | Gate f                                         | Adv(f )   |
+|-----------------------|-----------|------------------------------------------------|-----------|
+| 0                     | 0         | MAJ3(x[3]) = (x1 ∧ x2) ∨ ((x1 ∨ x2) ∧ x3)      | 2         |
+| x1                    | 1         | EQUAL3(x[3]) = (x1 ∧ x2 ∧ x3) ∨ (x1 ∧ x2 ∧ x3) | 3/√2      |
+| x1 ∧ x2               | √2        | (x1 ∧ x2 ∧ x3) ∨ (x1 ∧ x2)                     | √3 + √3   |
+| x1 ⊕ x2               | 2         | x1 ∨ (x2 ⊕ x3)                                 | √5        |
+| x1 ∧ x2 ∧ x3          | √3        | x1 ⊕ (x2 ∧ x3)                                 | 1 + √2    |
+| x1 ∨ (x2 ∧ x3)        | √3        | EXACT2 of 3(x[3]) =MAJ3(x[3]) ∧ (x1 ∨ x2 ∨ x3) | √7        |
+| (x3 ∧ x2) ∨ (x3 ∧ x1) | 2         | x1 ⊕ x2 ⊕ x3                                   | 3         |
+
+If ϕ is adversary-balanced, then by Theorem 4.6 Adv(ϕg) is the product of the gate adversary bounds along any non-self-intersecting path χ from g up to an input, Adv(ϕg) = ∏h∈χ Adv(h). Note that Adv(¬f ) = Adv(f), so NOT gates can be inserted anywhere in an adversary-balanced formula.
+
+The main result of this paper is
+
+Theorem 4.7 (Main result). There exists a quantum algorithm that evaluates an adversary-balanced formula ϕ(x) over S using O(Adv(ϕ)) queries to the phase-flip input oracle Ox. After efficient classical preprocessing independent of the input x, and assuming O(1)-time coherent access to the preprocessed classical string, the running time of the algorithm is Adv(ϕ)(logAdv(ϕ))O(1) .
+
+From Figure 5, the adversary bound Adv(MAJ3) = 2. By Theorem 4.6 the adversary bound for the balanced MAJ3 formula of depth d is 2d . Theorem 1.1 is therefore essentially a corollary of Theorem 4.7 (for the balanced MAJ3 formula, coherent access to a preprocessed classical string is not needed).
+
+## 4.2 Optimal span programs for gates in S
+
+In this section, we will substitute specific span programs into Definition 3.6, in order to prove:
+
+Theorem 4.8. Let S be the gate set of Definition 4.1. For every gate f ∈ S, there exists a span program P computing fP = f, such that the witness size of P (Definition 3.6) on equal input complexities zi = 1 is
+
+$$
+\ w s i z e ( P ) = A d v ( f ) \ .
+$$
+
+Adv(f) is the adversary bound for f (Definition 4.3).
+
+Proof. We analyze five of the fourteen inequivalent binary functions on at most three bits, listed in Figure 5: 0 and x1 (both trivial), the MAJ3 gate (Claim 4.9), the k-bit EQUALk gate (Claim 4.10), and a certain three-bit function, g(x) = (x1 ∧ x2 ∧ x3) ∨ (x1 ∧ x2) (Claim 4.11).
+
+Claim 4.9. Let PMAJ3 be the span program from Example 2.2. Then wsize(PMAJ3 ) = 2 = Adv(MAJ3).
+
+Proof. Substitute PMAJ3 into Definition 3.6. Some of the witness vectors are |w′000 〉 = (1, 0), |w′100 〉 = (1,-1/√3), and |w110〉 = (e-iπ/6 , eiπ/6 , 0), |w111〉 = (1, 1, 1)/√3.
+
+Claim 4.10. Letting α = 4√k -1, the span program
+
+$$
+X _ { J } & = ( \{ x _ { 1 } , x _ { 2 } , \dots , x _ { k } \} \ \{ \overline { x _ { 1 } } , \overline { x _ { 2 } } , \dots , \overline { x _ { k } } \} ) \\ t & = ( 1 ) \, , \quad v _ { J } = ( \alpha \quad \alpha \quad )
+$$
+
+computes EQUALk with witness size k √k-1 = Adv(EQUALk).1
+
+1The optimal adversary matrix Γ comes from the 2×2k matrix ( 1 1 ··· a a ··· a a ··· 1 1 ··· ), where the rows correspond to inputs 0k and 1k , and the columns correspond to inputs of Hamming weight 1 then k - 1, and a = 1/(k - 1).
+
+Proof. Substitute into Definition 3.6. The witnesses are |w0k〉 = (0, √k α ), |w1k〉 = ( √k α , 0) and |w′x 〉 = (1) for x /∈ {0k , 1k }.
+
+Claim 4.11. Let g(x) = (x1 ∧ x2 ∧ x3) ∨ (x1 ∧ x2). Letting α1 = 4√1+ 1 √3 and α2 = √√3-1, the span program
+
+$$
+X _ { J } = ( \{ x _ { 1 } , x _ { 2 } \} \ \{ \overline { x _ { 1 } } , \overline { x _ { 2 } } \} \ \{ x _ { 3 } \} ) \\ t = \left ( \begin{matrix} 1 \\ 0 \end{matrix} \right ) , \ \ v _ { J } = \left ( \begin{matrix} \alpha _ { 1 } & \alpha _ { 1 } \alpha _ { 2 } & 0 \\ \alpha _ { 2 } & 0 & 1 \end{matrix} \right )
+$$
+
+computes g with witness size √3 + √3 = Adv(g).2
+
+Proof. By substitution into Definition 3.6.
+
+For all the remaining gates in S, it suffices to analyze the NOT gate (Lemma 3.9), and OR and PARITY gates on unbalanced inputs (Lemma 4.12). That is, we allow z1 and z2 to be different, with z1/z2, z2/z1 = O(1). For functions b and b′ on disjoint inputs, Adv(b ⊕ b′ ) = Adv(b) + Adv(b′ ), and Adv(b ∨ b′ ) = √Adv(b)2 +Adv(b′ )2 [BS04, HLŠ07]; we obtain matching upper bounds for span program witness size.
+
+Lemma 4.12. Consider f(x, x′ ) = f ′ (b(x), b′ (x′ )), with f ′ ∈ {PARITY, OR}, and b and b′ functions on O(1) bits. Assume that there exist span programs Pb and Pb′ for b and b′ with respective witness sizes B = wsize(Pb) and B′ = wsize(Pb′). Then there exists a span program P for f with witness size wsize(P) = B + B′ if f ′ = PARITY, or √B2 +B′2 if f ′ = OR.
+
+Proof. Substitute the following span programs with zero constraints into Definition 3.6:
+
+$$
+X _ { J } & = ( \{ x _ { 1 } , \overline { x _ { 2 } } \} \ \{ \overline { x _ { 1 } } , x _ { 2 } \} ) \\ P _ { \text {PARITY} } \colon t & = ( 1 ) \, , \quad v _ { J } = ( \begin{array} { c c c } 1 & 1 & 1 \\ & & \\ & X _ { J } = ( \ \{ x _ { 1 } \} & \{ x _ { 2 } \} & ) \\ & & \\ P _ { \text {OR} } \colon t = ( 1 ) \, , & v _ { J } = \left ( \frac { \sqrt { B } } { \sqrt { B ^ { 2 } + B ^ { \prime 2 } } } \ \frac { \sqrt { B ^ { \prime } } } { \sqrt { B ^ { 2 } + B ^ { \prime 2 } } } \right ) \ .
+$$
+
+The witness vectors for PARITY are |w′00 〉 = (1) and |w10〉 = (√B2 +B′2 , 0), and the witness vectors for OR are |w′00 〉 = (1), |w10〉 = ( 4√B2 +B′2 , 0), and |w11〉 = (1, 1) · 12 4√B2 + B′2 .
+
+Then, e.g., the function EXACT2 of 3(x1, x2, x3) = MAJ3(x1, x2, x3) ∧ (x1 ∨ x2 ∨ x3), so Lemma 4.12 implies a span program for EXACT2 of 3 with witness size √7 = √wsize(MAJ3)2 +wsize(OR3)2 .
+
+Remark 4.13. Our procedure for analyzing a function f has been as follows:
+
+1. First determine a span program P computing fP = f. The simplest span program is derived from the minimum-size {AND, OR, NOT} formula for f.
+2. Next, compute wsize(P, x) for each input x, as a function of the variable weights of P.
+3. Finally, optimize the free weights of P to minimize wsize(P) = maxx wsize(P, x). For example, note that scaling AOJ up helps the true cases in Definition 3.6, and hurts the false cases; therefore choose a scale to balance the worst true case against the worst false case.
+
+We respect the symmetries of f during optimization. On the other hand, if two literals are not treated symmetrically by f, then we do not group them together in any grouped input Xj. For example, in Claim 4.11 we do not group x3 together with x1 and x2 in X1.
+
+2The optimal adversary matrix Γ comes from the matrix ( 1 a √3 1 a √3 b 0 √3 ), where a = ( 1 2 (5 - √13 - 6√3))1/2 , b = 1 2 ( - 1 - √3 + √2(8+ √3)), and the rows correspond to inputs 011, 101, 110, the columns to inputs 000, 001, 111.
+
+Remark 4.14. The proof of Theorem 4.8 uses separate analyses for EQUALk, MAJ3 and g because the upper bounds from Lemma 4.12 for these functions do not match the adversary lower bounds. For example, from Figure 5 the smallest {AND, OR, NOT} formula for MAJ3 has five inputs, MAJ3(x[3]) = (x1 ∧ x2) ∨ ((x1∨x2)∧x3). Lemma 4.12 therefore gives a span program P for MAJ3 with witness size wsize(P) = √5. In fact, optimizing the weights of this P gives a span program with witness size √3+ √2 < √5; the worst-case inputs of the read-once formula (x1 ∧x2) ∨ ((x4 ∨x5) ∧x3) do not arise under the promise that x4 = x1 and x5 = x2. However, this is still worse than the span program PMAJ3 of Example 2.2, with wsize(PMAJ3 ) = 2.
+
+Remark 4.15. Lemma 4.12 implies that any {AND, OR, NOT} formula of bounded size has a span program with witness size the square root of the sum of the squares of the input complexities. We conjecture that this holds even for formulas with size ω(1); see [Amb06b, ACR+07] for special cases.
+
+## 4.3 Span program spectral analysis of ϕ
+
+Theorem 4.16. Consider an adversary-balanced formula ϕ on the gate set S, with adversary bound Adv(ϕ). Let P be the composed span program computing fP = ϕ. For an input x ∈ {0, 1}N , recall the definition of the weighted graph GP (x) from Theorem 2.5; if the literal on an input edge evaluates to true, then delete that edge from GP . Let G̃P (x) be the same as GP (x) except with the weight on the output edge (aO, bO) set to w = ϵw/√Adv(ϕ) (instead of weight one), where ϵw > 0 is a sufficiently small constant. Then,
+
+- If ϕ(x) = 1, there exists a normalized eigenvalue-zero eigenvector of the adjacency matrix AG̃P (x) with Ω(1) support on the output vertex aO.
+- If ϕ(x) = 0, then for some small enough constant ϵ > 0, AG̃P (x) does not have any eigenvalue-λ eigenvectors supported on aO or bO for |λ| ≤ ϵ/Adv(ϕ).
+
+Proof. The proof of Theorem 4.16 has two parts. First, we will prove by induction that zg = O(Adv(ϕg)). Then, by considering the last eigenvector constraint, λaO = wbO, we either construct the desired eigenvector or derive a contradiction, depending on whether ϕ(x) is true or false.
+
+Base case. Consider an input xi to the formula ϕ. If xi = 1, then the corresponding input edge (aj, bi) is not in GP (x). In particular, the input i does not contribute to the expression for z̃j(x) in Eq. (3.3), so zi may be left undefined. If xi = 0, then the input edge (aj, bi) is in GP (x). The eigenvalue-λ equation at bi is λbi = aj. For λ = 0, this is just aj = 0, so let σi = 1. For λ > 0, this is ri = λsi = aj/bi = λ, so si = zi = 1.
+
+Induction. Assume that |λ| ≤ ϵ/Adv(ϕ), for some small enough constant ϵ > 0.
+
+Consider a gate g. Let h1, . . . , hk be the inputs to g. Let ϕg denote the subformula of ϕ based at g. By Theorem 3.7 and Theorem 4.8, the output bound zg satisfies
+
+$$
+z _ { g } \lesssim \text {Ad} ( g ) \max _ { i } z _ { h _ { i } } \ ,
+$$
+
+$$
+z _ { g } \leq c _ { 1 } + \Lambda d v ( g ) ( \max _ { i } z _ { h _ { i } } ) ( 1 + c _ { 2 } \cdot | \lambda | \Lambda d v ( \varphi _ { g } ) )
+$$
+
+for certain constants c1, c2. Different kinds of gates give different constants in Eq. (4.6), but since the gate set is finite, all constants are uniformly O(1).
+
+Since |λ| ≤ ϵ/Adv(ϕ), the recurrence Eq. (4.6) has solution
+
+$$
+z _ { g } \leq O \left ( \max _ { \chi } \prod _ { h \in \chi } A d v ( h ) \left ( 1 + \epsilon ^ { \prime } \frac { A d v ( \varphi _ { h } ) } { A d v ( \varphi ) } \right ) \right ) \ ,
+$$
+
+where the maximum is taken over the choice of χ a non-self-intersecting path from g up to an input. Because ϕ is by assumption adversary balanced (Definition 4.5), ∏h∈χ Adv(h) = Adv(ϕg) (Theorem 4.6). Also, ∏h∈χ (1 + ϵ′ Adv(ϕh) Adv(ϕ) ) = O(1). Therefore, the solution satisfies
+
+$$
+z _ { g } = O ( A d v ( \varphi _ { g } ) ) \ .
+$$
+
+or equivalently Final amplification step. Assume ϕ(x) = 1. Then by Eq. (4.7), there exists a normalized eigenvaluezero eigenvector of the graph GP (x) with squared amplitude |aO|2 ≥ σO = 1/O(Adv(ϕ)). Recall that w = ϵw/√Adv(ϕ) is the weight of the output edge (aO, bO) of P in G̃P (x), and let âO = waO. The λ = 0 eigenvector equations for G̃P (x) are the same as those for GP (x), except with âO in place of aO. Therefore, we may take |âO|2 = 1/O(Adv(ϕ)), so for a normalized eigenvalue-zero eigenvector of G̃P (x), |aO|2 = Ω(1). By reducing the weight of the output edge from 1 to w, we have amplified the support on aO up to a constant.
+
+Now assume that ϕ(x) = 0. By Theorem 2.5, there does not exist any eigenvalue-zero eigenvector supported on aO. Also bO = 0 at λ = 0 by the constraint λaO = wbO. For λ ̸= 0, |λ| ≤ ϵ/Adv(ϕ), Eq. (4.7) implies that in any eigenvalue-λ eigenvector for G̃P (x), either âO = bO = 0 or the ratio |âO/bO| ≤ |λ| · O(Adv(ϕ)), so
+
+$$
+| a _ { O } / b _ { O } | \leq c _ { 3 } \cdot \frac { | \lambda | } { w } A d v ( \varphi )
+$$
+
+for some constant c3 that does not depend on w. We have not yet used the eigenvector equation at aO, λaO = wbO. Combining this equation with Eq. (4.8), we get w2 ≤ c3λ2Adv(ϕ) ≤ c3ϵ2/Adv(ϕ). Substituting w = ϵw/√Adv(ϕ), this is a contradiction provided we set ϵw so ϵ2w > c3ϵ2 . Therefore, the adjacency matrix of G̃P (x) cannot have an eigenvalue-λ eigenvector supported on aO or bO.
+
+## 4.4 Quantum algorithm
+
+We apply Theorem 4.16 and the Szegedy correspondence between discrete- and continuous-time quantum walks [Sze04] to design the optimal quantum algorithm needed to prove Theorem 4.7. The approach is similar to that used for the NAND formula evaluation algorithm of [CRŠZ07], with only technical differences. Full details are given in Appendix B.
+
+The main idea is to construct a discrete-time quantum walk Ux = ÕxU0N on the directed edges of GP whose spectrum and eigenvectors correspond exactly to those of A G̃P (x) . Here U0N is a fixed unitary operator only depending on the formula graph AG̃P (0N ) , which can be implemented efficiently without access to the input x, and Õx is defined by
+
+$$
+\tilde { O } _ { x } | v , w \rangle = \begin{cases} ( - 1 ) ^ { x _ { i } ( v ) } | v , w \rangle & \text {if } v \text { is a leaf} \\ | v , w \rangle & \text {otherwise} \end{cases}
+$$
+
+where i(v) is the index of the input variable corresponding to the leaf v. One call to Õx can be implemented using one call to the standard phase-flip oracle Ox of Eq. (4.3).
+
+Now starting at the output edge |aO, bO〉, run phase estimation [CEMM98] on Ux with precision δp = O(1/Adv(ϕ)) and error δe a small enough constant. Output "ϕ(x) = 1" iff the output phase is zero. The query complexity of this algorithm is O(1/δp) = O(Adv(ϕ)). The first part of Theorem 4.16 implies completeness, because the initial state has constant overlap with an eigenstate of Ux with phase zero. The second part of Theorem 4.16 implies soundness, because the spectral gap away from zero is greater than the precision δp.
+
+## 5 Extensions and open problems
+
+Theorem 4.7 can be extended in several directions, and there are many open problems including those from [CRŠZ07]. For example, is the eigenvalue-zero eigenstate useful for extracting witness information? We would like to raise several other questions.
+
+## 5.1 Four-bit gates
+
+The gate set S includes all three-bit binary gates. What about four-bit gates? Up to symmetries, there are 208 inequivalent binary functions that depend on exactly four input bits x1, . . . , x4. The functions we have considered so far are listed at the webpage [RŠ07]. To summarize,
+
+- Thirty of the functions can be written as a PARITY or OR of two subformulas on disjoint inputs. These functions are already included in the gate set S (Definition 4.1).
+- For 25 additional functions, we have found a span program with witness size matching the adversary lower bound. These functions can be added to S without breaking Theorem 4.7.
+- For 20 of the remaining functions, we have found a span program with complexity beating the squareroot of the minimum {AND, OR, NOT} formula size, but not matching the adversary lower bound.
+
+Example 5.1 (Threshold 2 of 4). In analogy to Example 2.2, one might consider the span program
+
+$$
+X _ { J } = ( \{ x _ { 1 } \} \ \{ x _ { 2 } \} \ \{ x _ { 3 } \} \ \{ x _ { 4 } \} ) \\ t = \left ( \begin{matrix} 1 \\ 0 \end{matrix} \right ) , \ \ v _ { J } = \left ( \begin{matrix} 1 & 1 & 1 & 1 \\ 1 & & i & - 1 & - i \end{matrix} \right ) \ .
+$$
+
+This span program computes Threshold2 of 4(x[4])-MAJ3 is Threshold2 of 3-but it is not optimal. Intuitively, the problem is that the different pairs of inputs are not symmetrical. An optimal span program, with witness size √6, is
+
+$$
+X _ { J } & = ( \{ x _ { 1 } \} \ \{ x _ { 1 } \} \quad \{ x _ { 2 } \} \ \{ x _ { 2 } \} \quad \{ x _ { 3 } \} \ \{ x _ { 3 } \} \quad \{ x _ { 4 } \} \ \{ x _ { 4 } \} ) \\ t & = \begin{pmatrix} 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 \\ 0 & 1 & 1 & 1 & - 1 & i & - i & i & i & 1 & 1 & 1 & - 1 \end{pmatrix}
+$$
+
+It was derived by embedding a four-simplex symmetrically in the 2 × 2 unitary matrices, in correct analogy to Example 2.2. This embedding gives a span program over an extension ring of C that, following [KW93, Theorem 12] and [BGW99, Prop. 2.8], can be simulated by a span program over the base ring.
+
+The Hamming-weight threshold functions Thresholdh of k : {0, 1}k → {0, 1} defined by
+
+$$
+T h r e s h o l d _ { h o f k } ( x ) = \left \{ \begin{array} { l l } { 1 } & { i f | x | \geq h } \\ { 0 } & { i f | x | < h } \end{array}
+$$
+
+are functions that we currently have an understanding of only for h ∈ {0, 1, k} and a partial understanding of for h ∈ {2, k-1}. Another function of particular interest is the six-bit Kushilevitz function [HLŠ07, Amb06a]. It seems that k-bit gates are inevitably going to require more involved techniques to evaluate optimally, for k large enough. It may well be that four-bit gates are already interesting in this sense.
+
+## 5.2 Unbalanced formulas
+
+Can the restriction that the gates have adversary-balanced inputs be significantly weakened? So far, we have only analyzed the PARITY and OR gates for unbalanced inputs, in Lemma 4.12. For the MAJ3 gate, we have found an optimal span program for the case in which only two of the inputs are balanced:
+
+Lemma 5.2. Let f(x, x′ , x′′ ) = MAJ3(b(x), b′ (x′ ), b′′ (x′′ )) with b, b′ , b′′ functions on O(1) bits computed by span programs Pb, Pb′ , Pb′′ with witness sizes B = wsize(Pb) = Adv(b) = wsize(Pb′) = Adv(b′ ) and B′′ = wsize(Pb′′) = Adv(b′′ ). Let β = B′′/B and α = 1 2√2 (√8+β2 -β)1/2 . Then there exists a span program P for f with wsize(P) = 1 2 (√8 + β2 + β)B = Adv(f ):
+
+$$
+X _ { J } = ( \{ x _ { 1 } \} \ \{ x _ { 2 } \} \quad \{ x _ { 3 } \} \quad ) \\ t = \left ( \begin{matrix} 1 \\ 0 \end{matrix} \right ) \, , \ \ v _ { J } = \left ( \begin{matrix} \alpha & \alpha & \sqrt { \frac { 1 } { 2 } + \beta \alpha ^ { 2 } } \\ i & - i & 2 \alpha \end{matrix} \right ) \ .
+$$
+
+.
+
+Therefore, for example, the four-bit gates MAJ3(x1, x2, x3 ∧x4) and MAJ3(x1, x2, x3 ⊕x4) can be added into S without affecting the correctness of Theorem 4.7 (see Section 5.1). However, we do not have an understanding of MAJ3 when all three input complexities differ. In this case, the formula for the adversary lower bound is substantially more complicated, and we do not have a matching span program.
+
+For other gates, with the exception of PARITY and OR, we know similarly little. For a highly unbalanced formula with large depth, there is the further problem of whether the formula can be rebalanced without increasing its adversary lower bound too much [CRŠZ07].
+
+## 5.3 Witness vectors and the adversary bound
+
+The witnesses in Definition 3.6 have an interesting property related to a dual version of the adversary bound [LM04, ŠS06]: Assume that all |Xj| = 1 and z = 1. For x, y ∈ {0, 1}n with fP (x) = 1, fP (y) = 0, consider the witnesses |wx〉, |w′y 〉 achieving the minima in Eqs. (3.4), (3.5), and let |wy〉 = A† |w′y 〉. Then |wx〉 = Π(x)|wx〉 and Π(y)|wy〉 = |wy〉, so
+
+$$
+\langle w _ { x } | \Pi ( x ) \overline { \Pi } ( y ) | w _ { y } \rangle = \langle w _ { x } | A ^ { \dagger } | w _ { y } ^ { \prime } \rangle = \langle t | w _ { y } ^ { \prime } \rangle = 1 \ .
+$$
+
+Therefore, if we define px(i) = 1 ‖|wx〉‖2 ∑j: Xj={xi} ∨ Xj={xi} |〈j|wx〉|2 for each x (for both true and false fP (x)) and for
+
+i ∈ [n], then we get a feasible set of probability distributions for the minimax formulation of the adversary bound [ŠS06]. If wsize(P) = Adv(fP ), then this set of probability distributions is optimal.
+
+In this paper, we only use the adversary bound with nonnegative weights Adv(f). In fact, Hoyer, Lee and Špalek showed that Eq. (4.2) still provides a lower bound on the quantum query complexity even when one removes the restriction that the entries of Γ be nonnegative [HLŠ07]. This more general adversary bound, Adv±(f) is clearly at least Adv(f). Theorem 4.6 is not known to hold for Adv± composition; however, under the conditions of the theorem, it is known that Adv±(f) ≥ Adv±(g)Adv±(h1). For every three-bit function f, no advantage is gained by allowing negative weights: Adv±(f) = Adv(f). For most functions f on four bits, though, Adv±(f) > Adv(f) [HLŠ06]. Therefore, one gets an asymptotically higher lower bound for formulas with such functions as gates than using Adv. However, for no function f with Adv(f) < Adv±(f) do we have a span program that matches Adv±(f). The dual formulation of Adv± cannot be expressed using probability distributions and one therefore cannot hope for a simple correspondence with the witnesses like described above.
+
+Both variants of the adversary bound, Adv and Adv±, can be expressed as optimal solutions of certain semidefinite programs. Can one find a semidefinite formulation of span program witness size?
+
+## 5.4 Eliminating the preprocessing
+
+In many cases for ϕ, the preprocessing step of algorithm ALG can be eliminated. Because ϕ is an adversarybalanced formula on a known gateset, a decomposition through Theorem B.4 can be computed separately for each gate of S and then put together at runtime. This decomposition is not the decomposition of Claim B.2, which involves global properties of ϕ like ‖A′‖. For an example, see the exactly balanced NAND tree algorithm in [CRŠZ07].
+
+The decompositions can be combined because all the weights of gate input/output edges are one. This is quite different from the case of unbalanced NAND trees considered by [CRŠZ07], in which the weight of an input edge depends on the subformula entering it.
+
+## 5.5 Arbitrary {AND, OR, NOT, PARITY} formulas
+
+Some of the conditions on the gates in S (Definition 4.1) can be loosened. For example, S includes as single gates O(1)-size {AND, OR, NOT, PARITY} formulas on inputs that are themselves possibly elements of S ′ . Let f be such a gate, f = g ◦ (h1, . . . , hk) with g an {AND, OR, NOT, PARITY} formula of size O(1), and each hi either the identity or a gate from S ′ . We have assumed that all the inputs to f have equal adversary bounds. However, the stated proof works equally well if only each hi has inputs with equal adversary bounds, provided the inputs to hi and to hi′ have adversary bounds that differ by at most a constant factor.
+
+We believe that the assumption that g be of size O(1) can also be significantly weakened. A stronger analysis like that of [CRŠZ07] for "approximately balanced" {AND, OR, NOT} formulas can presumably also be applied with PARITY gates. We have avoided this analysis to simplify the proofs, and to focus on the main novelty of this paper, the extended gate sets.
+
+For {AND, OR, NOT, PARITY} formulas that are not "approximately balanced," rebalancing will typically be required. We have not investigated how the formula rebalancing procedures of [BCE91, BB94] affect the formula's adversary bound. In [CRŠZ07], it sufficed to consider the effect on the formula size, because the adversary bound for any {AND, OR, NOT} formula on N inputs is always √N.
+
+## 5.6 New algorithms based on span programs
+
+We have begun the development of a new framework for quantum algorithms based on span programs. In this paper, we have only composed bounded-size span programs evaluating functions each on O(1) bits. An intriguing question is, do there exist interesting quantum algorithms based directly on asymptotically large span programs? Some candidate problems may be found in [BGW99, BGP96], although note that the quantum algorithm works for span programs over C that need not be monotone.
+
+## Acknowledgements
+
+We thank Troy Lee for pointing out span programs to us. B.R. would like to thank Andrew Childs, Sean Hallgren, Cris Moore, David Yonge-Mallo and Shengyu Zhang for helpful conversations.
+
+## References
+
+- [ABO99] Eric Allender, Robert Beals, and Mitsunori Ogihara. The complexity of matrix rank and feasible systems of linear equations. Computational Complexity, 8:99-126, 1999. Preliminary version in Proc. 28th ACM STOC, 1996.
+- [ACR+07] Andris Ambainis, Andrew M. Childs, Ben W. Reichardt, Robert Špalek, and Shengyu Zhang. Any AND-OR formula of size N can be evaluated in time N 1/2+o(1) on a quantum computer. In Proc. 48th IEEE FOCS, pages 363-372, 2007.
+- [Amb06a] Andris Ambainis. Polynomial degree vs. quantum query complexity. J. Comput. Syst. Sci., 72(2):220-238, 2006. Preliminary version in Proc. 44th IEEE FOCS, 2003.
+- [Amb06b] Andris Ambainis. Quantum search with variable times. arXiv:quant-ph/0609168, 2006.
+- [Amb07] Andris Ambainis. A nearly optimal discrete query quantum algorithm for evaluating NAND formulas. arXiv:0704.3628 [quant-ph], 2007.
+- [BB94] Maria Luisa Bonet and Samuel R. Buss. Size-depth tradeoffs for Boolean formulae. Information Processing Letters, 49(3):151-155, 1994.
+- [BCE91] Nader H. Bshouty, Richard Cleve, andWayne Eberly. Size-depth tradeoffs for algebraic formulae. In Proc. 32nd IEEE FOCS, pages 334-341, 1991.
+- [BGP96] Amos Beimel, Anna Gál, and Mike Paterson. Lower bounds for monotone span programs. Computational Complexity, 6:29-45, 1996. Preliminary version in Proc. 36th IEEE FOCS, 1995.
+- [BGW99] László Babai, Anna Gál, and Avi Wigderson. Superpolynomial lower bounds for monotone span programs. Combinatorica, 19(3):301-319, 1999. Preliminary version in Proc. 28th ACM STOC, 1996.
+
+- [BS04] Howard Barnum and Michael Saks. A lower bound on the quantum query complexity of readonce functions. J. Comput. Syst. Sci., 69(2):244-258, 2004.
+- [BSS03] Howard Barnum, Michael Saks, and Mario Szegedy. Quantum decision trees and semidefinite programming. In Proc. 18th IEEE Complexity, pages 179-193, 2003.
+- [CCJY07] AndrewM. Childs, Richard Cleve, Stephen P. Jordan, andDavidYeung. Discrete-query quantum algorithm for NAND trees. arXiv:quant-ph/0702160, 2007.
+- [CEMM98] Richard Cleve, Artur Ekert, Chiara Macchiavello, and Michele Mosca. Quantum algorithms revisited. Proc. R. Soc. London A, 454(1969):339-354, 1998.
+- [CF02] Ronald Cramer and Serge Fehr. Optimal black-box secret sharing over arbitrary Abelian groups. In Proc. CRYPTO 2002, LNCS vol. 2442, pages 272-287. Springer-Verlag, 2002.
+- [CRŠZ07] AndrewM. Childs, BenW. Reichardt, Robert Špalek, and Shengyu Zhang. Every NAND formula of size N can be evaluated in time N 1/2+o(1) on a quantum computer. arXiv:quant-ph/0703015, 2007.
+- [FGG07] Edward Farhi, Jeffrey Goldstone, and SamGutmann. A quantum algorithm for the Hamiltonian NAND tree. arXiv:quant-ph/0702144, 2007.
+- [GP03] Anna Gál and Pavel Pudlák. A note on monotone complexity and the rank of matrices. Information Processing Letters, 87(6):321-326, 2003.
+- [Gro96] Lov K. Grover. A fast quantum mechanical algorithm for database search. In Proc. 28th ACM STOC, pages 212-219, 1996.
+- [Gro02] Lov K. Grover. Tradeoffs in the quantum search algorithm. arXiv:quant-ph/0201152, 2002.
+- [GV96] G. H. Golub and C. F. Van Loan. Matrix Computations. Johns Hopkins, Baltimore, 3rd edition, 1996.
+- [HLŠ05] Peter Hoyer, Troy Lee, and Robert Špalek. Tight adversary bounds for composite functions. arXiv:quant-ph/0509067, 2005.
+- [HLŠ06] Peter Hoyer, Troy Lee, and Robert Špalek. Source codes of semidefinite programs for ADV±. http://www.ucw.cz/~robert/papers/adv/, 2006.
+- [HLŠ07] Peter Hoyer, Troy Lee, and Robert Špalek. Negative weights make adversaries stronger. In Proc. 39th ACM STOC, pages 526-535, 2007.
+- [JKS03] T. S. Jayram, Ravi Kumar, and D. Sivakumar. Two applications of information complexity. In Proc. 35th ACM STOC, pages 673-682, 2003.
+- [KW93] Mauricio Karchmer and Avi Wigderson. On span programs. In Proc. 8th IEEE Symp. Structure in Complexity Theory, pages 102-111, 1993.
+- [LM04] Sophie Laplante and Frédéric Magniez. Lower bounds for randomized and quantum query complexity using Kolmogorov arguments. In Proc. 19th IEEE Complexity, pages 294-304, 2004.
+- [MNRS07] Frédéric Magniez, Ashwin Nayak, Jérémie Roland, and Miklos Santha. Search via quantum walk. In Proc. 39th ACM STOC, pages 575-584, 2007.
+- [NNP05] Ventzislav Nikov, Svetla Nikova, and Bart Preneel. On the size of monotone span programs. In Proc. SCN 2004, LNCS vol. 3352, pages 249-262, 2005.
+- [RŠ07] Ben W. Reichardt and Robert Špalek. Quantum query complexity of up to 4-bit functions. http://www.ucw.cz/~robert/papers/gadgets/, 2007.
+
+- [San95] Miklos Santha. On the Monte Carlo decision tree complexity of read-once formulae. Random Structures and Algorithms, 6(1):75-87, 1995. Preliminary version in Proc. 6th IEEE Structure in Complexity Theory, 1991.
+- [Sni85] Marc Snir. Lower bounds on probabilistic linear decision trees. Theoretical Computer Science, 38:69-82, 1985.
+- [ŠS06] Robert Špalek and Mario Szegedy. All quantum adversary methods are equivalent. Theory of Computing, 2(1):1-18, 2006. Earlier version in ICALP'05.
+- [SW86] Michael Saks and Avi Wigderson. Probabilistic Boolean decision trees and the complexity of evaluating game trees. In Proc. 27th IEEE FOCS, pages 29-38, 1986.
+- [Sze04] Mario Szegedy. Quantum speed-up of Markov chain based algorithms. In Proc. 45th IEEE FOCS, pages 32-41, 2004.
+
+## A Proof of Theorem 3.7
+
+In this section we will prove Theorem 3.7. Before beginning, though, let us show that the alternative expressions for the span program witness size wsize(P, x) of Definition 3.6 are equivalent, so wsize(P) is well defined. It will also be useful to derive several alternative expressions for wsize(P, x).
+
+Definition A.1 (Additional matrix notations). Recall Definition 3.4. Let 〈o| = AOJ = 〈t|A and let C = (1-|t〉〈t|)A, so A = C+|t〉〈o| (the matrix ACJ is C with range restricted to 1-|t〉〈t|). Let ∆ = CΠ(CΠ)+ be the projection onto the range of CΠ, and let ∆ = 1-∆. For a matrix M and a projection Θ, let MΘ denote the restriction ΘMΘ of M to the range of Θ. For a vector m̃J, we will commonly write m̃= ∑j∈J m̃j|j〉〈j| for the diagonal matrix with diagonal entries m̃J. Figure 6 summarizes the matrices used in this section.
+
+We will use several times the following estimates for pseudoinverse norms:
+
+Claim A.2. For matrices A and B with Range(B† ) ⊆ Range(A) (i.e., B = BAA+), ‖A(BA)+‖ ≤ ‖B+‖ and ‖(BA)+‖ ≤ ‖A+‖‖B+‖.
+
+Proof. Since A(BA)+ = A(BA)+BB+ = [A(BA)+(BA)A+]B+ and the bracketed term is a projection, ‖A(BA)+‖ ≤ ‖B+‖. Then also ‖(BA)+‖ = ‖A+A(BA)+‖ ≤ ‖A+‖‖B+‖.
+
+Lemma A.3. For S any positive-definite, diagonal matrix, let
+
+$$
+\ w s i z e _ { S } ( P , x ) = \begin{cases} \min _ { | w ^ { \prime } \rangle \colon A \Pi | w \rangle = | t | } \| S | w \rangle \| ^ { 2 } & i f \, f _ { P } ( x ) = 1 \\ \min _ { \substack { | w ^ { \prime } \rangle \colon \langle t | w ^ { \prime } \rangle = 1 \\ \Pi A ^ { \prime } | w ^ { \prime } \rangle = 0 } } \| S A ^ { \dagger } | w ^ { \prime } \rangle \| ^ { 2 } & i f \, f _ { P } ( x ) = 0 \end{cases}
+$$
+
+$$
+\ w s i g _ { S } ( P , x ) & = \min _ { | w \rangle \langle w | | \Pi | w \rangle = 1 } | \langle o | \Pi S ^ { - 1 } | w \rangle | ^ { - 2 } \\ & = \| ( A I S ^ { - 1 } ) ^ { + } | t \rangle \| ^ { 2 } \\ & = \| ( \Pi - ( C \Pi S ^ { - 1 } ) ^ { + } C \Pi S ^ { - 1 } ) S ^ { - 1 } | o \rangle \| ^ { - 2 }
+$$
+
+$$
+\ w s i z _ { S } ( P , x ) & = \min _ { | w ^ { \prime } \rangle \colon | S A ^ { \dagger } | w ^ { \prime } \rangle | = 1 } | \langle t | w ^ { \prime } \rangle | ^ { - 2 } \\ & = \| ( 1 + ( \overline { \Pi } ( A S ) ^ { + } A S - 1 ) ^ { + } \Pi ) ( A S ) ^ { + } | t \rangle \| ^ { - 2 } \\ & = \| ( 1 - ( \overline { \Delta } C S ) ^ { + } \overline { \Delta } C S ) S ( 1 - C ^ { \dagger } ( \Pi C ^ { \dagger } ) ^ { + } ) | o \rangle \| ^ { 2 } \ .
+$$
+
+Then if fP (x) = 1,
+
+and, if fP (x) = 0, Moreover, |w∗S 〉 = argmin|w〉:AΠ|w〉=|t〉‖S|w〉‖2 = S-1 (AΠS-1 )+|t〉 has norm ‖|w∗S 〉‖ = O(1) and
+
+$$
+| w _ { S } ^ { \prime * } \rangle = \arg \min _ { \Pi A ^ { \dagger } | w ^ { \prime } \rangle = 0 } | | S A ^ { \dagger } | w ^ { \prime } \rangle | ^ { 2 } = | t \rangle - ( \Pi C ^ { \dagger } ) ^ { + } \Pi | o \rangle - ( S C ^ { \dagger } \overline { \Delta } ) ^ { + } S ( 1 - C ^ { \dagger } ( \Pi C ^ { \dagger } ) ^ { + } ) | o \rangle
+$$
+
+has norm ‖|w′∗ S 〉‖ = O(1).
+
+In particular, the two different expressions for wsize(P, x) = wsize√z̃ (P, x) in Definition 3.6 are equivalent, so wsize(P, x) and wsize(P) are well defined.
+
+Proof. Assume fP (x) = 1. That min|w〉:AΠS-1 |w〉=|t〉 ‖|w〉‖2 = min|w〉:〈w|Π|w〉=1 CΠS-1 |w〉=0 |〈o|ΠS-1 |w〉|-2 is immediate.
+
+In general, argmin|x〉:M|x〉=|b〉‖|x〉‖ = M +|b〉; therefore, min|w〉:AΠS-1 |w〉=|t〉 ‖|w〉‖2 = ‖(AΠS-1 )+|t〉‖2 . By basic geometry, argmax|w〉:‖Π|w〉‖=1 CΠS-1 |w〉=0 |〈o|ΠS-1 |w〉| ∝ (1 - (CΠS-1 )+(CΠS-1 ))ΠS-1 |o〉, i.e., is proportional
+
+to the projection of ΠS-1 |o〉 onto the space orthogonal to the range of S-1ΠC † . Eq. (A.2) follows.
+
+Next assume fP (x) = 0. That min|w′ 〉:〈t|w′ 〉=1 ΠA† |w′ 〉=0 ‖SA† |w′ 〉‖2 = min|w′ 〉:‖SA† |w′ 〉‖=1 ΠA† |w′ 〉=0 |〈t|w′ 〉|-2 is immediate.
+
+Now, without loss of generality, |t〉 ∈ Range(A) = Range(AS), since otherwise fP is false on every input. Therefore, 〈t|w′ 〉 = 〈t|(SA† )+(SA† )|w′ 〉 = 〈t|(SA† )+|w〉 if |w〉 = SA† |w′ 〉. We want to find the length-one vector |w〉 that is in the range of SA† and also of Π, and that maximizes |〈t|(SA† )+|w〉|2 . The answer is clearly the normalized projection of (AS)+|t〉 onto the intersection Range(SA† ) ∩ Range(Π). In general, given two projections Π1 and Π2, the projection onto the intersection of their ranges can be written 1 - (Π1Π2 - 1)+(Π1Π2 - 1). Substituting Π1 = Π and Π2 = (AS)+AS gives the second claimed expression.
+
+$$
+( - 1 - & \frac { 1 } { 2 } \| 2 - 2 \| ^ { 2 } ) ^ { ( 1 - 1 ) 2 } = ( - 1 ) ^ { 2 } \sum _ { \substack { \text {Finally, we show that } \min _ { | w ^ { \prime } ( \cdot ) , ( t | w ^ { \prime } ) = 1 } \| S A ^ { \dagger } | w ^ { \prime } ) \| ^ { 2 } } = \| ( 1 - ( \overline { \Delta } C S ) ^ { + } \overline { \Delta } C S ) S ( 1 - C ^ { \dagger } ( \Pi C ^ { \dagger } ) ^ { + } ) | _ { 0 } \rangle \| ^ { 2 } . \text { Since} \\ & \quad \Pi A ^ { \dagger } | w ^ { \prime } ) = 0 \\ ( - 1 ) & \cdot ( 1 - 1 ) + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 )
+$$
+
+fP (x) is false, |t〉 does not lie in the span of the true grouped input vectors, |t〉 /∈ Range(AΠ), or equivalently Π|o〉 ∈ Range(ΠC † ). Therefore, there exists a vector |w′ 〉 = |t〉 + |bC〉 that is orthogonal to the span of the true columns of A and has inner product one with |t〉. Any such |bC〉 has the form
+
+$$
+| b _ { C } \rangle = - ( \Pi C ^ { \dagger } ) ^ { + } \Pi | o \rangle + \overline { \Delta } | v \rangle \ ,
+$$
+
+where |v〉 is an arbitrary vector with 〈t|v〉 = 0. We want to choose |v〉 to minimize the squared length of
+
+$$
+\overline { \Pi } S A ^ { \dagger } | w ^ { \prime } \rangle & = S \overline { \Pi } ( | o \rangle + C ^ { \dagger } | b _ { C } \rangle ) \\ & = S ( 1 - C ^ { \dagger } ( \Pi C ^ { \dagger } ) ^ { + } ) | o \rangle + S C ^ { \dagger } \overline { \Delta } | v \rangle \ .
+$$
+
+The answer is clearly the squared length of S(1-C † (ΠC † )+)|o〉 projected orthogonal to the range of SC†∆, as claimed. This corresponds to setting |v〉 = -(SC†∆)+S(1-C † (ΠC † )+)|o〉.
+
+The norms of |w∗S 〉 and |w′∗ S 〉 are bounded using Claim A.2.
+
+Remark A.4. The expressions for witness size in Eqs. (A.2) and (A.3) look quite different depending on whether fP (x) = 1 or fP (x) = 0, with the latter case being more complicated. It can be seen, though, that |wsize(P, x)-wsize(P † , x)| = O(1) for any fixed span program P, where P † is the dual span program described in Section 2.3 with fP †(x) = ¬fP (x).
+
+Let us now show that if z̃′j ≲ z̃j for all j ∈ J, then wsize√z̃′ (P, x) ≲ wsize(P, x) (Lemma A.6). This will be useful in showing that wsize(P, x) is a rough upper bound on the exact expressions that we will derive in the sections below.
+
+Remark A.5. From Definition 3.6, it is immediate that wsize(P, x) is monotone increasing in each input complexity zi.
+
+Lemma A.6. Let S and T be any positive-definite diagonal matrices. Then
+
+$$
+\ w s i z e _ { S \sqrt { 1 + T } } ( P , x ) \leq \ w s i z e _ { S } ( P , x ) \cdot ( 1 + \| T \| ) \, ,
+$$
+
+$$
+\text {wsize} \sqrt { S ^ { 2 } + T ^ { 2 } } ( P , x ) \leq \text {wsize} _ { S } ( P , x ) + O ( \| T \| ^ { 2 } ) \ .
+$$
+
+In particular, if z̃′J is such that z̃′j ≲ z̃j for all j ∈ J, then wsize√z̃′ (P, x) ≲ wsize√z̃ (P, x) = wsize(P, x).
+
+$$
+\lambda ^ { 2 } \bar { y } ^ { \dagger } ( X / X _ { \Delta } ) ^ { - 1 } \bar { y }
+$$
+
+span program matrix
+
+"constraint" part of the span program "output" row of the span program projection onto true grouped inputs projection onto false grouped inputs grouped input squared supports at λ = 0 input ratios ri = aj(i)/bi grouped input ratios grouped input ratio multipliers grouped input complexities, 1 ˜σj , s̃j ≲ z̃j true constraints scaled down by √s̃ false constraints scaled up by √s̃ projection onto the range of true constraints complementary projection Y +1) matrix to be inverted Schur complement of X∆ in X y a part of the inverse of X a useful O(1) matrix, V - ̂ V = O(λ2 ‖z̃‖2 )
+
+$$
+A & = \sum _ { j } | v _ { j } \langle j | = C + | t \rangle \langle o | \\ C & = ( 1 - | t \rangle t ) A \\ \langle o | = A _ { O J } = \langle t | A \\ \Pi & = \sum _ { t r e } | j \rangle \langle j | & \text {pr} \\ \Pi & = 1 - \Pi \\ \tilde { \sigma } & = \sum _ { j } \tilde { \sigma } _ { j } | j \rangle \langle j | \\ r & = \sum _ { i } r _ { i } | i \rangle \langle i | \\ \tilde { r } & = ( A _ { J } \dagger r ^ { - 1 } A _ { J } - \lambda ) ^ { - 1 } = \sum _ { \tilde { r } } \tilde { r } _ { j } | j \rangle \langle j | \\ \tilde { s } & = - \frac { 1 } { \lambda } \Pi \tilde { r } ^ { - 1 } + \frac { 1 } { \lambda } \Pi \tilde { r } = \sum _ { j } \tilde { s } _ { j } | j \rangle \langle j | \\ \tilde { z } & = \sum _ { j } \tilde { z } _ { j } | j \rangle \langle j | \\ y & = C \tilde { s } ^ { - 1 / 2 } \Pi , Y = y y ^ { \dagger } \\ \bar { y } & = C \tilde { s } ^ { 1 / 2 } \Pi , \bar { Y } = \bar { y } \bar { y } ^ { \dagger } \\ \Delta & = y y ^ { + } = C \Pi ( C \Pi ) ^ { + } \\ \Delta & = 1 - \Delta \\ X & = - \lambda ^ { 2 } ( 1 \pm \frac { 1 } { \lambda } C \tilde { r } C ^ { \dagger } ) = Y - \lambda ^ { 2 } ( \bar { Y } + 1 ) \\ ( X / X _ { \Delta } ) & = X _ { \overline { \Delta } } - \Delta X ( X _ { \Delta } ) ^ { - 1 } X \Delta \\ V & = - \lambda ^ { 2 } \bar { y } ^ { \dagger } \overline { \Delta } X ^ { - 1 } \overline { \Delta } \bar { y } = - \lambda ^ { 2 } \bar { y } ^ { \dagger } ( X / X _ { \Delta } ) ^ { - 1 } \bar { y } \quad a p \\ \widehat { V } & = \bar { y } ^ { \dagger } \overline { \Delta } ( \bar { Y } _ { \overline { \Delta } } + 1 ) ^ { - 1 } \overline { \Delta } \bar { y } \\ & \quad F i gure \, 6 \colon \, M a t r i c e s \, u s e d \, i n \, the p r i g h e r
+$$
+
+Proof. Eq. (A.5) is immediate from the definition in Eq. (A.1). To derive Eq. (A.6), first note that ‖√S2 + T 2 |v〉‖2 = ‖S|v〉‖2 + ‖T |v〉‖2 . Then when fP (x) = 1,
+
+$$
+\min _ { | w \rangle \colon A \Pi | w \rangle = | t \rangle } ( \| S | w \rangle \| ^ { 2 } + \| T | w \rangle \| ^ { 2 } ) & \leq \| S | w _ { S } ^ { * } \rangle \| ^ { 2 } + \| T | w _ { S } ^ { * } \rangle \| ^ { 2 } \\ & = w \text {size} _ { S } ( P , x ) + O ( \| T \| ^ { 2 } ) \ ,
+$$
+
+where we have used that |w∗S 〉 = argmin|w〉:AΠ|w〉=|t〉‖S|w〉‖2 has norm ‖|w∗S 〉‖ = O(1) by Lemma A.3. The argument when fP (x) = 0 is similar:
+
+$$
+\min _ { | w ^ { \prime } \rangle \colon ( t | w ^ { \prime } ) = 1 } ( \| S A ^ { \dagger } | w ^ { \prime } \rangle \| ^ { 2 } + \| T A ^ { \dagger } | w ^ { \prime } \rangle \| ^ { 2 } ) \leq \text {wsize} _ { S } ( P , x ) + \| T A ^ { \dagger } | w _ { S } ^ { \prime * } \rangle \| ^ { 2 } \ , \\ \Pi A ^ { \dagger } | w ^ { \prime } \rangle = 0
+$$
+
+where |w′∗ S 〉 = arg min|w′ 〉:〈t|w′ 〉=1 ΠA† |w′ 〉=0 ‖SA† |w′ 〉‖2 has O(1) norm by Lemma A.3.
+
+## A.1 Quantitative eigenvalue-zero spectral analysis of AGP
+
+Theorem 2.5 can be strengthened to put quantitative lower bounds on σO, the achievable squared magnitude, in a unit-normalized eigenvalue-zero eigenvector, on the output node either aO if fP (x) = 1 or bO if fP (x) = 0:
+
+Theorem A.7. For an input x ∈ {0, 1}n , define a weighted graph GP (x) by deleting from GP the edges (aj, bi) if the ith literal in Xj is true. Also let
+
+$$
+W = 1 + \sum _ { j \in J } \sum _ { i \in I _ { j } } \left ( \frac { 1 } { \sigma _ { i } } - 1 \right ) ( | b _ { i } \rangle \langle b _ { i } | + | a _ { j } \rangle \langle a _ { j } | ) \ .
+$$
+
+Consider all the eigenvalue-zero eigenvector equations of the weighted adjacency matrix AGP (x), except for the constraint at aO, i.e., Eqs. (2.1) except (2.1d). By Theorem 2.5, these equations have a solution |ψ〉 with
+
+〈aO|ψ〉 ̸= 0 if and only if fP (x) = 1, and have a solution |ψ〉 with 〈bO|ψ〉 ̸= 0 if and only if fP (x) = 0. In fact, the solution |ψ〉 can be chosen so that the normalized square overlap
+
+$$
+\sigma _ { O } \equiv \frac { | ( \langle a _ { O } | + \langle b _ { O } | ) | \psi \rangle | ^ { 2 } } { \langle \psi | W | \psi \rangle } \geq \frac { 1 } { \text {wsize} ( P , x ) + \text {constant} } \ ,
+$$
+
+where the constant may depend on P but is independent of the σI, and wsize(P, x) is as defined in Definition 3.6, with 1/σi ≤ zi for all i.
+
+Remark A.8. Note that Theorem A.7 implies the λ = 0 portion of Theorem 3.7. The weights in W mean that, e.g., setting bi = 1 adds 〈bi|W|bi〉 = 1/σi to the squared normalization factor.
+
+Proof of Theorem A.7. Recall Figure 2. The vertex aj is a shared output node of all the inputs i ∈ Ij. As in the proof of Theorem 2.5, Eq. (2.1c) implies that aj can be nonzero only if grouped input j is true, i.e., if all i ∈ Ij evaluate to true.
+
+For j ∈ J, define ˜σj by
+
+Let ˜σ = ∑j ˜σj|j〉〈j|.
+
+Case fP (x) = 1: When fP (x) = 1, set aj = 0 for all false grouped inputs j. Set the other aj so as to maximize the magnitude of -aO = AOJ|aJ〉 = 〈o|Π|aJ〉, such that C|aJ〉 = CΠ|aJ〉 = 0 and 〈aJ|W|aJ〉 = 〈aJ|Π˜σ-1 |aJ〉 = 1 (Eqs. (2.1b) and (2.1a) at λ = 0). Now, changing variables to |w〉 = ˜σ-1/2 |aJ 〉,
+
+$$
+| a _ { O } | ^ { 2 } & = \max _ { | w \rangle ( w | \Pi | w ) = 1 } | \langle o | \Pi \tilde { \sigma } ^ { 1 / 2 } | w \rangle | ^ { 2 } \\ & = 1 / \wsize s i z _ { \tilde { \sigma } } \ 1 / 2 ( P , x ) \\ & \geq 1 / \wsize s i z ( P , x ) \ ,
+$$
+
+using Eq. (A.2), 1/˜σj ≤ z̃j and the monotonicity of wsize(P, x) (Remark A.5). Finally, dividing by (1+ |aO|2 ) so that the total norm is one, gives
+
+$$
+\sigma _ { O } = \frac { | a _ { O } | ^ { 2 } } { 1 + | a _ { O } | ^ { 2 } } \geq \frac { 1 } { \text {size} ( P , x ) + 1 } \ .
+$$
+
+Case fP (x) = 0: When fP (x) = 0, for each true grouped input j set bi = 0 for i ∈ Ij. For each false j, set bi = 0 for true i ∈ Ij and set bi = fjσi/ ∑false i′ ∈ Ij σi′ . Choose |f〉 to maximize |bO|2 such that 〈f|Π˜σ-1 |f〉 = 1 and, by Eq. (2.1e) at λ = 0, |o〉bO +C † |bC〉 +Π|f〉 = 0. Equivalently, writing
+
+$$
+\tilde { \sigma } _ { j } = \left \{ \ \left ( 1 + \sum _ { i \in I _ { j } } \left ( \frac { 1 } { \sigma _ { i } } - 1 \right ) \right ) ^ { - 1 } \ \text { if } j \text { is true} \\ \sum _ { \text {false} } \text { i } \in I _ { j } \ \sigma _ { i } \quad \text { if } j \text { is false}
+$$
+
+From Definition 3.1, 1/˜σj ≤ z̃j. Roughly speaking, for each j, the vertices bi for i ∈ Ij can be treated as just a single input vertex with associated weight ˜σj in W. Precisely, if j is true, then 〈aj|W|aj〉 = 1/˜σj. And if j is false, then the bIj coefficients appear in Eq. (2.1e) only in the quantity 〈j|AIJ(x)† |bIj 〉 = ∑false i ∈ Ij bi. In order to minimize the weighted squared norm 〈bIj |W|bIj 〉 = ∑i∈Ij |bi|2 /σi for any fixed value of 〈j|AIJ(x)† |bIj 〉, each bi for i false should be set proportional to σi (by Cauchy-Schwarz), so
+
+$$
+\min _ { | b _ { I _ { j } } \rangle \colon \langle j | A _ { I J } ( x ^ { I } ) ^ { \dagger } | b _ { I _ { j } } \rangle = 1 } \langle b _ { I _ { j } } | W | b _ { I _ { j } } \rangle = \frac { 1 } { \tilde { \sigma } _ { j } } \ . \quad \\
+$$
+
+|w′ 〉 = ( bO bC ) so bO = 〈t|w′ 〉, we are constrained that Π|f〉 = -A† |w′ 〉, i.e.,
+
+$$
+| b _ { O } | ^ { 2 } & = \max _ { | w ^ { \prime } | \colon \| \tilde { \sigma } \ ^ { 1 / 2 } A ^ { \prime } | w ^ { \prime } \rangle | = 1 } | \langle t | w ^ { \prime } \rangle | ^ { 2 } \\ & = 1 / \vsize n s e _ { \tilde { \sigma } } \ 1 / 2 ( P , x ) \\ & \geq 1 / \vsize n s ( P , x )
+$$
+
+by Eq. (A.3) and the monotonicity of wsize(P, x). The constructed state has weighted squared norm 〈ψ|W|ψ〉 = 1 + ‖|w′∗ 〉‖2 , where |w′∗ 〉 = argmax|w′ 〉:‖˜σ-1/2A† |w′ 〉‖=1 ΠA† |w′ 〉=0 |〈t|w′ 〉|2 . Normalizing,
+
+$$
+\frac { 1 } { \sigma _ { O } } & = \frac { 1 + \| w ^ { \prime * } \rangle \| ^ { 2 } } { | b _ { O } | ^ { 2 } } \\ & \leq \text {wsize} ( P , x ) + \frac { \| | w ^ { \prime * } \rangle \| ^ { 2 } } { | b _ { O } | ^ { 2 } } \ .
+$$
+
+It remains to show that ‖|w′∗ 〉/bO‖ = O(1). Indeed, 1 〈t|w′∗ 〉 |w′∗ 〉 = arg min|w′ 〉:〈t|w′ 〉=1 ΠA† |w′ 〉=0 ‖˜σ-1/2A† |w′ 〉‖2 = |w′∗ ˜σ-1/2〉 has O(1) norm by Lemma A.3.
+
+## A.2 Small-eigenvalue spectral analysis of AGP
+
+Theorem A.9. For a span program P and input x, given sI with 0 < si ≤ zi for all i ∈ I, let s = ∑i si|i〉〈i| and r = ∑i ri|i〉〈i| = - 1λ Πs-1 + λΠs. Assume that 0 < λ ≤ ϵ/si for a small enough constant ϵ > 0 to be determined and for all i ∈ I. Then the equations
+
+$$
+b _ { I } = r ^ { - 1 } A _ { I J } a _ { J }
+$$
+
+$$
+\lambda b _ { O } = a _ { O } + A _ { O J } a _ { J }
+$$
+
+$$
+\lambda b _ { C } = A _ { C J A _ { J } }
+$$
+
+$$
+\lambda a _ { J } = A _ { O J } \bar { b } _ { O } + A _ { C J } \bar { b } _ { C } + A _ { I J } ( x ) ^ { \dagger } b _ { I }
+$$
+
+have a solution with aO, bO ̸= 0. Moreover, if rO = aO/bO and sO is defined as -1/(λrO) or rO/λ if fP (x) is true or false, respectively, then
+
+$$
+0 < s _ { O } \lesssim \text {size} \sqrt { \varepsilon } ( P , x ) \ ,
+$$
+
+where the grouped input complexities z̃J are defined in terms of zI in Definition 3.2.
+
+Proof. Similarly to the argument in Appendix A.1, it will be useful to define a "grouped input ratio" r̃j so that, roughly speaking, the vertices bi for i ∈ Ij can be treated as just a single input vertex.
+
+Definition A.10 (Grouped input ratios). For j ∈ J, let r̃j = (-λ+ ∑i∈Ij r-1 i )-1 , and let r̃ = ∑j r̃j |j〉〈j| = (AIJ † r-1AIJ - λ)-1 . Like an input ratio ri, r̃j is large and negative if j is true, and small and positive if j is false. Therefore let s̃j = -1/(λr̃j) if j is true, and s̃j = r̃j/λ if j is false. Let s̃ = ∑j s̃j|j〉〈j| = - 1λ Πr̃-1 + 1λ Πr̃, so r̃ = - 1λ Πs̃-1 + λΠs̃.
+
+Before proceeding, we need to establish that r̃ and s̃ are well defined.
+
+Lemma A.11. Assume that 0 < λ ≤ ϵ/zi for a small enough constant ϵ > 0 and for all i ∈ I. Then r̃ = (AIJ † r-1AIJ -λ)-1 exists, so s̃ exists as well. Moreover, for each grouped input j ∈ J, s̃j ≲ z̃j .
+
+Proof. By definition,
+
+$$
+\tilde { r } _ { j } = ( - \lambda + \sum _ { i \in I _ { j } } r _ { i } ^ { - 1 } ) ^ { - 1 } = \left ( - \, \lambda - \lambda \sum _ { \text {true } i \in I _ { j } } s _ { i } + \frac { 1 } { \lambda } \sum _ { \text {false } i \in I _ { j } } s _ { i } ^ { - 1 } \right ) ^ { - 1 } \, .
+$$
+
+If all inputs in Ij are true, then
+
+so 1 ≤ s̃j ≤ 1 + ∑i∈Ij zi ≤ 1 + z̃j .
+
+Now assume at least one input in Ij is false. The true terms can be upper-bounded by λ ∑true i ∈ Ij si ≤ λ ∑i∈Ij zi ≤ |Ij|ϵ. On the other hand, if i is false then (λsi)-1 ≥ (λzi)-1 ≥ 1/ϵ. Therefore, s̃j > 0, and we also get s̃j ≤ z̃j(1+ ϵ′λmaxfalse i ∈ Ij zi) for a constant ϵ′ .
+
+Now we will solve for the output ratio rO using Eqs. (A.15b-d). Letting sO = rO/λ in case fP (x) = 0, or sO = -1/(λrO) in case fP (x) = 1, we aim to show that 0 < sO ≲ wsize√s̃ (P, x). This will prove Theorem A.9 since, by Lemma A.6, wsize√s̃ (P, x) ≲ wsize√z̃ (P, x) = wsize(P, x). Our proof will follow the sketch below Theorem 3.7 in Section 3. We start by deriving an exact expression for rO:
+
+Lemma A.12. The solution to Eq. (A.15) has aO = 0 if bO = 0, and otherwise,
+
+$$
+r _ { O } = \lambda + \langle o | \left ( \tilde { r } - \frac { 1 } { \lambda } \tilde { r } C ^ { \dagger } ( 1 + \frac { 1 } { \lambda } C \tilde { r } C ^ { \dagger } ) ^ { - 1 } C \tilde { r } \right ) | o \rangle \ ,
+$$
+
+provided that r̃ and (1+ 1λ Cr̃C† )-1 exist.
+
+Proof. Recall from Definition A.1 that |o〉 = AOJ † and ACJ is C with range restricted. Substituting Eqs. (A.15a) and (A.15c) into (A.15d), and rearranging terms gives
+
+$$
+\left ( \lambda - A _ { I J } \dagger r ^ { - 1 } A _ { I J } - \frac { 1 } { \lambda } C ^ { \dagger } C \right ) | a _ { J } \rangle = | o \rangle b _ { O } \ .
+$$
+
+From Eq. (A.15b), if bO ̸= 0, then aO/bO = λ- 〈o|aJ〉/bO, so
+
+$$
+r _ { O } & = \lambda + \langle o | ( \tilde { r } ^ { - 1 } + \frac { 1 } { \lambda } C ^ { \dagger } C ) ^ { - 1 } | o \rangle \\ & = \lambda + \langle o | \left ( \tilde { r } - \frac { 1 } { \lambda } \tilde { r } C ^ { \dagger } ( 1 + \frac { 1 } { \lambda } C \tilde { r } C ^ { \dagger } ) ^ { - 1 } C \tilde { r } \right ) | o \rangle \ ,
+$$
+
+rC† )-1 exist.
+
+by the Woodbury matrix identity [GV96], provided that r̃ and (1+ 1λ C˜
+
+Remark A.13 (Form of Eq. (A.17)). Note from Eq. (A.17) that rO is a real number provided that all the input ratios rI are themselves reals. Also, note that rO depends on C only through C †C (see too Eq. (A.18) in the proof); in particular, left-multiplying C by U where U is any linear isometry (i.e., satisfying U †U = 1) has no effect. Since the grouped input vectors vJ can be arbitrary in Definition 2.1, C †C is in general an arbitrary |J| × |J| positive semidefinite matrix.
+
+Now the main step in simplifying Eq. (A.17) is dividing the matrix we want to invert into a 2× 2 block matrix and applying the following well-known claim:
+
+Claim A.14. Let X be an operator, and let ∆ and ∆ = 1-∆ be a projection and its complement. Assume that X∆ is invertible. Let the "Schur complement" of X be (X/X∆) ≡ X∆ -∆X(X∆)-1X∆. If the Schur complement of X is invertible on ∆, then X is invertible, and X-1 is given by:
+
+$$
+\Delta X ^ { - 1 } \Delta & = ( X _ { \Delta } ) ^ { - 1 } + ( X _ { \Delta } ) ^ { - 1 } X ( X / X _ { \Delta } ) ^ { - 1 } X ( X _ { \Delta } ) ^ { - 1 } & \Delta X ^ { - 1 } \overline { \Delta } & = - ( X _ { \Delta } ) ^ { - 1 } X ( X / X _ { \Delta } ) ^ { - 1 } \\ \overline { \Delta } X ^ { - 1 } \Delta & = - ( X / X _ { \Delta } ) ^ { - 1 } X ( X _ { \Delta } ) ^ { - 1 } & \overline { \Delta } X ^ { - 1 } \overline { \Delta } & = ( X / X _ { \Delta } ) ^ { - 1 }
+$$
+
+$$
+( A . 1 9 )
+$$
+
+$$
+\tilde { s } _ { j } = - 1 / ( \lambda \tilde { r } _ { j } ) = 1 + \sum _ { i \in I _ { j } } s _ { i } \ ,
+$$
+
+Proof. Multiply out the matrices.
+
+Lemma A.15. The inverse (1+ 1λ Cr̃C† )-1 exists, provided 0 < λ ≤ ϵ/zi for a small enough positive constant ϵ and for all i ∈ I.
+
+Proof. Let y = Cs̃-1/2Π, ȳ = Cs̃1/2Π, Y = yy† and Ȳ = ȳȳ† . We aim to show that X-1 exists, where
+
+$$
+X & = - \lambda ^ { 2 } ( 1 + \frac { 1 } { \lambda } C \tilde { r } C ^ { \dagger } ) \\ & = Y - \lambda ^ { 2 } ( \bar { Y } + 1 ) \ .
+$$
+
+Let ∆= yy+ be the projection onto the range of y, and let ∆= 1-∆. Then
+
+$$
+X _ { \Delta } & = Y - \lambda ^ { 2 } \Delta ( \bar { Y } + 1 ) \Delta & \Delta X \overline { \Delta } & = - \lambda ^ { 2 } \Delta \bar { Y } \overline { \Delta } \\ \overline { \Delta } X \Delta & = - \lambda ^ { 2 } \overline { \Delta } \bar { Y } \Delta & X _ { \overline { \Delta } } & = - \lambda ^ { 2 } \overline { \Delta } ( \bar { Y } + 1 ) \overline { \Delta }
+$$
+
+Now since Y is invertible on ∆ (i.e., ∆= Y Y +), so is X. By the Neumann series,
+
+$$
+( X _ { \Delta } ) ^ { - 1 } = Y ^ { + } ( 1 + O ( \lambda ^ { 2 } \| \tilde { s } \| ^ { 2 } ) ) \ ,
+$$
+
+where we have used that ‖Ȳ ‖ = O(‖s̃‖) and ‖Y +‖ = O(‖s̃‖) (Claim A.2), and where we write O(λ2‖s̃‖2 ) to mean some matrix with norm so-bounded. In particular, (X∆)-1 is positive definite on ∆.
+
+Let (X/X∆) be the Schur complement of X∆ in X,
+
+$$
+( X / X _ { \Delta } ) & \equiv X _ { \overline { \Delta } } - \overline { \Delta } X ( X _ { \Delta } ) ^ { - 1 } X \overline { \Delta } \\ & = - \lambda ^ { 2 } \overline { \Delta } ( \bar { Y } + 1 ) \overline { \Delta } - \lambda ^ { 4 } \overline { \Delta } \bar { Y } ( X _ { \Delta } ) ^ { - 1 } \bar { Y } \overline { \Delta } \ .
+$$
+
+As -(X/X∆) on ∆ is the sum of the positive definite matrix λ2∆ and positive semidefinite matrices, (X/X∆) is negative definite on ∆ and in particular is invertible on ∆.
+
+Since X∆ and (X/X∆) are each invertible, on ∆ and on ∆, respectively, X-1 exists by Claim A.14, as claimed.
+
+The following discussion will use the notation from the proof of Lemma A.15. It will also be convenient to let S = √s̃. We have from Eq. (A.17)
+
+$$
+r _ { O } & = \lambda + \langle o | \tilde { r } | o \rangle + \lambda \langle o | \tilde { r } C ^ { \dagger } X ^ { - 1 } C \tilde { r } | o \rangle \\ & = \lambda - \frac { 1 } { \lambda } \langle o | S ^ { - 2 } \Pi | o \rangle + \lambda \langle o | S ^ { 2 } \overline { \Pi } | o \rangle + \left ( \begin{array} { c c } \frac { 1 } { \lambda } \langle o | S ^ { - 1 } y ^ { \dagger } X ^ { - 1 } y S ^ { - 1 } | o \rangle & + \lambda ^ { 3 } \langle o | S \bar { y } ^ { \dagger } X ^ { - 1 } \bar { y } S | o \rangle \\ \frac { \lambda } { \lambda } ( \langle o | S ^ { - 1 } y ^ { \dagger } X ^ { - 1 } \bar { y } S | o \rangle & + \langle o | S \bar { y } ^ { \dagger } X ^ { - 1 } y S ^ { - 1 } | o \rangle ) \end{array} \right ) \ .
+$$
+
+Our goal now is to expand the above expression as a series in λ, evaluating the coefficients of 1/λ and of λ, and bounding higher-order terms. In order to expand X-1 as a series, we use the block decomposition of X and Claim A.14.
+
+Let us start by evaluating two expressions, (X∆)-1 and V = -λ2 ȳ† (X/X∆)-1 ȳ, that will reappear frequently in the following analysis.
+
+Claim A.16. (X∆)-1 satisfies
+
+$$
+( X _ { \Delta } ) ^ { - 1 } & = Y ^ { + } + \lambda ^ { 2 } Y ^ { + } ( \bar { Y } + 1 ) Y ^ { + } + Y ^ { + } O ( \lambda ^ { 4 } \| \tilde { s } \| ^ { 3 } ) Y ^ { + } \\ & = Y ^ { + } ( 1 + O ( \lambda ^ { 2 } \| \tilde { s } \| ^ { 2 } ) ) = O ( \| \tilde { s } \| ) \, .
+$$
+
+Proof. We know that ‖(X∆)-1‖ = O(‖s̃‖). Note that for matrices A and B, (A + B)-1 = (1 - (A + B)-1B)A-1 = A-1 (1 - B(A + B)-1 ) = A-1 - A-1BA-1 + A-1B(A + B)-1BA-1 provided A and A + B are invertible. Applying this with A = Y and B = -λ2∆( Ȳ + 1)∆ gives
+
+$$
+( X _ { \Delta } ) ^ { - 1 } & = Y ^ { + } + \lambda ^ { 2 } Y ^ { + } ( \bar { Y } + 1 ) Y ^ { + } + \lambda ^ { 4 } Y ^ { + } ( \bar { Y } + 1 ) ( X _ { \Delta } ) ^ { - 1 } ( \bar { Y } + 1 ) Y ^ { + } \\ & = Y ^ { + } + \lambda ^ { 2 } Y ^ { + } ( \bar { Y } + 1 ) Y ^ { + } + Y ^ { + } O ( \lambda ^ { 4 } \| \tilde { s } \| ^ { 3 } ) Y ^ { + } \ .
+$$
+
+Claim A.17. Let V = -λ2 ȳ†∆X-1∆ȳ = -λ2 ȳ† (X/X∆)-1 ȳ. Then
+
+$$
+V = \widehat { V } + O ( \lambda ^ { 2 } \| \tilde { s } \| ^ { 2 } ) \quad w h e r e \quad \widehat { V } = \bar { y } ^ { \dagger } \overline { \Delta } ( \bar { Y } _ { \overline { \Delta } } + 1 ) ^ { - 1 } \overline { \Delta } \bar { y } \ .
+$$
+
+$$
+V & = - \lambda ^ { 2 } \bar { y } ^ { \dagger } ( X _ { \overline { \Delta } } - \overline { \Delta } X ( X _ { \Delta } ) ^ { - 1 } X \overline { \Delta } ) ^ { - 1 } \bar { y } \\ & = \bar { y } ^ { \dagger } \left [ \bar { \Delta } ( \bar { Y } + 1 ) \overline { \Delta } + \lambda ^ { 2 } \bar { \Delta } \bar { Y } ( X _ { \Delta } ) ^ { - 1 } \bar { Y } \right ] ^ { - 1 } \bar { y } \\ & = M ^ { \dagger } \left [ M ( 1 + \lambda ^ { 2 } \bar { y } ^ { \dagger } ( X _ { \Delta } ) ^ { - 1 } \bar { y } ) M ^ { \dagger } + 1 \right ] ^ { - 1 } M \ ,
+$$
+
+where M = ∆ȳ. Now λ2 ȳ† (X∆)-1 ȳ = O(λ2‖s̃‖2 ) since ȳ = O(‖√s̃‖). Therefore, M (1+λ2 ȳ† (X∆)-1 ȳ)M † +1 is the sum of positive-definite and positive-semidefinite matrices, hence is invertible. Again use (A+B)-1 = (1 - (A + B)-1B)A-1 , now with A = MM † + 1 = Ȳ∆ + 1 and B = λ2Mȳ† (X∆)-1 ȳM † , to get
+
+$$
+V & = \widehat { V } - V ( \lambda ^ { 2 } \bar { y } ^ { \dagger } ( X _ { \Delta } ) ^ { - 1 } \bar { y } ) \widehat { V } \\ & = \widehat { V } \cdot \left [ 1 + ( \lambda ^ { 2 } \bar { y } ^ { \dagger } ( X _ { \Delta } ) ^ { - 1 } \bar { y } ) \widehat { V } \right ] ^ { - 1 } \ ,
+$$
+
+provided the inverse right-multiplying ̂ V exists. Indeed, M † (MM † + 1)-1M < 1 for an arbitrary matrix M and in particular for M = ∆ȳ (if the singular-value decomposition of M is M = ∑i mi|i〉〈i′ |, then M † (MM † + 1)-1M = ∑i m2i m2i +1 |i′ 〉〈i′ |). Therefore the inverse does exist, and we obtain Eq. (A.26).
+
+Now, using Claim A.16 and Claim A.17, we find
+
+$$
+Now , \, & \text {using Claim A.16 and Claim A.17, we find} \\ & \Delta X ^ { - 1 } \Delta = ( X _ { \Delta } ) ^ { - 1 } + ( X _ { \Delta } ) ^ { - 1 } X ( X _ { \Delta } ) ^ { - 1 } X ( X _ { \Delta } ) ^ { - 1 } \\ & = ( X _ { \Delta } ) ^ { - 1 } - \lambda ^ { 2 } ( X _ { \Delta } ) ^ { - \frac { 1 } { \tilde { y } } } Y \bar { v } ^ { \dagger } ( X _ { \Delta } ) ^ { - 1 } \\ & = Y ^ { + } + \lambda ^ { 2 } Y ^ { + } ( \bar { Y } + 1 ) Y ^ { + } + Y ^ { + } O ( \lambda ^ { 4 } \| \mathfrak { s } \| ^ { 3 } ) Y ^ { + } \\ & - \lambda ^ { 2 } Y ^ { + } ( 1 + O ( \lambda ^ { 2 } \| \mathfrak { s } \| ^ { 2 } ) ) \bar { \gamma } ( \hat { V } + O ( \lambda ^ { 2 } \| \mathfrak { s } \| ^ { 2 } ) ) \bar { \gamma } ^ { \dagger } ( 1 + O ( \lambda ^ { 2 } \| \mathfrak { s } \| ^ { 2 } ) ) Y ^ { + } \\ & = Y ^ { + } + \lambda ^ { 2 } Y ^ { + } \left ( - \bar { \gamma } \bar { v } ^ { \dagger } \bar { y } ^ { \dagger } + \bar { Y } + 1 + O ( \lambda ^ { 2 } \| \mathfrak { s } \| ^ { 3 } ) \right ) Y ^ { + } \ ,
+$$
+
+and
+
+$$
+\Delta X ^ { - 1 } \overline { \bar { y } } & = \lambda ^ { 2 } ( X _ { \Delta } ) ^ { - 1 } \bar { Y } ( X / X _ { \Delta } ) ^ { - 1 } \bar { y } \\ & = - ( X _ { \Delta } ) ^ { - 1 } \bar { y } V \\ & = - Y ^ { + } ( 1 + O ( \lambda ^ { 2 } \| \delta \| ^ { 2 } ) ) \bar { y } ( \bar { V } + O ( \lambda ^ { 2 } \| \bar { \S } \| ^ { 2 } ) ) \\ & = - Y ^ { + } \bar { y } \bar { V } + Y ^ { + } \cdot O ( \lambda ^ { 2 } \| \bar { \S } \| ^ { 5 / 2 } ) \ .
+$$
+
+In particular, ‖∆X-1∆‖ = O(‖s̃‖) and ‖∆X-1∆ȳ‖ = O(‖s̃‖3/2 ).
+
+Let us now substitute the expressions we have derived into Eq. (A.24) for rO. Consider each of the terms involving X-1 separately. First of all,
+
+$$
+\text {voting } X \quad \text {separately. First of all,} \\ \frac { 1 } { \lambda } \langle o | S ^ { - 1 } y ^ { \dagger } X ^ { - 1 } y S ^ { - 1 } | o \rangle & = \frac { 1 } { \lambda } \langle o | S ^ { - 1 } y ^ { \dagger } ( \Delta X ^ { - 1 } \Delta ) y S ^ { - 1 } | o \rangle \\ & = \frac { 1 } { \lambda } \langle | \Pi S ^ { - 1 } y ^ { + } y S ^ { - 1 } | | \Pi | o \rangle \\ & \quad + \lambda \langle | \Pi S ^ { - 1 } y ^ { + } ( 1 + \bar { Y } - \bar { y } \widehat { Y } ^ { \dagger } ) ( y ^ { \dagger } ) ^ { + } S ^ { - 1 } \Pi | o \rangle \\ & \quad + O ( \lambda ^ { 3 } \| \bar { s } \| ^ { 3 } ) \ ,
+$$
+
+V = ̂ s‖2 ) where ̂ Y∆ + 1)-1∆Īn particular, ‖̂ V ‖ < 1 and ‖V ‖ < 1 + O(λ2 ‖s̃‖2 ) = O(1).
+
+Proof. We compute where we have substituted Eq. (A.29) and applied ‖S-1 y†Y +‖ = ‖S-1 y+‖ = O(1) (Claim A.2). Also, by Claim A.17 and Eqs. (A.29), (A.30),
+
+$$
+\lambda ^ { 3 } \langle o | S \bar { y } ^ { \dagger } X ^ { - 1 } \bar { y } S | o \rangle & = \lambda ^ { 3 } \langle o | S \bar { y } ^ { \dagger } ( \Delta + \overline { \Delta } ) X ^ { - 1 } ( \Delta + \overline { \Delta } ) \bar { y } S | o \rangle \\ & = - \lambda \langle o | S V S | o \rangle + O ( \lambda ^ { 3 } \| \bar { s } \| ^ { 3 } ) \\ & = - \lambda \langle o | \bar { \Pi } S \widehat { V } S \bar { \Pi } | o \rangle + O ( \lambda ^ { 3 } \| \bar { s } \| ^ { 3 } ) \ .
+$$
+
+Lastly, by Eqs. (A.29), (A.30),
+
+$$
+\lambda \langle o | S ^ { - 1 } y ^ { \dagger } X ^ { - 1 } \bar { y } S | o \rangle & = \lambda \langle o | S ^ { - 1 } y ^ { \dagger } \Delta X ^ { - 1 } ( \Delta + \bar { \Delta } ) \bar { y } S | o \rangle \\ & = \lambda \langle o | S ^ { - 1 } y ^ { \dagger } Y ^ { + } ( 1 + O ( \lambda ^ { 2 } \| \bar { s } \| ^ { 2 } ) ) \bar { y } S | o \rangle \\ & - \lambda \langle o | S ^ { - 1 } y ^ { \dagger } Y ^ { + } \left [ \bar { \hat { y } } + O ( \lambda ^ { 2 } \| \bar { s } \| ^ { 5 / 2 } ) \right ] S | o \rangle \\ & = \lambda \langle o | \Pi S ^ { - 1 } y ^ { + } ( \bar { y } - \bar { y } \hat { V } ) S \overline { \Pi } | o \rangle + O ( \lambda ^ { 3 } \| \bar { s } \| ^ { 3 } ) \ .
+$$
+
+Substituting Eqs. (A.31), (A.32), (A.33) into the expression for rO gives
+
+$$
+r _ { O } = - \frac { 1 } { \lambda } \| ( 1 - y ^ { + } y ) S ^ { - 1 } \Pi | o \rangle \| ^ { 2 } + \lambda \langle v | ( 1 - \widehat { V } ) | v \rangle + O ( \lambda + \lambda ^ { 3 } \| \tilde { \S } \| ^ { 3 } ) \ ,
+$$
+
+where |v〉 = (SΠ- ȳ† (y† )+S-1 )|o〉. From the singular-value decomposition, one infers that (1-M † (MM † + 1)-1M) - (1 -M +M) = M +(1 - (MM † + 1)-1 )(M † )+ for any matrix M, and in particular for M = ∆ȳ. Moreover, 〈v|(∆ȳ)+(1 - ( Ȳ∆ + 1)-1 )((∆ȳ)† )+|v〉 = O(1), since ‖S(∆ȳ)+‖ = O(1) and ‖〈v|S-1 ‖ = O(1). Therefore the above equation simplifies to
+
+$$
+r _ { O } = - \frac { 1 } { \lambda } \| ( 1 - y ^ { + } y ) S ^ { - 1 } \Pi | o \rangle \| ^ { 2 } + \lambda ( \| ( 1 - ( \overline { \Delta } \bar { y } ) ^ { + } ( \overline { \Delta } \bar { y } ) ) | v \rangle \| ^ { 2 } + O ( 1 ) ) + O ( \lambda ^ { 3 } \| \tilde { s } \| ^ { 3 } ) \ .
+$$
+
+This is as far as we can simplify rO in general. When fP (x) = 1, the first term is -1/(λwsizeS(P, x)), as desired, using the last expression of Eq. (A.2) for wsizeS(P, x). Assume then that fP (x) = 0, i.e., Π|o〉 ∈ Range(ΠC † ). In this case, the first term in Eq. (A.35) is zero, and the second term can be simplified slightly further. Using (y† )+S-1 |o〉 = (ΠS-1C † )+S-1Π|o〉 = (ΠC † )+|o〉 and ΠC † (ΠC † )+|o〉 = Π|o〉,
+
+$$
+| v \rangle & = ( S \overline { \Pi } - \bar { y } ^ { \dagger } ( \Pi C ^ { \dagger } ) ^ { + } ) | o \rangle \\ & = ( S \overline { \Pi } - \bar { y } ^ { \dagger } ( \Pi C ^ { \dagger } ) ^ { + } ) | o \rangle + S \Pi ( 1 - C ^ { \dagger } ( \Pi C ^ { \dagger } ) ^ { + } ) | o \rangle \\ & = S ( 1 - C ^ { \dagger } ( \Pi C ^ { \dagger } ) ^ { + } ) | o \rangle \ .
+$$
+
+Moreover, since ∆CSΠ = 0, ∆ȳ = ∆CSΠ = ∆CS. Therefore, ‖(1 - (∆ȳ)+(∆ȳ))|v〉‖2 = wsizeS(P, x), as desired, using the last expression of Eq. (A.3) for wsizeS(P, x). This concludes the proof of Theorem A.9.
+
+Theorem A.9 completes the λ ̸= 0 portion of Theorem 3.7, finishing its proof.
+
+## B Quantum algorithm
+
+The approach outlined in Section 4.4 is slightly indirect. To motivate it, we begin by briefly considering in Section B.1 a more direct algorithm ALG′ , that runs phase estimation directly on exp(iAG̃P (x) ). ALG′ is analogous to the algorithm described by Cleve et al. [CCJY07] soon after the original NAND formula evaluation paper [FGG07]. Algorithm ALG′ is nearly optimal, but not quite. The operator exp(iAG̃P (x) ) is a continuous-time quantum walk, and the overhead can be thought of as coming from simulating continuoustime quantum dynamics with a discrete computational model, in particular with discrete oracle queries. To avoid this overhead, the proof of Theorem 4.7 in Section B.2 works with a discrete-time quantum walk.
+
+The approach in Section B.1 is optional motivation, and the reader may choose to skip directly to Section B.2.
+
+## B.1 Intuition: Continuous-time quantum walk algorithm
+
+Theorem 4.16 immediately suggests the basic form of a quantum algorithm for evaluating ϕ(x):
+
+Algorithm ALG′ : Input x ∈ {0, 1}N , Output true/false.
+
+1. Prepare an initial state on the output node, |aO〉.
+2. Run phase estimation, with precision δp ≤ 1 ‖A G̃P (0N ) ‖ ϵ Adv(ϕ) and small enough constant error rate δe, on the unitary V = exp(iAG̃P (x)/‖AG̃P (0N ) ‖).
+3. Output true if and only if the phase estimation output is λ = 0.
+
+The idea of the second step is to "measure the Hamiltonian A G̃P (x) ." In this step, we have normalized A G̃P (x) by ‖AG̃P (0N ) ‖ ≥ ‖AG̃P (x)‖ instead of by ‖AG̃P (x) ‖, in order to minimize dependence on the input x. This norm is O(1) since the graph G̃P (0N ) has vertex degrees and edge weights all O(1).
+
+Algorithm ALG′ evaluates ϕ(x) correctly, with a constant gap between its completeness and soundness:
+
+- Theorem 4.16 implies that if the formula evaluates to true, then AG̃P (x) has an eigenvalue-zero eigenstate with squared support |aO|2 = Ω(1) on aO. Therefore, the phase estimation outcome is λ = 0 with probability at least |aO|2 - δe = Ω(1) (the completeness parameter).
+- On the other hand, if the formula evaluates to false, then Theorem 4.16 implies that AG̃P (x)/‖AG̃P (0N ) ‖ has no eigenvalue-λ eigenstates supported on aO with |λ| ≤ δp. Therefore, the measured outcome will be λ = 0 only if there is an error in the phase estimation. By choosing δe a small enough constant, the soundness error δe will be bounded away from the completeness parameter.
+
+The efficiency of ALG′ also seems promising. Phase estimation of V with precision δp and error rate δe requires O(1/(δpδe)) calls to V [CEMM98]. Therefore, the second step requires only O(Adv(ϕ)) calls to V . However, we still need to explain how to implement V . This is important because AG̃P (x) depends on the input x. Therefore, implementing V requires querying the x. If each call to V requires many queries to the input oracle Ox of Eq. (4.3), then the overall query efficiency of ALG′ will be poor.
+
+Note now that only the input edges of GP (x) depend on the input x. Therefore, AG̃P (x) can be split up into two terms: (input edges)+(all other edges). The first term can be exponentiated with only two queries to the input oracle Ox, while exponentiating the second term requires no input queries. The two terms do not commute, but the exponential of their sum can still be computed to sufficient precision by using a Lie product decomposition. These are more quantitative versions of identities like eA+B = limn→∞(eA/n eB/n )n . For more details, see [CCJY07].
+
+Unfortunately, implementing the exponential of AG̃P (x) will require ω(1) input queries. By using higherorder Lie product formulas, the overhead can be reduced to exp(O(√log|x|)), which is N o(1) . However, this is still a super-constant overhead, so it appears that this approach cannot yield an optimal formula evaluation algorithm-the best we can hope for is O(Adv(ϕ)) · N o(1) queries.
+
+## B.2 Proof of Theorem 4.7: Discrete-time quantum walk algorithm
+
+Therefore, we turn to the approach used in the NAND formula evaluation algorithm of [CRŠZ07]. Instead of running phase estimation on the exponential of AG̃P (x) , we construct a discrete-time, or "coined," quantum walk Ux = ÕxU0N , where Õx is the adjusted oracle of Eq. (4.9), that has spectrum and eigenvectors corresponding in a precise way to those of AG̃P (x) . Then we run phase estimation on Ux. Each call to Ux requires exactly one oracle query, so there is no query overhead.
+
+## B.2.1 Construction of the coined quantum walk Ux
+
+The first step in constructing Ux is to decompose ÃGP (0N ) into (constant)·∆† ◦∆, where ∆ is a square matrix with row norms one, and ◦ denotes the entrywise matrix product. We follow [CRŠZ07]. One minor technical difference, though, is that for us, AG̃P (x) is a Hermitian matrix with possibly complex entries. In [CRŠZ07], the analogous weighted adjacency matrix, for the NAND formula ϕ, is a real symmetric matrix. Therefore, we need to slightly modify the construction of ∆ to obtain the correct phases for the entries of ÃGP (0N ).
+
+Definition B.1. For notational convenience, let A = AG̃P (0N ) be the weighted adjacency matrix for G̃P (0N ). (Recall from Theorem 4.16 that G̃P (0N ) is the same as GP except with the edge weight on the output edge (aO, bO) reduced.) A = ∑v,w Av,w|v〉〈w| is a Hermitian matrix.
+
+G̃P (0N ) is a bipartite graph, so we may color each vertex red or black, such that every edge is between one red vertex and one black vertex.
+
+Claim B.2. Let A′ = ∑v,w |Av,w||v〉〈w| be the entrywise absolute value of A. A′ is a real symmetric matrix. Let ‖A′‖ be the largest-magnitude eigenvalue of A′ . Let |δ〉 be the principle eigenvector of A′ , with 〈v|δ〉 = δv > 0 for every v, and let
+
+$$
+\Delta = \frac { 1 } { \sqrt { \| A ^ { \prime } \| } } \sum _ { \substack { b l a c k \ v \\ r e d \ w } } \left ( ( \sqrt { A _ { v , w } } ) ^ { * } \sqrt { \frac { \delta _ { w } } { \delta _ { v } } } | v \rangle \langle w | + \sqrt { A _ { v , w } } \sqrt { \frac { \delta _ { v } } { \delta _ { w } } } | w \rangle \langle v | \right ) \ .
+$$
+
+Then ∆ has all row norms one, and A = ‖A′‖ · ∆† ◦ ∆.
+
+Proof. Since A′ has nonnegative entries, the principal eigenvector |δ〉 is also nonnegative. Since G̃P (0N ) is a connected graph, δv > 0 for every v. Hence ∆ is well defined up to choice of sign of the square root, which doesn't matter.
+
+By construction, for all v and w, ∆∗v,w∆w,v = Av,w/‖A′‖, i.e., ‖A′‖ · ∆† ◦ ∆ = A. Furthermore, the squared norm of the v-th row of ∆ is ∑w |∆v,w|2 = 1 ‖A′ ‖ 1 δv ∑w A′v,w δw = 1 ‖A′ ‖ (A′ δ)v δv = 1.
+
+Remark B.3. In defining ∆, we have evenly divided the complex phases of entries of A between red-black and black-red terms. However, any division of the phases would have worked. For example, Claim B.2 would also hold with Eq. (B.1) replaced by ∆= 1 √‖A′ ‖ ∑black v red w ( A∗v,w √|Av,w| √ δw δv |v〉〈w| + √|Av,w| δv δw |w〉〈v|).
+
+We can now apply Szegedy's correspondence theorem [Sze04] to relate the spectrum of ÃGP to that of a discrete-time coined quantum walk unitary.
+
+Theorem B.4 ([Sze04]). Let {|v〉 : v ∈ V } be an orthonormal basis for HV . For each v ∈ V , let |ṽ〉 = |v〉 ⊗ ∑w∈V δvw|w〉 ∈ HV ⊗HV , where 〈ṽ|ṽ〉 = ∑w |δvw|2 = 1. Let T = ∑v |ṽ〉〈v| and Π = TT † = ∑v |ṽ〉〈ṽ| be the projection onto the span of the |ṽ〉s. Let S = ∑v,w |v,w〉〈w, v|, a swap. Let U = (2Π- 1)S, a swap followed by reflection about the span of the |ṽ〉s. Let M = T †ST = ∑v,w δ∗ vw δwv|v〉〈w|.
+
+Then the spectral decomposition of U corresponds to that of M as follows: Take {|λα〉} a complete set of orthonormal eigenvectors of the Hermitian matrix M with respective eigenvalues λα. Let Rα = Span{T|λα〉, ST|λα〉}. Then Ra ⊥ Rα′ for α ̸= α′ ; let R = ⊕αRα. U fixes the spaces Ra and is -S on R⊥. The eigenvalues and eigenvectors of U within Ra are given by βα,± = λα±i√1 -λ2α and (1+βα,±S)T|λα〉, respectively.
+
+A proof of Theorem B.4 in the above form is given in [CRŠZ07], and see [MNRS07].
+
+Remark B.5 (Coined quantum walks). The operator U = (2Π-1)S in Theorem B.4 is known as a "coined quantum walk." S is known as the "step operator," and the reflection (2Π- 1) is the "coin-flip operator." On the space R, (2Π- 1) decomposes as ∑v |v〉〈v| ⊗ (reflection about ∑w δvw|w〉).
+
+In a classical random walk on a graph, a coin is flipped between each step to decide which adjacent vertex to step to next. In a coined quantum walk, on the other hand, the coin is maintained as part of the coherent quantum state, and is reflected between steps (also known as "diffusion").
+
+Remark B.6. Theorem B.4 can be viewed as giving a correspondence between coined quantum walks and classical random walks; in the special case that each δvw = δwv ≥ 0, M is a classical random walk transition matrix. For general δvw, Theorem B.4 can be viewed a correspondence between coined quantum walks and continuous-time quantum walks. We use the theorem in the latter sense.
+
+Lemma B.7. For ∆ defined by Eq. (B.1) and with δvw = ∆v,w, let U0N be the coined quantum walk operator U0N = iU = i(2Π- 1)S in the notation of Theorem B.4. U0N acts on HV ⊗HV , where V is the vertex set of GP . For x ∈ {0, 1}N , let Ux = ÕxU0N , where Õx applies a phase (-1)xi to input vertex bi and otherwise does nothing (see Eq. (4.9)). Then,
+
+- If ϕ(x) = 1, there exist eigenvalue 1 and eigenvalue -1 normalized eigenstates of Ux each with Ω(1) support on |aO, bO〉.
+- If ϕ(x) = 0, then Ux does not have any eigenstates supported on |aO, bO〉 with eigenvalues ±eiλ for |λ| ≤ arcsin( 1 ‖A′ ‖ ϵ Adv(ϕ) ) = Ω(1/Adv(ϕ)), where ϵ > 0 is the constant of Theorem 4.16.
+
+Proof. Note that for an input vertex bi on a span program input edge (ai, bi), the bith row of ∆ is 〈bi|∆ = 〈ai|. Define ∆(x) as follows: If xi = 1, then let 〈bi|∆(x) = 〈bi| (i.e., in the classical walk formulation, make bi a probability sink), and let the other rows of ∆(x) be the same as those of ∆=∆(0N ).
+
+In the notation of Theorem B.4 with each δvw set to the (v,w) entry of ∆(x), the vectors |ṽ〉 do not depend on x if v /∈ {bi}i∈I, whereas
+
+$$
+| \tilde { b } _ { i } \rangle = \left \{ \begin{array} { l l l } { | b _ { i } , a _ { i } \rangle } & { i f x _ { i } = 0 } \\ { | b _ { i } , b _ { i } \rangle } & { i f x _ { i } = 1 } \end{array}
+$$
+
+Therefore, in M = ∆(x)† ◦∆(x), entries (ai, bi) and (bi, ai) are zeroed out when xi = 1, while other entries are unchanged: so M = 1 ‖A′ ‖ AG̃P (x) . Also, on R, iU = i(2Π - 1)S is the same as Ux. So Theorem B.4 implies that the spectrum of Ux = ÕxU0N corresponds exactly to that of AG̃P (x) /‖A′‖. If the eigenvalues of AG̃P (x) /‖A′‖ are {λα}, then the eigenvalues of Ux are given by iβα,± = ±√1-λ2α +iλα, i.e., ei arcsinλα and -e-i arcsin λα .
+
+In case ϕ(x) = 1, Theorem 4.16 promises that A G̃P (x) has an eigenvalue-zero eigenstate with Ω(1) support on aO. Denote this eigenstate by |λα = 0〉. By Theorem B.4, (1 ± iS)T|λα = 0〉 are eigenstates of Ux with eigenvalues ±1. Since T|aO〉 = |aO, bO〉, the eigenvectors (1 ± iS)T|λα = 0〉 each have Ω(1) support on |aO, bO〉. Moreover, this remains true even after renormalizing: T is an isometry, while the swap S is unitary, so ‖(1 ± iS)T |λα = 0〉‖ ≤ 2.
+
+The claim also follows for the case ϕ(x) = 0 by Theorems 4.16 and B.4. Every eigenstate of iU with support on |aO, bO〉 = T |aO〉 must be of the form (1 + βα,±S)T |λα〉 = (1 + (λα ± i√1 - λ2α)S)T |λα〉. The terms which can overlap T|aO〉 are either 〈aO|λα〉 (via T) or 〈bO|λα〉 (via ST). But by Theorem 4.16, both coefficients must be zero. Note that ‖A′‖ = O(1) since the graph G̃P (0N ) has vertex degrees and edge weights all O(1). Therefore, the spectral gap from zero of AG̃P (x)/‖A′‖ is only a constant factor worse than that of AG̃P (x) .
+
+## B.2.2 Algorithm ALG, correctness, and query and time complexity
+
+Algorithm ALG: Input x ∈ {0, 1}N , Output true/false.
+
+1. Prepare an initial state on the output edge |aO, bO〉.
+2. Run phase estimation on Ux = ÕxU0N , with precision δp ≤ arcsin( 1 ‖A′ ‖ ϵ Adv(ϕ) ) and small enough constant error rate δe.
+3. Output true if the measured phase is 0 or π. Otherwise output false.
+
+Correctness: Lemma B.7 implies that ALG is both complete and sound:
+
+| x       |   0000 |   0001 |   0010 |   0011 |   0100 |   0101 |   0110 |   0111 |   1000 |   1001 |   1010 |   1011 |   1100 |   1101 |   1110 |   1111 |
+|---------|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|
+| x1 ∧ x3 |      0 |      0 |      0 |      0 |      0 |      0 |      0 |      0 |      1 |      1 |      0 |      0 |      1 |      1 |      0 |      0 |
+| x1 ∧ x2 |      0 |      0 |      0 |      0 |      0 |      0 |      0 |      0 |      0 |      0 |      0 |      0 |      1 |      1 |      1 |      1 |
+
+- If ϕ(x) = 1, then U(x) has eigenvalue-(±1) eigenstates each with Ω(1) squared support on |aO, bO〉. The completeness parameter is at least this squared support minus the phase estimation error rate δe. For small enough constant δe, the completeness is Ω(1).
+- If ϕ(x) = 0, then since the precision parameter δp is smaller than the promised gap away from ±1 in Lemma B.7, phase estimation will output 0 or π only if there is an error. By choosing the error rate δe a small enough constant, the soundness error δe will be bounded away from the completeness parameter.
+
+Therefore, algorithm ALG is correct. The constant gap between its completeness and soundness parameters can be amplified as usual.
+
+Query and time complexity: Phase estimation of Ux with precision δp and error rate δe requires O(1/(δpδe)) calls to Ux = ÕxU0N [CEMM98]. Therefore, ALG makes O(Adv(ϕ)) queries to the input oracle Ox.
+
+The time-efficiency claim of Theorem 4.7 is slightly more complicated. Here, we need to allow a preprocessing phase in which the algorithm can compute AG̃P (0N ) and in particular (approximations to) the coin diffusion operators in U0N . This preprocessing depending on ϕ, but not x, takes poly(N) time. The algorithm then needs coherent access to the precomputed information in order to apply efficiently the coin diffusion operators. For further details, see [CRŠZ07].
+
+This completes the proof of Theorem 4.7.
+
+## C Table of functions on up to four bits
+
+Which four-bit gates can be added to the gate set S without affecting the correctness of Theorem 4.8 or Theorem 4.7? As summarized in Section 5.1, we have made partial progress toward answering this question. In this appendix, we present a table that lists all the four-bit gates, up to equivalences, and says what we know for each gate.
+
+Definition C.1. Two k-bit boolean functions f1, f2 : {0, 1}k → {0, 1} are equivalent if there exists a string y ∈ {0, 1}k and a k-element permutation σ ∈ Sk such that either for all x ∈ {0, 1}k f1(x) = f2(σ(x)⊕y), or for all x ∈ {0, 1}k f1(x) = ¬f2(σ(x) ⊕ y). Here for a bit string x = x1x2 . . . xk ∈ {0, 1}k , σ(x) ∈ {0, 1}k is defined as xσ-1 (1)xσ-1 (2) . . . xσ-1 (k).
+
+That is, two functions are equivalent if they differ by permuting the inputs, and complementing a subset of the input bits and output bit. There are 222 inequivalent four-bit functions. We number each function for reference by considering its sixteen-bit truth table as the binary representation of an integer as in Figure 7.
+
+The table begins with the fourteen inequivalent functions of Figure 5 that depend on at most three input bits. The 208 functions that depend on all four input bits are first sorted according to their polynomial degree [Amb06a] and then by their non-negative-weight and general adversary bounds, Adv and Adv±. If these two bounds are equal, then we state only the first of the two. The numerical adversary bounds were taken from [HLŠ06].
+
+□
+
+For each function, we give its {AND, OR, NOT} formula size. Note that by Lemma 4.12, a function of formula size k has a trivial span program with witness size √k. The table includes comments on some of the functions. These comments might include, for example, the smallest-size {AND, OR, NOT} formula for an equivalent function. For some of the functions, e.g., #7128, we have listed in the Status column the witness size for the best span program we have found that computes the function. Those functions for which we know an optimal span program, with witness size matching the adversary bound, are marked with a checkmark (✓), together with a brief justification. For example, a reference to Lemma 4.12 means that the optimal span program follows from composing two simpler span programs based on an OR or PARITY gate. The lower bound for such functions follows from a simple fact on composition of adversary lower bounds:
+
+$$
+\underset { f _ { 2 } ) = \sqrt { \ A d v ( f _ { 1 } ) ^ { 2 } + \ A d v ( f _ { 2 } ) ^ { 2 } } .
+$$
+
+For a function f marked "opt. NAND," the optimal span program comes from optimizing the edge weights of the tree corresponding to a minimal-size NAND formula computing f.
+
+Listed below the table are the optimal adversary matrices (Definition 4.3) and optimal span programs for all the four-bit functions for which we know an optimal span program, except when one bound or the other follows from other stated results, e.g., from Lemma C.2 or Lemma 4.12. In a Mathematica file included as an electronic supplement to this article, we have included code to verify the adversary bound and span program witness size calculations.
+
+For details on any of the span programs referenced with witness size that does not match the adversary lower bound, e.g., for function #7128, please contact one of the authors.
+
+Functions depending on up to three input bits:
+
+|     # |   Size | Adv    | Adv±   | Status      | Comments                   |
+|-------|--------|--------|--------|-------------|----------------------------|
+|     0 |      0 | 0      | -      | ✓trivial    | constant 0                 |
+|   255 |      1 | 1      | -      | ✓trivial    | x1                         |
+|    15 |      2 | √2     | -      | ✓Lemma 4.12 | x1 ∨ x2                    |
+|     3 |      3 | √3     | -      | ✓Lemma 4.12 | x1 ∨ x2 ∨ x3               |
+|    63 |      3 | √3     | -      | ✓Lemma 4.12 | x1 ∨ (x2 ∧ x3)             |
+|  4080 |      4 | 2      | -      | ✓Lemma 4.12 | x1 ⊕x2                     |
+|   975 |      4 | 2      | -      | ✓Lemma 4.12 | (x3 ∧ x2) ∨ (x3 ∧ x1)      |
+|   831 |      5 | 2      | -      | ✓Claim 4.9  | MAJ3                       |
+|   960 |      6 | 3/√2   | -      | ✓Claim 4.10 | EQUAL3                     |
+|   963 |      5 | √3+ √3 | -      | ✓Claim 4.11 | (x1 ∧ x2 ∧ x3) ∨ (x1 ∧ x2) |
+|    60 |      5 | √5     | -      | ✓Lemma 4.12 | x1 ∨ (x2 ⊕x3)              |
+|  1020 |      6 | 1 + √2 | -      | ✓Lemma 4.12 | x1 ⊕ (x2 ∧ x3)             |
+|   828 |      8 | √7     | -      | ✓Lemma 4.12 | EXACT2 of 3                |
+| 15555 |     10 | 3      | -      | ✓Lemma 4.12 | x1 ⊕x2 ⊕x3                 |
+
+Functions depending on four input bits, with polynomial degree either two or three:
+
+|    # |   Size |     Adv |    Adv± |   Status | Comments                                                                      |
+|------|--------|---------|---------|----------|-------------------------------------------------------------------------------|
+| 7128 |     10 | 2.50000 | 2.51353 |  2.77394 | sorted input bits [Amb06a], (x1 ∧ ((x2 ∧ x3)∨(x3∧x4)))∨(x1∧((x2∧x3)∨(x3∧x4))) |
+|  863 |      5 | 2.00000 | 2.07136 |  2.22833 | monotone two adjacent 1s, (x1∧x2)∨(x4∧ (x1 ∨ x3))                             |
+|  427 |      5 | 2.18398 | 2.20814 |  2.22833 | #975(x1 ∧ x2, x3, x4)                                                         |
+
+| # Size   | Adv             | Adv±          | Status      | Comments                                                                                |
+|----------|-----------------|---------------|-------------|-----------------------------------------------------------------------------------------|
+| 27 5     | √5              | - ✓Lemma 4.12 |             | x1 ∧#975(x2, x3, x4)                                                                    |
+| 393 6    | 4/√3            | - ✓opt. NAND  |             | (x1 ∧ x2 ∧ x3) ∨ (x1 ∧ x2 ∧ x4)                                                         |
+| 383 7    | 2.30278 2.34406 |               | √4+ √3      | (x1 ∧ x2 ∧ x3) ∨ ((x1 ∨ x2 ∨ x3) ∧ x4)                                                  |
+| 126 7    | √11/2           | - ✓Lemma      | 4.12        | x1 ∧¬EQUAL3(x2, x3, x4)                                                                 |
+| 24 7     | √11/2           | - ✓Lemma      | 4.12        | x1 ∧EQUAL3(x2, x3, x4)                                                                  |
+| 303 6    | 2.35829         | - 1 +         | √2          | ((x1 ∨ x2) ∧ x3) ∨ ((x1 ∨ x2) ∧ x4), span program size 5                                |
+| 495 6    | 1 + √2          | - ✓opt.       | NAND        | #975(x1, x2, x3 ∧ x4)                                                                   |
+| 989 6    | 1 + √2          | - ✓opt.       | gadget      | (x1 ∧ x2 ∧ x3) ∨ (x1 ∧ (x2 ∨ x4))                                                       |
+| 965 7    | 2.41531 2.42653 | 2.59234       |             | (x1 ∧ x2 ∧ x3) ∨ (x4 ∧ x3) ∨ (x4 ∧ x2)                                                  |
+| 987 7    | 2.43128 2.44711 |               |             |                                                                                         |
+| 424 8    | √6              | - ✓opt.       | NAND        | EQUAL3(x1, x2, x3 ∧ x4)                                                                 |
+| 2034 7   | 2.47323 2.48653 |               |             |                                                                                         |
+| 429 7    | 2.48837         | 2.50826       |             |                                                                                         |
+| 490 8    | 2.52207         | 2.52326       |             |                                                                                         |
+| 281 8    | 2.51464 2.54019 |               |             |                                                                                         |
+| 2022 8   | 2.55719         | 2.58189       |             |                                                                                         |
+| 1968 8   | 2√5/3           | - ✓opt.       | NAND        | (x1 ∧x2 ∧ (x3 ∨x4)) ∨ (x1 ∧x2 ∧ (x3 ∨x4))                                               |
+| 1782 7   | 2.56155         | 2.59040       | 2.61804     | #975(x1 ⊕x2, x3, x4)                                                                    |
+| 984 8    | 2.58539         | 2.60282       |             |                                                                                         |
+| 1973 8   | 2.61704         | 2.63510       |             |                                                                                         |
+| 1910 8   | √7              | - ✓opt.       | NAND        | (x1 ∧ x2 ∧ x3 ∧ x4) ∨ (x1 ∧ x2) ∨ (x3 ∧ x4)                                             |
+| 317 8    | √7              | - ✓Lemma      | 4.12        | (x1 ∧ x2 ∧ x3) ∨MAJ3(x2, x3, x4)                                                        |
+| 858 8    | 2.64575         | 2.64658       | √5+2√2      | (x1 ∧x2 ∧x3) ∨ (x3 ∧x4) ∨ (x1 ∧ (x2 ∨x3))                                               |
+| 300 9    | 2.69932         | 2.70595       |             |                                                                                         |
+| 6030 10  | 2.70928         | - 3           |             | (x1 ∧ (x2 ∨ x3) ∧ (x2 ∨ x4)) ∨ (x1 ∧ (x2 ∨ x3) ∧ (x2 ∨ x4)), classical three-query alg. |
+| 894 10   | 2.70808 2.71982 |               |             |                                                                                         |
+| 1714 10  | 2.75018         | 2.75944       |             |                                                                                         |
+| 1980 9   | 2.75779         | 2.77469       |             |                                                                                         |
+| 1719 9   | 2.76916         | 2.78319       |             |                                                                                         |
+| 366 10   | 2.76569         | 2.80341       |             |                                                                                         |
+| 6042 10  | 2.84104         | 2.84923       |             |                                                                                         |
+| 1716 10  | 2.86854 2.88186 |               |             |                                                                                         |
+| 1680 12  | 3               | - ✓opt.       | NAND        | EQUAL3(x1, x2, x3 ⊕x4)                                                                  |
+| 1695 10  | 3               | - ✓opt.       | NAND        | #975(x1, x2, x3 ⊕x4), tight classical alg.                                              |
+| 5790 10  | 3               | -             | ✓opt. NAND  | (x1 ∧ (x2 ∨ x3) ∧ (x2 ∨ x4)) ∨ (x1 ∧ (x2 ∨                                              |
+| 7140 10  | 3               | -             | ✓Lemma 4.12 | x3) ∧ (x2 ∨ x3)), tight classical alg. x1 ⊕#975(x2, x3, x4), tight classical alg.       |
+| 1683 11  | 3.00283         | 3.01009       |             |                                                                                         |
+| 5766 12  | 3.02533         | 3.03595       |             |                                                                                         |
+| 6627 12  | 3.01470         | 3.04933       |             |                                                                                         |
+| 5783 12  | 3.03917         | 3.07294       |             |                                                                                         |
+| 6375 14  | 1 + √9/2        | -             | ✓Lemma 4.12 | x1 ⊕EQUAL3(x2, x3, x4)                                                                  |
+
+Functions depending on four input bits, with polynomial degree four:
+
+|   # |   Size |   Adv | Adv±   | Status      | Comments          |
+|-----|--------|-------|--------|-------------|-------------------|
+|   1 |      4 |     2 | -      | ✓Lemma 4.12 | x1 ∧ x2 ∧ x3 ∧ x4 |
+
+| #        | Size                 | Adv       | Adv±     | Status       | Comments                                      |
+|----------|----------------------|-----------|----------|--------------|-----------------------------------------------|
+| 127      | 4                    | -         | ✓Lemma   | 4.12         | x1 ∨ (x2 ∧ x3 ∧ x4)                           |
+| 31       | 2 4 2                | -         | ✓Lemma   | 4.12 x1      | ∧ (x2 ∨ (x3 ∧ x4))                            |
+| 7        | 4 2                  | -         | ✓Lemma   | 4.12         | x1 ∧ x2 ∧ (x3 ∨ x4)                           |
+| 855      | 4 2                  | -         | ✓Lemma   | 4.12         | (x1 ∨ x3) ∧ (x2 ∨ x4)                         |
+| 319      | 6 2.17533            | 2.20453   |          | 2.27731      | (x1 ∧ (x2 ∨ x3)) ∨ (x2 ∧ x3 ∧ x4)             |
+| 431      | 5 2.20635            | 2.20721   |          | 2.22835      | ((x1 ∨ x2) ∧ x3) ∨ (x1 ∧ x4)                  |
+| 23       | 6 √5                 | -         | ✓Lemma   | 4.12         | x1 ∧MAJ3(x2, x3, x4)                          |
+| 399      | 6 2.22595            | 2.25274   |          |              |                                               |
+| 287      | 6 √3+ √5             | -         | ✓Lemma   | 5.2          | MAJ3(x1, x2, x3 ∧ x4)                         |
+| 384      | 8 4/√3               | -         | ✓Claim   | 4.10         | EQUAL4                                        |
+| 447      | 7 2.30278            | 2.31707   |          |              |                                               |
+| 385      | 7 (1/2)√13+ √73      | -         | ✓opt.    | NAND ∨ ∧     | (x1 (x2 x3)) ∧ (x1 ∨ (x2 ∧ x3 ∧ x4))          |
+| 395      | 6 2.29062            | 2.32499   |          |              |                                               |
+| 2032     | 6 √(7+ √17)/2        | -         | ✓opt.    | NAND         | #963(x1, x2, x3 ∨ x4)                         |
+| 426      | 6 √(7+ √17)/2        | -         | ✓opt.    | NAND         | #963(x1, x2, x3 ∧ x4)                         |
+| 967      | 6 2.36698 √3         | 2.37004   |          |              |                                               |
+| 25       | 6 √4+                | -         | ✓Lemma   | 4.12         | x1 ∧#963(x2, x3, x4)                          |
+| 61       | 6 √4+ √3             | -         | ✓Lemma   | 4.12         | x1 ∨#963(x2, x3, x4)                          |
+| 981      | 7 2.39489            | 2.40490   |          |              |                                               |
+| 283      | 7 2.40091            | 2.42364   |          |              |                                               |
+| 983      | 6 2.42266            | 2.42424   |          |              |                                               |
+| 409      | 7 2.39120            | 2.42693   |          |              |                                               |
+| 961      | 7 2.43531            | 2.43869   |          |              |                                               |
+| 111      | 6 √6                 | -         | ✓Lemma   | 4.12         | x1 ∨#60(x2, x3, x4)                           |
+| 1638     | 6 √6                 | -         | ✓Lemma   | 4.12         | (x1 ∧ x2) ∨ (x3 ⊕x4)                          |
+| 279      | 8 √6                 | -         | ✓Example | 5.1          | Threshold2 of 4                               |
+| 6        | 6 √6                 | -         |          | ✓Lemma 4.12  | x1 ∧ x2 ∧ (x3 ⊕x4)                            |
+| 387      | 7 2.48662            | 2.50251   |          |              |                                               |
+| 859      | 7 2.49857 2.53791    | 2.50575   |          |              |                                               |
+| 988      | 7                    | 2.53835   |          |              |                                               |
+| 411      | 8 2.52192            | 2.54009   |          |              |                                               |
+| 1654     | 7 2.51758            | 2.54347   |          |              |                                               |
+| 445      | 9 2.53019            | 2.55017   |          |              |                                               |
+| 425      | 7 2.55654            | -         |          | 2.55654      | #963(x1 ∧ x2, x3, x4), exact exp. for Adv?    |
+| 494      | 7 2.55654            | -         |          | 2.55654      | #963(x1 ∨ x2, x3, x4), exact exp. for Adv?    |
+| 2018     | 8 2.54502            | 2.55711   |          |              |                                               |
+| 2016     | 8 2.55128            |           | 2.55874  |              |                                               |
+| 2033     | 2.56155              | -         |          |              | ((x1 ∨ x2) ∧ x3 ∧ x4) ∨ (x2 ∧ x3) ∨ (x3 ∧ x4) |
+| 491      | 8                    |           |          | 2.59163      | (x1 ∧ x2 ∧ x3) ∨ (x4 ∧ (x1 ∨ (x2 ∧ x3)))      |
+|          | 7 2.56388            |           | 2.57901  | 2.64302      |                                               |
+| 879      | 8 2.57641            |           | 2.58289  |              |                                               |
+| 415      | 8 2.57096            | 2.58436   |          |              |                                               |
+| 428      | 8 2.59386            | 2.60618   |          |              |                                               |
+| 430 30   | 7 2.60716 7 √4+2√2   | 2.60975 - |          | ✓Lemma 4.12  | x1 ∧#1020(x2, x3, x4)                         |
+| 2019 488 | 8 2.61439 10 2.62705 | 2.62037 - |          |              |                                               |
+|          | √7                   | -         |          |              |                                               |
+| 1639     | 8                    |           |          | ✓opt. gadget | (x1 ∧ x2) ∨ MAJ3(x1 ∧ x2, x3, x4)             |
+| 1969     | 9 2.64898            |           | 2.65285  |              |                                               |
+
+| #        | Size                 | Adv       | Adv±         | Status                                                                      | Comments                                   |
+|----------|----------------------|-----------|--------------|-----------------------------------------------------------------------------|--------------------------------------------|
+| 1778     | 8 2.66716            | 2.66873   |              |                                                                             |                                            |
+| 985      | 8 2.65949            | 2.67406   |              |                                                                             |                                            |
+| 980      | 9 2.67345            | 2.67735   |              |                                                                             |                                            |
+| 1650     | 8 2.67869            | 2.68369   |              |                                                                             |                                            |
+| 391      | 9 2.68828            | 2.70027   |              |                                                                             |                                            |
+| 878      | 9 2.68845            | 2.70057   |              |                                                                             |                                            |
+| 1918     | 10 2.70131           | -         |              | (x1 ∧ x2 ∧ ¬ EQUAL4(x2,                                                     | (x3 ∨ x4)) ∨ (x1 ∧                         |
+| 386      | 9 2.67082            | 2.70300   |              |                                                                             | x3, x4))                                   |
+| 966      | 8 2.70246            | 2.70500   |              |                                                                             |                                            |
+| 367      | 8 2.70387            | 2.70585   |              |                                                                             |                                            |
+| 1662     | 9 2.69544            | 2.70815   |              |                                                                             |                                            |
+| 1776     | 8 √(9+ √33)/2        | -         | ✓opt. NAND   | #963(x1, x2, x3 ⊕x4)                                                        |                                            |
+| 280      | 10 2.71411           | 2.71639   |              |                                                                             |                                            |
+| 408      | 9 2.69951            | 2.71811   |              |                                                                             |                                            |
+| 301      | 8 2.71328            | 2.71856   |              |                                                                             |                                            |
+| 1647     | 8 1 + √3             | -         | ✓Lemma 5.2   | MAJ3(x1, x2, x3 ⊕x4)                                                        | x1 ⊕ (x2                                   |
+| 2040     | 8 1 + √3             | -         | ✓Lemma 4.12  | ∧ (x3 ∨ x4))                                                                |                                            |
+| 510      | 8 1 + √3             | -         | ✓Lemma 4.12  | (x2 ∧ x3 ∧ x4)                                                              | x1 ⊕                                       |
+| 1634     | 8 2.74013            | 2.74148   |              |                                                                             |                                            |
+| 856 892  | 9 2.73510 9          | 2.74171   |              |                                                                             |                                            |
+|          | 2.72608              | 2.74205   |              |                                                                             |                                            |
+| 316      | 9 2.74228            | 2.74790   |              |                                                                             |                                            |
+| 862      | 9 2.74628            | 2.75157   |              |                                                                             |                                            |
+| 829      | 9 2.75490            | 2.76384   |              |                                                                             |                                            |
+| 990      | 8 2.76066            | 2.76706   |              |                                                                             |                                            |
+| 1651     | 8 2.75952            | 2.76736   |              |                                                                             |                                            |
+| 1715     | 9 2.76490            | 2.77389   |              |                                                                             |                                            |
+| 489      | 9 2.78575            | -         | 2.86182      | (x1 ∧ x2 ∧ x3) ∨ (x4 x2 and x3                                              | ∧ (x2 ∨ x3) ∧ (x1 ∨ (x2 ∧ symmetrical      |
+| 6040     | 10 2.77499 9         | 2.79246   | 2.85539      | (x1∧x2∧(x3∨x4))∨(x3∧x4)∨(x1∧x3∧x4),                                         | x3))),                                     |
+| 1914     | 2.79485              | -         |              | x3 and x4 symmetrical                                                       |                                            |
+| 282      | 9 2.80369            | -         | 2.92535      | (x1 ∧ x3 ∧ x4) ∨ (x3 ∧ x4) ∨ ((x1 ∨ x2) ∧ (x3 ∨ x4)), x2 and x3 symmetrical |                                            |
+| 1972     | 9 2.79678            | 2.80499   |              |                                                                             |                                            |
+| 893      | 9 2.79694            |           |              |                                                                             |                                            |
+|          |                      | 2.80607   |              |                                                                             |                                            |
+| 444      | 10 2.80787           | 2.81297   |              |                                                                             |                                            |
+| 874      | 10 2.81477           | 2.81815   |              |                                                                             |                                            |
+| 107      | 9 2√2 2√2            | -         | ✓Lemma 4.12  | ∧#828(x2, x3, x4) (x1 ⊕x2) ∧ (x3 ⊕x4)                                       | x1                                         |
+| 1632     | 8 2√2                | -         | ✓Lemma 4.12  | x4)                                                                         | x1                                         |
+| 22       | 9 2√2                | -         | ✓Lemma 4.12  | ∧#828(x2, x3,                                                               |                                            |
+| 6014     | 12                   | -         | ✓opt. gadget | EXACT2 or 3 of 4                                                            | = Thr.2 of 4(x1, x2, x3, x4)∧(x1∨x2∨x3∨x4) |
+| 854      | 8 2√2                | - 2.83150 | ✓Lemma 4.12  | (x1 ∧ x2) ⊕ (x3 ∧                                                           | x4)                                        |
+| 6060     | 10 2.82034           | 2.83570   |              |                                                                             |                                            |
+| 875 2017 | 9 2.83428 10 2.83417 | 2.83655   |              |                                                                             |                                            |
+| 1712     | 10 2.84346           | 2.84354   |              |                                                                             |                                            |
+
+| #         | Size                  | Adv Adv±        | Status                    | Comments                                         |
+|-----------|-----------------------|-----------------|---------------------------|--------------------------------------------------|
+| 857       | 9 2.82909             | 2.85105         |                           |                                                  |
+| 1718      | 9 2.84413             | 2.85900         |                           |                                                  |
+| 382       | 11 2.87999            | -               |                           |                                                  |
+| 362       | 11 2.88004            | 2.88205         |                           |                                                  |
+| 5758      | 11 2.89586            | -               |                           |                                                  |
+| 876       | 10 2.89815            | 2.90403         |                           |                                                  |
+| 318       | 10 2.90163            | 2.90404         |                           |                                                  |
+| 407       | 11 2.89638            | 2.90417         |                           |                                                  |
+| 410       | 10 2.90592            | 2.91505         |                           |                                                  |
+| 446       | 10 2.91254            | 2.91560         |                           |                                                  |
+| 1974      | 10 2.91560            | 2.91835         |                           |                                                  |
+| 363       | 10 2.92040            | 2.92652         |                           |                                                  |
+| 1658      | 10 2.92940            | 2.93141         |                           |                                                  |
+| 5774      | 11 2.92267            | 2.93717         |                           |                                                  |
+| 1717      | 10 2.93360            | 2.94668         |                           |                                                  |
+| 1777      | 10 2.96176            | -               |                           |                                                  |
+| 982       | 10 2.96425            | 2.96696         |                           |                                                  |
+| 1635      | 10 2.98641            | 2.98673         |                           |                                                  |
+| 6120      | 12                    |                 |                           |                                                  |
+|           | 3                     | -               | ✓Lemma 4.12               | x1 ⊕MAJ3(x2, x3, x4)                             |
+| 1713      | 11 2.99622            | 3.00474         |                           |                                                  |
+| 1912      | 10 √5+ √17            | -               | ✓opt. NAND                | #828(x1 ∨ x2, x3, x4)                            |
+| 286       | 10 √5+                | √17 -           | ✓opt. NAND                | #828(x1 ∧ x2, x3, x4)                            |
+| 5786      | 11 3.01265            | 3.02051         |                           |                                                  |
+| 1687 1681 | 11 3.01018 3.02473    | 3.02207         |                           |                                                  |
+|           | 12                    | 3.02629         |                           |                                                  |
+| 360       | 12 3.04017            | 3.04042         |                           |                                                  |
+| 1659 6625 | 11 3.04139 12 3.02185 | 3.04288 3.04627 |                           |                                                  |
+| 5820      | 11 3.03542            | 3.04710         |                           |                                                  |
+| 1725      | 12 3.04048            | 3.05100         |                           |                                                  |
+| 877 390   | 11 3.04498 12 3.03755 | 3.05270 3.05354 |                           |                                                  |
+| 872       | 12 3.06480            | 3.06823         |                           |                                                  |
+| 5782      | 11 3.06111            | 3.07244         |                           |                                                  |
+| 5784      | 12 3.07314            | 3.07400         |                           |                                                  |
+|           | 12                    | 3.09058         |                           |                                                  |
+| 5742      | 3.09004               |                 |                           |                                                  |
+| 1686      | 11 3.11060            | -               |                           | #963(x1 ⊕ x2, x3, x4)                            |
+| 5804      | 12 3.11134            | 3.11717         |                           |                                                  |
+| 2025      | 12 3.12714            | 3.12849         |                           |                                                  |
+| 6038      | 12 3.12842            | 3.12999         |                           |                                                  |
+| 414       | 12 3.12805            | 3.13416         |                           |                                                  |
+| 5767      | 13 3.13610            | 3.13705         |                           |                                                  |
+| 361       | 11 3.14864            | -               |                           |                                                  |
+| 5787      | 12 3.14761            | 3.15425         |                           |                                                  |
+| 105       | 11 √10                | -               | ✓Lemma 4.12 x1 ∧ (x2 ⊕x3  | ⊕x4)                                             |
+| 278       | 12 √10                | -               | ✓Lemma 4.12 EXACT1 of 4 = | Thr.3 of 4(x1, x2, x3, x4) ∧ (x1 ∨ x2 ∨ x3 ∨ x4) |
+| 1656      | 12 3.16284            | 3.16420         |                           |                                                  |
+| 6630      | 12 1 + √3 + √3        | -               | 4.12                      | x1 ⊕#963(x2, x3, x4)                             |
+| 1721      | 12                    | 3.19570         |                           |                                                  |
+|           |                       | 3.19509         | ✓Lemma                    |                                                  |
+
+|     # |   Size | Adv     | Adv±    | Status      | Comments                                                              |
+|-------|--------|---------|---------|-------------|-----------------------------------------------------------------------|
+|  1913 |     12 | 3.19640 | -       |             |                                                                       |
+|  5763 |     13 | 3.21393 | 3.21633 |             |                                                                       |
+|  5771 |     13 | 3.21305 | 3.21888 |             |                                                                       |
+|  1643 |     12 | 3.21930 | -       |             |                                                                       |
+|  1633 |     12 | 3.23607 | -       | 3.33513     | ((x1 ⊕ x2) ∧ (x3 ⊕ x4)) ∨ (x1 ∧ x2 ∧ x3 ∧ x4)                         |
+|  1785 |     12 | 1 + √5  | -       | ✓Lemma 4.12 | x1 ⊕#60(x2, x3, x4)                                                   |
+|   873 |     12 | 3.26876 | 3.27185 |             |                                                                       |
+|  5785 |     12 | 3.27183 | 3.27189 |             |                                                                       |
+|  5738 |     14 | 3.28207 | -       |             |                                                                       |
+|  5805 |     14 | 3.34542 | 3.34781 |             |                                                                       |
+|  5761 |     15 | 3.36028 | -       |             | EXACT1 or 4 of 4                                                      |
+|   406 |     14 | 3.36637 | 3.37384 |             |                                                                       |
+|  1657 |     14 | 3.39009 | 3.39051 |             |                                                                       |
+|  5769 |     14 | 3.39400 | -       |             |                                                                       |
+|  7905 |     12 | 2 + √2  | -       | ✓Lemma 4.12 | x1 ⊕x2 ⊕ (x3 ∧ x4)                                                    |
+|  5736 |     16 | 2√3     | -       | ✓Lemma 4.12 | EXACT2 of 4 = Thr.2 of 4(x1, x2, x3, x4) ∧ Thr.2 of 4(x1, x2, x3, x4) |
+|  5801 |     14 | 3.51041 | 3.51129 |             |                                                                       |
+|  5739 |     15 | 3.51414 | -       |             |                                                                       |
+|  1641 |     14 | √7+ √33 | -       | ✓opt. NAND  | #828(x1 ⊕x2, x3, x4)                                                  |
+|  5865 |     16 | 1 + √7  | -       | ✓Lemma 4.12 | x1 ⊕#828(x2, x3, x4)                                                  |
+|  5737 |     16 | 3.78478 | -       |             | EXACT2 or 4 of 4                                                      |
+| 27030 |     16 | 4       | -       | ✓Lemma 4.12 | PARITY4, x1 ⊕x2 ⊕x3 ⊕x4                                               |
+
+We now list optimal adversary matrices and optimal span programs for the four-bit functions for which we know an optimal span program. For the adversary matrices, we include only the rows and columns with nonzero entries.
+
+Several of the four-bit functions, for example #287, MAJ3(x1, x2, x3 ∧x4), or #1647, MAJ3(x1, x2, x3 ⊕ x4), are compositions of a three-bit function with a two-bit function. Therefore, to consolidate cases and increase the generality of our results, it will sometimes be convenient to give span programs for three-bit functions with unbalanced input complexities. Lemma 5.2, for example, implies optimal span programs for both functions #287 and #1647. For the adversary lower bound, it is also convenient to define the general adversary bound with costs [HLŠ07, HLŠ05]:
+
+Definition C.3 (Adversary bound with costs). Let f : {0, 1}k → {0, 1}, and let α ∈ Rn+ be a vector of positive reals. Define
+
+$$
+\ A d v _ { \alpha } ^ { \pm } ( f ) = \max _ { \Gamma \neq 0 } \frac { \| \Gamma \| } { \max _ { i } \frac { 1 } { \alpha _ { i } } \| \Gamma \circ D _ { i } \| } \ ,
+$$
+
+where the matrices Di are defined as in Definition 4.3. The maximum is over all 2k ×2k nonzero, symmetric matrices Γ satisfying 〈x|Γ|y〉 = 0 if f(x) = f(y).
+
+This weighted version of the adversary bound composes nicely, as shown by the following generalization of Theorem 4.6, still a special case of [HLŠ07, Theorem 13]:
+
+Theorem C.4 ([HLŠ07]). Let f = g◦(h1, . . . , hk) and let α = (Adv±(h1), . . . , Adv±(hk)). Then Adv±(f) ≥ Adv±α (f ).
+
+[HLŠ07, Theorem 12] shows that the weighted version of the nonnegative adversary bound composes exactly, i.e., the ≥ sign can be replaced with equality, but equality is not known to hold for the general adversary bound.
+
+Theorem C.4 lets us compute the adversary bound for the four-bit function #287, MAJ3(x1, x2, x3 ∧x4), for example, by considering 23 × 23 adversary matrices for the three-bit majority function with costs α = (1, 1, √2).
+
+## C.1 Function #831, MAJ3, with partly unbalanced inputs:
+
+If the first two inputs have equal costs 1 and the third input has cost β, then the optimal adversary matrix for function #831, MAJ3, comes from
+
+$$
+\Gamma = \begin{ \left [ \begin{array} { c c c } { 1 0 0 } & { 0 } & { 1 1 1 } & { 1 0 1 } & { 1 1 0 } \\ { 0 1 0 } & { \left ( \begin{array} { c c c } { 0 } & { \beta } & { 1 } \\ { \beta } & { 0 } & { 1 } \\ { 1 } & { 1 } & { 0 } \end{array} \right ) } \end{ \left ] }
+$$
+
+The adversary bound is Adv±(1,1,β) (MAJ3) = 1 2 (√8+β2 + β). An optimal span program for this function with equal first two input complexities is given in Lemma 5.2. Note that this also settles the complexities of functions #287 and #1647.
+
+## C.2 Function #975 with partly unbalanced inputs:
+
+Function #975 is (x3 ∧x2)∨(x3 ∧x1). If the first two inputs have equal costs 1 and the third input has cost β, then the optimal adversary matrix comes from
+
+$$
+\Gamma = \begin{array} { c c c } 1 & 1 0 0 \left ( \begin{matrix} 0 1 0 & 1 0 1 \\ 1 & \beta \\ \end{matrix} \right ) \\ 0 1 1 \left ( \begin{matrix} 0 \\ \beta & 1 \end{matrix} \right ) \end{array}
+$$
+
+The adversary bound is Adv±(1,1,β) (#975) = β + 1. A span program with matching witness size is
+
+$$
+X _ { J } = ( \{ x _ { 1 } \} \ \{ x _ { 3 } \} \ \{ \overline { x _ { 3 } } \} \ \{ x _ { 2 } \} ) \\ t = \left ( \begin{smallmatrix} 1 \\ 0 \\ 0 \end{smallmatrix} \right ) , \ \ v _ { J } = \left ( \begin{smallmatrix} 0 & 1 & 1 & 0 \\ 1 & 1 & 0 & 0 \\ 0 & 0 & 0 & 1 \end{smallmatrix} \right ) \ .
+$$
+
+This function can be evaluated as an "if-then-else" statement, by evaluating the third input x3 at cost β and then one of x1 or x2 at cost 1. A span program with witness size β+1 is thus not surprising. Note that this also settles the complexities of functions #495 and #1695.
+
+## C.3 Function #960, EQUAL3 , with partly unbalanced inputs:
+
+For function #960, EQUAL3, the adversary bound when the first two inputs have equal costs 1 and the third input has cost β is
+
+$$
+\ A d v _ { ( 1 , 1 , \beta ) } ^ { \pm } ( E Q U A L _ { 3 } ) = \left \{ \begin{array} { l l } { \beta + \sqrt { 2 - \beta ^ { 2 } } } & { i f 0 < \beta \leq \sqrt { 2 / 5 } } \\ { \sqrt { \frac { 3 } { 2 } ( 2 + \beta ^ { 2 } ) } } & { i f \sqrt { 2 / 5 } \leq \beta \leq 2 } & { . } \end{array}
+$$
+
+Indeed, optimal adversary matrices are
+
+$$
+\begin{array} {
+$$
+
+for the ranges 0 < β ≤ √2/5, √2/5 ≤ β ≤ 2 and β ≥ 2, respectively, where α = √ 4-β2
+
+The optimal span program is
+
+$$
+X _ { J } = ( \{ x _ { 3 } \} \ \{ x _ { 1 } , x _ { 2 } \} \ \{ \overline { x _ { 1 } } , \overline { x _ { 2 } } \} \ \{ \overline { x _ { 3 } } \} ) \\ t = \begin{pmatrix} 1 \\ 0 \\ 0 \end{pmatrix} , \ \ v _ { J } = \begin{pmatrix} 0 & 1 & 1 & 0 \\ w & 1 & 0 & 0 \\ 0 & 0 & 1 & w \end{pmatrix} \ ,
+$$
+
+where w = ( β+√2-β2 2(1-β2 ) )1/2 for β ≤ √2/5, w = 1/√β for √2/5 ≤ β ≤ 2, and w = 1/√2 for β ≥ 2.
+
+Note that this also settles the complexities of functions #424, EQUAL3(x1, x2, x3 ∧ x4), and #1680, EQUAL3(x1, x2, x3 ⊕ x4).
+
+## C.4 Function #963 with partly unbalanced inputs:
+
+See Claim 4.11 for the balanced complexity case for function #963, (x1 ∧ x2 ∧ x3) ∨ (x1 ∧ x2). If the first two, symmetrical inputs have equal costs 1 and the third input has cost β, the the optimal adversary matrix comes from
+
+$$
+\Gamma = \begin{array} { c c c c } 0 0 0 & 0 0 1 & 1 1 1 \\ 0 & 0 & 1 & 1 \\ 1 0 1 & \left ( \begin{array} { c c c } 0 & 1 & 1 \\ 0 & 1 & 1 \\ 1 1 0 & \left ( \begin{array} { c c c } 0 & 1 & 1 \\ 1 & 0 & \beta \end{array} \right ) \end{array}
+$$
+
+The adversary bound is Adv±(1,1,β) (#963) = 1 √2 (5+β2 + √9 + 2β2 + β4 )1/2 . A span program with matching witness size is
+
+$$
+X _ { J } & = \left ( \{ x _ { 1 } \} \ \{ x _ { 2 } , x _ { 3 } \} \ \{ \overline { x } _ { 2 } , \overline { x } _ { 3 } \} \right ) \\ t & = \left ( \begin{smallmatrix} 1 \\ 0 \end{smallmatrix} \right ) , \ \ v _ { J } = \left ( \begin{smallmatrix} 0 & w _ { 1 } & 1 \\ 0 & w _ { 2 } & 0 \end{smallmatrix} \right ) \ ,
+$$
+
+where w1 = 1 2 (1 + β2 + √9+2β2 +β4 )1/2 and w2 = 1 √2β ( - 3 + β2 + √9+2β2 +β4 )1/2 . Note that this also settles the complexities of functions #2032, #426 and #1776.
+
+## C.5 Function #828, EXACT2of 3, with partly unbalanced inputs:
+
+Function #828 is EXACT2 of 3(x1, x2, x3) = MAJ3(x1, x2, x3) ∧ (x1 ∨ x2 ∨ x3). If the first two inputs have equal costs 1 and the third input has cost β, then the optimal adversary matrix comes from
+
+$$
+\Gamma = \begin{array} { c c c c } 0 0 1 & 0 & 1 & 1 \\ \Gamma = & 0 1 0 & \left ( \begin{array} { c c c } 0 & 1 & 1 \\ 1 & 0 & \beta \\ 1 0 0 & \beta & 0 \\ \beta & 1 & 1 \end{array} \right ) \end{array}
+$$
+
+The adversary bound is Adv±(1,1,β) (#828) = (3+β2 + √1 + 8β2 )1/2 . A span program with matching witness size is
+
+XJ = ({x1, x2} {x3} {x1} {x2} {x3} )
+
+$$
+X _ { J } = ( \{ \overline { x } _ { 1 } , \overline { x } _ { 2 } \} \ \{ \overline { x } _ { 3 } \} \ \{ x _ { 1 } \} \ \{ x _ { 2 } \} \ \{ x _ { 3 } \} \ ) \\ t = \begin{pmatrix} 1 \\ 0 \\ 0 \end{pmatrix} \, , \ \ v _ { J } = \left ( \begin{array} { c c c c } 1 & 0 & w _ { 2 } & w _ { 2 } & w _ { 1 } / \sqrt { 2 } \\ 0 & 0 & i & - i & w _ { 1 } \\ w _ { 1 } & 1 & 0 & 0 & 0 \end{pmatrix} \right ) \ ,
+$$
+
+where w2 1 = (√8β2 + 1 - 1)/(2β) and w2 2 = 1/(√8β2 +1 + 3). Note that this also settles the complexities of functions #1912, #286 and #1641.
+
+5β2-2 .
+
+## C.6 Function #393:
+
+The optimal adversary matrix and a matching span program for function #393 are
+
+$$
+\begin{smallmatrix} 0 0 1 1 0 1 1 0 1 1 1 0 1 1 \\ 0 0 0 1 & 1 & 3 & 0 & 0 \\ 1 1 1 0 & 3 & 1 & 0 & 0 \\ 0 0 1 & 2 \sqrt { 2 } & 0 & 3 & 3 \\ 1 1 1 1 & 0 & 2 \sqrt { 2 } & 3 & 3 \end{smallmatrix} \right ) \quad t = \begin{pmatrix} 1 \\ 0 \\ 0 \\ 0 \end{pmatrix} , \ v _ { J } = \left ( \begin{array} { c c c c c } 1 & 0 & 1 & 0 \\ 0 & 1 & 0 & 0 \\ 0 & 0 & 0 & 1 \\ \sqrt { 3 / 2 } \end{array} \right ) \ .
+$$
+
+## C.7 Function #989:
+
+The optimal adversary matrix and a matching span program for function #989 are
+
+$$
+X _ { J } = & ( \{ \overline { x } _ { 1 } , x _ { 2 } \} \ \emptyset \ \{ \overline { x } _ { 2 } \} \ \{ \overline { x } _ { 3 } \} \ \{ x _ { 4 } \} \ \{ \overline { x } _ { 4 } \} ) \\ 0 0 1 & ( \begin{array} { c c c } 0 1 1 & 1 & 0 \\ 1 & 1 & 0 \\ 0 1 1 & 0 & 1 \end{array} ) & t = \begin{pmatrix} 1 \\ 0 \\ 0 \\ 2 ^ { 1 / 4 } & 1 & 0 & 0 & 0 & 0 & 0 \end{pmatrix} \ .
+$$
+
+## C.8 Function #1968:
+
+The optimal adversary matrix and a matching span program for function #1968 are
+
+$$
+\begin{array} {
+$$
+
+## C.9 Function #1910:
+
+The optimal adversary matrix and a matching span program for function #1910 are
+
+$$
+\begin{smallmatrix} 0 0 1 0 & 0 1 0 & 0 1 0 & 0 1 0 & 1 1 0 & 1 1 1 \\ 0 1 1 1 & ( \begin{array} { c c c c } 0 & 0 & 1 & 0 & 1 & 0 & 1 \\ 0 & 0 & 0 & 1 & 1 & 0 & 1 \\ 1 & 0 & 1 & 0 & 0 & 0 & 1 & 1 \\ 1 1 0 & 0 & 0 & 0 & 0 & 1 & 1 \end{array} ) & & & X _ { J } = ( \{ x _ { 1 } , x _ { 2 } , x _ { 3 } , x _ { 4 } \} \ \{ \overline { x _ { 1 } } , \overline { x _ { 2 } } \} \ \{ \overline { x _ { 3 } } , \overline { x _ { 4 } } \} ) \\ & & & & & & & \\ & & & & & & & \\ & & & & & & & \\ & & & & & & & \\ & & & & & & & \\ & & & & & & & \\ & & & & & & & \\ & & & & & & & \\ & & & & & & & \end{smallmatrix} ) \quad t = \left ( 1 \right ) , \quad v _ { J } = \left ( \begin{array} { c c c c } \sqrt { 2 } & & & 1 & 1 \\ & & & & 0 & 2 \\ & & & & & 0 & 1 \\ & & & & & & 0 & 0 \\ & & & & & & & 0 & 0 & 1 & 1 \end{array} \right ) \ .
+$$
+
+## C.10 Function #317:
+
+The optimal adversary matrix for function #317, (x1 ∧ x2 ∧ x3) ∨MAJ3(x2, x3, x4), comes from
+
+$$
+\Gamma = \begin{array} { c c c c } 1 0 0 0 & 0 & 1 & 1 & 1 & 0 \\ 0 0 1 1 & 1 & 1 & 0 & 1 \\ 0 1 0 1 & 1 & 0 & 1 & 1 \\ 1 1 1 0 & 1 & 1 & 1 & 1 \end{array} \end{array}
+$$
+
+A matching span program follows from Lemma 4.12 applied to the span programs for AND3 and MAJ3.
+
+## C.11 Function #5790:
+
+The optimal adversary matrix and a matching span program for function #5790 are
+
+$$
+\begin{smallmatrix} 0 0 1 & 0 1 0 & 1 0 0 & 1 1 1 1 \\ 0 0 0 & ( \begin{array} { c c c } 1 & 1 & 1 & 0 \\ 1 & 1 & 1 & 0 \\ 1 & 1 & 0 & 1 \\ 1 0 1 & 0 & 1 & 1 \end{array} ) & & & t = \left ( \begin{matrix} 1 \\ 0 \\ 0 \\ 0 \end{matrix} \right ) \, , \ v _ { J } = \left ( \begin{array} { c c c } 1 & 0 & 0 & 1 \\ 1 & 1 & 1 & 0 \\ 0 & 0 & 0 & 1 \end{array} \right ) \, .
+$$
+
+## C.12 Function #385:
+
+The optimal adversary matrix and a matching span program for function #385 are
+
+$$
+\begin{smallmatrix} 0 1 1 1 0 0 1 1 1 \\ 0 0 0 0 \left ( \begin{array} { c c c } \sqrt { 2 } & \sqrt { 2 } & 0 \\ 0 & \sqrt { 2 } & 1 \\ 0 & \sqrt { 2 } & 1 \\ 1 0 0 \left ( \begin{array} { c c c } 0 & \sqrt { 2 } & 1 \\ 0 & \sqrt { 2 } & 1 \\ 0 & \sqrt { 2 } & 1 \end{array} \right ) \end{smallmatrix} & t = \left ( \begin{matrix} 1 \\ 1 \\ 0 \\ 0 \end{matrix} \right ) , \ v _ { J } = \left ( \begin{matrix} 1 \\ 1 & 0 & \frac { ( 6 1 + \sqrt { 7 3 } ) ^ { 1 / 4 } } { 2 ^ { 3 / 4 } \sqrt { 3 } } \\ 0 & \frac { ( 4 9 + 5 \sqrt { 7 3 } ) ^ { 1 / 4 } } { 2 ^ { 3 / 4 } \sqrt { 3 } } & 1 \\ 1 \end{matrix} \right ) \, .
+$$
+
+## C.13 Function #279, Threshold2of 4:
+
+The optimal adversary matrix for function #279, Threshold2 of 4, is
+
+$$
+\Gamma = \begin{array} { c c c c c c c c } & & & & 0 1 1 1 & 1 0 1 1 & 1 1 0 1 & 1 1 1 0 \\ & & & 0 0 1 1 & ( 1 \ \ 1 \ \ 0 \ \ 0 \ \ 0 \\ & & 0 1 0 1 & ( 1 \ \ 0 \ \ 1 \ \ 0 \ \ 0 \\ & & 0 1 1 0 & ( 1 \ \ 0 \ \ 0 \ \ 1 \ \ 0 \\ & & 1 1 0 & 0 \ \ 0 \ \ 0 & 1 \\ & & 1 1 1 0 & 0 \ \ 1 \ \ 1 & 1 \\ & & 1 0 1 0 & 0 \ \ 1 \ \ 0 & 1 \\ & & 1 0 0 1 & 0 \ \ 1 & 1 & 0 \ \end{array} \\
+$$
+
+A matching span program was given in Example 5.1.
+
+## C.14 Function #1639:
+
+The optimal adversary matrix and a matching span program for function #1639, equivalent to the formula (x1 ∧ x2) ∨ MAJ3(x1 ∧ x2, x3, x4), are
+
+## 0000 0101 1001 0110 1010
+
+$$
+\begin{smallmatrix} 0 0 0 & 0 0 1 & 0 1 0 1 & 0 1 0 1 0 \\ 0 0 1 & 1 & 1 & 0 & 0 & 0 \\ 0 0 1 & 1 & 0 & 0 & 1 & 1 \\ 0 1 1 & 0 & 1 & 0 & 1 & 0 \\ 0 1 1 & 0 & 1 & 0 & 0 & 1 \\ 1 1 0 & 0 & 1 & 1 & 0 & 0 \\ 1 1 1 & 0 & 0 & 1 & 1 & 1 \end{smallmatrix}
+$$
+
+This span program is based on the one in Lemma 5.2.
+
+.
+
+.
+
+## C.15 Function #6014, EXACT2or 3of 4:
+
+The optimal adversary matrix and a matching span program for function #6014 are
+
+$$
+\Gamma = \left ( \begin{array} { c c c c c c c } 1 0 0 0 & 0 0 0 & 0 0 1 0 & 0 0 0 1 & 1 1 1 1 \\ 0 0 1 1 & 0 & 0 & 1 & 1 & 3 ^ { - 1 / 2 } \\ 0 1 0 1 & 0 & 1 & 0 & 1 & 3 ^ { - 1 / 2 } \\ 0 & 1 & 1 & 0 & 3 ^ { - 1 / 2 } \\ 1 1 0 0 & 1 & 0 & 0 & 3 ^ { - 1 / 2 } \\ 1 0 1 0 & 1 & 0 & 0 & 3 ^ { - 1 / 2 } \\ 1 0 0 1 & 0 & 0 & 1 & 3 ^ { - 1 / 2 } \end{array} \right )
+$$
+
+$$
+X _ { J } & = ( \{ x _ { 1 } \} \{ x _ { 1 } \} \{ x _ { 2 } \} \{ x _ { 2 } \} \{ x _ { 3 } \} \{ x _ { 3 } \} \{ x _ { 4 } \} \{ x _ { 4 } \} \{ \overline { x _ { 1 } } \} \ \{ \overline { x _ { 2 } } \} \ \{ \overline { x _ { 3 } } \} \ \{ \overline { x _ { 4 } } \} ) \\ t & = \left ( \begin{matrix} 1 \\ 0 \\ 0 \\ 0 \\ 0 \end{matrix} \right ) \, , \quad v _ { J } = \left ( \begin{matrix} 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 2 ^ { - 1 / 4 } \, 2 ^ { - 1 / 4 } \, 2 ^ { - 1 / 4 } \, 2 ^ { - 1 / 4 } \\ 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & \sqrt { 3 } & \sqrt { 3 } \\ 1 & 1 & 1 & 1 & - 1 & i & - i & i & i & 0 & 0 & 0 \\ i & - i & i & i & 1 & 1 & 1 & - 1 & 0 & 0 & 0 \\ \end{matrix} \right ) \, .
+$$
+
+.
+
+This span program is based on the expansion EXACT2 or 3 of 4 = Threshold2 of 4(x1, x2, x3, x4) ∧ (x1 ∨ x2 ∨ x3 ∨ x4), and the span program for Threshold2 of 4 #279 from Example 5.1.
+
+## C.16 Function #278, EXACT1of 4:
+
+The optimal adversary matrix for function #278, EXACT1 of 4 = Threshold3 of 4(x1, x2, x3, x4) ∧ (x1 ∨ x2 ∨ x3 ∨ x4), is
+
+$$
+\Gamma = \left ( \begin{array} { c c c c c c c } 0 1 1 1 & 1 & 1 & 0 & 0 \\ 0 0 1 1 & 1 & 1 & 0 & 0 \\ 0 1 0 1 & 1 & 0 & 1 & 0 \\ 0 1 1 0 & 1 & 0 & 0 & 1 \\ 1 & 0 & 0 & 1 & 1 \\ 1 0 1 0 & 0 & 1 & 0 & 1 \\ 1 0 0 1 & 0 & 1 & 1 & 0 \\ 1 1 1 1 1 & 1 & 1 & 1 & 1 \end{array} \right )
+$$
+
+A span program with matching witness size √10 follows from Lemma 4.12 applied to the span programs for OR4 and Threshold3 of 4 #279.
+
+## C.17 Function #5736, EXACT2of 4:
+
+The optimal adversary matrix for function #278, EXACT1 of 4 = Thr.2 of 4(x1, . . . , x4)∧Thr.2 of 4(x1, . . . , x4), is
+
+|      |   0011 | ⎛⎜⎜⎜⎜⎜⎜⎝ 0   | 0      | 1      | 1      | 1      | 1      | 0      | 0      |
+|------|--------|--------------|--------|--------|--------|--------|--------|--------|--------|
+|      |   0101 | 1000 0       | 0100 1 | 0010 0 | 0001 1 | 0111 1 | 1011 0 | 1101 1 | 1110 0 |
+| Γ =  |   0110 | 0            | 1      | 1      | 0      | 1      | 0      | 0      | 1      |
+| 1100 |      1 |              | 1      | 0      | 0      | 0      | 0      | 1      | 1      |
+| 1010 |      1 | 0            |        | 1      | 0      | 0      | 1      | 0      | 1      |
+| 1001 |      1 | 0            |        | 0      | 1      | 0      | 1      | 1      | 0      |
+
+A span program with matching witness size √12 follows from Lemma 4.12 applied to the span program for Threshold2 of 4 #279.

@@ -1,0 +1,1782 @@
+## I. INTRODUCTION
+
+Learning ground states and their energies remain among the most compelling uses of quantum computing, with applications in electronic-structure calculations [1], largescale optimization [2], high energy physics [3], and quantum sensing [4, 5]. Yet a persistent bottleneck underlies essentially all known approaches to ground-state preparation and ground-state energy estimation [6-17]: they typically require initialization with a state that already has nontrivial overlap with the true ground state. How to prepare such "good" initial states is currently the subject of active debate.
+
+Classical experience provides insights into how one might approach approximate state preparation. One natural strategy is to optimize within a structured variational family; for example, density matrix renormalization group (DMRG) methods form a bedrock of electronic-structure calculations. This perspective has, in turn, motivated variational quantum methods such as the Variational Quantum Eigensolver (VQE), a hybrid quantum-classical algorithm that minimizes an energy objective of a parameterized quantum state preparation circuit. A second common strategy is to exploit adiabaticity-slowly deforming the ground state of an easy-to-solve Hamiltonian into that of a harder one [18-22]. This principle underlies quantum adiabatic algorithms for ground-state preparation (in both analogue [23] and digital settings [24]) where one evolves under a slowly varying Hamiltonian and leverages a spectral gap to suppress unwanted excitations.
+
+∗ ricard.puigivalls@epfl.ch
+
+† berta.casas@bsc.es
+
+‡ These authors contributed equally to this work.
+
+In this work, we develop an iterative training strategy that integrates adiabatic state preparation [20, 23] into VQE [25]. Starting from a trivial Hamiltonian with known parameters that prepare the ground state, we gradually deform the Hamiltonian along an adiabatic interpolation. At each step, the variational parameters are initialized in the optimal solution from the preceding Hamiltonian in the path, and then optimized. We further generalize this approach from vanilla VQE, which targets the ground state of a single Hamiltonian, to meta-VQE [26], in which a single parameterized model is trained to output near-optimal parameters across a family of Hamiltonians. We stress that in both cases our iterative strategy is not limited to quantum hardware in that it could also be applied to "quantuminspired" classical methods that rely on simulating quantum circuits or variational states to find ground states and energies [27, 28].
+
+The iterative training strategy proposed here mitigates key limitations of VQE and adiabatic state preparation when each is used in isolation. Compared to adiabatic methods, an iterative variational scheme can potentially prepare similar quality states with substantially shallower circuits, and it provides a natural setting in which to learn and implement shortcuts to adiabaticity [29]. Relative to standard VQE, the method is designed to improve trainability in the presence of barren-plateau phenomena: by exploiting the smooth deformation of the Hamiltonian and its objective landscape, each step can be warm-started from the preceding solution, keeping the optimization localized and the variational search in a favorable regime.
+
+> *Generated caption of `2602.06137_-_Warm_Starts_Cold_States__Exploiting_Adiabaticity_for_Variational_Ground-States_assets/figure-001.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains two panels, labeled (a) and (b). Panel (a) is a 3D surface plot of a landscape with a deep, funnel-shaped valley in the center. On the right side of the landscape, a small gray sphere is positioned on a relatively flat, elevated area. Above the sphere, a black double-headed arrow points diagonally up and to the right, accompanied by a black question mark. Panel (b) consists of a line plot and a flowchart. The line plot has a vertical axis labeled $\mathcal{L}(\theta)$ and a horizontal axis labeled $\theta$, with a break indicated by two parallel diagonal lines near the right end of the axis. A horizontal blue line is labeled $E_0$ on the vertical axis. The plot shows several colored curves (green, teal, light blue, dark blue, and light yellow) that fluctuate across the landscape. A black dot marks a high point on a green curve, from which a black arrow points down to a local minimum. A large yellow shaded area highlights a deep valley in the blue curves. To the right of the plot, a flowchart labeled "Initialization" shows a sequence of transformations: $(x_1, \theta) \longrightarrow \mathcal{L}(\theta, x_1) \rightarrow \theta_{x_1}^*$, followed by $(x_2, \theta_{x_1}^*) \longrightarrow \mathcal{L}(\theta, x_2) \rightarrow \theta_{x_2}^*$, with blue ellipses leading to the final step $(x_{N-1}, \theta_{x_{N-1}}^*) \longrightarrow \mathcal{L}(\theta, x_N) \rightarrow E_0$.
+
+To formalize the benefits of warm starts, we derive a lower bound on the gradient variance, showing that at each step of the iterative procedure both VQE and Meta-VQE maintain trainable gradients, provided the preceding step converges sufficiently. Notably, we find that these guarantees are sensitive to the spectral gap and fail to hold when it vanishes. Such breakdowns are unsurprising: finding ground states of general many-body Hamiltonians is QMA-complete [30].
+
+To investigate the practicality of our method, we supplement our theoretical results with numerical simulations of the full training process, accounting for realistic shot noise. Our results confirm that the method consistently converges when the gap in the ground state energy does not vanish, providing a promising path for ground-state preparation on near-term devices in such cases. However, we see that when the gap closes the method can break down in line with our theoretical predictions and the QMA-completeness of generic Hamiltonians.
+
+## II. PRELIMINARIES
+
+## A. Variational Quantum Eigensolver and Meta-VQE
+
+The Variational Quantum Eigensolver (VQE) is a hybrid quantum-classical variational algorithm that approximates the ground-state energy of a Hamiltonian HP by preparing a trial state on a quantum processor and minimizing its measured energy over a parametrized circuit family. Precisely, the algorithm optimizes the following loss function
+
+$$
+\mathcal { L } _ { V Q E } ( \theta ) = \langle \psi | U ^ { \dagger } ( \theta ) H _ { P } U ( \theta ) | \psi \rangle \, ,
+$$
+
+where U(θ) is a parametrized quantum circuit, |ψ⟩ is an initial state, and θ is the vector of variational parameters. These parameters are optimized via a hybrid quantumclassical loop: the quantum computer estimates the objective and (when required) its gradients, which are later fed to a classical optimizer suggesting a new set of parameters. The loop is repeated until convergence to a candidate solution θ∗ . In this case, we focus on a very general circuit of the form
+
+$$
+U _ { V Q E } ( \theta ) = \prod _ { j = 1 } ^ { M } V _ { j } e ^ { - i \theta _ { j } P _ { j } } \, ,
+$$
+
+where {Pj}Mj=1 is a set of Hermitian generators such that P 2 j = ✶, M is the total number of variational parameters, and {Vj}Mj=1 are fixed (non-parametrized) gates. Throughout this work, we assume the parameters {θj} to be uncorrelated.
+
+A very natural extension of VQE for parametrized Hamiltonians is the Meta-VQE [26]. The Meta-VQE is an algorithm that contains an additional input (or encoding parameter) x in the circuit, and is trained on a family of parametrized Hamiltonians {HP (xi)}Ni=1 . The loss function is the average energy over a training set {xi}Ni=1 ,
+
+$$
+\mathcal { L } _ { M V Q E } ( \theta ) = \frac { 1 } { N } \sum _ { i = 1 } ^ { N } \, \langle \psi | U ^ { \dagger } ( \theta , x _ { i } ) H _ { P } ( x _ { i } ) U ( \theta , x _ { i } ) | \psi \rangle \, . \, \left ( 3 \right ) \quad \text {as} \, \tt a n s { \tt a t z e } \quad \tt a n s { \tt a t z e } \quad \tt a n s { \tt a t z e }
+$$
+
+Minimizing LMVQE(θ) results in a single parameter vector θ that can be used with the same circuit family U(θ, x) to prepare approximate ground states for all training points xi. A central motivation is that the learned parameters may also transfer to previously unseen values of x, for example between the trained points.
+
+Because the circuit explicitly depends on x, we write it as
+
+$$
+U _ { M V Q E } ( \theta , x ) = \prod _ { j } ^ { M } V _ { j } e ^ { - i f _ { j } ( \theta _ { j } , x ) P _ { j } } \, , \quad ( 4 ) \quad \text {inter} \quad \text {with} \quad \text {i} \quad \text {with} \quad \text {i} \quad \text {with
+$$
+
+where the notation carries over from Eq. (2). The encoding function fj(θj, x) specifies how the input x modulates the j-th rotation. In this sense, the choice of encoding determines how the data (here, the Hamiltonian parameter x) is injected into the circuit, and can strongly influence the induced distribution of states and the resulting optimization of the model [31]. For the purpose of this work we will consider fj(θj, x) to be a linear function of the training parameters, i.e., fj(θj, x) = gj(x)θj, where each gj(x) has bounded derivatives in the domain of [xmin, xmax].
+
+## B. Gradient magnitudes and barren plateaus
+
+Significant effort has been devoted to understanding the trainability of VQE and other Variational Quantum Algorithms (VQAs). In practice, training can be hindered by limited expressivity, unfavorable optimization landscapes, and local minima. One of the most studied phenomena is the vanishing gradient problem, also known as the barren plateau problem [32, 33], which is typically characterized by an exponentially vanishing variance of the cost landscape (over an ensemble of parameters or circuits). This implies that most of the parameter settings in the landscape yield cost values that are very close to the ensemble average, by Chebyshev's inequality
+
+$$
+\Pr ( | \mathcal { L } ( \theta ) - \mathbb { E } _ { \theta \sim \mathcal { D } } [ \mathcal { L } ( \theta ) ] | \geqslant \epsilon ) \leqslant \frac { \text {Var} _ { \theta \sim \mathcal { D } } [ \mathcal { L } ( \theta ) ] } { \epsilon ^ { 2 } } .
+$$
+
+If the fluctuations are exponentially small, exponentially many physical measurements are required, making optimization inefficient. Relatedly, gradients can also exhibit exponential concentration [34, 35]. More broadly, these effects can be viewed as manifestations of a curse of dimensionality [36]. This has prompted the search for specific ansätze in which the variance vanishes at most polynomially with the number of qubits.
+
+## C. Iterative methods
+
+Iterative methods combat trainability barriers by breaking down a single hard optimization task into a sequence of smaller, more manageable subproblems. The key idea is that the optimal solutions vary smoothly across the sequence, so that the parameters optimized at one step provide a good warm-start initialization for the next.
+
+One way to generate such a sequence is to introduce an interpolation between an "easy" initial Hamiltonian Hini with known ground state and the target problem Hamiltonian HP , similar to an adiabatic path [23]
+
+$$
+H ( s ) = ( 1 - s ) H _ { i n i } + s H _ { P } ,
+$$
+
+As s increases from 0 to 1, this defines a continuous path between an easy instance to the target instance, which mirrors the spirit of adiabatic state preparation. Unlike true adiabatic evolution, however, the state is produced by a parametrized circuit and updated through variational optimization at discrete values of sk. This has two main consequences: on the one hand, success depends on the expressivity of the ansatz and the ability to remain on the relevant low-energy branch. On the other hand, the depth required to learn and prepare the ground states can potentially be significantly shallower in a digital setting than simulating the adiabatic time evolution.
+
+In the context of many-body Hamiltonians, it is often more natural to consider families parameterized by a physical coupling x, for example
+
+$$
+H ( x ) = H _ { 0 } + x H _ { 1 } ,
+$$
+
+For any fixed x, the goal is to approximate the ground state of the corresponding instance H(x) (which we denote by H when x is clear from context). By incrementally changing the value of x, we can create a set of optimization problems that are similar enough. Concretely, we choose a set x1 < x2 < · · · < xK and define a family of loss functions {L(θ; xk)}Kk=1 . The optimal parameters θ∗xk-1 found at step k - 1 are expected to provide a useful inductive bias for step k. As we will explore, this depends on several factors, such as the gap of the Hamiltonian, the smoothness of the encoding function, and the circuit expressivity. In practice, we initialize the parameters for the k-th problem by sampling them randomly from a small region (for instance, a hypercube) centered at θ∗xk-1 .
+
+We formalize this idea in the following definition.
+
+Definition 1 (Iterative training strategy). Consider a general loss function L(θ). An iterative training strategy defines a family of loss functions {L(θ, xk)}Kk=1 , and uses the solution at step k -1
+
+$$
+\theta _ { x _ { k } \ 1 } ^ { * } = \arg \min _ { \theta } \mathcal { L } ( \theta , x _ { k - 1 } ) \, , \quad \quad ( 8 ) \quad \text {we count}
+$$
+
+as an initialization bias for optimizing L(θ, xk). Concretely, the initial parameters for L(θ, xk) are chosen according to a distribution D peaked at θ∗xk-1 .
+
+For a VQE loss function of the form of Eq. (1), the family of loss functions is defined as
+
+$$
+\mathcal { L } _ { \text {VQE} } ( \theta , x _ { k } ) = \langle \psi | U ^ { \dagger } ( \theta ) H ( x _ { k } ) U ( \theta ) | \psi \rangle \, , \quad ( 9 ) \ \text {sults}
+$$
+
+with H(xk) = H0 + xkH1 as in Eq. (7). Importantly, L(θ, xK) corresponds to the original problem we wanted to solve L(θ). Similarly, for a Meta-VQE loss function of the form of Eq. (3), the family of loss functions that we define are {LMVQE(θ, k)}Kk=1 , where
+
+$$
+\mathcal { L } _ { M V Q E } ( \theta , k ) = & \quad \L T r o t t e { 1 } \\ \frac { 1 } { k } \sum _ { j = 1 } ^ { k } \left \langle \psi | U ^ { \dagger } ( \theta , x _ { j } ) H ( x _ { j } ) U ( \theta , x _ { j } ) | \psi \right \rangle . \quad ( 1 0 ) \quad \text {bias} \quad \text {ods to} \\
+$$
+
+Notice the following key difference between the Meta-VQE and the simple VQE iterative strategy: in the Meta-VQE, instead of changing each summand in the loss function, an extra term is added to it, leaving us with sequence of objective functions indexed by the number of training points.
+
+## III. MAIN RESULTS
+
+## A. Overview
+
+Barren plateaus are most commonly established by showing that the cost function concentrates under a chosen parameter ensemble, often corresponding to random initialization. Importantly, this is an average-case statement: it does not exclude the existence of trainable regions of the landscape. In particular, large enough gradients typically exist if the optimization is initialized closely enough to a minimum [37]. While we generally cannot guarantee initialization in such a neighborhood a priori, we can devise algorithms and techniques to find good starting points with provable guarantees. In particular, it has been shown that small angle initializations can sometimes avoid small gradients.
+
+To formalize these results, let us define a hypercube in the parameter space centered at a reference point θ∗ ∈ RM and with side 2r as
+
+$$
+\mathcal { V } ( \theta ^ { * } , r ) = \{ \theta = \theta ^ { * } + \alpha \, | \, \alpha _ { i } \in [ - r , r ] \} \, .
+$$
+
+Then, we we can define a localized distribution. Concretely, we denote D(θ∗ , r) the uniform distribution over the hypercube V(θ∗ , r), i.e., the distribution obtained by drawing each αi independently and uniformly from [-r, r].
+
+Prior work showed that initializing a circuit uniformly around θ∗ = 0 with r ∈ O(1/√L), where L is the number of layers, can lead to non-exponentially vanishing gradients for a specific hardware and initial state [38]. Similar conclusions were reached in [39-59], and most of these results have been unified and generalized in [37], where it is shown that gradients vanish at worst polynomially with the number of qubits around any reference point with nonexponentially vanishing second derivative. However, since identity initialization can fail to have gradients in full generality, the work conjectures that warm starts need to get increasingly smarter with the number of qubits.
+
+Variational methods have also been used to compress Trotter circuits via warm starts [60] by learning one Trotter step at a time, using the previous step as an inductive bias. More concretely, the authors use established methods to iteratively compress a Trotter evolution, and rigorously prove that at each new initialization gradients can be found. This concept is generalized to any overlap type loss, with a rank-1 target state. They show that for any target state that changes sufficiently slow, we can use iterative methods to enhance the training of a VQA. Crucially, this work does not apply to loss functions with observables with rank larger than one. Or in other words, the method fails for ground state preparation.
+
+This critical limitation motivate us to explore iterative training beyond loss functions that are just the overlap between two states, and to study whether iterative approaches can be used to find ground states of arbitrary observables. In particular, to approximate the ground state of H(x), we propose to split the problem into an iterative sequence of easier optimization tasks. Indeed, by starting our training in a reference Hamiltonian H0, whose ground state is known or easy to find, and incrementally modifying it until we reach the final H(x), we can potentially remain in regions with non-exponentially vanishing gradients.
+
+Concretely, in this work we provide analytical guarantees for iterative training methods covering a general family of quantum circuits and variational algorithms. The guarantees are based on the fact that, by finding a good approximation to the ground state of an intermediate step, we can use it as an effective warm-start initialization for the next iteration, as long as the change in H(x) is small enough. This procedure is sketched in Fig. 1.
+
+Our results can be viewed as a discretized analogue of adiabatic quantum computation in the following sense. In adiabatic state preparation, one follows a continuous path of Hamiltonians H(s) and, provided the evolution is slow compared to the inverse spectral gap, the system remains close to the instantaneous ground state. Here, instead of implementing a continuous-time evolution, we consider a sequence of Hamiltonians along an interpolation path and solve a variational optimization problem at each point. The underlying mechanism is analogous to adiabatic reasoning: if successive Hamiltonians are sufficiently close and the gap does not become too small, the ground state varies smoothly along the path, so the parameters learned at step k-1 provide an effective warm start for step k. Our analysis makes this intuition quantitative by translating the notion of "slow enough" into explicit, step-wise conditions expressed in terms of how much the Hamiltonian changes between consecutive points on the path. In this way, we provide analytical guarantees for when iterative training remains in a trainable regime and when it can fail, for example when gap closures or level crossings cause the optimum to move abruptly from one step to the next.
+
+## B. Lower-bound on the variance
+
+We now proceed to analyzing iterative strategies through the local geometry of the loss landscape around the warmstart initialization. At iteration xk, we do not optimize from scratch; instead, we initialize parameters in a small neighborhood of the previously optimized solution θ∗xk-1 . The key question is then whether this local region remains sufficiently informative for optimization as we move along the path.
+
+To move away from the intuition and turn this into a formal result, in this section we provide a lower bound on the variance of the loss function at a new iteration xk when parameters are sampled from a hypercube around θ∗xk-1 . This bound serves as a quantitative certificate that the loss does not become overly flat in the warm-start region. Equivalently, it guarantees that typical parameter perturbations around θ∗xk-1 induce non-negligible changes in the objective, which is a necessary ingredient for reliable training and for assessing progress with a feasible number of measurements.
+
+Theorem 1 (Lower-bound on the loss variance for iterative methods, Informal). Consider a loss function of the form in either Eq. (1) or Eq. (3), with ansätze as defined in Eq. (2), and Eq. (4) with M variational parameters. Suppose we use an iterative training strategy according to Definition 1. Assume that the following conditions are fulfil led:
+
+1. The Hamiltonian change rate, xk - xk-1 is bounded by
+
+$$
+| x _ { k } - x _ { k - 1 } | \in \mathcal { O } \left ( \frac { | \Delta _ { g a p } | } { \| H _ { 1 } \| _ { s } + M \| H ( x _ { k } ) \| _ { s } } \right ) . \quad ( 1 2 )
+$$
+
+2. The infidelity between the true ground state and the one learned variationally in the previous iteration is bounded by a constant.
+3. The generator of the first gate acts non-trivially on the initial state, i.e., ⟨ψ|P1|ψ⟩ = 0.
+
+Consider sampling the parameters θk from a hypercube of width 2r around the previous solution θ∗ k-1 such that
+
+$$
+r ^ { 2 } \in \mathcal { O } \left ( \frac { | \Delta _ { g a p } | } { M ( \| H ( x _ { k } ) \| _ { s } + | \Delta _ { g a p } | ) } \right ) .
+$$
+
+Then we can guarantee the variance lower bound
+
+$$
+V a r _ { \theta \sim \mathcal { D } ( \theta ^ { * } , r ) } [ \mathcal { L } ( \theta , x _ { k } ) ] \in \Omega \left ( r ^ { 4 } \right ) \, .
+$$
+
+Here we used ∥ · ∥s = λ(·) max - λ(·) min , a semi-norm [61] that captures the scale of a Hamiltonian, where λ(·) max and λ(·) min denote, respectively, the largest and smallest eigenvalues of the corresponding Hamiltonian. Furthermore, we defined |∆gap| = |λ(·) min - λ(·) 1 |, the absolute difference between the ground state and the first eigenvalue. The formal version of Theorem 1 is presented and proven in Appendix B for the VQE and Appendix C for the Meta-VQE algorithm. For clarity, we present in the main text a single unified theorem that covers both cases by adopting the more restrictive set of assumptions needed across the two analyses.
+
+Theorem 1 provides a step-wise guarantee that, around each warm-start point, the loss landscape does not become exponentially flat. Concretely, it establishes that inside a hypercube of side length 2r, with r2 ∝ |∆gap|/(M∥H∥s), the variance decays at worst polynomially in r. Consequently, as long as the gap |∆gap| does not close along the path, and as long as ∥H∥s and M do not scale exponentially with the number of qubits, the variance decays polynomially, ensuring a local region with provable gradients along the iterative path.
+
+The rate at which the Hamiltonian is iteratively updated, i.e., |xk - xk-1|, also needs to be sufficiently gradual to guarantee a non-exponentially vanishing variance (and hence a non-flat loss landscape). That said, the first condition in Theorem 1, |xk - xk-1| ∈ |∆gap|/(∥H1∥s + M∥H(xk-1)∥s), is obtained from a loose, worst-case bound and may be improvable in practice. In contrast, the dependence on the gap is structural: as we exemplify in Section III C, the gap closing can render the training infeasible. Indeed, the closure of the gap in the ground states acts as a roadblock, similar to what has been found in other contexts [20, 23]. Thus, the scaling with the gap is unlikely to be improved.
+
+The second condition in Theorem 1 captures the intuitive fact that the training at each iteration needs to be sufficiently successful to ensure that, at the next iteration, we are close enough to a minimum to have gradients. If the training of the loss function k - 1 fails (or does not converge well enough), the subsequent warm start may fall outside the guaranteed region, which can cause the iterative training scheme to be ineffective.
+
+The final condition to guarantee loss variances in Theorem 1 is that the first gate in our circuit acts non-trivially on the initial state (e.g. does not commute entirely with the target Hamiltonian). We impose ⟨ψ|P1|ψ⟩ = 0 as a convenient sufficient condition to simplify the proof, but this requirement might not be strictly necessary. Its role is simply to ensure that the ansatz produces a nontrivial local variation of the prepared state (and hence of the loss) around the initialization.
+
+We devote the rest of this section to studying the tightness of the bound with respect to the number of parameters M. Fig. 2 analyzes the local geometry of the loss landscape LVQE(θ) for a single iterative step k of the training procedure. Concretely, we estimate the variance of the loss under random perturbations of the optimized parameters θ∗ (xk), which serve as a warm start for the next iteration of the algorithm. This characterizes how loss fluctuations concentrate as a function of the neighborhood size r and the parameter count M (linear in the system size n), providing guidance on how far one can move in x while maintaining usable gradient information when n grows.
+
+In our simulations, we consider a one-dimensional Heisenberg Hamiltonian with a transversal magnetic field of the form:
+
+$$
+H ( x ) = - \sum _ { i = 1 } ^ { n } Z _ { i } + x \sum _ { \langle i , j \rangle } ( X _ { i } X _ { j } + Y _ { i } Y _ { j } + Z _ { i } Z _ { j } ) , \ \ ( 1 5 ) \\
+$$
+
+where the first term corresponds to a gapped Hamiltonian with a product-state ground state, and the second term defines a Heisenberg interaction Hamiltonian with ⟨i, j⟩ denoting nearest neighbor interactions with periodic boundary conditions. The interpolation parameter x therefore connects an easy-to-prepare initial regime to a strongly interacting regime as x is increased.
+
+Following the ansatz definition in Eq. (2), we use a circuit of the form U(θ) = ∏Ll=1 Ul(θl), where each layer Ul(θl) consists of single-qubit Rz rotations on all qubits, followed by two-qubit rotations Rxx, Ryy, and Rzz acting on nearest-neighbor qubits with periodic boundary conditions, with each gate parameterized by a different angle. The total number of trainable parameters therefore scales as M = 4nL, and in the numerics we take L = n.
+
+In Fig. 2 (a) we plot the variance of the loss LVQE for x2 = 0.2, corresponding to the second iteration step. We compute the variance for different values of r, the halfwidth of the hypercube centered at the solution θ∗ 1 , from which we sample the new initial parameters in random directions. As expected, for r = π the variance vanishes exponentially with the number of qubits. This is because in this regime, the initialization is uniform over the full landscape, so the concentration of the loss function phenomena (BP) manifests. However, as the size of the hypercube shrinks, the variance increases and its decay transitions to a polynomial scaling with the number of qubits.
+
+We recall that these are sufficient conditions: they guarantee substantial loss variation and gradients when they are satisfied, but they do not imply that training must fail when they are violated. In particular, the bound ensures that under these conditions, the initialization strategy is guaranteed to be in a region with non-negligible gradients. A natural follow-up question is whether one can still train from larger neighborhoods than those covered by the theorem.
+
+We address this question numerically in Fig. 2 (b) and (c). There, we show the relationship between the maximum value of the variance and the value of r that maximizes it, with respect to the number of variational parameters M (i.e., the dimension of θ). We find that rmax scales roughly as M -1/3 , very close to the M -1/2 bound predicted by Theorem 1. In fact, the observed scaling is slightly more favorable than the worst-case bound provided by Theorem 1, but almost saturates the bound.
+
+> *Generated caption of `2602.06137_-_Warm_Starts_Cold_States__Exploiting_Adiabaticity_for_Variational_Ground-States_assets/figure-002.png` (ollama:gemma4:26b, prompt sci-v1):* This image consists of three subplots, labeled (a), (b), and (c), showing scientific data related to variance and parameters. Subplot (a) is a line plot with markers. The y-axis is labeled "Variance" on a logarithmic scale ranging from $10^{-4}$ to $10^{-2}$. The x-axis is labeled $r/\pi$ on a logarithmic scale ranging from $10^{-1}$ to $10^0$. A legend in the bottom-left corner lists series for different values of $n$: $n=4$ (dark blue), $n=6$ (blue), $n=8$ (green), $n=10$ (yellow), $n=12$ (orange), $n=14$ (pink), and $n=16$ (brown). All series show an initial increase in variance followed by a peak and then a decrease as $r/\pi$ increases. Higher values of $n$ correspond to lower variance after the peak. Subplot (b) is a line plot with markers on a log-log scale. The y-axis is labeled "Max variance" and ranges from $-1.875 \times 10^{-1}$ to $-1.375 \times 10^{-1}$ (though markers are labeled $-1.50$, $-1.75$). The x-axis is labeled "# params ($M$)" and ranges from $10^{-1}$ to $10^2$. The data points follow a downward linear trend on this scale. An equation is provided: $y = 0.382 \ x^{-0.513}$ with $(R^2 = 0.997)$. Subplot (c) is a line plot with markers on a log-log scale. The y-axis is labeled "$r_{\text{max}}$ (at max Var)" and ranges from $10^{-3}$ to $10^{-1}$. The x-axis is labeled "# params ($M$)" and ranges from $10^{-3}$ to $10^2$. The data points follow a downward linear trend. An equation is provided: $y = 2.02 \ x^{-0.274}$ with $(R = 0.990)$, and a dashed line represents the relationship $y \propto x^{-1/2}$.
+
+## C. Training via iterative methods
+
+So far we have shown that iterative methods can work as a warm starting strategy, ensuring that the variational optimization can be initialized in a locally trainable region. However, this is not sufficient to guarantee that training will converge to a sufficiently good minimum. In this section we train different variational algorithms to assess practical advantages and limitations of iterative training methods.
+
+We start by presenting the models that we will study using the VQE and Meta-VQE algorithms. In particular, we consider one-dimensional spin chains governed by two different Hamiltonians: the anisotropic XY model and the transverse-field Ising model. Both are parameterized by a control parameter x that interpolates between distinct interaction regimes. The anisotropic XY model is defined as
+
+$$
+H _ { X Y } ( x ) = - J \left [ H _ { \sigma _ { x } } + H _ { \sigma _ { \nu } } + x ( H _ { \sigma _ { x } } - H _ { \sigma _ { \nu } } ) \right ] ,
+$$
+
+where Hσj = ∑n-1 i=1 σ(i) j σ(i+1) j , σj ∈ {σx, σy} and where x controls the anisotropy between σxσx and σyσy couplings. For x = 0 the model reduces to the isotropic XX chain, while for x = 1 it reproduces the Ising limit. The generalized Ising Hamiltonian used in our simulations is
+
+$$
+H _ { 1 } ( x ) = - \, J \sum _ { i = 1 } ^ { n } Z _ { i } Z _ { i + 1 } - x \sum _ { i = 1 } ^ { n } X _ { i } \quad ( 1 7 )
+$$
+
+$$
+- \ Y _ { 1 } X _ { 2 } \cdots X _ { n - 1 } Y _ { n } ,
+$$
+
+where J sets the strength of the nearest-neighbor coupling and x acts as a tunable transverse field. The last term Xi - Y1X2 · · ·Xn-1Yn cancels the periodic boundary term Z1Zn after the Jordan-Wigner transformation in order to solve the system as it was infinite [62].
+
+In order to assess whether training remains feasible in a realistic setting, it is important to account for finite-shot measurement noise. To this end, we model measurement uncertainty through a synthetic shot-noise model at the level of measurement groups. For a fixed total shot budget nshots, we partition the Hamiltonian into G disjoint groups of Pauli terms, H(x) = ∑Gg=1 Hg(x), where each group corresponds to a single measurement setting and is assigned a group-dependent shot budget Sg with ∑Gg=1 Sg = nshots. For a given parameter vector θ, we then define the (synthetic) finite-shot energy estimator as
+
+$$
+\widehat { E } ( \theta ) \coloneqq \sum _ { g = 1 } ^ { G } \left ( \mathcal { L } _ { g } ( \theta ) + \sqrt { V _ { g } ( \theta ) } \, \xi _ { g } \right ) , \quad \xi _ { g } \sim \mathcal { N } ( 0 , 1 ) , \ ( 1 9 )
+$$
+
+where Lg(θ) is the loss function associated to the exact contribution of group g, and Vg(θ) is chosen to match the leading-order finite-shot variance of estimating that group with Sg shots (see Appendix D). Concretely, under the standard approximation that intra-group covariances are negligible,
+
+> *Generated caption of `2602.06137_-_Warm_Starts_Cold_States__Exploiting_Adiabaticity_for_Variational_Ground-States_assets/figure-003.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains four plots, labeled (a), (b), (c), and (d), arranged in a $2 \times 2$ grid. Plots (a) and (b) relate to the "XY model," while plots (c) and (d) relate to the "Ising" model. All plots show $\langle H(x) \rangle$ on the vertical $y$-axis versus $x$ on the horizontal $x$-axis. Plot (a) is titled "VQE" and has the $y$-axis labeled "XY model $\langle H(x) \rangle$" with values ranging from $-1.65$ to $-1.45$. The $x$-axis is labeled $x$ from $0.00$ to $1.00$. The legend contains "exact ground" (black line), "exact 1st excited" (blue line), and "train" (tan circles). The "exact ground" line starts at approximately $-1.50$ and curves downward to $-1.67$ at $x=1.00$. The "exact 1st excited" line starts at approximately $-1.44$ and curves downward to $-1.60$ at $x=1.00$. The "train" data points (tan circles) lie directly on the "exact ground" line at $x$ values of approximately $0.0, 0.2, 0.4, 0.6, 0.8,$ and $1.0$. Plot (b) is titled "MetaVQE" and has the same axes as plot (a). The legend includes "exact ground" (black line), "exact 1st excited" (blue line), "train" (tan circles), and "test" (green crosses). The "exact ground" and "exact 1st excited" lines are identical to plot (a). The "train" tan circles lie on the "exact ground" line. The "test" green crosses also lie directly on the "exact ground" line at more frequent $x$ intervals. Plot (c) is titled with "Ising" on the $y$-axis, which is labeled "Ising $\langle H(x) \rangle$" with values from $-2.00$ to $-1.00$. The $x$-axis is labeled $x$ from $0.0$ to $2.0$. A vertical gray line is at $x=1.0$. The legend is not present, but the plot shows an "exact ground" line (black) curving from $-1.00$ at $x=0$ to $-2.10$ at $x=2.0$. An "exact 1st excited" line (blue) curves from approximately $-0.92$ at $x=0$ to $-1.95$ at $x=2.0$. Tan circles are plotted along the blue line at $x \approx 0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75,$ and $2.0$. Green crosses are visible on the black line near $x=1.0$. Plot (d) has the same axes as plot (c). The legend includes "exact ground" (black line), "exact 1st excited" (blue line), "train" (tan circles), and "test" (green crosses). The "exact ground" and "exact 1st excited" lines are identical to plot (c). The "train" tan circles follow the blue line. The "test" green crosses follow the black line, deviating slightly from it at higher $x$ values.
+
+$$
+V _ { g } ( \theta ) \approx \sum _ { \alpha \in \mathcal { I } _ { g } } c _ { \alpha } ^ { 2 } \, \frac { 1 - \langle P _ { \alpha } \rangle _ { \theta } ^ { 2 } } { S _ { \alpha } } , \quad \sum _ { \alpha \in \mathcal { I } _ { g } } S _ { \alpha } = S _ { g } , \quad ( 2 0 ) \quad \text {the ite} \quad \text {train} \quad \\
+$$
+
+with Sα the shots allocated to each Pauli term within the group. We draw independent noise {ξg}Gg=1 for each circuit evaluation, reflecting independent measurement batches across settings. This construction reproduces the expected statistical variance of finite-shot experiments.
+
+In Fig. 3 (a) and (b) we show an iterative training method for both VQE and Meta-VQE applied to the HXY Hamiltonian in Eq. (16). In this plot we can clearly see that the iterative method works. Indeed for both strategies the training can follow the ground state. Not only that, but we also see that for Meta-VQE the test points also match the exact energies.
+
+The situation changes for the Ising Hamiltonian HI in Eq. (15) (Fig. 3 panels (c) and (d)). Near the level crossing at x = 1, the optimization fails to remain on the true ground state. Instead, it continues along the smooth continuation of the previously learned state, in agreement with the behavior predicted by Theorem 1. This highlights how level crossings and gap closings can obstruct iterative training and, in some cases, prevent convergence to the global optimum.
+
+This behavior can be understood from the locality of the optimization. Before the crossing, the tracked state coincides with the global minimum; after the crossing, the same continuous trajectory persists but corresponds only to a local minimum. Since the optimizer explores the landscape locally, nearby parameter updates typically increase the energy, making it difficult to transition to a different branch that becomes energetically favorable after the crossing. Escaping this would require an initialization already aligned with the post-crossing ground state, which cannot be guaranteed without prior knowledge of the solution.
+
+Consequently, the issue at hand is not due to barren plateau phenomena or shot noise, but rather a fundamental limitation of local, iterative optimization strategy in the presence of spectral crossings. In this sense, the phenomenon is closely related to the bottlenecks encountered in adiabatic (or adiabatic-like) ground-state preparation strategies when the gap closes.
+
+The existence of gradient paths between the old and new global minima, previously dubbed fertile valleys [60], has attracted attention recently. While as ground state finding for many-body Hamiltonians is QMA-complete [30], fertile valleys provably cannot exist in the worst case, numerical evidence suggests that they may sometimes be possible to find for some simpler problems. How widespread or rare this phenomenon is, as well as whether there are particular strategies that can make these fertile valleys more likely, is thus one important open direction for future research.
+
+## IV. DISCUSSION
+
+This work investigates iterative warm-start training for variational optimization, where each instance is initialized using parameters optimized for a neighboring instance. By viewing VQE and Meta-VQE through the lens of a discretized adiabatic deformation, we analyzed the conditions under which the optimization remains within an informative region of the parameter space. Theorem 1 establishes a lower bound on the loss variance within a hypercube centered at the previous optimum, provided that: (i) consecutive Hamiltonians are sufficiently close, (ii) the previous step achieved adequate accuracy, and (iii) the initial gate induces a nontrivial local state variation. We find that the permissible warm-start neighborhood shrinks as the number of variational parameters increases, but expands with a larger spectral gap. Within this neighborhood, the loss landscape retains sufficient local variation to provide useful gradients, thereby avoiding barren plateaus. These analytical findings are corroborated by numerical landscape probes for system sizes up to n = 16. As the warm-start neighborhood contracts from "global" initializations (large r) toward a local regime, the variance transitions from an exponentially vanishing scaling to a polynomial one.
+
+Training simulations under a synthetic shot-noise model further demonstrate that warm-start VQE and Meta-VQE reliably track the ground-state energy along paths with a sufficient spectral gap. However, this behavior changes qualitatively when the gap closes: near a level crossing, the optimization tends to follow the smooth continuation of the pre-crossing solution, which becomes a local minimum after the crossing. This failure mode is consistent with the gap sensitivity identified in Theorem 1 and reflects the limitations of local iterative optimization in the presence of spectral crossings.
+
+Despite these limitations, this iterative framework offers distinct advantages. Unlike standard adiabatic evolution, which often requires significant evolution time (or circuit depth, if the implementation is digitalized) to satisfy the adiabatic theorem, this variational approach can search for a "shortcut to adiabaticity" within a constrained, lowerdepth ansatz. Furthermore, the ability to reliably produce approximate ground states makes this method highly valuable for fault-tolerant algorithms; specifically, these states can serve as high-overlap inputs, thereby reducing the total runtime required to achieve high-precision energy estimates.
+
+It is perhaps worth highlighting that recent results have proven that local regions of variational landscapes may be modeled by a surrogate [27]. In this approach, one can take several measurements at the beginning of the protocol to simulate regions of the quantum landscape (and train using those regions), which is potentially applied to the method proposed here. While this typically requires a comparable overall amount of quantum hardware access, it can offer practical advantages in real deployments-most notably by reducing the need for tight quantum-classical feedback loops, making the optimization less sensitive to time-dependent noise drift and calibration changes, and enabling more efficient workflows when access is mediated through cloud queues and intermittent device availability.
+
+Several open directions follow naturally from our work here. To mitigate the issue of level crossings, one might track not only the ground state but also a subspace of lowlying excited states, ensuring the target branch can be recovered after eigenvalue reordering. Variational Quantum Deflation [63] offers a concrete framework for this, though it remains an open question whether multi-state tracking provides provable guarantees in the iterative setting.
+
+Another strategy might be to exploit the control space: by starting from various solvable Hamiltonians, one could attempt to construct trajectories that circumvent spectral gap closures entirely. This enables the variational discovery of shortcuts to adiabaticity through the careful selection of the Hamiltonian path. Ultimately, this suggests a paradigm complementary to the heuristic parameter search of non-iterative versions of VQE: instead of simply guessing initialization points and ansatz, one shapes the optimization path itself. By enforcing symmetries or conserved quantities along the Hamiltonian trajectory, the optimizer can be confined to a protected subspace, shielding the process from symmetry-breaking level crossings.
+
+Taken together, these results position iterative warmstart variational methods as a potential route to overcoming trainability barriers in variational quantum algorithms. Furthermore, by exposing their deep connection to adiabatic evolution, point toward a new paradigm in which the mature toolbox of adiabatic control and shortcut techniques can be systematically repurposed. Indeed, this opens the door to designing scalable and robust variational training strategies.
+
+## ACKNOWLEDGMENTS
+
+We thank Marc Drudis, Paolo Braccia, Santiago Llorens, and Pauline Besserve for insightful discussions. R.P. acknowledges the support of the SNF Quantum Flagship Replacement Scheme (Grant No. 215933). B. C. acknowledges funding from the Spanish Ministry for Digital Transformation and the Civil Service of the Spanish Government through the QUANTUM ENIA project call - Quantum Spain, EU, through the Recovery, Transformation and Resilience Plan - NextGenerationEU, within the framework of Digital Spain 2026. A.C. -L. acknowledges funding by the European Union, supported by the EuroHPC Joint Undertaking and its members under the Grant Agreement Nº 101159808, including top-up funding by Ministry for Digital Transformation and the Civil Service of the Spanish Government, and from the grant RYC2022037769-I funded by MICIU/ AEI/ 10.13039/ 501100011033 and by "ESF+" . Z.H. acknowledges support from the Sandoz Family Foundation-Monique de Meuron program for Academic Promotion. A.P.S acknowledges funding from Swiss National Science Foundation through the grant TMPFP2 \_ 234085, and Juan Carrasquilla for his support.
+
+- [1] Y. Cao, J. Romero, J. P. Olson, M. Degroote, P. D. Johnson, M. Kieferová, I. D. Kivlichan, T. Menke, B. Peropadre, N. P. Sawaya, et al., Chemical reviews 119, 10856 (2019).
+- [2] E. Farhi, J. Goldstone, and S. Gutmann, arXiv preprint arXiv:1411.4028 https://doi.org/10.48550/arXiv.1411.4028 (2014).
+- [3] A. Di Meglio, K. Jansen, I. Tavernelli, C. Alexandrou, S. Arunachalam, C. W. Bauer, K. Borras, S. Carrazza, A. Crippa, V. Croft, et al., Prx quantum 5, 037001 (2024).
+- [4] M. Hassani, M. Hu, G. Müller-Rigat, M. Fadel, and J. Tura, arXiv preprint arXiv:2512.02976 https://doi.org/10.48550/arXiv.2512.02976 (2025).
+- [5] R. Puig, P. Sekatski, P. A. Erdman, P. Abiuso, J. Calsamiglia, and M. Perarnau-Llobet, PRX Quantum 6, 030309 (2025).
+- [6] M. A. Nielsen and I. L. Chuang, Quantum Computation and Quantum Information (Cambridge University Press, Cambridge, 2000).
+- [7] K. Temme, T. J. Osborne, K. G. Vollbrecht, D. Poulin, and F. Verstraete, Nature 471, 87 (2011).
+- [8] A. Y. Kitaev, arXiv preprint quant-ph/9511026 10.48550/arXiv.quant-ph/9511026 (1995).
+- [9] G. Brassard, P. Hoyer, M. Mosca, and A. Tapp, arXiv preprint quant-ph/0005055 10.48550/arXiv.quantph/0005055 (2000).
+- [10] K. C. Tan, D. Bowmick, and P. Sengupta, arXiv preprint arXiv:2010.00949 (2020).
+- [11] G. H. Low and I. L. Chuang, Quantum 3, 163 (2019).
+- [12] A. Gilyén, Y. Su, G. H. Low, and N. Wiebe, in Proceedings of the 51st Annual ACM SIGACT Symposium on Theory of Computing (2019) pp. 193-204.
+- [13] Y. Ge, J. Tura, and J. I. Cirac, Journal of Mathematical Physics 60 (2019).
+- [14] M. Motta, C. Sun, A. T. Tan, M. J. O'Rourke, E. Ye, A. J. Minnich, F. G. Brandao, and G. K.-L. Chan, Nature Physics 16, 205 (2020).
+- [15] D. Motlagh, M. S. Zini, J. M. Arrazola, and N. Wiebe, arXiv preprint arXiv:2404.05810 https://doi.org/10.48550/arXiv.2404.05810 (2024).
+- [16] M. Gluza, J. Son, B. H. Tiang, Y. Suzuki, Z. Holmes, and N. H. Ng, arXiv preprint arXiv:2412.04554 https://doi.org/10.48550/arXiv.2412.04554 (2024).
+- [17] Y. Suzuki, B. H. Tiang, J. Son, N. H. Ng, Z. Holmes, and M. Gluza, arXiv preprint arXiv:2504.01077 https://doi.org/10.48550/arXiv.2504.01077 (2025).
+- [18] A. Garcia-Saez and J. Latorre, arXiv preprint arXiv:1806.02287 https://doi.org/10.48550/arXiv.1806.02287 (2018).
+- [19] S. M. Harwood, D. Trenev, S. T. Stober, P. Barkoutsos, T. P. Gujarati, S. Mostame, and D. Greenberg, ACM Transactions on Quantum Computing 3, 1 (2022).
+
+- [20] T. Albash and D. A. Lidar, Rev. Mod. Phys. 90, 015002 (2018).
+- [21] M. Hibat-Allah, E. M. Inack, R. Wiersema, R. G. Melko, and J. Carrasquilla, Nature Machine Intelligence 3, 952 (2021).
+- [22] B. Žunkovič, P. Torta, G. Pecci, G. Lami, and M. Collura, Physical Review Letters 134, 130601 (2025).
+- [23] E. Farhi, J. Goldstone, S. Gutmann, and M. Sipser, arXiv preprint quant-ph/0001106 10.48550/arXiv.quantph/0001106 (2000).
+- [24] I. Kolotouros, I. Petrongonas, M. Prokop, and P. Wallden, Quantum Science and Technology 10, 015003 (2024).
+- [25] A. Peruzzo, J. McClean, P. Shadbolt, M.-H. Yung, X.-Q. Zhou, P. J. Love, A. Aspuru-Guzik, and J. L. O'brien, Nature Communications 5, 1 (2014).
+- [26] A. Cervera-Lierta, J. S. Kottmann, and A. Aspuru-Guzik, PRX Quantum 2, 020329 (2021).
+- [27] S. Lerch, R. Puig, M. Rudolph, A. Angrisani, T. Jones, M. Cerezo, S. Thanasilp, and Z. Holmes, arXiv preprint arXiv:2411.19896 10.48550/arXiv.2411.19896 (2024).
+- [28] M. S. Rudolph, T. Jones, Y. Teng, A. Angrisani, and Z. Holmes, arXiv preprint arXiv:2505.21606 10.48550/arXiv.2505.21606 (2025).
+- [29] D. Guéry-Odelin, A. Ruschhaupt, A. Kiely, E. Torrontegui, S. Martínez-Garaot, and J. G. Muga, Reviews of Modern Physics 91, 045001 (2019).
+- [30] J. Kempe, A. Kitaev, and O. Regev, in International Conference on Foundations of Software Technology and Theoretical Computer Science (Springer, 2004) pp. 372-383.
+- [31] B. Casas, X. Bonet-Monroig, and A. Pérez-Salinas, arXiv preprint arXiv:2411.19281 10.48550/arXiv.2411.19281 (2024).
+- [32] J. R. McClean, S. Boixo, V. N. Smelyanskiy, R. Babbush, and H. Neven, Nature Communications 9, 1 (2018).
+- [33] M. Larocca, S. Thanasilp, S. Wang, K. Sharma, J. Biamonte, P. J. Coles, L. Cincio, J. R. McClean, Z. Holmes, and M. Cerezo, Nature Reviews Physics 7, 174-189 (2025).
+- [34] A. Perez-Salinas, H. Wang, and X. Bonet-Monroig, npj Quantum Information 10, 1 (2024).
+- [35] A. Arrasmith, Z. Holmes, M. Cerezo, and P. J. Coles, Quantum Science and Technology 7, 045015 (2022).
+- [36] M. Cerezo, M. Larocca, D. García-Martín, N. L. Diaz, P. Braccia, E. Fontana, M. S. Rudolph, P. Bermejo, A. Ijaz, S. Thanasilp, et al., Nature Communications 16, 7907 (2025).
+- [37] H. Mhiri, R. Puig, S. Lerch, M. S. Rudolph, T. Chotibut, S. Thanasilp, and Z. Holmes, arXiv preprint arXiv:2502.07889 https://doi.org/10.48550/arXiv.2502.07889 (2025).
+- [38] Y. Wang, B. Qi, C. Ferrie, and D. Dong, Physical Review Applied 22, 054005 (2024).
+- [39] J. Dborin, F. Barratt, V. Wimalaweera, L. Wright, and A. G. Green, Quantum Science and Technology 7, 035014 (2022).
+- [40] F. Truger, J. Barzen, F. Leymann, and J. Obst, arXiv preprint arXiv:2402.17378 (2024).
+- [41] M. S. Rudolph, J. Miller, D. Motlagh, J. Chen, A. Acharya, and A. Perdomo-Ortiz, Nature Communications 14, 8367 (2023).
+- [42] M. L. Goh, M. Larocca, L. Cincio, M. Cerezo, and F. Sauvage, Physical Review Research 7, 033266 (2025).
+- [43] F. Sauvage, S. Sim, A. A. Kunitsa, W. A. Simon, M. Mauri, and A. Perdomo-Ortiz, arXiv preprint arXiv:2103.08572 (2021).
+- [44] G. Verdon, M. Broughton, J. R. McClean, K. J. Sung, R. Babbush, Z. Jiang, H. Neven, and M. Mohseni, arXiv preprint arXiv:1907.05415 (2019).
+- [45] K. N. Okada, K. Osaki, K. Mitarai, and K. Fujii, Physical Review Research 5, 043217 (2023).
+- [46] G. Ravi, P. Gokhale, Y. Ding, W. Kirby, K. Smith, J. Baker, P. Love, H. Hoffmann, K. Brown, and F. Chong, arXiv preprint arXiv:2202.12924 (2022).
+- [47] J. Gibbs, Z. Holmes, and P. Stevenson, arXiv preprint arXiv:2402.10277 10.48550/arXiv.2402.10277 (2024).
+- [48] K. Mitarai, Y. Suzuki, W. Mizukami, Y. O. Nakagawa, and K. Fujii, Physical Review Research 4, 033012 (2022).
+- [49] R. Tate, J. Moondra, B. Gard, G. Mohler, and S. Gupta, Quantum 7, 1121 (2023).
+- [50] Y.-F. Niu, S. Zhang, and W.-S. Bao, Electronics 12, 347 (2023).
+- [51] D. J. Egger, J. Mareček, and S. Woerner, Quantum 5, 479 (2021).
+- [52] J. Wurtz and D. Lykov, Physical Review A 104, 052419 (2021).
+- [53] A. Mari, T. R. Bromley, J. Izaac, M. Schuld, and N. Killoran, Quantum 4, 340 (2020).
+- [54] M. Wilson, S. Stromswold, F. Wudarski, S. Hadfield, N. M. Tubman, and E. Rieffel, arXiv preprint arXiv:1908.03185 (2019).
+- [55] H.-Y. Liu, T.-P. Sun, Y.-C. Wu, Y.-J. Han, and G.-P. Guo, New Journal of Physics 25, 013039 (2023).
+- [56] L. Zhou, S.-T. Wang, S. Choi, H. Pichler, and M. D. Lukin, Physical Review X 10, 021067 (2020).
+- [57] V. Akshay, D. Rabinovich, E. Campos, and J. Biamonte, Phys. Rev. A 104, L010401 (2021).
+- [58] H. R. Grimsley, N. J. Mayhall, G. S. Barron, E. Barnes, and S. E. Economou, npj Quantum Information 9, 19 (2023).
+- [59] A. A. Mele, G. B. Mbeng, G. E. Santoro, M. Collura, and P. Torta, Physical Review A 106, L060401 (2022).
+- [60] R. Puig, M. Drudis, S. Thanasilp, and Z. Holmes, PRX Quantum 6, 010317 (2025).
+- [61] S. Boixo, S. T. Flammia, C. M. Caves, and J. M. Geremia, Physical review letters 98, 090401 (2007).
+- [62] A. Cervera-Lierta, Quantum 2, 114 (2018).
+- [63] O. Higgott, D. Wang, and S. Brierley, Quantum 3, 156 (2019).
+- [64] J. J. Duistermaat and J. A. C. Kolk, Taylor expansion in several variables, in Distributions: Theory and Applications (Birkhäuser Boston, Boston, 2010) pp. 59-63.
+- [65] W. Banaszczyk, Additive subgroups of topological vector spaces (Springer, 2006).
+- [66] T. H. Gronwall, O. Dunkel, and H. S. Uhler, The American Mathematical Monthly 27, 81 (1920).
+
+## Appendix A: Preliminaries
+
+## 1. Taylor remainder theorem
+
+We present the Taylor remainder theorem which expresses a multivariate differentiable function as a series expansion. We refer the reader to Ref. [64] for further details.
+
+Theorem 2 (Taylor reminder theorem). Consider a function f(x) such that f : RN →R which is K times differentiable around a point a ∈ RN , for K a positive integer K. The function f(x) can be expanded around a as
+
+$$
+f ( x ) = \sum _ { k = 0 } ^ { K } \sum _ { i _ { 1 } , i _ { 2 } , \dots , i _ { k } } ^ { N } \frac { 1 } { k ! } \left ( \frac { \partial ^ { k } f ( x ) } { \partial x _ { i _ { 1 } } \partial x _ { i _ { 2 } } \dots \partial x _ { i _ { k } } } \right ) \Big | _ { x = a } ( x _ { i _ { 1 } } - a _ { i _ { 1 } } ) ( x _ { i _ { 2 } } - a _ { i _ { 2 } } ) . . ( x _ { i _ { k } } - a _ { i _ { k } } ) + R _ { K , a } ( x ) \ ,
+$$
+
+where the remainder is of the form
+
+$$
+R _ { K , a } ( x ) = \sum _ { i _ { 1 } , i _ { 2 } , \dots , i _ { K + 1 } } ^ { N } \frac { 1 } { ( K + 1 ) ! } \left ( \frac { \partial ^ { K + 1 } f ( x ) } { \partial x _ { i _ { 1 } } \partial x _ { i _ { 2 } } \dots \partial x _ { i _ { K + 1 } } } \right ) \Big | _ { x = \nu } ( x _ { i _ { 1 } } - a _ { i _ { 1 } } ) ( x _ { i _ { 2 } } - a _ { i _ { 2 } } ) \dots ( x _ { i _ { K + 1 } } - a _ { i _ { K + 1 } } ) \ ,
+$$
+
+with ν = cx + (1 - c)a for some c ∈ [0, 1].
+
+## 2. Variance decomposition of a multivariable function
+
+Here we show how the variance of a multivariate function can be decomposed into a sum of expected values and variances for different variables.
+
+Proposition 1. Consider a multi-variable function f(θ) = f(θ1, . . . , θM) depending on M parameters such that f(θ) : RM → R. We assume that each parameter is i.i.d sampled from some distribution D i.e., θ ∼ D⊗M . Then we can express the variance of f(θ) as
+
+$$
+V a r _ { \theta \sim \mathcal { D } ^ { \otimes M } } \left [ f ( \theta ) \right ] = \sum _ { k = 1 } ^ { M } \mathbb { E } _ { \theta _ { k + 1 } } [ V a r _ { \theta _ { k } } [ \mathbb { E } _ { \underline { k } _ { 1 } } [ f ( \theta ) ] ] ] \, ,
+$$
+
+and therefore we can lower bound the variance as
+
+$$
+V a _ { \theta \sim \mathcal { D } ^ { \otimes M } } \left [ f ( \theta ) \right ] \geqslant V a _ { \theta _ { M } } \left [ \mathbb { E } _ { \theta _ { \overline { M } } } [ f ( \theta ) ] \right ] ,
+$$
+
+where θk = (θ1, .., θk) and θk = (θk+1, . . . , θM).
+
+Proof. The proof can be obtained by recursion over the number of independent parameters M. Precisely, let us introduce the function fk defined recursively as follows
+
+$$
+f _ { \overline { 0 } } ( \theta ) = f ( \theta )
+$$
+
+$$
+f _ { \overline { k } } ( \theta ) = \mathbb { E } _ { \theta _ { k } } [ f _ { \overline { k - 1 } } ( \theta ) ] = \mathbb { E } _ { \theta _ { \underline { k } } } [ f ( \theta ) ]
+$$
+
+Here, one can see that the function fk only depends on the parameters θk . Moreover, we can show that ∀ 0 ⩽ k ⩽m
+
+$$
+V a r _ { \theta _ { \overline { k } } } [ f _ { \overline { k } } ( \theta _ { \overline { k } } ) ] = \mathbb { E } _ { \theta _ { \overline { k } } } [ f _ { \overline { k } } ^ { 2 } ( \theta _ { \overline { k } } ) ] - \mathbb { E } _ { \theta _ { \overline { k } } } [ f _ { \overline { k } } ( \theta _ { \overline { k } } ) ] ^ { 2 }
+$$
+
+$$
+= \mathbb { E } _ { \theta _ { \overline { k + 1 } } } [ \mathbb { E } _ { \theta _ { k + 1 } } [ f _ { \overline { k } } ^ { 2 } ( \theta _ { \overline { k } } ) ] ] - \mathbb { E } _ { \theta _ { \overline { k + 1 } } } [ \mathbb { E } _ { \theta _ { k + 1 } } [ f _ { \overline { k } } ( \theta _ { \overline { k } } ) ] ] ^ { 2 }
+$$
+
+$$
+= \mathbb { E } _ { \theta _ { k + 1 } } [ \mathbb { E } _ { k _ { k + 1 } } [ f _ { \overline { k } } ^ { 2 } ( \theta _ { \overline { k } } ) ] ] - \mathbb { E } _ { \theta _ { \overline { k + 1 } } } [ \mathbb { E } _ { k _ { k + 1 } } [ f _ { \overline { k } } ( \theta _ { \overline { k } } ) ] ^ { 2 } ] \\ + \mathbb { R } _ { \Theta } \quad [ \mathbb { F } _ { \Theta _ { k } } [ \ f { ( \theta _ { k } ) } ^ { 2 } ] ^ { 2 } ] = \mathbb { F } _ { \Theta } \quad [ \mathbb { F } _ { \Theta _ { k } } [ \ f { ( \theta _ { k } ) } ^ { - } ] ] ^ { 2 }
+$$
+
+$$
++ \, \mathbb { E } _ { \theta _ { \overline { k + 1 } } } [ \mathbb { E } _ { \theta _ { k + 1 } } [ f _ { \overline { k } } ( \theta _ { \overline { k } } ) ] ^ { 2 } ] - \mathbb { E } _ { \theta _ { \overline { k + 1 } } } [ \mathbb { E } _ { \theta _ { k + 1 } } [ f _ { \overline { k } } ( \theta _ { \overline { k } } ) ] ] ^ { 2 }
+$$
+
+$$
+= \mathbb { E } _ { \theta _ { \overline { k + 1 } } } [ V a _ { \theta _ { k + 1 } } [ f _ { \overline { k } } ( \theta _ { \overline { k } } ) ] ] + V a _ { \theta _ { \overline { k + 1 } } } [ \mathbb { E } _ { \theta _ { k + 1 } } [ f _ { \overline { k } } ( \theta _ { \overline { k } } ) ] ]
+$$
+
+$$
+= \mathbb { E } _ { \theta _ { k + 1 } } [ V a _ { \theta _ { k + 1 } } [ f _ { \overline { k } } ( \theta _ { \overline { k } } ) ] ] + V a _ { \theta _ { \overline { k + 1 } } } [ f _ { \overline { k + 1 } } ( \theta _ { \overline { k + 1 } } ) ]
+$$
+
+Hence, we have that
+
+$$
+V a r [ f ( \theta ) ] = V a r _ { \theta _ { \overline { 0 } } } [ f _ { \overline { 0 } } ( \theta _ { \overline { 0 } } ) ] = \mathbb { E } _ { \theta _ { \overline { 1 } } } [ V a r _ { \theta _ { 1 } } [ f _ { \overline { 0 } } ( \theta _ { \overline { 0 } } ) ] ] + V a r _ { \theta _ { \overline { \tau } } } [ f _ { \overline { 1 } } ( \theta _ { \overline { 1 } } ) ]
+$$
+
+$$
+= \mathbb { E } _ { \theta _ { \overline { 1 } } } [ V a r _ { \theta _ { 1 } } [ f _ { \overline { 0 } } ( \theta _ { \overline { 0 } } ) ] ] + \mathbb { E } _ { \theta _ { \overline { 2 } } } [ V a r _ { \theta _ { 2 } } [ f _ { \overline { 2 } } ( \theta _ { \overline { 2 } } ) ] ] + V a r _ { \theta _ { \overline { 2 } } } [ f _ { \overline { 2 } } ( \theta _ { \overline { 2 } } ) ]
+$$
+
+$$
+= \sum _ { k = 0 } ^ { m - 1 } \mathbb { E } _ { \theta _ { k + 1 } } [ V a r _ { \theta _ { k + 1 } } [ f _ { \overline { k } } ( \theta _ { \overline { k } } ) ] ] \\
+$$
+
+$$
+= \sum _ { k = 1 } ^ { m } \mathbb { E } _ { \sigma _ { \overline { k } } } [ V a _ { \theta _ { k } } \, _ { 1 } [ \mathbb { E } _ { \underline { \theta _ { k } } } [ f ( \theta ) ] ] ] \\
+$$
+
+Furthermore, because the variance of a function is always positive, every term in the previous sum in Eq. (A15) is larger or equal to zero. Thus, we can use that the sum of positive terms is lower bounded by one of the terms in the sum to find the following lowerbound
+
+$$
+V a r [ f ( \theta ) ] \geqslant V a r _ { \theta _ { 1 } } [ \mathbb { E } _ { \theta _ { \overline { 1 } } } [ f ( \theta ) ] ]
+$$
+
+which concludes the proof. Additionally, any permutation of the parameters allows to find the same relationship for any individual 0 ⩽ k ⩽ M.
+
+## Appendix B: Lower bound on the variance of the VQE loss function
+
+In this section, we analyze the variational problem in the absence of explicit data encoding within the quantum circuit. That is, the parameters xj appears only in the Hamiltonian, while the circuit parameters θ are optimized independently for each value of xj. We show that if the parameters θ∗ prepare the ground state of H(xj-1) with precision ϵ, and the step ∆xj = xj -xj-1 is sufficiently small, then the variance remains non-vanishing, ensuring that we could estimate the gradients that lead to a solution θ for H(xj).
+
+This analysis constitutes the first step toward generalizing the result to the case where the loss function is a sum of N terms evaluated with a parameterized quantum circuit that includes explicit encodings xj. The result is given in the following theorem:
+
+Theorem 3. Let the loss function associated with the j-th Hamiltonian be
+
+$$
+\mathcal { L } _ { j } ( \theta ) = \langle \psi | U ^ { \dagger } ( \theta ) H ( x _ { j } ) U ( \theta ) | \psi \rangle \, .
+$$
+
+Assume that the parameters θ∗ generate a state U(θ∗ )|ψ⟩ whose fidelity with the ground state |gsj-1⟩ of H(xj-1) satisfies
+
+$$
+| \langle g s _ { j - 1 } | U ( \theta ^ { * } ) | \psi \rangle | ^ { 2 } = 1 - \epsilon ^ { 2 } ,
+$$
+
+i.e., the prepared state is ϵ-close to the true ground state in the Hilbert-space 2-norm, in particular we consider ϵ ⩽ 1/√2. Assume moreover that the first circuit generator P1 acts non-trivially on the input state, in the sense that | ⟨ψ|P1|ψ⟩ |2 = 0. Suppose further that the Hamiltonians at consecutive steps is given by
+
+$$
+H ( x _ { j } ) = H ( x _ { j - 1 } ) + \Delta x _ { j } \, H _ { 1 } ,
+$$
+
+where H1 is a fixed Hermitian operator, and that the step size obeys
+
+$$
+| \Delta x _ { j } | \leqslant \widetilde { \gamma } \, \frac { ( 1 - 2 \epsilon ^ { 2 } ) \, | \Delta _ { g a p } | } { \| H _ { 1 } \| _ { s } } ,
+$$
+
+with ˜ γ ∈ (0, 1), and |∆gap| being the absolute value of the gap of H(xj). Then, for a uniform distribution D(θ∗ , r) centered at θ∗ within a hypercube of side 2r, the variance of Lj(θ) satisfies
+
+$$
+V a r _ { \theta \sim \mathcal { D } ^ { ( \theta * , r ) } } [ \mathcal { L } _ { j } ( \theta ) ] \geqslant \left ( 1 - \frac { 4 r ^ { 2 } } { 7 } \right ) \frac { 4 r ^ { 4 } } { 4 5 } \left ( ( 1 - \gamma ) ( 1 - \widetilde { \gamma } ) ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p } | \right ) ^ { 2 } ,
+$$
+
+given that
+
+$$
+r ^ { 2 } < \gamma \frac { 3 } { ( M - 1 ) } \, \frac { ( 1 - 2 \epsilon ^ { 2 } ) ( 1 - \widetilde { \gamma } ) | \Delta _ { g a p } | } { \| H ( x _ { j } ) \| _ { s } + ( 1 - 2 \epsilon ^ { 2 } ) ( 1 - \widetilde { \gamma } ) | \Delta _ { g a p } | } ,
+$$
+
+Here γ, ˜ γ ∈ (0, 1) are constants, ϵ quantifies the infidelity with the previous ground state, |∆gap| denotes the spectral gap of H(xj), ∥ · ∥s is the spectral semi-norm, and M is the number of trainable parameters in the circuit.
+
+Consequently, if r ∈ Θ(poly(n)), then Varα∼D(0,r)[Lj(α)] ∈ Ω(poly(n)).
+
+Proof. First we recall that the loss function is defined as
+
+$$
+\mathcal { L } _ { j } ( \theta ) = \langle \psi | U ^ { \dagger } ( \theta ) H ( x _ { j } ) U ( \theta ) | \psi \rangle \, ,
+$$
+
+where |ψ⟩ represents the initial state, H(xj) a parametrized observable and U(θ) a parametrized quantum circuit. Finally, xj is a parameter of the Hamiltonian.
+
+The unitary matrices are defined as
+
+or in other words we are interested in
+
+$$
+V a r _ { \theta \sim \mathcal { D } ( \theta ^ { * } , r ) } [ \mathcal { L } _ { j } ( \theta ) ] = V a r _ { \alpha \sim \mathcal { D } ( 0 , r ) } [ \mathcal { L } _ { j } ( \theta = \theta ^ { * } + \alpha ) ] \, .
+$$
+
+$$
+U ( \theta ) = \prod _ { i = 1 } ^ { M } U _ { i } ( \theta _ { i } ) V _ { i } \, ,
+$$
+
+where θ is a vector with the variational parameters θ = (θ1, θ2, ..., θM) and each unitary gate takes the form of Uk(θk) = e-iθkPk , where Pk is a Pauli string, and Vk are arbitrary non-parameterized unitary transformations.
+
+The loss function LN(θ) is trained for a new xN. Note that at each training iteration we change the loss function. Indeed, we have a different loss function for every x1, ...xN, however, as we will see, we need the different Hamiltonians to be sufficiently close to each other. We assume training as an iterative method. In each new iteration, we will initialize the parameters around the optimal solution of the previous iteration θ∗ j-1 . Crucially, the parametrized gates can be re-expressed as perturbations α around the previous optimal solution, i.e. θi = θ∗ i +αi as shown below
+
+$$
+U ( \theta ) = & \prod _ { i = 1 } ^ { M } V _ { i } U _ { i } ( \theta _ { i } )
+$$
+
+$$
+= & \prod _ { i = 1 } ^ { M } V _ { i } U _ { i } ( \theta _ { i } ^ { * } ) U _ { i } ( \alpha _ { i } ) \\
+$$
+
+$$
+= \prod _ { i = 1 } ^ { M } \widetilde { V } _ { i } ( \theta _ { i } ^ { * } ) U _ { i } ( \alpha _ { i } ) \, ,
+$$
+
+$$
+( B 9 ) \\ ( B 1 0 )
+$$
+
+where we used that e-i(a+b)P = e-iaP e-ibP in the first equality to separate the parametrized unitary into two. In the final equality we absorbed the θ∗ -dependent Ui into Vi, i.e. Ṽi(θ∗ i ) = ViUi(θ∗ i ). To ease the notation, we will denote Ṽi(θ∗ i ) as just Ṽi.
+
+We consider a region of parameters around the previous solution of the form
+
+$$
+\mathcal { V } ( \theta ^ { * } , r ) = \{ \theta = \theta ^ { * } + \alpha \, | \, \alpha \in [ - r , r ] ^ { M } \}
+$$
+
+where r is the characteristic length of the region.
+
+We are interested in the variance of the loss function in Eq. (B6) over the region V(θ∗ , r) such that the parameters are uniformly sampled
+
+$$
+\mathcal { D } ( \theta ^ { * } , r ) \coloneqq \text {Unif} [ \mathcal { V } ( \theta ^ { * } , r ) ] \, ,
+$$
+
+Using this, we now move to finding a general lower bound for the variance of the loss function.
+
+From now onward we are going to use α as the variables of interest instead of θ, as explained in the previous change of variable. Indeed, α allows us to assume, without loss of generality, that the hypercube of interest is centered at zero.
+
+As we are interested in independently sampled parameters from the same distribution, we can use Proposition 1 to immediately find a lower bound on Eq. (B13)
+
+$$
+V a r _ { \alpha \sim \mathcal { D } ( 0 , r ) } [ \mathcal { L } ( \alpha ) ] \geqslant V a r _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \mathbb { E } _ { \alpha _ { \mp } \sim \mathcal { D } ( 0 , r ) } [ \mathcal { L } ( \alpha ) ] ]
+$$
+
+where we denote αk-1 = (αk, ...αM), and similarly, 0 = (0, ..., 0) is the vector of M - 1 null components.
+
+We start by computing the expected values of Eq. (B14). Because the variables are independent, we can compute the different expected values one-by-one, starting with α2 to αM, that is
+
+$$
+\mathbb { E } _ { \alpha _ { \overline { 1 } } \sim \mathcal { D } ( 0 _ { \overline { 1 } } , r ) } [ \mathcal { L } ( \alpha ) ] = \mathbb { E } _ { \alpha _ { 2 } } [ \dots \mathbb { E } _ { \alpha _ { M } } [ \mathcal { L } ( \alpha ) ] \dots ] \, .
+$$
+
+To do this, we express each parametrized unitary Ui(αi) = e-iαiPi = cos(αi)✶ - i sin(αi)Pi.
+
+We start by evaluating the expectation value of the M-th variable, the first one that appears in Eq. (B15). Therefore,
+
+$$
+\text {we have} \\ \mathbb { E } _ { \alpha _ { M } } [ \mathcal { L } ( \alpha ) ] = \mathbb { E } _ { \alpha _ { M } } [ \langle \psi | U ^ { \dagger } ( \theta ) H ( x _ { j } ) U ( \theta ) | \psi \rangle ]
+$$
+
+$$
+= \langle \psi | \left ( \prod _ { i = 1 } ^ { M - 1 } \widetilde { V } _ { i } ( \theta _ { i } ^ { * } ) U _ { i } ( \alpha _ { i } ) \right ) ^ { \dagger } \underbrace { \mathbb { E } _ { \alpha _ { M } [ U _ { M } ^ { \dagger } ( \alpha _ { M } ) \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M } U _ { M } ( \alpha _ { M } ) ] } _ { i = 1 } \left ( \prod _ { i = 1 } ^ { M - 1 } \widetilde { V } _ { i } ( \theta _ { i } ^ { * } ) U _ { i } ( \alpha _ { i } ) \right ) | \psi \rangle \, ,
+$$
+
+where in the last equation have make explicit the gates that depend on αM and we have used linearity of expectation and of the inner product . Now, we focus only on the expectation value over the under-braced quantity.
+
+$$
+\mathbb { E } _ { \alpha _ { M } \sim \mathcal { D } ( 0 , r ) } [ U _ { M } ^ { \dagger } ( \alpha _ { M } ) \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M } U _ { M } ( \alpha _ { M } ) ] = \mathbb { E } _ { \alpha _ { M } \sim \mathcal { D } ( 0 , r ) } [ \cos ^ { 2 } ( \alpha _ { M } ) \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M }
+$$
+
+$$
++ \sin ^ { 2 } ( \alpha _ { M } ) P _ { M } \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M } P _ { M }
+$$
+
+$$
+- \, i \sin ( \alpha _ { M } ) \cos ( \alpha _ { M } ) [ P _ { M } , \widetilde { V } _ { M } ^ { \dagger } H \widetilde { V } _ { M } ] ]
+$$
+
+$$
+= & k _ { + } \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M } + k _ { - } P _ { M } \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M } P _ { M } .
+$$
+
+In the first equality we expanded the exponential into its trigonometric expansion. Then, in the last equation, we integrate explicitly, defining
+
+$$
+k _ { + } \colon = & \frac { 1 } { 2 r } \int _ { - r } ^ { r } d \alpha _ { i } \cos ^ { 2 } ( \alpha _ { i } ) = \frac { 1 } { 2 } ( 1 + \sin ( 2 r ) ) \\
+$$
+
+$$
+k _ { - } \colon = & \frac { 1 } { 2 r } \int _ { - r } ^ { r } d \alpha _ { i } \sin ^ { 2 } ( \alpha _ { i } ) = \frac { 1 } { 2 } ( 1 - \sin c ( 2 r ) ) .
+$$
+
+We also used the fact that the integral with an odd number of powers of sin over a symmetric space vanishes.
+
+Because all the variables αi are independent and follow the same distribution, we iteratively repeat the calculation in Eq. (B21) for all the subsequent parameters in a telescopic fashion. The only thing that changes is the central objects in Eq. (B21), as we characterize now. Let us denote the object in Eq. (B21) as H′ := k+ ṼMH(xj ) Ṽ †M + k-PM Ṽ †M H(xj ) ṼMPM. Now, integrating over the second variable αM-1 we have:
+
+$$
+\mathbb { E } _ { \alpha _ { M } } \, _ { 1 \sim \mathcal { D } ( 0 , r ) } \left [ \left ( \prod _ { s = 1 } ^ { M - 1 } \widetilde { V } _ { s } U _ { s } ( \theta _ { s } ) \right ) ^ { \dagger } H ^ { \prime } ( x _ { j } ) \left ( \prod _ { s = 1 } ^ { M - 1 } \widetilde { V } _ { s } U _ { s } ( \theta _ { s } ) \right ) \right ]
+$$
+
+$$
+= \mathbb { E } _ { \alpha _ { M } \ \uparrow \mathcal { D } ( 0 , r ) } \left [ \left ( \prod _ { s = 1 } ^ { M - 2 } \tilde { V } _ { s } U _ { s } ( \theta _ { s } ) \right ) ^ { \dagger } U _ { M - 1 } ^ { \dagger } ( \alpha _ { M - 1 } ) \tilde { V } _ { M - 1 } ^ { \dagger } H ^ { \prime } ( x _ { j } ) \tilde { V } _ { M - 1 } U _ { M - 1 } ( \alpha _ { M - 1 } ) \left ( \prod _ { s = 1 } ^ { M - 2 } \tilde { V } _ { s } U _ { s } ( \theta _ { s } ) \right ) \right ]
+$$
+
+$$
+= \left [ \left ( \prod _ { s = 1 } ^ { M - 2 } \widetilde { V } _ { s } U _ { s } ( \theta _ { s } ) \right ) ^ { \dagger } H ^ { ^ { \prime \prime } } ( x _ { j } ) \left ( \prod _ { s = 1 } ^ { M - 2 } \widetilde { V } _ { s } U _ { s } ( \theta _ { s } ) \right ) \right ]
+$$
+
+where we denoted
+
+$$
+H ^ { \prime \prime } ( x _ { j } ) = & k _ { + } ^ { 2 } \widetilde { V } _ { M - 1 } ^ { \dagger } \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M } \widetilde { V } _ { M - 1 } + k _ { + } k _ { - } P _ { M - 1 } \widetilde { V } _ { M - 1 } ^ { \dagger } \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M } \widetilde { V } _ { M - 1 } P _ { M - 1 } \\ & + k _ { - } k _ { + } \widetilde { V } _ { M - 1 } ^ { \dagger } P _ { M } \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M } P _ { M } \widetilde { V } _ { M - 1 } + k _ { - } ^ { 2 } P _ { M - 1 } \widetilde { V } _ { M - 1 } ^ { \dagger } P _ { M } \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M } P _ { M } \widetilde { V } _ { M - 1 } P _ { M - 1 } .
+$$
+
+In Eq. (B26) we have used the same derivations as in Eq. (B21). We define the expression after integrating all the variables as
+
+$$
+H _ { \text {eff} } ( x _ { j } ) \coloneqq \mathbb { E } _ { \alpha _ { s } \sim \mathcal { D } ( 0 , r ) } \left [ \dots \mathbb { E } _ { \alpha _ { M } \ \ 2 \sim \mathcal { D } ( 0 , r ) } \left [ \left ( \prod _ { s = 1 } ^ { M - 2 } \widetilde { V } _ { s } U _ { s } ( \theta _ { s } ) \right ) ^ { \dagger } H ^ { ^ { \prime \prime } } ( x _ { j } ) \left ( \prod _ { s = 1 } ^ { M - 2 } \widetilde { V } _ { s } U _ { s } ( \theta _ { s } ) \right ) \right ] \cdots \right ] ,
+$$
+
+which takes the explicit form
+
+$$
+H _ { \text {eff} } ( x _ { j } ) = \widetilde { V } _ { 1 } ^ { \dagger } \sum _ { z } \bigcirc _ { l = 2 } ^ { M } k _ { z _ { l } } \mathcal { P } _ { z _ { l } } ^ { ( l ) } ( H ( x _ { j } ) ) \widetilde { V } _ { 1 }
+$$
+
+where zl ∈ {+,-}, ⃝ represents the composition operation (f ◦ g = f(g)), and the super-operator P (l) z (·) is defined as
+
+$$
+\mathcal { P } _ { z } ^ { ( l ) } ( \cdot ) = \begin{cases} \widetilde { V } _ { l } ^ { \dagger } ( \cdot ) \widetilde { V } _ { l } & \text {if } z \to + \\ P _ { l } \widetilde { V } _ { l } ^ { \dagger } ( \cdot ) \widetilde { V } _ { l } P _ { l } & \text {if } z \to - \end{cases}
+$$
+
+where it either applies the l-th non parametrized gates when the subscript z is assigned to a plus (+) or conjugates the operator with two Pauli strings Pl and then applies the non parametrized gates Vl when z is assigned to a minus (-).
+
+Because the expected value is linear with the sum (i.e. E[a+ b] = E[a] +E[b]), we can now use Eq. (B30) to compute the expected value of the loss function L(θ). Indeed, we can recover the explicit formula of the loss function in Eq. (B6), and use it to express the expected value in Eq. (B14)
+
+$$
+\mathbb { E } _ { \alpha _ { \widetilde { T } } \sim \mathcal { D } ( 0 _ { \widetilde { T } } , r ) } [ \mathcal { L } ( \theta ) ] = \langle \psi | U _ { 1 } ^ { \dagger } ( \alpha _ { 1 } ) \widetilde { V } _ { 1 } ^ { \dagger } H _ { \text {eff} } ( x _ { j } ) \widetilde { V } _ { 1 } U _ { 1 } ( \alpha _ { 1 } ) | \psi \rangle \, .
+$$
+
+Furthermore, we stress that the dependency on α1 is because we still need to compute the variance over it, which we address now. Using the previous equation, we are ready to compute the right hand side of Eq. (B14), a lower bound on the variance over the constrained landscape. To do it, we start by expanding the gate U1 again into its trigonometric form
+
+$$
+V a _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \mathbb { E } _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \mathcal { L } ( \alpha ) ] = V a _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } \left \lceil \langle \psi | \left ( \cos ^ { 2 } ( \theta _ { 1 } ) H _ { e f f } ( x _ { j } ) + \sin ^ { 2 } ( \theta _ { 1 } ) P _ { 1 } H _ { e f f } ( x _ { j } ) P _ { 1 } \right ) | \psi \rangle \right \rceil
+$$
+
+$$
++ \ V a r _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } \left [ \sin ( \theta _ { 1 } ) \cos ( \theta _ { 1 } ) \left \langle \psi | i [ P _ { M } , H ( x _ { j } ) ] | \psi \right \rangle \right ]
+$$
+
+$$
+\geqslant & \text {Var} _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } \left \lceil \langle \psi | \left ( \cos ^ { 2 } ( \theta _ { 1 } ) H _ { \text {eff} } ( x _ { j } ) + \sin ^ { 2 } ( \theta _ { 1 } ) P _ { 1 } H _ { \text {eff} } ( x _ { j } ) P _ { 1 } \right ) | \psi \rangle \right \rceil
+$$
+
+where we used that Ui(αi) = e-iαiPi = cos(αi)✶- i sin(αi)Pi. Furthermore, the term proportional to sin(θ1) cos(θ1) is orthogonal to the terms sin2 (θ1) and cos2 (θ1). Therefore, the covariance between the two is zero. Indeed, the integrals ∫ sin(θ1) cos3 (θ1) or ∫ sin3 (θ1) cos(θ1) over a symmetric space are zero, as it is an integral of an antisymmetric function times another symmetric function. Also, in the first inequality in Eq. (B35), we use the fact that the variance of a function is always positive. Therefore we can drop the variance in Eq. (B34), as it is positive.
+
+Now we rewrite the variance as a sum of variances and covariances
+
+$$
+V a r _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \langle \psi | \cos ^ { 2 } ( \theta _ { 1 } ) H _ { e f f } ( x _ { j } ) + \sin ^ { 2 } ( \theta _ { 1 } ) P _ { 1 } H _ { e f f } ( x _ { j } ) P _ { 1 } \, | \psi \rangle ]
+$$
+
+$$
+= V a r _ { \alpha _ { 1 } \wedge \mathcal { D } ( 0 , r ) } [ \cos ^ { 2 } ( \theta _ { 1 } ) ] | \, \langle \psi | H _ { e f f } ( x _ { j } ) | \psi \rangle \, | ^ { 2 }
+$$
+
+$$
++ \ V a r _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \sin ^ { 2 } ( \theta _ { 1 } ) ] | \, \langle \psi | P _ { 1 } H _ { e f f } ( x _ { j } ) P _ { 1 } | \psi \rangle \, | ^ { 2 }
+$$
+
+$$
++ \, 2 \, C o v _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \sin ^ { 2 } ( \theta _ { 1 } ) , \cos ^ { 2 } ( \theta _ { 1 } ) ] \, \langle \psi | P _ { 1 } H _ { e f f } ( x _ { j } ) P _ { 1 } | \psi \rangle \, \langle \psi | H _ { e f f } ( x _ { j } ) | \psi \rangle
+$$
+
+$$
+( B 3 9 )
+$$
+
+$$
+= & h ( r ) \left ( \langle \psi | H _ { e f f } ( x _ { j } ) | \psi \rangle - \langle \psi | P _ { 1 } H _ { e f f } ( x _ { j } ) P _ { 1 } | \psi \rangle \right ) ^ { 2 }
+$$
+
+where in the first equality we decomposed the variance of a sum into its covariances, i.e. Var[φ1+φ2] = Var[φ1]+Var[φ2]+ 2Cov[φ1, φ2]. The covariance in defined as Covα∼D[φ1(α)φ2(α)] = Eα∼D[φ1(α)φ2(α)] -Eα∼D[φ1(α)] Eα∼D[φ2(α)]. In the second equality we have introduced the function h(r), given by
+
+$$
+h ( r ) = \frac { \cos ( 4 r ) - 1 } { 3 2 r ^ { 2 } } + \frac { 1 + \sin c ( 4 r ) } { 8 } ,
+$$
+
+which conveniently corresponds to the three terms in Eq. (B39), that is
+
+$$
+h ( r ) = V a r _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \sin ^ { 2 } ( \theta _ { 1 } ) ] = V a r _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \cos ^ { 2 } ( \theta _ { 1 } ) ] = - C o v _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \cos ^ { 2 } ( \theta _ { 1 } ) , \sin ^ { 2 } ( \theta _ { 1 } ) ] .
+$$
+
+By recovering Eq. (B14), and using the lower bound derived in Eq. (B35) and the result of this term in Eq. (B40), we can finally derive a lower bound to the variance of the loss function that reads as follows
+
+$$
+V a r _ { \alpha \sim \mathcal { D } ( 0 , r ) } [ \mathcal { L } ( \alpha ) ] \geqslant h ( r ) ( \langle \psi | ( H _ { e f f } ( x _ { j } ) - P _ { 1 } H _ { e f f } ( x _ { j } ) P _ { 1 } ) | \psi \rangle ) ^ { 2 }
+$$
+
+Now we need to find a lower bound to the squared expectation value. To do so, we first show that the expecation value is negative, and thus we will find an upper bound of it (a lower bound on the term squared). To do so, we can check Eq. (B30) to see the first term of Heff(xj). By inspecting the equation, we see that Heff(xj) is a convex combination of rotated Hamiltonians, as the parameters k+ + k- = 1, and the difference in the Hamiltonian depends only on unitary matrices. Indeed
+
+$$
+k _ { + } H _ { 1 } + k _ { - } H _ { 2 }
+$$
+
+is a convex combination of H1,H2. In the case of Eq. (B30), we see that each of the terms in the sum is the original H(xj), but to which we apply a series of unitary transformations in the form of non-parametrized gates Ṽi and Pauli strings Pl.
+
+Furthermore, K+ := kM-1 + is clearly the dominant term out of all of the other (for small enough values of r). Indeed, by Eq. (B22), we can use a Taylor expansion, which leads us to k+ ∼ 1 - r2 3 +O(r4 ), k- ∼ r2 3 +O(r4 ). Therefore, for small values of r we expect the term proportional to K+ to be dominant. In what follows we formalize this argument and find strict bounds on the value of r, such that the term ⟨ψ|Ṽ1 (Heff(xj) - P1Heff(xj)P1) Ṽ † 1 |ψ⟩ is always negative. We start by rewriting this term as a sum of the terms depending on K+:
+
+$$
+\langle \psi | ( H _ { e f f } ( x _ { j } ) - P _ { 1 } H _ { e f f } ( x _ { j } ) P _ { 1 } ) | \psi \rangle = & K _ { + } \left \langle \psi | U ( \theta ^ { * } ) H ( x _ { j } ) U ^ { \dagger } ( \theta ^ { * } ) | \psi \rangle
+$$
+
+$$
+- \, K _ { + } \, \langle \psi | P _ { 1 } U ( \theta ^ { * } ) H ( x _ { j } ) U ^ { \dagger } ( \theta ^ { * } ) P _ { 1 } | \psi \rangle
+$$
+
+$$
++ \, \langle \psi | \widetilde { V } _ { 1 } ^ { \dagger } \sum _ { z \neq \{ + \} ^ { \otimes M } } \bigcup _ { l = 2 } ^ { M } k _ { z _ { l } } \mathcal { P } _ { z _ { l } } ^ { ( l ) } ( H ( x _ { j } ) ) \widetilde { V } _ { 1 } | \psi \rangle
+$$
+
+$$
+- \, \langle \psi | P _ { 1 } \widetilde { V } _ { 1 } ^ { \dagger } \sum _ { z \neq \{ + \} ^ { \otimes M } } \bigcup _ { l = 2 } ^ { M } k _ { z _ { l } } \mathcal { P } _ { z _ { l } } ^ { ( l ) } ( H ( x _ { j } ) ) \widetilde { V } _ { 1 } P _ { 1 } | \psi \rangle
+$$
+
+$$
+= & K _ { + } \left \langle \psi \right | \left [ U ( \theta ^ { * } ) H U ^ { \dagger } ( \theta ^ { * } ) - P _ { 1 } U ( \theta ^ { * } ) H ( x _ { j } ) U ^ { \dagger } ( \theta ^ { * } ) P _ { 1 } \right ] | \psi \rangle + \xi .
+$$
+
+In the first equality we use the definition of Heff introduced in Eq. (B30), while in the second equality we introduce ξ, a quantity that contains all the other terms. As discussed, Heff(xj) can be understood as a convex combination of rotations of the Hamiltonian H(xj). Therefore, ξ is upper bounded by the norm of H(xj):
+
+$$
+| \xi | = \left | \sum _ { z \neq \{ + \} ^ { \otimes M } } \langle \psi | \widetilde { V } _ { 1 } ^ { \dagger } \bigcirc _ { l = 2 } ^ { M } k _ { z _ { l } } \mathcal { P } _ { z _ { l } } ^ { ( l ) } ( H ( x _ { j } ) ) \widetilde { V } _ { 1 } | \psi \rangle - \langle \psi | P _ { 1 } \widetilde { V } _ { 1 } ^ { \dagger } \bigcirc _ { l = 2 } ^ { M } k _ { z _ { l } } \mathcal { P } _ { z _ { l } } ^ { ( l ) } ( H ( x _ { j } ) ) \widetilde { V } _ { 1 } P _ { 1 } | \psi \rangle \right |
+$$
+
+$$
+\leqslant \sum _ { z \neq ( \cdot + ) ^ { \otimes M } } \prod _ { l = 2 } ^ { M } k _ { z _ { l } } \max _ { z ^ { \prime } \in \{ \cdot + , \cdot \} ^ { \otimes M } } \| \widetilde { V } _ { 1 } ^ { \dagger } \bigcirc _ { k = 2 } ^ { M } \mathcal { P } _ { z _ { k } ^ { \prime } } ^ { ( k ) } ( H ( x _ { j } ) ) \widetilde { V } _ { 1 } - P _ { 1 } \widetilde { V } _ { 1 } ^ { \dagger } \bigcirc _ { k = 2 } ^ { M } \mathcal { P } _ { z _ { k } } ^ { ( k ) } ( H ( x _ { j } ) ) \widetilde { V } _ { 1 } ^ { \dagger } P _ { 1 } \| _ { \infty }
+$$
+
+$$
+\leqslant & \| H ( x _ { j } ) \| _ { s } \sum _ { z \neq [ + \} ^ { \otimes M } } \prod _ { l = 2 } ^ { M } k _ { z _ { l } } = ( 1 - K _ { + } ) \| H ( x _ { j } ) \| _ { s } .
+$$
+
+In the first equality we use a triangle inequality to split the expected value of the sum into the sum of absolute values. Then, we apply Hölder's inequality to maximize the value over ψ that has 1-norm equal to one. In the last inequality, we use that the largest eigenvalue of the term inside the infinity norm can be at most the maximum difference between the eigenvalues of H(xj), λmax - λmin. This is because the two terms are just rotations of the original Hamiltonian H(xj). Note that we define the semi-norm ∥H∥s := λmax-λmin (see Ref. [5, 61]). Using this result, we can upper bound equation Eq. (B49):
+
+$$
+\langle \psi | ( H _ { \text {eff} } ( x _ { j } ) - P _ { 1 } H _ { \text {eff} } ( x _ { j } ) P _ { 1 } ) | \psi \rangle \\ & \leqslant K _ { + } \langle \psi | \left [ U ^ { \dagger } ( \theta ^ { * } ) H ( x _ { j } ) U ( \theta ^ { * } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } ) H ( x _ { j } ) U ( \theta ^ { * } ) P _ { 1 } \right ] | \psi \rangle + ( 1 - K _ { + } ) \| H ( x _ { j } ) \| _ { s . }
+$$
+
+Now, we focus on the remaining expected value in Eq. (B53) to show that this term is indeed negative. To do so, we recall that θ∗ is the set of parameters we converged to in the previous training iteration. Without loss of generality we can write U(θ∗ ) |ψ⟩ = √1 - ϵ2 ∣∣gsj-1 〉 +ϵ ∣∣gs⊥j-1 〉, where ∣∣gsj-1 〉 is the ground state of H(xj-1) and ∣∣gs⊥j-1 〉 is orthogonal to its ground state. We additionally assume that | ⟨ψ|P1|ψ⟩ |2 = 0, as it just means that the first generator of the circuit acts non-trivially on the initial input state. This also implies that |ψ⟩ , P1 |ψ⟩ are orthogonal, and therefore we can write U(θ∗ , xj)P1 |ψ⟩ = ϵ ∣∣gsj 〉 - √1- ϵ2 ∣∣gs⊥j 〉, where ∣∣gsj 〉 is the ground state of H(xj). Using this, we can readily simplify Eq. (B53) by rewriting H(xj) = H(xj-1) +∆xH1, where H1 is the additional term added to the Hamiltonian at each iteration:
+
+$$
+\langle \psi | \left [ U ^ { \dagger } ( \theta ^ { * } ) H ( x _ { j } ) U ( \theta ^ { * } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } ) H ( x _ { j } ) U ( \theta ^ { * } ) P _ { 1 } \right ] | \psi \rangle = \langle \psi | \left [ U ^ { \dagger } ( \theta ^ { * } ) H ( x _ { j - 1 } ) U ( \theta ^ { * } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } ) H ( x _ { j - 1 } ) U ( \theta ^ { * } ) P _ { 1 } \right ] | \psi \rangle
+$$
+
+$$
++ \, \Delta x \, \langle \psi | \, [ U ^ { \dagger } ( \theta ^ { * } ) H _ { 1 } U ( \theta ^ { * } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } ) H _ { 1 } U ( \theta ^ { * } ) P _ { 1 } ] \, | \psi \rangle \, \ ( B 5 5 )
+$$
+
+$$
+\leqslant & ( 1 - \epsilon ^ { 2 } ) \lambda _ { \min } + \epsilon ^ { 2 } ( \lambda _ { \min } - \Delta _ { g a p } ) - \epsilon ^ { 2 } \lambda _ { \min }
+$$
+
+$$
+- \left ( 1 - \epsilon ^ { 2 } \right ) ( \lambda _ { \min } - \Delta _ { g a p } ) + | \Delta x | \| H _ { 1 } \| _ { s }
+$$
+
+$$
+= & ( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { g a p } + | \Delta x | | H _ { 1 } | | _ { s } ,
+$$
+
+where in the inequality we used the explicit form of |ψ⟩ described above, with the gap defined as ∆gap = λmin - λ1, with λmin being the ground state energy and λ1 being the first excited state energy. In the final equality we see that for sufficiently small |∆x| this quantity is negative, given that ∆gap < 0, assuming a good enough training in ϵ for the previous iteration. In particular, we consider ϵ2 ⩽ 1/2. Indeed, if we choose
+
+$$
+| \Delta x | \leqslant \widetilde { \gamma } \frac { ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p } | } { \| H _ { 1 } \| _ { s } } ,
+$$
+
+where ˜ γ ∈ (0, 1) is a constant. Then, we can rewrite the upper bound in Eq. (B58) as
+
+$$
+\langle \psi | \left [ U ^ { \dagger } ( \theta ^ { * } ) H ( x _ { j } ) U ( \theta ^ { * } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } ) H ( x _ { j } ) U ( \theta ^ { * } ) P _ { 1 } \right ] | \psi \rangle \leqslant ( 1 - 2 \epsilon ^ { 2 } ) ( 1 - \widetilde { \gamma } ) \Delta _ { g a p }
+$$
+
+Finally, we can input this last equation in Eq. (B53) to obtain
+
+$$
+\langle \psi | ( H _ { \text {eff} } ( x _ { j } ) - P _ { 1 } H _ { \text {eff} } ( x _ { j } ) P _ { 1 } ) | \psi \rangle \leq & K _ { + } ( 1 - 2 \epsilon ^ { 2 } ) ( 1 - \widetilde { \gamma } ) \Delta _ { g a p } + ( 1 - K _ { + } ) \| H ( x _ { j } ) \| _ { s } .
+$$
+
+Imposing the negativity of this expression, we can derive the following bound on K+
+
+$$
+K _ { + } ^ { ( j ) } > \frac { \| H ( x _ { j } ) \| _ { s } } { \| H ( x _ { j } ) \| _ { s } - ( 1 - 2 \epsilon ^ { 2 } ) ( 1 - \widetilde { \gamma } ) \Delta _ { \text {gap} } } .
+$$
+
+Finding a condition for r such that the previous condition on K+ is fulfilled is not trivial. However, we can leverage the Taylor Reminder Theorem 2 to derive it. We start with the definition of K+(r), where we make the dependence on r explicit:
+
+$$
+K _ { + } ( r ) = \prod _ { l = 2 } ^ { M } k _ { + } ( r ) & & ( B 6 3 )
+$$
+
+$$
+\geq & \prod _ { l = 2 } ^ { M } \left ( 1 - \frac { r ^ { 2 } } { 3 } \right ) \\
+$$
+
+$$
+\geqslant _ { l \in \{ 2 , \dots , M \} } \left ( 1 - \frac { r ^ { 2 } } { 3 } \right ) ^ { M - 1 }
+$$
+
+$$
+\geqslant & 1 - \frac { r ^ { 2 } ( M - 1 ) } { 3 } .
+$$
+
+In the first inequality we used the Taylor Reminder Theorem in the function k+(r) defined in Eq (B22). In the second equality we used that the product of M -1 terms is minimized by taking the M -1 power of the smallest one. Finally, we use the Bernoulli's identity; (1-x)k ⩾ 1-xk if x ⩾ 0.
+
+We can now input this condition in Eq. (B62) to find a sufficient condition for it being negative:
+
+$$
+K _ { + } \geqslant 1 - \frac { r ^ { 2 } ( M - 1 ) } { 3 } > \frac { \| H ( x _ { j } ) \| _ { s } } { \| H ( x _ { j } ) \| _ { s } - ( 1 - 2 \epsilon ^ { 2 } ) ( 1 - \widetilde { \gamma } ) \Delta _ { g a p } } ,
+$$
+
+where the first inequality is due to the previous derivation in Eq. (B66), and we impose the second inequality such that the condition in Eq. (B62) is fulfilled. Using this, we obtain the following condition in r
+
+$$
+1 - \frac { r ^ { 2 } ( M - 1 ) } { 3 } > \frac { \| H ( x _ { j } ) \| _ { s } } { \| H ( x _ { j } ) \| _ { s } - ( 1 - 2 \epsilon ^ { 2 } ) ( 1 - \widetilde { \gamma } ) \Delta _ { g a p } } \Rightarrow r ^ { 2 } < \gamma \frac { 3 } { ( M - 1 ) } \frac { ( 1 - 2 \epsilon ^ { 2 } ) ( 1 - \widetilde { \gamma } ) | \Delta _ { g a p } | } { \| H ( x _ { j } ) \| _ { s } + ( 1 - 2 \epsilon ^ { 2 } ) ( 1 - \widetilde { \gamma } ) | \Delta _ { g a p } | } ,
+$$
+
+where γ ∈ (0, 1) is a constant. Now we can recover Eq. (B43), and assuming that r fulfills the condition in Eq. (B68), we can further lower bound the variance as
+
+$$
+V a r _ { \alpha \sim \mathcal { D } ( 0 , r ) } [ \mathcal { L } _ { j } ( \alpha ) ] \geqslant & h ( r ) ( \, \langle \psi | ( H _ { e f f } ( x _ { j } ) - P _ { 1 } H _ { e f f } ( x _ { j } ) P _ { 1 } ) | \psi \rangle ) ^ { 2 } \\
+$$
+
+$$
+\geqslant & h ( r ) \left ( ( 1 - \gamma ) ( 1 - \widetilde { \gamma } ) ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g _ { 3 } \text {ap} } | \right ) ^ { 2 } .
+$$
+
+To finally give an intuitive expression, we lower bound the function h(r) defined in Eq (B41). We do so by leveraging the Taylor Reminder Theorem 2 once again. Particularly, we expand the function to the 6th order around r = 0, and then show that this is always a lower bound. We use that the first to third derivatives, as well as the fifth derivative, are equal to zero, around r = 0. Thus, we can express the function as
+
+$$
+h ( r ) = & \frac { 1 } { 4 ! } \partial _ { r ^ { \prime } } ^ { 4 } h ( r ^ { \prime } ) \Big | _ { r ^ { \prime } = 0 } r ^ { 4 } + \frac { 1 } { 6 ! } \partial _ { r ^ { \prime } } ^ { 6 } h ( r ^ { \prime } ) \Big | _ { r ^ { \prime } = 0 } r ^ { 6 } + \mathcal { O } ( r ^ { 8 } ) \\
+$$
+
+$$
+= & \frac { 4 r ^ { 4 } } { 4 5 } - \frac { 1 6 r ^ { 6 } } { 3 1 5 } + \mathcal { O } ( r ^ { 8 } ) .
+$$
+
+To show that the terms we wrote explicitly in Eq. (B72) are indeed a lower bound of the function h(r) we recall the form of h(r) in Eq. (B41). Then, we can find the Taylor Expansions of the trigonometric functions and use this to find the Taylor expansion of h(r). The expansions of the aforementioned functions are
+
+$$
+\sin c ( 4 r ) = \sum _ { n = 0 } ( - 1 ) ^ { n } \frac { ( 4 r ) ^ { 2 n } } { ( 2 n + 1 ) ! }
+$$
+
+$$
+\cos ( 4 r ) = \sum _ { n = 0 } ^ { n } ( - 1 ) ^ { n } \frac { ( 4 r ) ^ { 2 n } } { ( 2 n ) ! } .
+$$
+
+The upper limit in the sum is ∞ for all the subsequent sums. Inserting these expansions into h(r), we find
+
+$$
+h ( r ) = & \frac { 1 } { 2 } \sum _ { n = 1 } ( - 1 ) ^ { n } \frac { ( 4 r ) ^ { 2 n - 1 } } { ( 2 n + 1 ) ! } + \frac { 1 } { 8 } + \frac { 1 } { 8 } \sum _ { n = 0 } ( - 1 ) ^ { n } \frac { ( 4 r ) ^ { 2 n } } { ( 2 n ) ! }
+$$
+
+$$
+= & \frac { 1 } { 8 } \sum _ { n = 2 } ( - 1 ) ^ { n } \frac { n - 1 } { n + 1 } \frac { ( 4 r ) ^ { 2 n } } { ( 2 n + 1 ) ! }
+$$
+
+where, as expected, in the second inequality we use that the powers of r up to the third (n < 2) cancel out. Furthermore, we compacted the sums into one.
+
+Note that this sum is absolutely convergent. Indeed, we can take the absolute value of all the elements:
+
+$$
+\sum _ { n = 2 } \left | \frac { n - 1 } { n + 1 } \right | \frac { ( 4 r ) ^ { 2 n } } { ( 2 n + 1 ) ! } \leqslant \frac { 1 } { 4 r } \sum _ { n = 0 } \frac { ( 4 r ) ^ { 2 n + 1 } } { ( 2 n + 1 ) ! } = \frac { \sinh ( 4 r ) } { 4 r }
+$$
+
+where in the first inequality we used that |(n - 1)/(n + 1)| < 1 for n > 0 and in the last equality we used that the hyperbolic sine sinh(x) is has a Taylor expansion of that form.
+
+Because the sum in Eq. (B76) is absolutely convergent, we can rearrange the terms of the sum. Indeed, absolute convergent series can be rearranged and not only will they still converge, but they will converge to the same limit (see Remark 10.13 in Ref. [65]). Thus, we rearrange Eq. (B76) by pairing the elements (n, n+1), (n+2, n+3)...
+
+$$
+h ( r ) = & \frac { 1 } { 8 } \sum _ { n = 2 } ( - 1 ) ^ { n } \frac { n - 1 } { n + 1 } \frac { ( 4 r ) ^ { 2 n } } { ( 2 n + 1 ) ! } \\
+$$
+
+$$
+= & \frac { 1 } { 8 } \sum _ { n = 1 } ^ { 2 } \frac { ( 4 r ) ^ { 4 n } } { ( 4 n + 1 ) ! } \left ( \frac { 2 n - 1 } { 2 n + 1 } - \frac { 2 n } { 2 n + 2 } \frac { ( 4 r ) ^ { 2 } } { ( 4 n + 2 ) ( 4 n + 3 ) } \right ) .
+$$
+
+In the second inequality we paired one positive term n with the next n+1 and redefined n → 2n in order to avoid double counting due to this rearrangement. Now it is easy to show that for r < 1, n ⩾ 1 all this terms are always positive. Indeed we can rewrite the term as
+
+$$
+\frac { 2 n - 1 } { 2 n + 1 } - \frac { n } { n + 1 } \, \frac { 1 6 } { ( 4 n + 2 ) ( 4 n + 3 ) }
+$$
+
+$$
+\begin{cases} \frac { n } { n + 1 } \frac { 1 6 } { ( 4 n + 2 ) ( 4 n + 3 ) } & \leqslant \frac { n } { n + 1 } \frac { 8 } { 2 1 } \\ \frac { n } { n + 1 } \frac { 8 } { 2 1 } & \leqslant \frac { 2 n - 1 } { 2 n + 1 } \end{cases}
+$$
+
+then it suffices to see that
+
+to be able to write the following inequality
+
+$$
+\frac { 2 n - 1 } { 2 n + 1 } \geqslant \frac { n } { n + 1 } \frac { 8 } { 2 1 } \geqslant \frac { n } { n + 1 } \frac { 1 6 } { ( 4 n + 2 ) ( 4 n + 3 ) } .
+$$
+
+Finally, we can lower bound the whole sum by one of the elements. We do this for n = 1 and obtain
+
+$$
+h ( r ) \geqslant \frac { 1 } { 8 } \frac { ( 4 r ) ^ { 4 } } { ( 4 + 1 ) ! } \left ( \frac { 2 - 1 } { 2 + 1 } - \frac { 2 } { 2 + 2 } \frac { ( 4 r ) ^ { 2 } } { ( 4 + 2 ) ( 4 + 3 ) } \right )
+$$
+
+$$
+= & \frac { 1 } { 8 } \frac { ( 4 r ) ^ { 4 } } { 1 2 0 } \left ( \frac { 2 - 1 } { 2 + 1 } - \frac { 2 } { 2 + 2 } \frac { ( 4 r ) ^ { 2 } } { ( 4 + 2 ) ( 4 + 3 ) } \right )
+$$
+
+$$
+= \left ( 1 - \frac { 4 r ^ { 2 } } { 7 } \right ) \frac { 4 r ^ { 4 } } { 4 5 } .
+$$
+
+Therefore, we can recover Eq. (B70) and input the result obtained in Eq. (B72) to find that
+
+$$
+V a r _ { \alpha \sim \mathcal { D } ( 0 , r ) } [ \zeta _ { j } ( \alpha ) ] \geqslant \left ( 1 - \frac { 4 r ^ { 2 } } { 7 } \right ) \frac { 4 r ^ { 4 } } { 4 5 } \left ( ( 1 - \gamma ) ( 1 - \widetilde { \gamma } ) ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p } | \right ) ^ { 2 } ,
+$$
+
+where r should fulfill the constraint in Eq. (B68). Because r ∈ Θ(poly(n)), then Varα∼D(0,r)[L(α)] ∈ Ω(poly(n)).
+
+## Appendix C: Lower bound on the variance of the Meta-VQE loss function
+
+In this appendix, we derive a lower bound on the variance of a loss function of the form
+
+$$
+\mathcal { L } ( \theta , x ) = \frac { 1 } { N } \sum _ { j = 1 } ^ { N } \langle \psi | U ^ { \dagger } ( \theta , x _ { j } ) H ( x _ { j } ) U ( \theta , x _ { j } ) | \psi \rangle = \frac { 1 } { N } \sum _ { j = 1 } ^ { N } \mathcal { L } _ { j } ( \theta , x _ { j } ) \, .
+$$
+
+Unlike the previous case, the parameterized quantum circuit now includes an explicit encoding of the classical variable xj in its structure.
+
+The iterative training procedure proceeds as follows. We begin with the single-term loss L(θ, x1) = L1(θ, x1) and train the circuit to obtain an optimal set of parameters θ∗ 1 . Next, we consider the two-term loss L(θ, (x1, x2)) = 1 2 [L1(θ, x1) + L2(θ, x2)] and re-optimize the circuit by initializing the parameters near θ∗ 1 . This process is repeated iteratively until step N, each time adding one more term to the loss function and refining the parameters accordingly.
+
+Importantly, the global loss L(θ, x) changes at every iteration because a new encoded Hamiltonian term is incorporated at each step, thus modifying both the optimization landscape and the effective variance of the loss.
+
+## Theorem 4. Consider a loss function L(θ, x) of the form of
+
+$$
+\mathcal { L } ( \theta , x ) = \frac { 1 } { N } \sum _ { j = 1 } ^ { N } \mathcal { L } ^ { ( j ) } ( \theta , x _ { j } )
+$$
+
+$$
+\mathcal { L } ^ { ( j ) } ( \theta , x _ { j } ) = \langle \psi | U ^ { \dagger } ( \theta , x _ { j } ) H ( x _ { j } ) U ( \theta , x _ { j } ) | \psi \rangle \, ,
+$$
+
+and with the generators being non parametrized gates and Pauli rotations of the form of
+
+$$
+e ^ { - i \theta _ { j } g _ { j } ( x ) P _ { j } } .
+$$
+
+Assume that every encoding function gj is differentiable on the relevant interval has bounded derivatives.
+
+Assume moreover that the first circuit generator acts non-trivially on the input state in the sense that
+
+$$
+\langle \psi | P _ { 1 } | \psi \rangle = 0 .
+$$
+
+where Let θ∗ denote the parameters carried over from the previous iteration (trained on x1, . . . , xN-1).Assume that for each j ∈ {1, . . . ,N - 1} the prepared state has overlap
+
+$$
+| \langle g s _ { j } | U ( \theta ^ { * } , x _ { j } ) | \psi \rangle | ^ { 2 } \geq 1 - \epsilon ^ { 2 } , \quad \epsilon \leq \frac { 1 } { \sqrt { 2 } } ,
+$$
+
+where |gsj⟩ is a ground state of H(xj). Assume further that each H(xj) has a nonzero spectral gap ∆(j) gap between its ground energy and first excited energy, and define
+
+$$
+| \Delta _ { g a p \min } | \colon = \min _ { 1 \leq j \leq N } | \Delta _ { g a p } ^ { ( j ) } | .
+$$
+
+Then, if we add to the Hamiltonian a term of ∆xW (that is H(xN) = H(xN-1) + ∆xH1), where H1 is a fixed hermitian matrix, and ∆x = xN -xN-1, such that it is bounded as
+
+$$
+| \Delta x | < \widetilde { \gamma } _ { \overline { \| } H _ { 1 } \| _ { s } + M \max _ { l } \partial _ { x } g _ { l } ( x ) \| H ( x _ { N } ) \| _ { s } } ,
+$$
+
+where ˜ γ ∈ (0, 1) is a constant, M is the number of trainable parameters and ∥ · ∥s = λ(·) max - λ(·) min is a semi-norm [61]. Let D(θ∗ , r) be the uniform distribution over the hypercube {θ∗ +α : αi ∈ [-r, r]} (with i.i.d. coordinates), and let us consider some value of the radius rt satisfy
+
+$$
+r _ { t } ^ { 2 } \leqslant \gamma \min \left \{ \min _ { j , k } \frac { 4 g _ { 1 } ^ { 2 } ( x _ { j } ) g _ { 1 } ^ { 2 } ( x _ { k } ) } { 4 5 h _ { 6 } ( x _ { j } , x _ { k } ) } , \frac { 3 } { g _ { \min } ^ { 2 } ( M - 1 ) } \frac { \widetilde { \gamma } ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p \min } | } { \| H \| _ { s , \min } + ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p \min } | } \right \}
+$$
+
+where
+
+$$
+h _ { 6 } ( x _ { j } , x _ { k } ) = & 2 ^ { 6 } \left ( \frac { 3 g _ { 1 } ( x _ { j } ) ^ { 6 } } { 7 } + \frac { g _ { 1 } ( x _ { j } ) ^ { 5 } g _ { 1 } ( x _ { k } ) } { 2 } + \frac { 3 g _ { 1 } ( x _ { j } ) ^ { 4 } g _ { 1 } ( x _ { k } ) ^ { 2 } } { 7 } + \frac { 5 g _ { 1 } ( x _ { j } ) ^ { 3 } g _ { 1 } ( x _ { k } ) ^ { 3 } } { 4 } \right ) ^ { 3 }
+$$
+
+$$
++ \, \frac { 3 7 g _ { 1 } ( x _ { j } ) ^ { 2 } g _ { 1 } ( x _ { k } ) ^ { 4 } } { 7 } + \frac { g _ { 1 } ( x _ { j } ) g _ { 1 } ( x _ { k } ) ^ { 5 } } { 7 } + \frac { g _ { 1 } ( x _ { j } ) g _ { 1 } ( x _ { k } ) ^ { 5 } } { 2 } + \frac { 3 g _ { 1 } ( x _ { k } ) ^ { 6 } } { 7 } \right )
+$$
+
+Then the variance on a hyper cube of side 2r with 0 < r ⩽ rt is lower-bounded by
+
+$$
+V a _ { \theta \sim \mathcal { D } ^ { * } , r } [ \mathcal { L } ( \alpha ) ] \geq ( 1 - \gamma ) \frac { 4 } { 4 5 } g _ { 1 } ^ { 2 } ( x _ { j } ) g _ { 1 } ^ { 2 } ( x _ { k } ) ( 1 - \gamma ) ( 1 - \widetilde { \gamma } ) ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p \min } | \in \Omega ( 1 / \text {Poly} ( n ) ) \, ,
+$$
+
+where θ∗ is the previous iteration best solution and where γ ∈ (0, 1) is a constant.
+
+Proof. Since we have already bounded each one of the terms Lj(θ, xj) (but without the encoding xj) in Appendix B, we have much of the work done.
+
+The parameterized quantum circuit in this case is given by
+
+$$
+U ( \theta , x _ { j } ) = \prod _ { i = 1 } ^ { M } U _ { i } ( f _ { i } ( \theta _ { i } , x _ { j } ) ) V _ { i } \, ,
+$$
+
+where θ is a vector with the variational parameters θ = (θ1, θ2, ..., θM) and fi(θi, xj) are the encoding functions. These functions can be different for every θi but share a common structure fi(θi, xj) = gi(xj)θi. Finally, each unitary gate takes the form of Uk(θk, xj) = e-ifk(θk,xj)Pk , where Pk is a Pauli string.
+
+As in Appendix B, the parametrized gates can be re-expressed as perturbations α around the previous optimal solution, i.e. θi = θ∗ i +αi as shown below
+
+$$
+U ( \theta , x _ { j } ) = \prod _ { i = 1 } ^ { M } V _ { i } U _ { i } ( f _ { i } ( \theta _ { i } , x _ { j } ) )
+$$
+
+$$
+= & \prod _ { i = 1 } ^ { M } V _ { i } U _ { i } ( f _ { i } ( \theta _ { i } ^ { * } , x _ { j } ) ) U _ { i } ( f _ { i } ( \alpha _ { i } , x _ { j } ) ) \\
+$$
+
+$$
+= \prod _ { i = 1 } ^ { M } \widetilde { V } _ { i } ( f _ { i } ( \theta _ { i } ^ { * } , x _ { j } ) ) U _ { i } ( f _ { i } ( \alpha _ { i } , x _ { j } ) ) \, ,
+$$
+
+$$
+( C 1 6 )
+$$
+
+where we used that fi(θ∗ i +αi, xj) = fi(θ∗ i , xj)+fi(αi, xj) and the fact that e-i(a+b)P = e-iaP e-ibP in the first equality to separate the parametrized unitary into two. In the final equality we absorbed the θ∗ dependent Ui into Vi, i.e. Ṽi(fi(θ∗ i , xj)) = ViUi(fi(θ∗ i , xj)). To ease the notation, we will denote Ṽi(fi(θ∗ i , xj)) as just Ṽi.
+
+We consider a region of parameters around the previous solution of the form
+
+$$
+\mathcal { V } ( \theta ^ { * } , r ) = \{ \theta = \theta ^ { * } + \alpha \, | \, \alpha _ { i } \in [ - r , r ] \}
+$$
+
+where r is the characteristic length of the region.
+
+We are interested in the variance of the loss function in Eq. (C2) over the region V(θ∗ , r) such that the parameters are uniformly sampled
+
+$$
+\mathcal { D } ( \theta ^ { * } , r ) \coloneqq \text {Unif} [ \mathcal { V } ( \theta ^ { * } , r ) ] \, ,
+$$
+
+or in other words we are interested in
+
+$$
+V a r _ { \theta \sim \mathcal { D } ( \theta ^ { * } , r ) } [ \mathcal { L } ( \theta , x ) ] = V a r _ { \alpha \sim \mathcal { D } ( 0 , r ) } [ \mathcal { L } ( \theta = \theta ^ { * } + \alpha , x ) ] \, .
+$$
+
+Using this we now move to finding a general lower bound for the variance of the loss function.
+
+As we are interested in independently sampled parameters from the same distribution, we can use Proposition 1 to immediately find a lower bound on Eq. (C19)
+
+$$
+V a r _ { \alpha \sim \mathcal { D } ( 0 , r ) } [ \mathcal { L } ( \alpha , x ) ] \geq V a r _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \mathbb { E } _ { \alpha _ { \overline { 1 } } \sim \mathcal { D } ( 0 , \overline { 1 } ) } [ \mathcal { L } ( \alpha , x ) ] ]
+$$
+
+where we denote α1 = (α2, ...αM), and similarly, 0 = 0, ..., 0 is the 0-th vector of M - 1 components.
+
+We start by computing the expected values of Eq. (C20). Because the variables are independent, we can compute the different expected values one-by-one, starting with α2 to αM, that is
+
+$$
+\mathbb { E } _ { \alpha _ { \Gamma } \sim \mathcal { D } ( 0 , \overline { r } _ { 1 } ) r } [ \mathcal { L } ( \alpha , x ) ] = \mathbb { E } _ { \alpha _ { 2 } } [ \dots \mathbb { E } _ { \alpha _ { M } } [ \mathcal { L } ( \alpha , x ) ] \dots ] \, .
+$$
+
+As in Appendix B we proceed to compute the expectation value with respect αM. We first compute this quantity for a single term of the loss function. The prodedure here it is very similar as in the previous section, but we include it for completeness.
+
+To do this computation, we express each parametrized unitary Ui(gi(xj)αi) = e-igi(xj)αiPi = cos(gi(xj)αi)✶ - i sin(gi(xj)αi)Pi. Then we can define
+
+$$
+k _ { + } ^ { ( i , j ) } \colon = & \frac { 1 } { 2 r } \int _ { - r } ^ { r } \cos ^ { 2 } ( g _ { i } ( x _ { j } ) \alpha _ { i } ) = \frac { 1 } { 2 } ( 1 + \sin c ( 2 g _ { i } ( x _ { j } ) r ) )
+$$
+
+$$
+k _ { - } ^ { ( i , j ) } \colon = & \frac { 1 } { 2 r } \int _ { - r } ^ { r } \sin ^ { 2 } ( g _ { i } ( x _ { j } ) \alpha _ { i } ) = \frac { 1 } { 2 } ( 1 - \sin c ( 2 g _ { i } ( x _ { j } ) r ) )
+$$
+
+where now we have index i refering to layer and j to encoding. We have explicitly used that fi(θi, xj) = gi(xj)θi. Equipped with these definitions, we can now proceed with the calculations. We start by evaluation the expected value of the unitary gate M into one of the summand in Eq. (C2), i.e. in the term in L(j) (θ, xj). The expected value over the first parameter takes the following form
+
+$$
+\mathbb { E } _ { \alpha _ { M } \sim \mathcal { D } ( 0 , r ) } [ U _ { M } ^ { \dagger } ( g _ { M } ( x _ { j } ) \alpha _ { M } ) \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M } U _ { M } ( g _ { M } ( x _ { j } ) \alpha _ { M } ) ] = \mathbb { E } _ { \alpha _ { M } \sim \mathcal { D } ( 0 , r ) } [ \cos ^ { 2 } ( g _ { M } ( x _ { j } ) \alpha _ { M } ) \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M }
+$$
+
+$$
++ \sin ^ { 2 } ( g _ { M } ( x _ { j } ) \alpha _ { M } ) P _ { M } \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M } P _ { M }
+$$
+
+$$
+- \, i \sin ( g _ { M } ( x _ { j } ) \alpha _ { M } ) \cos ( g _ { M } ( x _ { j } ) \alpha _ { M } ) [ P _ { M } , \widetilde { V } _ { M } ^ { \dagger } H \widetilde { V } _ { M } ] ] \ \ ( C 2 6 )
+$$
+
+$$
+= & k _ { + } ^ { ( M , j ) } \widetilde { V } _ { M } H ( x _ { j } ) \widetilde { V } _ { M } ^ { \dagger } + k _ { - } ^ { ( M , j ) } P _ { M } \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M } P _ { M } .
+$$
+
+Iin the first equality we expanded the exponential into its trigonometric form. Then, in the second equality, we used that the integral with an odd number of powers of sin over a symmetric space vanishes. Because all of the variables are independent and follow the same distribution, we reproduce the calculation in Eq. (C27) for all the subsequent parameters. To do so, we denote H′ := k(M,j) + VMH(xj)V †M +k(M,j) - VMPMH(xj)PMV †M , and using this notation we can see that
+
+$$
+\mathbb { E } _ { \alpha _ { M } \ \ 1 ^ { \sim } \mathcal { D } ( 0 , r ) } \left [ \left ( \prod _ { s = 1 } ^ { M - 1 } \widetilde { V } _ { s } U _ { s } ( g _ { s } ( x _ { j } ) \theta _ { s } ) \right ) ^ { \dagger } H ^ { \prime } ( x _ { j } ) \left ( \prod _ { s = 1 } ^ { M - 1 } \widetilde { V } _ { s } U _ { s } ( g _ { s } ( x _ { j } ) \theta _ { s } ) \right ) \right ]
+$$
+
+$$
+= \left ( \prod _ { s = 1 } ^ { M - 2 } \widetilde { V } _ { s } U _ { s } ( g _ { s } ( x _ { j } ) \theta _ { s } ) \right ) ^ { \dagger } ( k _ { + } ^ { ( M - 1 , j ) } \widetilde { V } _ { M - 1 } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M - 1 } \\
+$$
+
+$$
++ \, k _ { - } ^ { ( M - 1 , j ) } P _ { M - 1 } \widetilde { V } _ { M - 1 } ^ { \dagger } H ^ { \prime } ( x _ { j } ) \widetilde { V } _ { M - 1 } P _ { M - 1 } \Big ) \left ( \prod _ { s = 1 } ^ { M - 1 } \widetilde { V } _ { s } U _ { s } ( g _ { s } ( x _ { j } ) \theta _ { s } ) \right )
+$$
+
+$$
+= \left ( \prod _ { s = 1 } ^ { M - 2 } \widetilde { V } _ { s } U _ { s } ( g _ { s } ( x _ { j } ) \theta _ { s } ) \right ) ^ { \dagger } H ^ { \prime \prime } ( x _ { j } ) \left ( \prod _ { s = 1 } ^ { M - 2 } \widetilde { V } _ { s } U _ { s } ( g _ { s } ( x _ { j } ) \theta _ { s } ) \right )
+$$
+
+where we denoted
+
+$$
+H ^ { \prime \prime } ( x _ { j } ) = & k _ { + } ^ { ( M , j ) } k _ { + } ^ { ( M - 1 , j ) } \widetilde { V } _ { M - 1 } ^ { \dagger } \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M } \widetilde { V } _ { M - 1 } + k _ { + } ^ { ( M , j ) } K _ { - } ^ { ( M - 1 , j ) } P _ { M - 1 } \widetilde { V } _ { M - 1 } \widetilde { V } _ { M } H ( x _ { j } ) \widetilde { V } _ { M } ^ { \dagger } \widetilde { V } _ { M - 1 } ^ { \dagger } P _ { M - 1 }
+$$
+
+$$
++ \, k _ { _ { - } } ^ { ( M , j ) } k _ { + } ^ { ( M - 1 , j ) } \tilde { V } _ { M - 1 } ^ { \dagger } P _ { M } \tilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \tilde { V } _ { M } P _ { M } \tilde { V } _ { M - 1 }
+$$
+
+$$
++ k _ { + } ^ { ( M , j ) } k _ { + } ^ { ( M - 1 , j ) } P _ { M - 1 } \widetilde { V } _ { M - 1 } ^ { \dagger } P _ { M } \widetilde { V } _ { M } ^ { \dagger } H ( x _ { j } ) \widetilde { V } _ { M } P _ { M } \widetilde { V } _ { M - 1 } P _ { M - 1 }
+$$
+
+We define as Heff(xj) the result of integrating all the remaining variables in Eq (C31):
+
+$$
+H _ { e f f } ( x _ { j } ) \colon = H \, \mathbb { E } _ { \alpha _ { 2 } \sim \mathcal { D } ( 0 , r ) } \left [ \cdots \mathbb { E } _ { \alpha _ { M } \, \ r } \, \mathcal { D } ( 0 , r ) \left [ \left ( \prod _ { s = 1 } ^ { M - 2 } \widetilde { V } _ { s } U _ { s } ( g _ { s } ( x _ { j } ) \theta _ { s } ) \right ) ^ { \dagger } H ^ { \prime \prime } ( x _ { j } ) \left ( \prod _ { s = 1 } ^ { M - 2 } \widetilde { V } _ { s } U _ { s } ( g _ { s } ( x _ { j } ) \theta _ { s } ) \right ) \right ] \cdots \right ] .
+$$
+
+Explicitly, Heff takes the following form
+
+$$
+H _ { e f f } ( x _ { j } ) = \widetilde { V } _ { 1 } ^ { \dagger } \sum _ { z } \bigcirc _ { l = 2 } ^ { M } k _ { z _ { l } } ^ { ( l , j ) } \mathcal { P } _ { z _ { l } } ^ { ( l ) } ( H ( x _ { j } ) ) \widetilde { V } _ { 1 }
+$$
+
+where zl ∈ {+,-}, ⃝ represents the composition operation (f ◦ g = f(g)), and the super-operator P (l) z (·) is defined as
+
+$$
+\mathcal { P } _ { z } ^ { ( l ) } ( \cdot ) = \begin{cases} \tilde { V } _ { l } ^ { \dagger } \cdot \tilde { V } _ { l } \text { if } z \to + \\ P _ { l } \tilde { V } _ { l } ^ { \dagger } \cdot \tilde { V } _ { l } P _ { l } \text { if } z \to - \end{cases}
+$$
+
+in analogy to Eq. (B30).
+
+Since the expected value is linear with the sum (i.e. E[a + b] = E[a] + E[b]), we can now use Eq. (C36) to trivially compute the expected value of the loss function L(θ). Indeed, we can recover the explicit formula of the loss function and use it to express the expected value in Eq. (C20):
+
+$$
+\mathbb { E } _ { \alpha _ { \uparrow } \sim \mathcal { D } ( \mathcal { O } _ { \uparrow , r } ) } [ \mathcal { L } ( \theta ) ] = \frac { 1 } { N } \sum _ { j = 1 } ^ { N } \mathbb { E } _ { \alpha _ { \uparrow } \sim \mathcal { D } ( \mathcal { O } _ { \uparrow , r } ) } [ \mathcal { L } ^ { ( j ) } ( \theta , x _ { j } ) ]
+$$
+
+$$
+= & \frac { 1 } { N } \sum _ { j = 1 } ^ { N } \left \langle \psi | U _ { 1 } ^ { \dagger } ( g _ { 1 } ( x _ { j } ) \alpha _ { 1 } ) \widetilde { V } _ { 1 } ^ { \dagger } H _ { e f f } ( x _ { j } ) \widetilde { V } _ { 1 } U _ { 1 } ( g _ { 1 } ( x _ { j } ) \alpha _ { 1 } ) | \psi \right \rangle
+$$
+
+where in the last equality we used the equation derived in Eq. (C36). Furthermore, we stress that the dependency on still one variable is due to the fact that we still need to compute the variance over it.
+
+That is what we proceed to do next. Using the previous equation, we are ready to compute the right hand side of Eq. (C20), a lower bound on the variance over the constrained landscape. To do it, we start by expanding the gate U1 into the sin, cos form as we did in Eq. (C26)
+
+$$
+V a _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \mathbb { E } _ { \alpha _ { T } \sim \mathcal { D } ( 0 , r ) } [ \mathcal { L } ( \alpha ) ] \geqslant \frac { 1 } { N ^ { 2 } } \ V a _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } \left [ \sum _ { j = 1 } ^ { N } \langle \psi | \left ( \cos ^ { 2 } ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) H _ { e f f } ( x _ { j } ) \right )
+$$
+
+$$
++ \sin ^ { 2 } ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) P _ { 1 } H _ { \text {eff} } ( x _ { j } ) P _ { 1 } ) \left | \psi \right \rangle \right ]
+$$
+
+$$
++ \, \frac { 1 } { N ^ { 2 } } \, V a r _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } \left [ \sum _ { j = 1 } ^ { N } \sin ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) \cos ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) \, \langle \psi | i [ P _ { M } , H ( x _ { j } ) ] | \psi \rangle \right ] \quad ( C 4 2 )
+$$
+
+$$
+\geqslant & \frac { 1 } { N ^ { 2 } } \, V a _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } \left [ \sum _ { j = 1 } ^ { N } \langle \psi | \left ( \cos ^ { 2 } ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) H _ { e f f } ( x _ { j } ) \right )
+$$
+
+$$
++ \sin ^ { 2 } ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) P _ { 1 } H _ { \text {eff} } ( x _ { j } ) P _ { 1 } \Big ) | \psi \rangle \Big ]
+$$
+
+where we expanded the gate U1 using that Ui(gi(xj)αi) = e-igi(xj)αiPi = cos(gi(xj)αi)✶ - i sin(gi(xj)αi)Pi similarly to what we did in Eq. (C26). Furthermore, we used that the term that proportional to sin(g1(xj)θ1) cos(g1(xj)θ1) is orthogonal to the terms sin2 (g1(xj)θ1), cos2 (g1(xj)θ1). Therefore, the covariance between the two is zero. In the first inequality in Eq. (C44), we use that the variance of a function is always positive. Therefore we can drop the variance in Eq. (C42), as it is positive.
+
+We now define the function h(r, xj, xk)
+
+$$
+h ( x _ { j } , x _ { k } ) = \frac { 1 } { 4 } \left ( \sin [ 2 \left ( g _ { 1 } ( x _ { j } ) - g _ { 1 } ( x _ { k } ) \right ) r ] + \sin [ 2 \left ( g _ { 1 } ( x _ { j } ) + g _ { 1 } ( x _ { k } ) \right ) r ] - \frac { 1 } { 2 } \sin [ 2 g _ { 1 } ( x _ { j } ) r ] \sin [ 2 g _ { 1 } ( x _ { k } ) r ] \right )
+$$
+
+which corresponds to the respective variances and covariances that we need to compute in Eq. (C44). When obvious by context, we are going to skip the dependence on r. In particular, h(xj, xk) relates to these functions as
+
+$$
+h ( x _ { j } , x _ { k } ) = C o v _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \sin ^ { 2 } ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) , \sin ^ { 2 } ( g _ { 1 } ( x _ { k } ) \theta _ { 1 } ) ]
+$$
+
+$$
+= C o v _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \cos ^ { 2 } ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) , \cos ^ { 2 } ( g _ { 1 } ( x _ { k } ) \theta _ { 1 } ) ]
+$$
+
+$$
+= - \, \text {Cov} _ { \alpha _ { 1 } } \sim & \, \mathcal { D } ( 0 , r ) [ \cos ^ { 2 } ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) , \sin ^ { 2 } ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) ]
+$$
+
+where we define the covariance in the standard way Covα∼D[φ1(α)φ2(α)] = Eα∼D[φ1(α)φ2(α)] - Eα∼D[φ1(α)] Eα∼D[φ2(α)].
+
+Using these results, we can recover Eq. (C44) and use the new introduced h(xj, xk) to compute the variance. We start by rewriting the variance as a sum of variances and covariances
+
+$$
+\frac { 1 } { N ^ { 2 } } \, \text {Var} _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \sum _ { j = 1 } ^ { N } \langle \psi | \cos ^ { 2 } ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) H _ { e f f } ( x _ { j } ) + \sin ^ { 2 } ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) P _ { 1 } H _ { e f f } ( x _ { j } ) P _ { 1 } \, | \psi \rangle ]
+$$
+
+$$
+= & \frac { 1 } { N ^ { 2 } } \sum _ { j , k } ^ { N } \left ( \, C o n _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \cos ^ { 2 } ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) , \cos ^ { 2 } ( g _ { 1 } ( x _ { k } ) \theta _ { 1 } ) ] \, \langle \psi | H _ { \text {eff} } ( x _ { j } ) | \psi \rangle \, \langle \psi | H _ { \text {eff} } ( x _ { k } ) | \psi \rangle
+$$
+
+$$
++ C o v _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \sin ^ { 2 } ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) , \sin ^ { 2 } ( g _ { 1 } ( x _ { k } ) \theta _ { 1 } ) ] \, \langle \psi | P _ { 1 } H _ { e f f } ( x _ { j } ) P _ { 1 } | \psi \rangle \, \langle \psi | P _ { 1 } H _ { e f f } ( x _ { k } ) P _ { 1 } | \psi \rangle
+$$
+
+$$
++ C o v _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \sin ^ { 2 } ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) , \cos ^ { 2 } ( g _ { 1 } ( x _ { k } ) \theta _ { 1 } ) ] \langle \psi | P _ { 1 } H _ { e f f } ( x _ { j } ) P _ { 1 } | \psi \rangle \, \langle \psi | H _ { e f f } ( x _ { k } ) | \psi \rangle
+$$
+
+$$
++ C o v _ { \alpha _ { 1 } \sim \mathcal { D } ( 0 , r ) } [ \cos ^ { 2 } ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) , \sin ^ { 2 } ( g _ { 1 } ( x _ { j } ) \theta _ { 1 } ) ] \, \langle \psi | H _ { \text {eff} } ( x _ { k } ) | \psi \rangle \, \langle \psi | P _ { 1 } H _ { \text {eff} } ( x _ { k } ) P _ { 1 } \psi \rangle \,
+$$
+
+$$
+= & \frac { 1 } { N ^ { 2 } } \sum _ { j , k } ^ { N } h ( x _ { j } , x _ { k } ) \left ( \left \langle \psi | H _ { \text {eff} } ( x _ { j } ) | \psi \rangle - \left \langle \psi | P _ { 1 } H _ { \text {eff} } ( x _ { j } ) P _ { 1 } | \psi \rangle \right ) \left ( \left \langle \psi | H _ { \text {eff} } ( x _ { k } ) | \psi \rangle - \left \langle \psi | P _ { 1 } H _ { \text {eff} } ( x _ { k } ) P _ { 1 } | \psi \rangle \right ) \right )
+$$
+
+where in the first equality we decomposed the variance of a sum into its covariances, i.e. Var[φ1 +φ2] = Cov[φ1, φ1] + Cov[φ2, φ2]+2Cov[φ1, φ2], using the notation that Cov[φ1, φ1] = Var[φ1]. In the second equality we used Eq. (C48), to simplify the result. Finally we use · to emphasize the product of the two terms in the parenthesis due to the line break.
+
+By recovering Eq. (C20), and using the lower bound derived in Eq. (C44) and the result of this term in Eq. (C54), we can finally derive a strict lower bound to the variance of the loss function that reads as follows
+
+$$
+V a r _ { \alpha \sim \mathcal { D } ( 0 , r ) } [ \mathcal { C } ( \alpha ) ] \geq & \frac { 1 } { N ^ { 2 } } \sum _ { j , k } ^ { N } h ( x _ { j } , x _ { k } ) \left \langle \psi | ( H _ { e f f } ( x _ { j } ) - P _ { 1 } H _ { e f f } ( x _ { j } ) P _ { 1 } ) | \psi \right \rangle
+$$
+
+$$
+\cdot \, \langle \psi | ( H _ { \text {eff} } ( x _ { k } ) - P _ { 1 } H _ { \text {eff} } ( x _ { k } ) P _ { 1 } ) | \psi \rangle
+$$
+
+Finally, we want to make sure that this lower-bound is positive, and thus meaningful.
+
+## 1. Sufficient conditions for the bound to be non-trivial
+
+Here we derive sufficient conditions for the bound to be meaningful. We start by analyzing the term ⟨ψ|(Heff(xj) -P1Heff(xj)P1)|ψ⟩. In particular, we want to leverage the known structure of Heff(xj) to ensure that this term is always negative for all j.
+
+We first focus on all the terms with j < N. For these terms, the parameters have already been trained around the corresponding solution. As a consequence, we can invoke our assumption that the variational state has a sufficiently large overlap with the ground state of Heff(xj), which in turn guarantees the negativity of the above expression, as we discuss now.
+
+In contrast, when we add a new term to the loss function, i.e., the contribution with j = N, we do not yet have a guarantee on this overlap. For this last term we must instead rely on additional properties, such as the continuity of the encoding function and the smooth dependence of the optimal parameters on xj, to control the sign of the contribution. Note that the case j = N always refers to the newest term introduced into the cost function at a given stage of the iterative procedure.
+
+## a. Negativity of the expected values for j < N
+
+We pont out that Heff(xj) in Eq. (C36) is a convex combination of rotated Hamiltonians, since the parameters k(l,j) + + k(l,j) - = 1, ∀ (l, j) and the differences in the Hamiltonians depend on unitary matrices exclusively. Furthermore, there is clearly one dominant term out, which is K(j) + = ∏M-1 l=1 k(l,j) + . This term is the largest for small values of r. Indeed, recalling Eq. (C22) and by with a Taylor expansion, one can see that k(l,j) + ∼ 1- g2 l (xj)r2 12 +O(r4 ), k(l,j) - ∼ g2 l (xj)r2 12 . This means that around zero, we expect the term K(j) + to be dominant. In the next lines we formalize this argument and find strict bounds on the value of r, such that the term ⟨ψ|Ṽ1 (Heff(xj) - P1Heff(xj)P1) Ṽ † 1 |ψ⟩ is always negative. We start by rewriting this term as a sum of the terms depending on K(j) + and those that do not
+
+$$
+\langle \psi | ( H _ { \text {eff} } ( x _ { j } ) - P _ { 1 } H _ { \text {eff} } ( x _ { j } ) P _ { 1 } ) | \psi \rangle = K _ { + } ^ { ( j ) } \, \langle \psi | U ( \theta ^ { * } , x _ { j } ) H ( x _ { j } ) U ^ { \dagger } ( \theta ^ { * } , x _ { j } ) | \psi \rangle
+$$
+
+$$
+- \, K _ { + } ^ { ( j ) } \, \langle \psi | P _ { 1 } U ( \theta ^ { * } , x _ { j } ) H ( x _ { j } ) U ^ { \dagger } ( \theta ^ { * } , x _ { j } ) P _ { 1 } | \psi \rangle
+$$
+
+$$
++ \, \langle \psi | \widetilde { V } _ { 1 } ^ { \dagger } \sum _ { z \neq \{ + \} ^ { \otimes M } } \bigcirc _ { l = 2 } ^ { M } k _ { z _ { l } } ^ { ( l , j ) } \mathcal { P } _ { z _ { l } } ^ { ( l ) } ( H ( x _ { j } ) ) \widetilde { V } _ { 1 } | \psi \rangle
+$$
+
+$$
+- \, \langle \psi | P _ { 1 } \tilde { V } _ { 1 } ^ { \dagger } \sum _ { z \neq \{ + \} ^ { \otimes M } } \bigcirc _ { l = 2 } ^ { M } k _ { z _ { l } } ^ { ( l , j ) } \mathcal { P } _ { z _ { l } } ^ { ( l ) } ( H ( x _ { j } ) ) \widetilde { V } _ { 1 } P _ { 1 } | \psi \rangle
+$$
+
+$$
+= & K _ { + } ^ { ( j ) } \left \langle \psi \right | \left [ U ( \theta ^ { * } , x _ { j } ) H ( x _ { j } ) U ^ { \dagger } ( \theta ^ { * } , x _ { j } ) \right ] \\
+$$
+
+$$
+- \, P _ { 1 } U ( \theta ^ { * } , x _ { j } ) H ( x _ { j } ) U ^ { \dagger } ( \theta ^ { * } , x _ { j } ) P _ { 1 } . \, | \psi \rangle + \xi
+$$
+
+In the first equality we used the definition of Heff introduced in Eq. (C36). In the second equality we introduced ξ a quantity that contains all the previous terms. As discussed, Heff(xj) can be understood as a convex combination of rotated versions of the Hamiltonian H(xj). Therefore, ξ is upper bounded by the norm of H(xj). This can be seen by applying Hölder's inequality as follows
+
+$$
+| \xi | = \left | \sum _ { z \neq \{ + \} ^ { \otimes M } } \langle \psi | \widetilde { V } _ { 1 } ^ { \dagger } \bigcirc _ { l = 2 } ^ { M } k _ { z _ { l } } ^ { ( l , j ) } \mathcal { P } _ { z _ { l } } ^ { ( l ) } ( H ( x _ { j } ) ) \widetilde { V } _ { 1 } | \psi \rangle - \langle \psi | P _ { 1 } \widetilde { V } _ { 1 } ^ { \dagger } \bigcirc _ { l = 2 } ^ { M } k _ { z _ { l } } ^ { ( l , j ) } \mathcal { P } _ { z _ { l } } ^ { ( l ) } ( H ( x _ { j } ) ) \widetilde { V } _ { 1 } P _ { 1 } | \psi \rangle \right |
+$$
+
+$$
+\leqslant \sum _ { z \neq \{ + \} ^ { \otimes M } } \prod _ { l = 2 } ^ { M } k _ { z _ { l } } ^ { ( l , j ) } \max _ { z ^ { \prime } \in \{ + , - \} ^ { \otimes M } } \| \tilde { V } _ { 1 } ^ { \dagger } \bigcirc _ { k = 2 } ^ { M } \mathcal { P } _ { z _ { k } ^ { \prime } } ^ { ( k ) } ( H ( x _ { j } ) ) \tilde { V } _ { 1 } - P _ { 1 } \tilde { V } _ { 1 } ^ { \dagger } \bigcirc _ { k = 2 } ^ { M } \mathcal { P } _ { z _ { k } } ^ { ( k ) } ( H ( x _ { j } ) ) \tilde { V } _ { 1 } P _ { 1 } \| _ { \infty } \quad ( C 6 4 )
+$$
+
+$$
+\leqslant & \| H ( x _ { j } ) \| _ { s } \sum _ { z \neq ( + ) ^ { \otimes M } } \prod _ { l = 2 } ^ { M } k _ { z _ { l } ^ { l _ { l } } } ^ { ( l , j ) } = ( 1 - K _ { + } ^ { ( j ) } ) \| H ( x _ { j } ) \| _ { s }
+$$
+
+where we define the semi-norm ∥H∥s := λmax - λmin (see Ref. [61]). Using this result, we can upper bound equation Eq. (C62)
+
+$$
+\langle \psi | ( H _ { e f f } ( x _ { j } ) - P _ { 1 } H _ { e f f } ( x _ { j } ) P _ { 1 } ) | \psi \rangle \leqslant K _ { + } ^ { ( j ) } \left \langle \psi | \left [ U ^ { \dagger } ( \theta ^ { * } , x _ { j } ) H ( x _ { j } ) U ( \theta ^ { * } , x _ { j } ) \right ]
+$$
+
+$$
+- \, P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { j } ) H ( x _ { j } ) U ( \theta ^ { * } , x _ { j } ) P _ { 1 } | | \psi \rangle + ( 1 - K _ { + } ^ { ( j ) } ) \| H ( x _ { j } ) \| _ { s } \quad ( C 6 7 )
+$$
+
+Next, we focus on the term proportional to K(j) + . To analyze it, we recall that θ∗ are the set of variational parameters obtained when optimizing the previous loss landscape with N - 1 terms. Therefore, if we assume that we trained well enough for all j ̸= N, θ∗ is a good enough solution. Using this, we can write U(θ∗ , xj) |ψ⟩ = √1- ϵ2 ∣∣gsj 〉 + ϵ ∣∣gs⊥j 〉, where ∣∣gsj 〉 is the ground state of H(xj) and ∣∣gs⊥j 〉 is orthogonal to the ground state of H(xj). Trivially, we can impose that | ⟨ψ|P1|ψ⟩ |2 = 0, as it just means that the first generator of the circuit acts non-trivially on the initial input state. This also implies that |ψ⟩ , P1 |ψ⟩ are orthogonal, and therefore we can write U(θ∗ , xj)P1 |ψ⟩ = ϵ ∣∣gsj 〉 - √1- ϵ2 ∣∣gs⊥j 〉, then we can upper bound the following term
+
+$$
+\langle \psi | \left [ U ^ { \dagger } ( \theta ^ { * } , x _ { j } ) H ( x _ { j } ) U ( \theta ^ { * } , x _ { j } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { j } ) H ( x _ { j } ) U ( \theta ^ { * } , x _ { j } ) P _ { 1 } \right ] | \psi \rangle = & ( 1 - \epsilon ^ { 2 } ) \lambda _ { \min } + ( \lambda _ { \min } - \Delta _ { g a p } ) \epsilon ^ { 2 }
+$$
+
+$$
+- \, \epsilon ^ { 2 } \lambda _ { \min } - ( 1 - \epsilon ^ { 2 } ) ( \lambda _ { \min } - \Delta _ { g a p } ) \quad ( C 6 9 )
+$$
+
+$$
+= ( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { g a p } ^ { ( j ) }
+$$
+
+where we assume that the observable H(xj) has a gap between the ground state and the first excited state, that we denoted via ∆gap = λmin -λ1 ⩽ 0, where λ1 is the first excited level. Note that, instead of obtaining that P1 maps the state |ψ⟩ to a state of the form U(θ∗ , xj)P1 |ψ⟩ = ϵ ∣∣gsj 〉 - √1- ϵ2 ∣∣gs⊥j 〉, we could also obtain a state that is outside of the subspace spanned by {∣∣gsj 〉 , ∣∣gs⊥j 〉}. In such case, we would obtain a smaller value in Eq. (C69). Therefore, we just assume the worst case scenario.
+
+Finally, we can recover Eq. (C67) and find a condition on K(j) + and ϵ such that the quantity is always negative
+
+$$
+\langle \psi | ( H _ { \text {eff} } ( x _ { j } ) - P _ { 1 } H _ { \text {eff} } ( x _ { j } ) P _ { 1 } ) | \psi \rangle \leqslant K _ { + } ^ { ( j ) } ( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { \text {gap} } ^ { ( j ) } + ( 1 - K _ { + } ^ { ( j ) } ) \| H ( x _ { j } ) \| _ { s } .
+$$
+
+We then need ϵ2 ⩽ 1/2, and a value of K(j) + that fulfills the following:
+
+$$
+K _ { + } ^ { ( j ) } > \frac { \| H ( x _ { j } ) \| _ { s } } { \| H ( x _ { j } ) \| _ { s } - ( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { \text {gap} } ^ { ( j ) } } .
+$$
+
+Finding a condition for r such that the condition on K(j) + in this equation is fulfilled is not trivial. However, we can leverage the Taylor Reminder ( see Theorem 2) to derive it. To see this, we start with the definition of K(j) + (r) where we explicitly write the r dependence:
+
+$$
+K _ { + } ^ { ( j ) } ( r ) = \prod _ { l = 2 } ^ { M } k _ { + } ^ { ( l , j ) } ( r )
+$$
+
+$$
+\geq & \prod _ { l = 2 } ^ { M } \left ( 1 - \frac { g _ { l } ^ { 2 } ( x _ { j } ) r ^ { 2 } } { 3 } \right ) \\
+$$
+
+$$
+\geqslant _ { l \in \{ 2 , \dots , M \} } \left ( 1 - \frac { g _ { l } ^ { 2 } ( x _ { j } ) r ^ { 2 } } { 3 } \right ) ^ { M - 1 }
+$$
+
+$$
+\geqslant & 1 - \frac { g _ { \max } ^ { 2 } ( x _ { j } ) r ^ { 2 } ( M - 1 ) } { 3 } .
+$$
+
+In the first inequality we used the Taylor Reminder Theorem in the function k(l,j) + (r) defined in Eq (C22), in the second equality we used that the product of M - 1 terms is minimized by taking the power M - 1 of the smallest one, and finally in the last inequality we used Bernoulli's identity; (1 + x)k ⩾ 1 - xk if x ⩾ 0. Also, we introduced the notation gmax(xj) :=maxl gl(xj).
+
+We can now input this condition in Eq. (C72) to find a sufficient condition for it to be fulfilled
+
+$$
+K _ { + } ^ { ( j ) } \geqslant 1 - \frac { g _ { \max } ^ { 2 } ( x _ { j } ) r ^ { 2 } ( M - 1 ) } { 3 } > \frac { \| H ( x _ { j } ) \| _ { s } } { \| H ( x _ { j } ) \| _ { s } - ( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { g A P } ^ { ( j ) } } ,
+$$
+
+where the first inequality is due to the previous derivation in Eq. (C76), and the second inequality is imposed such that the condition in Eq. (C72) is fulfilled.
+
+Using the second inequality in Eq. (C77) , we can easily derive a condition on r such that Eq. (C72) is satisfied. To do so, we simple isolate r to obtain the following condition
+
+$$
+1 - \frac { g _ { \max } ^ { 2 } ( x _ { j } ) r ^ { 2 } ( M - 1 ) } { 3 } > \frac { \| H ( x _ { j } ) \| _ { s } } { \| H ( x _ { j } ) \| _ { s } - ( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { g a p } ^ { ( j ) } } \Rightarrow r < \frac { 3 } { g _ { \max } ^ { 2 } ( x _ { j } ) ( M - 1 ) } \frac { ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p } ^ { ( j ) } | } { \| ( H ( x _ { j } ) \| _ { s } + ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p } ^ { ( j ) } | } .
+$$
+
+Finally, if we want a condition that works for all j ⩽ N -1, we need to find the tightest condition, i.e.
+
+$$
+r < \frac { 3 } { g _ { \max } ^ { 2 } ( M - 1 ) } \frac { ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { \text {gap min} } | } { | H | | _ { s , \max } + ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { \text {gap min} } | } .
+$$
+
+Here we introduced some notation to ease the reading: ∥H∥s,max :=maxj ∥H(xj)∥s, and |∆gapmin| :=minj |∆(j) gap|.
+
+We have now found a sufficient condition to ensure that the terms j ̸= N in Eq. (C55) are negative, and thus the lower-bound from such equation is not trivial. However, we need to extend this condition to the only term we have not considered yet, j = N.
+
+## b. Extending the condition to j = N
+
+Finally, we need to extend this condition to j = N. Indeed, in this setting we cannot ensure that we have a good enough fidelity with the ground state. To do so, we start from Eq. (C67), as the analysis up to that point still applies. In particular, we bound the following term
+
+$$
+\langle \psi | \left [ U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) P _ { 1 } \right ] | \psi \rangle \, .
+$$
+
+To do so, we start by adding and subtracting the following term ⟨ψ| [U † (θ∗ , xN-1)H(xN)U(θ∗ , xN-1) - P1U † (θ∗ , xN-1)H(xN)U(θ∗ , xN-1)P1] |ψ⟩ to obtain
+
+$$
+\langle \psi | \left [ U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) P _ { 1 } \right ] | \psi \rangle
+$$
+
+$$
+= \langle \psi | U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) P _ { 1 } ] | \psi \rangle
+$$
+
+$$
++ \langle \psi | U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N - 1 } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N - 1 } ) P _ { 1 } | \psi \rangle
+$$
+
+$$
+- \, \langle \psi | \, U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N - 1 } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N - 1 } ) P _ { 1 } | \, | \psi \rangle
+$$
+
+$$
+& \leqslant \langle \psi | \left [ U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N - 1 } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N - 1 } ) P _ { 1 } \right ] | \psi \rangle
+$$
+
+$$
++ | x _ { N } - x _ { N - 1 } | \partial _ { x } ( \langle \psi | U ^ { \dagger } ( \theta ^ { * } , x ) H ( x _ { N } ) U ( \theta ^ { * } , x ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x ) H ( x _ { N } ) U ( \theta ^ { * } , x ) P _ { 1 } ] \, | \psi \rangle )
+$$
+
+$$
+& \leqslant \langle \psi | \left [ U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N - 1 } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N - 1 } ) P _ { 1 } \right ] | \psi \rangle
+$$
+
+$$
++ | x _ { N } - x _ { N - 1 } | \sum _ { i } \partial _ { g _ { i } } ( \langle \psi | [ U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) P _ { 1 } ] | \psi \rangle ) \partial _ { x } g _ { i } ( x ) .
+$$
+
+In the first inequality we grouped Eqs (C82,C84) to leverage that an expectation value parametrized with a circuit of the form of Eq. (C13) is Lipschitz continuous (as long as the function g is). Indeed, a function of this type is always differentiable and with a bounded derivative. In the final inequality, we apply the chain rule by first differentiating the expectation value with respect to each function gi, and then differentiating each gi with respect to x. Next, we compute the derivative of the expected value with respect to g, to further lower bound this quantity. We assume that at most M gates in the ansatz are parametrized by x, with parameters {gi(x)}Mi=1 . Then, we can write
+
+$$
+\sum _ { i } ^ { M } \partial _ { g _ { i } } ( \langle \psi | [ U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) P _ { 1 } | \psi ) \partial _ { x _ { i } } g _ { i } ( x ) \\
+$$
+
+$$
+\leq & M \max _ { i } | \partial _ { g _ { i } } \left \langle \psi \right | [ U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) P _ { 1 } \right ] \psi \partial _ { x } g _ { i } ( x ) |
+$$
+
+$$
+\leq & M \max _ { i } | \partial _ { g _ { i } } \left \langle \psi \right | [ U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) P _ { 1 } \right ] \psi \right \rangle \max _ { l } | \partial _ { x _ { l } } g _ { l } ( x ) |
+$$
+
+$$
+\leqslant & M \| H ( x _ { N } ) \| _ { s } \max _ { l } | \partial _ { x } g _ { l } ( x ) | .
+$$
+
+In the first inequality we bound the sum by M times the maximum term. In the second we use maxi |aibi| ⩽ (maxi |ai|)(maxi |bi|). Finally, in the last inequality we use that, for circuits of the form in Eq. (C13), the derivatives with respect to the gate parameters gi can be computed via the parameter-shift rule, and are bounded in magnitude by the seminorm ∥H(xN)∥s, as shown in Eq. (C65).
+
+We can now return to Eq. (C88), and substitute the derivative by the above bound. Thus, we obtain
+
+$$
+\langle \psi | [ U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) P _ { 1 } | \psi \rangle
+$$
+
+$$
+& \leqslant \langle \psi | \left [ U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N - 1 } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N - 1 } ) P _ { 1 } \right ] | \psi \rangle
+$$
+
+$$
++ | x _ { N } - x _ { N - 1 } | M \max _ { l } | \partial _ { x } g _ { l } ( x ) | \| H ( x _ { N } ) \| _ { s }
+$$
+
+$$
+= \langle \psi | \left [ U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) H ( x _ { N - 1 } ) U ( \theta ^ { * } , x _ { N - 1 } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) H ( x _ { N - 1 } ) U ( \theta ^ { * } , x _ { N - 1 } ) P _ { 1 } \right ] | \psi \rangle
+$$
+
+$$
++ \langle \psi | U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) \{ H ( x _ { N } ) - H ( x _ { N - 1 } ) \} U ( \theta ^ { * } , x _ { N - 1 } )
+$$
+
+$$
+- \, P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) \{ H ( x _ { N } ) - H ( x _ { N - 1 } ) \} U ( \theta ^ { * } , x _ { N - 1 } ) P _ { 1 } \rfloor | \psi \rangle
+$$
+
+$$
++ | x _ { N } - x _ { N - 1 } | M \max _ { l } | \partial _ { x } g _ { l } ( x ) | \| H ( x _ { N } ) \| _ { s } ,
+$$
+
+where we expanded H(xN) = H(xN-1) +H(xN) -H(xN-1). Then, using that H(xN) -H(xN-1) = ∆xH1 we can upper bound the remaining terms as follows, starting by Eq. (C98)
+
+$$
+\langle \psi | [ U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) \{ H ( x _ { N } ) - H ( x _ { N - 1 } ) \} U ( \theta ^ { * } , x _ { N - 1 } )
+$$
+
+$$
+- \, P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) \{ H ( x _ { N } ) - H ( x _ { N - 1 } ) \} U ( \theta ^ { * } , x _ { N - 1 } ) P _ { 1 } | \psi \rangle
+$$
+
+$$
+= \langle \psi | \, [ U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) \Delta x H _ { 1 } U ( \theta ^ { * } , x _ { N - 1 } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) \Delta x H _ { 1 } U ( \theta ^ { * } , x _ { N - 1 } ) P _ { 1 } ] | \psi \rangle
+$$
+
+$$
+\leqslant & | \Delta x | \| H _ { 1 } \| _ { s }
+$$
+
+where we bounded the difference in operators in the same way that we did previously as in Eq. (C65). Next we focus on Eq. (C96)
+
+$$
+\langle \psi | \left [ U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) H ( x _ { N - 1 } ) U ( \theta ^ { * } , x _ { N - 1 } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N - 1 } ) H ( x _ { N - 1 } ) U ( \theta ^ { * } , x _ { N - 1 } ) P _ { 1 } \right ] | \psi \rangle \leqslant ( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { g a p } ^ { ( N - 1 ) } \quad ( C 1 0 4 )
+$$
+
+where we used the previously derived Eq. (C70).
+
+Finally we can recover Eq. (C96) and apply the two bounds derived now in Eqs. (C103,C104) to upper bound it by
+
+$$
+\langle \psi | \left [ U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) - P _ { 1 } U ^ { \dagger } ( \theta ^ { * } , x _ { N } ) H ( x _ { N } ) U ( \theta ^ { * } , x _ { N } ) P _ { 1 } \right ] | \psi \rangle
+$$
+
+$$
+\leqslant & ( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { g a p } ^ { ( N - 1 ) } + | \Delta x | M \max _ { l } | \partial _ { x } g _ { l } ( x ) | \| H ( x _ { N } ) \| _ { s } + | \Delta x | \| H _ { 1 } \| _ { s } |
+$$
+
+$$
+\leqslant & ( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { g a p } ^ { ( N - 1 ) } + | \Delta x | M \max _ { l } | \partial _ { x } g _ { l } ( x ) | ( \| H ( x _ { N - 1 } ) \| _ { s } + \| H _ { 1 } \| _ { s } | \Delta x | ) + | \Delta x | \| H _ { 1 } \| _ { s } .
+$$
+
+In the last inequality we expressed H(xN) = H(xN-1) +∆xH1 and applied triangular inequality to split the term into two: ∥H(xN)∥ ⩽ ∥H(xN+1)∥s+|∆x|∥H1∥s. Note that this is not straightforward as ∥·∥s is not a norm. However, we can show that λmax[H(xN)] < λmax[H(xN-1)] + λmax[∆xH1] and conversely λmin[H(xN)] > λmin[H(xN-1)] + λmin[∆xH1]. With this, we can write
+
+$$
+| \lambda _ { \max } [ H ( x _ { N } ) ] - \lambda _ { \min } [ H ( x _ { N } ) ] | \leq & | \lambda _ { \max } [ H ( x _ { N - 1 } ) ] + \lambda _ { \max } [ \Delta x H _ { 1 } ] - \lambda _ { \min } [ H ( x _ { N - 1 } ) ] - \lambda _ { \min } [ \Delta x H _ { 1 } ] | \\
+$$
+
+$$
+= | ( \lambda _ { \max } [ H ( x _ { N - 1 } ) ] - \lambda _ { \min } [ H ( x _ { N - 1 } ) ] ) + ( \lambda _ { \max } [ \Delta x H _ { 1 } ] - \lambda _ { \min } [ \Delta x H _ { 1 } ] ) |
+$$
+
+$$
+\leqslant & | \lambda _ { \max } [ H ( x _ { N - 1 } ) ] - \lambda _ { \min } [ H ( x _ { N - 1 } ) ] | + | \lambda _ { \max } [ \Delta x H _ { 1 } ] - \lambda _ { \min } [ \Delta x H _ { 1 } ] | \\
+$$
+
+$$
+= & \| H ( x _ { N - 1 } ) \| _ { s } + \| \Delta x H _ { 1 } \| _ { s } \leqslant \| H ( x _ { N - 1 } ) \| _ { s } + | \Delta x | \| H _ { 1 } \| _ { s } ,
+$$
+
+where in the first inequality we used that by definition λmax[H(xN)] ⩾ λmin[H(xN)].
+
+We want to obtain a general condition that will work for an entire protocol. We can do so by taking the maximum/minimum over the different parameters at hand. Defining g∂max := maxl ∂xgl(x), the condition to fulfill is given by
+
+$$
+( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { g a p \min } + | \Delta x | M g _ { \theta \max } ( \| H \| _ { s , \max } + \| H _ { 1 } \| _ { s , \max } | \Delta x | ) + \| H _ { 1 } \| _ { s , \max } | \Delta x | \leqslant 0
+$$
+
+$$
+\blacktriangledown
+$$
+
+$$
+| \Delta x | < \frac { \widetilde { \gamma } } { 2 } \left ( \sqrt { \frac { ( g _ { \partial \max } \| H \| _ { s , \max } M + \| H _ { 1 } \| _ { s , \max } ) ^ { 2 } + 4 \Delta _ { g a p \min } g _ { \partial \max } M + \| H _ { 1 } \| _ { s , \max } \left ( 1 - 2 \epsilon ^ { 2 } \right ) } } - \frac { 1 } { g _ { \partial \max } M } - \frac { \| H \| _ { s , \max } } { \| H _ { 1 } \| _ { s , \max } } \right ) ,
+$$
+
+where ˜ γ ∈ (0, 1). We find a condition on ∆x such that we can always ensure that the terms ⟨ψ|(Heff(xj) -P1Heff(xj)P1)|ψ⟩ in Eq. (C55) are always negative (and thus the product of the two is positive). Similarly to how we found r in Eq. (C79) j ⩽ N -1, we now find
+
+$$
+r ^ { 2 } < \frac { 3 } { g _ { \min } ^ { 2 } ( M - 1 ) } \frac { ( 1 - \widetilde { \gamma } ) ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p \min } | } { \| H \| _ { s , \max } + ( 1 - \widetilde { \gamma } ) ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p \min } | }
+$$
+
+Note that Eq. (C115) is simply a constrained version of Eq (C79), but it scales in exactly the same way with all relevant parameters, since ˜ γ is a constant. Because this condition yields a smaller admissible region in r than the previous one, we will use it.
+
+We have now shown that the expected values in Eq. (C55) are always negative within a certain region, and therefore the products over which we sum are always positive. This is almost sufficient to guarantee that the bound is strictly positive and hence non-trivial. In the next section, we analyze the function h(xj, xk, r) in Eq. (C55) is positive. We now make the dependence on r explicit, as it is the parameter that we study next.
+
+## c. Positivity of the function h(xj, xk, r)
+
+Leveraging once again the Taylor Reminder Theorem 2 we can show that
+
+$$
+h ( x _ { j } , x _ { k } , r ) = \frac { 1 } { 4 ! } \partial _ { r ^ { \prime } } ^ { 4 } h ( x _ { j } , x _ { k } , r ^ { \prime } ) \Big | _ { r ^ { \prime } = 0 } r ^ { 4 } + \frac { 1 } { 6 ! } \partial _ { r ^ { \prime } } ^ { 6 } h ( x _ { j } , x _ { k } , r ^ { \prime } ) \Big | _ { r ^ { \prime } = \nu \in [ 0 , r ] } r ^ { 6 }
+$$
+
+where we used that the 1st, 2nd and 3rd derivatives are zero, as well as the 5th derivative, which can be checked by direct calculation. We can find a lower bound on the function by considering the maximum (in ν) absolute value of the 6-th derivative with a negative sign up front. We do this by recalling the form of h in Eq. (C45) and then
+
+$$
+\left | \partial _ { r ^ { \prime } } ^ { 6 } h ( x _ { j } , x _ { k } , r ^ { \prime } ) \right | _ { r ^ { \prime } = \nu \in [ 0 , r ] } \left | \leqslant \frac { ( 2 g _ { 1 } ( x _ { j } ) ) ^ { 6 } } { 7 } + \frac { 1 } { 2 } ( 2 g _ { 1 } ( x _ { j } ) ) ^ { 5 } ( 2 g _ { 1 } ( x _ { k } ) ) + ( 2 g _ { 1 } ( x _ { j } ) ) ^ { 4 } ( 2 g _ { 1 } ( x _ { k } ) ) ^ { 2 } + \frac { 5 } { 4 } ( 2 g _ { 1 } ( x _ { j } ) ) ^ { 3 } ( 2 g _ { 1 } ( x _ { k } ) ) ^ { 3 } \ ( C 1 1 7 )
+$$
+
+$$
++ \left ( 2 g _ { 1 } ( x _ { k } ) \right ) ^ { 4 } ( 2 g _ { 1 } ( x _ { j } ) ) ^ { 2 } + \frac { 1 } { 2 } ( 2 g _ { 1 } ( x _ { k } ) ) ^ { 5 } ( 2 g _ { 1 } ( x _ { j } ) ) + \frac { ( 2 g _ { 1 } ( x _ { k } ) ) ^ { 6 } } { 7 } \\ + ( 2 g _ { 1 } ( x _ { k } ) ) ^ { 4 } ( 2 g _ { 1 } ( x _ { j } ) ) ^ { 2 } + \frac { 1 } { 2 } ( 2 g _ { 1 } ( x _ { k } ) ) ^ { 5 } ( 2 g _ { 1 } ( x _ { j } ) ) + \frac { ( 2 g _ { 1 } ( x _ { k } ) ) ^ { 6 } } { 7 }
+$$
+
+$$
++ \, \frac { 1 } { 7 } ( 2 ( g _ { 1 } ( x _ { j } ) - g _ { 1 } ( x _ { k } ) ) ) ^ { 6 } + \frac { 1 } { 7 } ( 2 ( g _ { 1 } ( x _ { j } ) + g _ { 1 } ( x _ { k } ) ) ) ^ { 6 }
+$$
+
+$$
+= & 2 ^ { 6 } \left ( \frac { 3 g _ { 1 } ( x _ { j } ) ^ { 6 } } { 7 } + \frac { g _ { 1 } ( x _ { j } ) ^ { 5 } g _ { 1 } ( x _ { k } ) } { 2 } + \frac { 3 7 g _ { 1 } ( x _ { j } ) ^ { 4 } g _ { 1 } ( x _ { k } ) ^ { 2 } } { 7 } + \frac { 5 g _ { 1 } ( x _ { j } ) ^ { 3 } g _ { 1 } ( x _ { k } ) ^ { 3 } } { 4 } \right )
+$$
+
+$$
++ \, \frac { 3 7 g _ { 1 } ( x _ { j } ) ^ { 2 } g _ { 1 } ( x _ { k } ) ^ { 4 } } { 7 } + \frac { g _ { 1 } ( x _ { j } ) g _ { 1 } ( x _ { k } ) ^ { 5 } } { 7 } + \frac { g _ { 1 } ( x _ { j } ) g _ { 1 } ( x _ { k } ) ^ { 5 } } { 2 } + \frac { 3 g _ { 1 } ( x _ { k } ) ^ { 6 } } { 7 } \right ) \colon = h _ { 6 } ( x _ { j } , x _ { k } ) .
+$$
+
+Here we computed the derivative using the chain rule and applied the well-known upper bound on the derivative of the sinc function, |∂ k x sinc(x)| < 1/(1 + k) (see Ref. [66] for details). To ease notation, we denote the resulting function by h6(xj , xk).
+
+Therefore, the only thing left to do is recover Eq (C116) and find the lower bound accordingly
+
+$$
+h ( x _ { j } , x _ { k } , r ) \geqslant \frac { 1 } { 4 ! } \partial _ { r ^ { \prime } } ^ { 4 } h ( x _ { j } , x _ { k } , r ^ { \prime } ) \Big | _ { r ^ { \prime } = 0 } r ^ { 4 } - \frac { 1 } { 6 ! } h _ { 6 } ( x _ { j } , x _ { k } ) r ^ { 6 } \\
+$$
+
+$$
+= & \frac { 4 } { 4 5 } g _ { 1 } ^ { 2 } ( x _ { j } ) g _ { 1 } ^ { 2 } ( x _ { k } ) r ^ { 4 } - h _ { 6 } ( x _ { j } , x _ { k } ) r ^ { 6 }
+$$
+
+by imposing this bound to be larger than zero we find that
+
+$$
+\frac { 4 } { 4 5 } g _ { 1 } ^ { 2 } ( x _ { j } ) g _ { 1 } ^ { 2 } ( x _ { k } ) r ^ { 4 } - h _ { 6 } ( x _ { j } , x _ { k } ) r ^ { 6 } > 0 \\
+$$
+
+$$
+\blacktriangledown
+$$
+
+$$
+r ^ { 2 } < \frac { 4 g _ { 1 } ^ { 2 } ( x _ { j } ) g _ { 1 } ^ { 2 } ( x _ { k } ) } { 4 5 h _ { 6 } ( x _ { j } , x _ { k } ) }
+$$
+
+What remains is to combine all the conditions with the bound to obtain a final, concise expression.
+
+## 2. Final bound with all the necessary conditions.
+
+We have found two conditions on r, in Eqs (C115,C126) respectively. We define a threshold rt to be a range that fulfills both conditions, i.e.
+
+$$
+r _ { t } ^ { 2 } \leqslant \gamma \min \left \{ \min _ { j , k } \frac { 4 g _ { 1 } ^ { 2 } ( x _ { j } ) g _ { 1 } ^ { 2 } ( x _ { k } ) } { 4 5 h _ { 6 } ( x _ { j } , x _ { k } ) } , \frac { 3 } { g _ { \max } ^ { 2 } ( M - 1 ) } \frac { \widetilde { \gamma } ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p \min } | } { \| H \| _ { s , \max } + ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p \min } | } \right \} ,
+$$
+
+where again γ ∈ (0, 1). Note that both conditions are polynomial vanishing in the number of qubits under mild assumptions. Indeed, if the parameters of the problem are polynomial in the number of qubits, i.e. gmax,M, ∥H∥max ∈ Θ(poly(n)), |∆gapmin| ∈ Θ(1/poly(n)), then the threshold conditions will also be vanishing polynomially at worst, i.e. rt ∈ Θ(1/poly(n)).
+
+To simplify the notation further down the line, we introduce the following definitions
+
+$$
+r _ { t _ { 1 } } = & \gamma \min _ { j , k } \frac { 4 g _ { 1 } ^ { 2 } ( x _ { j } ) g _ { 1 } ^ { 2 } ( x _ { k } ) } { 4 5 h _ { 6 } ( x _ { j } , x _ { k } ) } \\
+$$
+
+$$
+r _ { t _ { 2 } } ^ { 2 } = & \gamma \frac { 3 } { g _ { \min } ^ { 2 } ( M - 1 ) } \frac { \widetilde { \gamma } ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p \min } | } { \| H \| _ { s , \min } + ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p \min } | }
+$$
+
+denoting the two limiting thresholds for r as rt1 , rt2 .
+
+Now we are equipped to recover Eq. (C55) and simplify the expression in the regime that α ∼ D(0, rt)
+
+$$
+V a r _ { \alpha \sim \mathcal { D } ( 0 , r ) } [ \mathcal { L } ( \alpha ) ] \geq & \frac { 1 } { N ^ { 2 } } \sum _ { j , k } ^ { N } h ( x _ { j } , x _ { k } ) \left \langle \psi | ( H _ { \text {eff} } ( x _ { j } ) - P _ { 1 } H _ { \text {eff} } ( x _ { j } ) P _ { 1 } ) | \psi \rangle
+$$
+
+$$
+\cdot \langle \psi | ( H _ { \text {eff} } ( x _ { k } ) - P _ { 1 } H _ { \text {eff} } ( x _ { k } ) P _ { 1 } ) | \psi \rangle
+$$
+
+$$
+\geq & \frac { 1 } { N ^ { 2 } } \min _ { x _ { j } , x _ { k } } h ( x _ { j } , x _ { k ^ { \prime } } ) \sum _ { j , k } ^ { N } \langle \psi | ( H _ { \text {eff} } ( x _ { j } ) - P _ { 1 } H _ { \text {eff} } ( x _ { j } ) P _ { 1 } ) | \psi \rangle \\
+$$
+
+$$
+\cdot \langle \psi | ( H _ { \text {eff} } ( x _ { k } ) - P _ { 1 } H _ { \text {eff} } ( x _ { k } ) P _ { 1 } ) | \psi \rangle
+$$
+
+$$
+\langle | ( x ^ { N } \ e ^ { ( x ) } - P _ { N } ( x ^ { N } ) ^ { 1 / 7 } | \rangle & & ( 1 ) ^ { 2 } \\ = & \frac { 1 } { N ^ { 2 } } \min _ { x _ { j } , x _ { k ^ { \prime } } } h ( x _ { j ^ { \prime } } , x _ { k ^ { \prime } } ) \left ( \sum _ { j } ^ { N } \, \langle \psi | ( H _ { \text {eff} } ( x _ { j } ) - P _ { 1 } H _ { \text {eff} } ( x _ { j } ) P _ { 1 } ) | \psi \rangle \right ) ^ { 2 } .
+$$
+
+In the first inequality, we just recovered Eq. (C55). In the second inequality we used that all the terms in the sum are positive. Therefore, the function h can be pulled out of the sum, and we lower bound the expression by the minimum value o h multiplied by the sum of the expectation-value terms. We also used that ∑j,k ajak = (∑j aj )2 .
+
+Now we can analyze the two terms in Eq. (C134) separately. First, we analyze the function minxj′ ,xk′ h(xj ′ , xk′):
+
+$$
+\min _ { x _ { j } , x _ { k } } h ( x _ { j } , x _ { k ^ { \prime } } ) \geqslant & r _ { t } ^ { 4 } \left ( \frac { 4 } { 4 5 } g _ { 1 } ^ { 2 } ( x _ { j } ) g _ { 1 } ^ { 2 } ( x _ { k } ) - h _ { 6 } ( x _ { j } , x _ { k } ) r _ { t } ^ { 2 } \right )
+$$
+
+$$
+\geqslant & r _ { t _ { 2 } } ^ { 4 } \left ( \frac { 4 } { 4 5 } g _ { 1 } ^ { 2 } ( x _ { j } ) g _ { 1 } ^ { 2 } ( x _ { k } ) - h _ { 6 } ( x _ { j } , x _ { k } ) r _ { t } ^ { 2 } \right ) \in \Omega \left ( 1 / \text {Poly} ( \mathbf n ) \right ) ,
+$$
+
+where we used that rt ∈ Ω(1/Poly(n)) as all the terms in Eq. (C127) are polynomial (and non zero). Furthermore, we used that rt2 < rt1 . We analyze further the term:
+
+$$
+\left ( \frac { 4 } { 4 5 } g _ { 1 } ^ { 2 } ( x _ { j } ) g _ { 1 } ^ { 2 } ( x _ { k } ) - h _ { 6 } ( x _ { j } , x _ { k } ) r _ { t } ^ { 2 } \right ) & \begin{cases} = ( 1 - \gamma ) \frac { 4 } { 4 5 } g _ { 1 } ^ { 2 } ( x _ { j } ) g _ { 1 } ^ { 2 } ( x _ { k } ) \in \Omega \left ( 1 / \text {Poly} ( n ) \right ) \text { if } r _ { t } = r _ { t _ { 1 } } \\ > ( 1 - \gamma ) \frac { 4 } { 4 5 } g _ { 1 } ^ { 2 } ( x _ { j } ) g _ { 1 } ^ { 2 } ( x _ { k } ) \in \Omega \left ( 1 / \text {Poly} ( n ) \right ) \text { if } r _ { t } = r _ { t _ { 2 } } , \end{cases} \quad ( C 1 3 7 )
+$$
+
+where we used that if the threshold value is rt = γminj,k 4g2 1 (xj )g2 1 (xk) 45h6(xj,xk) , then we can easily compute the value. Otherwise, it would imply that rt is smaller than γminj,k 4g2 1 (xj )g2 1 (xk) 45h6(xj,xk) , therefore, the quantity 4 45 g2 1 (xj )g2 1 (xk) - h6(xj , xk)r2 t will be larger than in the previous case.
+
+Let us now focus on the other term in Eq. (C134), i.e. the sum over the different expected values. Particularly,
+
+$$
+\frac { 1 } { N ^ { 2 } } \left ( \sum _ { j } ^ { N } \, \langle \psi | ( H _ { e f f } ( x _ { j } ) - P _ { 1 } H _ { e f f } ( x _ { j } ) P _ { 1 } ) | \psi \rangle \right ) ^ { 2 } \geqslant & \frac { 1 } { N ^ { 2 } } \left ( \sum _ { j = 1 } ^ { N - 1 } K _ { + } ^ { ( j ) } ( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { g } ^ { ( j ) } + K _ { + } ^ { ( N ) } \left ( \Delta _ { g a p } ^ { ( N - 1 ) } ( 1 - 2 \epsilon ^ { 2 } ) \right ) & ( C 1 3 8 )
+$$
+
+$$
++ \left | \Delta x | M \max _ { l } | \partial _ { x } g _ { l } ( x ) | ( \| H ( x _ { N } ) \| _ { s } + | \Delta x | \| H _ { 1 } \| _ { s } ) + \| H _ { 1 } \| _ { s } | \Delta x | \right ) \\
+$$
+
+$$
++ \sum _ { j = 1 } ^ { N } ( 1 - K _ { + } ^ { ( j ) } ) \| H ( x _ { j } ) \| _ { s } \right ) ^ { 2 }
+$$
+
+$$
+\geqslant & \frac { 1 } { N ^ { 2 } } \left ( \sum _ { j = 1 } ^ { N - 1 } K _ { + } ^ { ( j ) } ( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { g } ^ { ( j ) } + K _ { + } ^ { ( N ) } \left ( \Delta _ { g a p } ^ { ( N - 1 ) } ( 1 - 2 \epsilon ^ { 2 } ) \widetilde { \gamma } & ( C 1 4 1 )
+$$
+
+$$
++ \sum _ { j = 1 } ^ { N } ( 1 - K _ { + } ^ { ( j ) } ) \| H ( x _ { j } ) \| _ { s } \Big ) ^ { 2 }
+$$
+
+$$
+\geq & \frac { 1 } { N ^ { 2 } } \left ( \sum _ { j = 1 } ^ { N } K _ { + } ^ { ( j ) } \widetilde { \gamma } ( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { g a p \min } + \sum _ { j = 1 } ^ { N } ( 1 - K _ { + } ^ { ( j ) } ) \| H ( x _ { j } ) \| _ { s } \right ) ^ { 2 } \ \ ( C 1 4 3 )
+$$
+
+$$
+\geqslant \left ( \left ( 1 - \frac { g _ { \max } ^ { 2 } ( x _ { j } ) r _ { t } ^ { 2 } ( M - 1 ) } { 3 } \right ) \widetilde { \gamma } ( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { g a p \min } \right )
+$$
+
+$$
++ \, \frac { g _ { \max } ^ { 2 } ( x _ { j } ) r _ { t } ^ { 2 } ( M - 1 ) } { 3 } \| H _ { \max } \| _ { s } \Big ) ^ { 2 } .
+$$
+
+In the first inequality we lower bounded this expected values by the bounds obtained before, specifically the expressions in Eqs. (C71, C107). Note that these equations provide upper bounds on negative quantities and therefore correspond to lower bounds on their absolute values. In the second inequality, we substitute the lower bound for ∆x found in Eq. (C112). In the second-to-last inequality we lower bounded the ∆(j) gap by the minimum gap. Finally, in the last inequality we lower-bounded the K+ with the lower-bound introduced in Eq. (C76). We can then analyze the resulting scaling as a function of rtexactly the same way as in Eq. (C137), obtaining
+
+$$
+\left | \widetilde { \gamma } ( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { g a p \min } + \frac { g _ { \max } ^ { 2 } ( x _ { j } ) r _ { t } ^ { 2 } ( M - 1 ) } { 3 } ( \| H _ { \max } \| _ { s } - ( 1 - \widetilde { \gamma } ) ( 1 - 2 \epsilon ^ { 2 } ) \Delta _ { g a p \min } ) \right |
+$$
+
+$$
+\begin{cases} = ( 1 - \gamma ) ( 1 - \widetilde { \gamma } ) ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p \min } | \in \Omega ( 1 / \text {Poly} ( n ) ) \\ \geq ( 1 - \gamma ) ( 1 - \widetilde { \gamma } ) ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { g a p \min } | \in \Omega ( 1 / \text {Poly} ( n ) ) . \end{cases}
+$$
+
+We recall that ∆gapmin < 0, which is why we take the absolute value: the entire term is negative. Therefore, we can recover Eq. (C134), and lower bound it by polynomially vanishing terms. In particular, by combining the lower bounds on the two quantities that appear in the sum, as calculated in Eqs. (C137,C146), we obtain
+
+$$
+\text {Var} _ { \alpha \sim \mathcal { D } ( 0 , r ) } [ \mathcal { L } ( \alpha ) ] \geqslant ( 1 - \gamma ) \frac { 4 r _ { t _ { 2 } } ^ { 4 } } { 4 5 } g _ { 1 } ^ { 2 } ( x _ { j } ) g _ { 1 } ^ { 2 } ( x _ { k } ) ( 1 - \gamma ) ( 1 - \widetilde { \gamma } ) ( 1 - 2 \epsilon ^ { 2 } ) | \Delta _ { \text {gap min} } | \in \Omega \left ( 1 / \text {Poly} ( n ) \right ) .
+$$
+
+## Appendix D: Synthetic shot-noise model
+
+In this work we study training landscapes and scaling trends under finite-sampling conditions. On quantum hardware, expectation values are not accessed exactly, but rather they are estimated from a finite number of measurement shots, which introduces a stochastic error (shot noise). Simulating this effect is important if we want realistic loss fluctuations and fair comparisons across problem sizes and parameter counts at fixed measurement resources. However, explicitly sampling measurement outcomes at every optimization step adds a substantial computational overhead when we scale the number of qubits and repeat the procedure over many instances and training steps. To keep the study scalable while preserving the correct finite-shot statistics, we use a synthetic shot-noise model that injects the corresponding fluctuations at the expectation-value level.
+
+Concretely, our cost functions are expectation values of Hamiltonians that can be expressed as weighted sums of Pauli strings,
+
+$$
+H ( \mathbf x ) = \sum _ { \alpha = 1 } ^ { N _ { t e r m s } } c _ { \alpha } ( \mathbf x ) \, P _ { \alpha } , \quad P _ { \alpha } ^ { 2 } = \mathbf 1 ,
+$$
+
+where Pα are Pauli operators, and cα(x) are the Hamiltonian coefficients that may depend on x. Suppose we partition the index set into G disjoint measurement groups {I1, . . . , IG} (with Ig ∩Ig′ = ∅ for g ̸= g′ and ∪gIg = {1, . . . , Nterms}). Define the grouped operators
+
+$$
+H _ { g } ( x ) \coloneqq \sum _ { \alpha \in \mathcal { I } _ { g } } c _ { \alpha } ( x ) \, P _ { \alpha } , \quad H ( x ) = \sum _ { g = 1 } ^ { G } H _ { g } ( x ) .
+$$
+
+For a (pure or mixed) state ρ(θ, x) the exact loss is
+
+$$
+\mathcal { L } ( \theta ; x ) \colon = \text {Tr} \left [ \rho ( \theta , x ) \, H ( x ) \right ] = \sum _ { g = 1 } ^ { G } \mathcal { L } _ { g } ( \theta ; x ) , \quad \mathcal { L } _ { g } ( \theta ; x ) \colon = \text {Tr} \left [ \rho ( \theta , x ) \, H _ { g } ( x ) \right ] ,
+$$
+
+where each group g ∈ {1, . . . ,G} collects Pauli terms that are estimated using the same measurement setting (i.e., the same choice of local measurement bases, or equivalently the same "measurement circuit" up to single-qubit basis changes). In a shot-based implementation, the contributions Lg are therefore obtained from independent batches of measurements, with a group-dependent shot budget Sg (or, more generally, an allocation {Sα}α∈Ig within the group).
+
+This measurement-group structure is the reason we model finite-shot fluctuations at the group level : for each evaluation of Lg(θ; x) we draw a single random fluctuation ξg and define a synthetic estimator
+
+$$
+\widehat { \mathcal { L } } _ { g } ( \theta ; x ) \coloneqq \mathcal { L } _ { g } ( \theta ; x ) + \xi _ { g } , \quad \xi _ { g } \sim \mathcal { N } ( 0 , V _ { g } ( \theta ; x ) ) ,
+$$
+
+where Vg(θ; x) is chosen to reproduce the leading-order shot-noise variance of the group estimator. Under the standard assumption that different terms in the group are estimated from independent shot sets (or that intra-group covariances are negligible), one has
+
+$$
+V _ { g } ( \theta ; x ) \approx \sum _ { \alpha \in \mathcal { I } _ { g } } c _ { \alpha } ( x ) ^ { 2 } \ V a r [ \widehat { \langle P _ { \alpha } \rangle } _ { \theta , x } ] = \sum _ { \alpha \in \mathcal { I } _ { g } } c _ { \alpha } ( x ) ^ { 2 } \, \frac { 1 - \langle P _ { \alpha } \rangle _ { \theta , x } ^ { 2 } } { S _ { \alpha } } ,
+$$
+
+with Sα the number of shots allocated to term Pα (e.g., Sα = Sg/|Ig| for uniform allocation). Finally, drawing {ξg}Gg=1 independently across groups (reflecting independent measurement settings), we define the synthetic shot-noisy loss
+
+$$
+\widehat { \mathcal { L } } ( \theta ; x ) \coloneqq \sum _ { g = 1 } ^ { G } \widehat { \mathcal { L } } _ { g } ( \theta ; x ) = \mathcal { L } ( \theta ; x ) + \sum _ { g = 1 } ^ { G } \xi _ { g } ,
+$$
+
+which satisfies E[ ̂ L] = L and Var[ ̂ L] ≈ ∑Gg=1 Vg by construction.
+
+Equivalently, one may write the group estimator in the "standard normal" form
+
+$$
+\widehat { \mathcal { L } } _ { g } ( \theta ; \mathbf x ) = \mathcal { L } _ { g } ( \theta ; \mathbf x ) + \sqrt { V _ { g } ( \theta ; \mathbf x ) } \, \zeta _ { g } , \quad \zeta _ { g } \sim \mathcal { N } ( 0 , 1 ) ,
+$$
+
+which is identical to the previous expression since √V gζg ∼ N(0, Vg). In practice, each time the optimizer requests a loss evaluation (either to compute ̂ L itself or as part of a gradient-estimation rule such as parameter shift), we draw independent {ζg}Gg=1 . This matches the shot-based setting, where each circuit evaluation corresponds to an independent batch of measurement outcomes. Importantly, gradients are obtained by applying the same finite-shot procedure to the noisy loss evaluations (e.g., combining two independently noised shifted losses in the parameter-shift rule), so that the resulting gradient estimator remains unbiased, E[̂ ∇θL] = ∇θL, rather than by differentiating through a fixed realization of the random fluctuations.

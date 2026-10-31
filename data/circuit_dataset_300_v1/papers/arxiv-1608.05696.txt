@@ -1,0 +1,1126 @@
+## I Introduction
+
+Simulation of quantum systems was one of the first applications of quantum computers, proposed by Manin [1] and Feynman [2] in the early 1980s. Using the Lie-Trotter-Suzuki product formula [3], Lloyd demonstrated the feasibility of this proposal in 1996 [4]; since then a variety of quantum algorithms for quantum simulation have been developed [5, 6, 7, 8, 9, 10, 11, 12, 13], with applications ranging from quantum chemistry to quantum field theories to spin models [14, 15, 16, 17].
+
+Until recently, all quantum algorithms for quantum simulation were based on implementing the time-evolution operator as a product of unitary operators, as in Lloyd’s work using the Lie-Trotter-Suzuki product formula. A different avenue that has become popular recently is the idea of deviating from such product formulas and instead using linear combinations of unitary matrices to simulate time evolution [18, 19, 20, 21]. This strategy has led to improved algorithms that have query complexity sublogarithmic in the desired precision, which is not only super-polynomially better than any previous algorithm but also optimal.
+
+Of the many methods proposed so far, we focus here on the BCCKS algorithm which employs a truncated Taylor series to simulate quantum dynamics [20]. The algorithm has been applied to yield new algorithms for several problems, including linear systems [22], Gibbs sampling [23], and simulating quantum chemistry in second quantization [24] as well as in the configuration interaction representation [25]. For this reason, it has become a mainstay method in quantum simulation and beyond.
+
+The algorithms in [24, 25] build on a body of work on the simulation of quantum chemistry using quantum computers: following the introduction of Aspuru-Guzik et al.’s original algorithm for quantum simulation of chemistry in second quantization [15], Wecker et al. [26] determined the first estimates on the gate count required for it; these estimates were reduced through a better understanding of the errors involved and their origins, and the algorithm improved in several subsequent papers [27, 28, 29, 30, 31]. All these papers focused on second-quantized simulation: only a handful have considered the problem of simulating chemistry or physics in position space.
+
+The reason for this is that second-quantized simulations require very few (logical) qubits. Important molecules, such as ferredoxin or nitrogenase, responsible for energy transport in photosynthesis and nitrogen fixation, could be studied on a quantum computer using on the order of $100$ qubits using such methods. Simulations that are of great value both scientifically and industrially could be simulated using a small quantum computer using these methods. By contrast, even if only $32$ bits of precision are used to store each coordinate of the position of an electron in a position space simulation then methods such as [32, 33, 34, 35] would require $96$ qubits just to store the position of a single electron. Since existing quantum computers typically have fewer than $20$ qubits, such simulations have garnered much less attention because they are challenging to perform in existing hardware.
+
+However, there are several potential advantages to position space simulations. Most notably, these methods potentially require fewer gates than second-quantized methods. In particular, Kassal et al. found that position space simulation is both more efficient and accurate for systems with more than $\sim\!4$ atoms. This is also important because the more gates an algorithm needs, the more physical qubits it requires to implement in hardware. This potentially allows position space simulation to have advantages in space, time, and accuracy over second-quantized simulations once fault-tolerant quantum computing comes of age [36]. For these reasons, research has begun to delve more deeply into such simulations in recent years.
+
+Recent work by Somma has investigated the simulation of harmonic and quartic oscillators using Lie-Trotter-Suzuki formulas [37, 38]. This work highlights the challenges faced when trying to go beyond previous work using recent linear combination-based approaches [19, 21], because the complexity of such methods depends on the norm of the Hamiltonian, which is unbounded. This work highlights the fact that going beyond the Lie-Trotter-Suzuki formalism for these continuous simulations, as well as simulations of the Coulomb Hamiltonian, is not a straightforward extension of previous work.
+
+However, a subject not considered in past literature is the errors incurred by discretizing a continuous system into a uniform mesh, a prerequisite for existing such quantum simulation algorithms. We revisit the encoding of Wiesner and Zalka [32, 33, 34] as used in Lidar and Wang as well as Kassal et al.’s works, conducting a rigorous analysis of the errors involved in discretizing the wave function of a many-particle system, and determining the number of grid points necessary for simulation to arbitrary precision. We find that these errors scale exponentially in the number of particles in the worst case, give an example of a wave function with this worst-case scaling, and finally discuss which cases we expect to be simpler. Further, we present an algorithm for position space quantum simulation of interacting particles using the BCCKS truncated Taylor series method [20]. Our algorithm uses arbitrary high-order finite difference formulae [39] to suppress the errors in the kinetic energy operator with only polynomial complexity, which seems challenging for approaches based on the quantum Fourier transform.
+
+This paper is structured as follows. In Section II we outline our results. We review the BCCKS Taylor series algorithm in Section III. Section IV details the approximations to the Hamiltonian which we make, including imposing bounds on the potential energy and its derivatives, as well as the high-order finite difference approximation to the kinetic energy operator. In Section V, we discuss the problem of applying terms from the decomposition of the Hamiltonian into a linear combination of unitary operators. Section VI presents the complexity of evolving under the Hamiltonian. Finally, in Section VII we discuss the various errors incurred by discretizing a continuous system (under various assumptions) and what is required to control them.
+
+## II Summary of results
+
+Here we focus on simulating the dynamics of systems that have a fixed number of particles $\eta$ in $D$ dimensions, interacting through a spatially varying potential energy function $V(x):\mathbb{R}^{\eta D}\mapsto\mathbb{R}$. We further assume that the simulation is performed on a bounded hypertorus: $x\in[0,L]^{\eta D}$. In practice the assumption of periodic boundary conditions is just to simplify the construction of our approximate Hamiltonian, and non-periodic boundary conditions can be simulated by choosing the space $[0,L]^{\eta D}$ to be appropriately larger than the dynamically accessible space for the simulation.
+
+Under the above assumptions, we can express the Hamiltonian for the continuous system as
+
+$$
+H=T+V, \tag{1}
+$$
+
+where $T=-\sum_{i}\frac{\nabla_{i}^{2}}{2m_{i}}$ is the usual kinetic energy operator and $V=V(x)$ is some position-dependent potential energy operator, with $m_{i}$ the mass of the $i^{\text{th}}$ particle and $\nabla_{i}^{2}=\sum_{n}\frac{\partial^{2}}{\partial{x_{i,n}}^{2}}$ for $x\in[0,L]^{\eta D}$. $i$ indexes the $\eta$ particles, and $n$ indexes the $D$ dimensions. We begin with the definition of the finite difference approximation [39] to the kinetic energy operator. The kinetic operator in the Hamiltonian is not bounded, which means that simulation is under most circumstances impossible without further approximation. We address this by discretizing the space and defining a discrete kinetic operator as follows.
+
+**Definition 1.**
+
+Let $S_{i,n}$ be the centered finite difference approximation of order $2a$ and spacing $h$ to the kinetic energy operator for the $i^{\text{th}}$ particle along the $n^{\text{th}}$ dimension, and let $\tilde{T}=\sum_{i,n}\left(S_{i,n}-\frac{d_{2a+1,j=0}}{2m_{i}h^{2}}\mathds{1}\right)$, where $d_{2a+1,j=0}=-\sum_{j=-a,j\neq 0}^{a}d_{2a+1,j}$, with
+
+$$
+d_{2a+1,j\neq 0}=\frac{2(-1)^{a+j+1}(a!)^{2}}{(a+j)!(a-j)!j^{2}}. \tag{2}
+$$
+
+Our kinetic energy operator differs from the usual discretized operator by a term proportional to the identity, $D\sum_{i}\frac{d_{2a+1,j=0}}{2m_{i}h^{2}}\mathds{1}$. Since the identity commutes with the remainder of the Hamiltonian, it does not lead to an observable difference in the dynamics and we thus neglect it from the simulation. In cases where the user wishes to compute characteristic energies for the system, this term can be classically computed and added to the final result after the simulation.
+
+In order to make this process tractable on a quantum computer, we make a further discretization of the space into a mesh of hypercubes and assume that the value of the wave function is constant within each hypercube. We take this mesh to be uniform for simplicity and assume that each of the $D$ spatial dimensions is discretized into $b$ points. We further define the side length of the hypercubes to be $h:=L/b$.
+
+**Definition 2.**
+
+Let $S=[0,L]^{\eta D}$ and let $\{\mathcal{D}_{j}:j=1,\dotsc,b^{\eta D}\}$ be a set of hypercubes that comprise a uniform mesh of $S$, let $\{y_{j}:j=1,\dotsc,b^{\eta d}\}$ be their centroids, and let $y:x\mapsto{\rm argmin}_{u\in\{y_{j}\}}\|x-u\|$ if the argmin is unique and define it to be the minimum index of the $y_{j}$ terms in the argmin if it is not. We then define the discretized Hamiltonian via
+
+1. $\tilde{V}:\mathbb{R}^{\eta D}\mapsto\mathbb{R}$ is defined such that $\tilde{V}(x)=V(y(x))$.
+2. $\tilde{H}:=\tilde{T}+\tilde{V}$.
+
+Figure 1 illustrates the hypercubes $\{\mathcal{D}_{j}\}$ and their centroids $\{y_{j}\}$ for a single particle with $b=5$ bins in $D=2$ dimensions.
+
+The computational model that we use to analyze the Hamiltonian evolution is an oracle query model wherein we assume a universal quantum computer that has only two costly operations. The first operation is the computation of the potential energy $\tilde{V}(x)$, which we cost at one query. Furthermore, we will express our kinetic operator, approximated using finite difference formulas, as a sum of unitary adders. As such, we take the cost of applying one adder to the state to also be one query. All other resources, including initial state preparation, are assumed to be free in this analysis.
+
+With these definitions in hand we can state our main theorem, which provides an upper bound on the complexity of simulating such a discrete system (in a finite-dimensional Hilbert space) using the BCCKS Taylor series technique:
+
+**Theorem 3 (Discrete simulation).**
+
+Let $V$ be some position-dependent potential energy operator such that its max norm, $\|V(x)\|_{\infty}$, is bounded by $V_{\max}$, let $\tilde{H}$ be the discretized $\eta$-particle Hamiltonian in Definition 2 with the potential energy operator $\tilde{V}(x)=V(y(x))$, and let $m$ be the minimum mass of any particle. We can simulate time-evolution under $\tilde{H}$ of the discretized wave function $\psi(y(x))$, $e^{-i\tilde{H}t}\psi(y(x))$, for time $t>0$ within error $\epsilon>0$ with
+
+$$
+O\left(\left(\frac{\eta D}{mh^{2}}+V_{\max}\right)t\left[\frac{\log\left(\frac{\eta Dt}{mh^{2}\epsilon}+\frac{V_{\max}t}{\epsilon}\right)}{\log\left(\log\left(\frac{\eta Dt}{mh^{2}\epsilon}+\frac{V_{\max}t}{\epsilon}\right)\right)}\right]\right)
+$$
+
+unitary adders and queries to an oracle for the potential energy.
+
+We will discuss a version of the Coulomb potential modified such that it is bounded, $V_{\text{Coulomb}}=\sum_{i<j}\frac{q_{i}q_{j}}{\sqrt{\|x_{i}-x_{j}\|^{2}+\Delta^{2}}}$, where $\Delta$ determines the maximum of the potential. For this potential, we can simulate discretized evolution under $\tilde{H}$ within error $\epsilon$ with
+
+$$
+O\left(\left(\frac{\eta D}{mh^{2}}+\frac{\eta^{2}q^{2}}{\Delta}\right)t\left[\frac{\log\left(\frac{\eta Dt}{mh^{2}\epsilon}+\frac{\eta^{2}q^{2}t}{\Delta\epsilon}\right)}{\log\left(\log\left(\frac{\eta Dt}{mh^{2}\epsilon}+\frac{\eta^{2}q^{2}t}{\Delta\epsilon}\right)\right)}\right]\right)
+$$
+
+unitary adders and queries to an oracle for potential energies, where $q$ is the maximum absolute charge of any particle.
+
+This shows that if $h\in\omega(\eta^{-1})$ then such a simulation can be performed in time that scales better with $\eta$ than the best known quantum simulation schemes in chemistry applications, for fixed filling fraction. However, this does not directly address the question of how small $h$ will have to be to provide good accuracy. The answer that we find is, in worst-case scenarios, that the value of $h$ needed can be exponentially small in the number of particles and can scale linearly with the error tolerance. This is summarized in the following theorem.
+
+**Theorem 4 (Discretizing continuous simulation).**
+
+Let $V$ and $\tilde{H}$ be as in Theorem 3 with the following additional assumptions:
+
+1. the max norms of the derivatives of $V$, $\|\nabla V(x)\|_{\infty}$, are bounded by $V_{\max}^{\prime}$,
+2. let $\psi(k):\mathbb{R}^{\eta D}\mapsto\mathbb{C}$ and $\psi(x):\mathbb{R}^{\eta D}\mapsto\mathbb{C}$ be conjugate momentum and position representations of the same $\eta$-particle wave function such that $e^{-iHs}\psi(k)$ and $e^{-i\tilde{H}s}\psi(k)$ are zero if $\|k\|_{\infty}>k_{\rm max}$ for all $s\in[0,t]$,
+3. $\psi(x)$ is smooth at all times during the evolution,
+4. $k_{\max}L>\pi(2e^{-1/3})^{2/\eta D}$.
+
+Then for any square integrable wave function $\phi:S\mapsto\mathbb{C}$, we can simulate evolution for time $t>0$ with the simulation error $\left|\int_{S}\phi^{*}(x)e^{-iHt}\psi(x)\,\mathrm{d}^{\eta D}x-\int_{S}\phi^{*}(x)e^{-i\tilde{H}t}\frac{\psi(y(x))}{\int_{S}|\psi(y(x))|^{2}\,\mathrm{d}^{\eta D}x}\,\mathrm{d}^{\eta D}x\right|\leq\epsilon$ by choosing
+
+$$
+h\leq\frac{2\epsilon}{3\eta D\left(k_{\max}+V^{\prime}_{\max}t\right)}\left(\frac{k_{\max}L}{\pi}\right)^{-\eta D/2},
+$$
+
+and using the $(2a+1)$–order divided difference formula in Definition 1 where
+
+$$
+a\in O\left(\eta D\log(k_{\max}L)+\log\left(\frac{\eta^{2}D^{2}tk_{\max}(k_{\max}+V^{\prime}_{\max}t)}{m\epsilon^{2}}\right)\right).
+$$
+
+The modified Coulomb potential satisfies $V_{\max}^{\prime}\leq\frac{\eta^{2}q^{2}\sqrt{3}}{9\Delta^{2}}$. With this potential,
+
+$$
+h\leq\frac{2\epsilon}{3\eta D\left(k_{\max}+\frac{\eta^{2}q^{2}t\sqrt{3}}{9\Delta^{2}}\right)}\left(\frac{k_{\max}L}{\pi}\right)^{-\eta D/2}. \tag{3}
+$$
+
+Since the simulation scales as $O(h^{-2})$, the fact that $h\in O^{\star}((k_{\max}L)^{-\eta D/2})$ suggests that, without further assumptions on the initial state and the Hamiltonian, the complexity of the simulation given by Theorem 4 may be exponential in $\eta D$. We further show in Section VII that this scaling is tight in that there are valid quantum states that saturate it. This indicates that there are important caveats that need to be considered before one is able to conclude, for example, that a position space simulation will be faster than a second-quantized simulation. However, it is important to note that such problems also implicitly exist with second-quantized simulations, or in other schemes such as configuration interaction, but are typically dealt with using intelligent choices of basis functions. Our work suggests that such optimizations may be necessary to make quantum simulations of certain continuous-variable systems practical.
+
+One slightly stronger assumption to consider is a stricter bound on the derivatives of the wave function. In Theorem 4, we assumed only a maximum momentum. Corollary 5 determines the value of $h$ necessary when we assume that $|\psi^{(r)}(x)|\in O(k_{\max}^{r}/(\sqrt{2r+1}L^{\eta D/2})))$. This assumption means that the wave function can never become strongly localized: it must at all times take a constant value over a large fraction of $S$. While this assumed scaling of the derivative of the wave function of $k_{\max}^{r}$ may seem pessimistic at first glance, it is in fact saturated for plane waves. Furthermore, physical arguments based on the exponential scaling of the density of states given from Kato’s theorem suggest that such scaling may also occur in low energy states of dilute electron gases. Regardless, we expect such scalings to be common and show below that this does not lead to the exponential scaling predicted by Theorem 4.
+
+**Corollary 5 (Discretization with bounded derivatives).**
+
+Assume in addition to Assumptions $1$–$3$ of Theorem 4 that, at all times, $|\psi^{(r)}(x)|\leq\beta k_{\max}^{r}/(\sqrt{2r+1}L^{\eta D/2}))$ for any non-negative integer $r$ where $\beta\in\Theta(1)$ and $hk_{\max}<e^{1/3}$. Then for any square integrable wave function $\phi:S\mapsto\mathbb{C}$, we can simulate evolution for time $t>0$ with the simulation error at most $\epsilon$ by choosing
+
+$$
+h\in O\left(\frac{\epsilon}{\eta D\left(k_{\max}+V^{\prime}_{\max}t\right)}\right),
+$$
+
+and
+
+$$
+a\in O\left(\log\left(\frac{\eta^{2}D^{2}tk_{\max}(k_{\max}+V^{\prime}_{\max}t)}{m\epsilon^{2}}\right)\right).
+$$
+
+Thus even if the derivatives of the wave function are guaranteed to be modest then our bounds show that the cost of performing the simulation such that the error, as defined via the inner product in Theorem 4, can be made arbitrarily small using a polynomial number of queries to the potential operator using low-order difference formulas. If we apply this method to simulate chemistry then the number of calls to an oracle that computes the pairwise potential (assuming $D$, $k_{\max}$ and $\Delta$ are fixed) scales as $\tilde{O}(\eta^{7}t^{3}/\epsilon^{2})$. This scaling is worse than the $\tilde{O}(\eta^{5}t\log(1/\epsilon))$ scaling that has been demonstrated for methods using a basis in first (assuming the number of orbitals is proportional to $\eta$) or second quantization [24, 25], which may cause one to question whether these methods actually have advantages for chemistry over existing methods.
+
+When drawing conclusions in comparing these results, it is important to consider what error metric is being used. To this end, Theorem 3 and Theorem 4 and Corollary 5 use very different measures of the error (as seen in Figure 2). The first strictly examines the error between the simulated system within the basis and the exact evolution that we would see within that basis. The latter two interpret the state within the quantum computer as a coarse-grained state in the infinite-dimensional simulation, and measure the error to be the maximum difference in any inner product that could be measured in the higher-dimensional space. This means that the $\tilde{O}(\eta^{7}t^{3}/\epsilon^{2})$ scaling should not be directly compared to the $\tilde{O}(\eta^{5}t\log(1/\epsilon))$ scaling seen in existing algorithms because the latter does not explicitly consider the error incurred by representing the problem in a discrete basis.
+
+Also, it is important to stress that Theorem 4 and Corollary 5 bound a different sort of error than that usually considered in the quantum simulation literature. In our setting, we assume a fixed spatial grid and allow the user to prepare an arbitrary initial state (modulo the promises made above about that state) and then discuss how badly the error can scale. Most simulations deviate from this approach because the user typically picks a basis that is tailored to not only the state but also the observable that they want to measure. Typical measurements include, for example, estimation of bond lengths or eigenvalues of the Hamiltonian. Unlike the wavefunction overlaps considered in our theorems, such quantities are not necessarily very sensitive to the number of hypercubes in the mesh. This means that while these scalings are daunting, they need not imply that such simulations will not be practical. Rather, they suggest that the costs of such simulations will depend strongly on the nature of the information that one wishes to extract and on the promises made about the behavior of the system.
+
+## III Hamiltonian simulation
+
+To exploit the Taylor series simulation techniques, we must be able to approximate the Hamiltonian $H$ by a linear combination of easily-applied unitary operators, that is, as
+
+$$
+H\approx\sum_{\chi}d_{\chi}V_{\chi}, \tag{4}
+$$
+
+where each $V_{\chi}$ is unitary, and $d_{\chi}>0$. Later, we will bound the error in this approximation. As in Definition 2, we will work with the Hamiltonian represented in position space
+
+$$
+H=T+V, \tag{5}
+$$
+
+where $T=-\sum_{i}\frac{\nabla_{i}^{2}}{2m_{i}}$ is the kinetic energy operator and $V=V(x)$ is the potential energy operator, with $\nabla_{i}^{2}=\sum_{n}\frac{\partial^{2}}{\partial{x_{i,n}}^{2}}$. Our goal, then, is to decompose this Hamiltonian as in Eq. (4), into a linear combination of easily-applied unitary operators that approximates the original Hamiltonian. One way of doing this is by decomposing it into a linear combination of 1-sparse unitary operators (unitary operators with only a single nonzero entry in each row or column); however, the unitary operators need not be 1-sparse in general.
+
+Because the potential energy operator $V=V(x)$ is diagonal in the position basis, we can decompose it into a sum of diagonal unitary operators which can be efficiently applied to arbitrary precision. The single-particle Laplacians $\nabla_{i}^{2}$ in the kinetic energy operator are more difficult: we will consider a decomposition of the kinetic energy operator, approximated using finite difference formulas, into a linear combination of unitary adder circuits. By decomposing the kinetic and potential energy operators into a linear combination of unitary operators to sufficient precision, we can decompose the Hamiltonian into unitary operators to any desired precision. The following section details how we decompose the potential and kinetic energy operators into a linear combination of unitary operators.
+
+Once we have decomposed the Hamiltonian into a linear combination of unitary operators which can be easily applied, as in Eq. (4), we employ the BCCKS truncated Taylor series method for simulating Hamiltonian dynamics [20]. We wish to simulate evolution under the Hamiltonian $H$ for time $t>0$, that is, to approximately apply the operator
+
+$$
+U(t)=\exp(-iHt) \tag{6}
+$$
+
+with error less than $\epsilon>0$. We divide the evolution time $t$ into $r$ segments of length $t/r$, and so require error less than $\epsilon/r$ for each segment.
+
+The key result of Ref. [20] is that time evolution in each segment can be approximated to within error $\epsilon/r$ by a truncated Taylor series, as
+
+$$
+U(t/r)=\exp(-iHt/r)\approx\sum_{k=0}^{K}\frac{1}{k!}(-iHt/r)^{k}, \tag{7}
+$$
+
+where, provided that we choose $\|H\|t$, we can take [20]
+
+$$
+K\in O\left(\frac{\log(r/\epsilon)}{\log\log(r/\epsilon)}\right). \tag{8}
+$$
+
+Expanding Eq. (7) using the form of the Hamiltonian in Eq. (4), we find that
+
+$$
+U(t/r)\approx\sum_{k=0}^{K}\sum_{\chi_{1},\dotsc,\chi_{k}}\frac{(-it/r)^{k}}{k!}d_{\chi_{1}}\dotsm d_{\chi_{k}}V_{\chi_{1}}\dotsm V_{\chi_{k}}. \tag{9}
+$$
+
+The sum for each $\chi_{i}$ is over all the terms in the decomposition of the Hamiltonian in Eq. (4). We collect the real coefficients in the sum into one variable, $c_{\alpha}=(t/r)^{k}/k!\prod_{k^{\prime}=1}^{k}d_{\chi_{k^{\prime}}}$, and the products of the unitary operators into a unitary operator $W_{\alpha}=(-i)^{k}\prod_{k^{\prime}=1}^{k}V_{\chi_{k^{\prime}}}$, where the multi-index $\alpha$ is
+
+$$
+\alpha=(k,\chi_{1},\chi_{1},\dotsc,\chi_{k}). \tag{10}
+$$
+
+We can then rewrite our approximation for $U(t/r)$ as
+
+$$
+U(t/r)\approx\sum_{\alpha}c_{\alpha}W_{\alpha}=W(t/r). \tag{11}
+$$
+
+Since each $V_{\chi}$ can be easily applied, so too can each $W_{\alpha}$, which are products of at most $K$ operators $V_{\chi}$. In Section VI, we will give the circuit for an operator $\textrm{select}(W)$ such that for any state $\mathinner{|{\psi}\rangle}$ and for any ancilla state $\mathinner{|{\alpha}\rangle}$,
+
+$$
+\textrm{select}(W)\mathinner{|{\alpha}\rangle}\mathinner{|{\psi}\rangle}=\mathinner{|{\alpha}\rangle}W_{\alpha}\mathinner{|{\psi}\rangle}. \tag{12}
+$$
+
+Given a circuit for applying the operators $W_{\alpha}$, we can apply the approximate unitary for a single segment $W(t/r)$ using oblivious amplitude amplification [20].
+
+First, we use a unitary $B$ which we define by its action on the ancilla zero state:
+
+$$
+B\mathinner{|{0}\rangle}=\frac{1}{\sqrt{c}}\sum_{\alpha}\sqrt{c_{\alpha}}\mathinner{|{\alpha}\rangle}, \tag{13}
+$$
+
+where $c=\sum_{\alpha}c_{\alpha}$ is the normalization constant $\sqrt{c}$ squared. Following this, we apply $\textrm{select}(W)$, and finally apply $B^{\dagger}$. Let us group these three operators into a new operator $A$, whose action on $\mathinner{|{0}\rangle}\mathinner{|{\psi}\rangle}$ is
+
+$$
+A\mathinner{|{0}\rangle}\mathinner{|{\psi}\rangle}=\frac{1}{c}\mathinner{|{0}\rangle}W(t/r)\mathinner{|{\psi}\rangle}+\sqrt{1-\frac{1}{c^{2}}}\mathinner{|{\phi}\rangle}, \tag{14}
+$$
+
+where $\mathinner{|{\phi}\rangle}$ is some state with the ancilla orthogonal to $\mathinner{|{0}\rangle}$.
+
+The desired state $W(t/r)\mathinner{|{\psi}\rangle}$ can be “extracted” from this superposition using oblivious amplitude amplification [19, 20]. When we allow for the fact that $W(t/r)$ may be slightly nonunitary, there are two conditions which must be satisfied in order to bound the error in oblivious amplitude amplification to $O(\epsilon/r)$ [19]: first, we must have that $|c-2|\in O(\epsilon/r)$, and second, we must have that
+
+$$
+\|U(t/r)-W(t/r)\|\in O(\epsilon/r), \tag{15}
+$$
+
+where here and in the remainder of the paper we take $\|\cdot\|$ to be the induced $2$–norm or spectral norm. The first condition can be satisfied by an appropriate choice of $r$, and the second is satisfied by our earlier choice $K\in O\left(\frac{\log(r/\epsilon)}{\log\log(r/\epsilon)}\right)$.
+
+In oblivious amplitude amplification, by alternating the application of $A$ and $A^{\dagger}$ with the operator $R=\mathds{1}-2P_{0}$ which reflects across the ancilla zero state (where $P_{0}$ is the projection operator onto the zero ancilla state), we construct the operator
+
+$$
+G=-ARA^{\dagger}RA, \tag{16}
+$$
+
+which, given that $|c-2|\in O(\epsilon/r)$ and $\|U(t/r)-W(t/r)\|\in O(\epsilon/r)$, satisfies
+
+$$
+\|P_{0}G\mathinner{|{0}\rangle}\mathinner{|{\psi}\rangle}-\mathinner{|{0}\rangle}U(t/r)\mathinner{|{\psi}\rangle}\|\in O(\epsilon/r). \tag{17}
+$$
+
+Thus, we can approximate evolution under the Hamiltonian $H$ for time $t/r$ with accuracy $O(\epsilon/r)$ by initializing the ancilla for each segment in the zero state, applying $P_{0}G$, and discarding the ancilla. By repeating this process $r$ times, we can approximate evolution under the Hamiltonian for time $t$ with accuracy $O(\epsilon)$.
+
+## IV Approximating the Hamiltonian
+
+In this section, we present the approximation of the continuous Hamiltonian $H$ which we will decompose into a sum of unitary operators. We apply one approximation to the potential energy operator and two to the kinetic energy operator. To the potential energy operator $V$, we impose a cutoff on the potential energy between two particles. For the kinetic energy operator we assume a maximum momentum $k_{\max}$, and also approximate the kinetic energy operator $T$ by a sum of high-order finite difference formulas for each particle and dimension. These approximations hold for both finite- and infinite-dimensional Hilbert spaces. We focus only on the discretized finite-dimensional case because we must ultimately discretize to determine the cost of a circuit that approximates evolution under the discretized Hamiltonian $\tilde{H}$ in Section V.
+
+Throughout, we employ a discrete position-basis encoding of the $\eta$-particle wave function $\psi(y(x))$. The position of each particle is encoded in $D$ registers specifying the $D$ components of that particle’s position in a uniformly spaced grid of side length $L$. Each spatial direction is discretized into $b$ bins of side length $h=L/b$. We represent the stored position of particle $i$ in the $n^{\text{th}}$ dimension by $\mathinner{|{x_{i,n}}\rangle}$, and use $\mathinner{|{x}\rangle}$ to represent the combined register storing the positions of all $\eta$ particles. Each of the coordinate registers $\mathinner{|{x_{i,n}}\rangle}$ is composed of $\lceil\log b\rceil$ qubits indexing which of the $b$ bins the particle is in. As such $\mathinner{|{x}\rangle}$ is composed of $\eta D\lceil\log b\rceil$ qubits.
+
+### IV.1 The potential energy operator
+
+We first discuss the approximation to the potential energy operator $V=V(x)$. This approximation affects $V(x)$ directly, and its discretized counterpart $\tilde{V}(x)=V(y(x))$ through Definition 2. We wish to decompose the potential energy operator into a sum of unitary operators approximating $V$. Because the potential energy operator is diagonal in the position basis, this decomposition is relatively straightforward. One simple way of approximating it as a sum of unitary operators is by writing it as a sum of signature matrices, that is, diagonal matrices whose elements are $+1$ or $-1$. This requires a number of signature matrices equal to the maximum possible norm of the potential energy operator.
+
+At this stage, the potential energy operator is unbounded, so we would need infinitely many signature matrices in the sum. To prevent infinities, we replace potentials of the form $\|x_{i}-x_{j}\|^{-k}$ with $1/(\sqrt{\|x_{i}-x_{j}\|^{2}+\Delta^{2}})^{k}$, with $\Delta>0$. For example, rather than the usual Coulomb potential $\sum_{i<j}\frac{q_{i}q_{j}}{\|x_{i}-x_{j}\|}$, where $x_{i}$ and $q_{i}$ are the $D$-dimensional position and charge of the $i^{\text{th}}$ particle, respectively, we instead use
+
+$$
+V_{\text{Coulomb}}=\sum_{i<j}\frac{q_{i}q_{j}}{\sqrt{\|x_{i}-x_{j}\|^{2}+\Delta^{2}}}. \tag{18}
+$$
+
+Let $q=\max_{i}|q_{i}|$. The modified Coulomb potential energy operator is bounded by
+
+$$
+\|V_{\text{Coulomb}}(x)\|_{\infty}\leq\frac{\eta(\eta-1)q^{2}}{2\Delta}. \tag{19}
+$$
+
+In general, we will denote the maximum value of the potential by $V_{\max}$. This means that we can approximate any bounded potential energy operator by a sum of $V_{\max}$ signature matrices. The modified Coulomb potential energy operator, for example, can be approximated by a sum of $\left\lceil\frac{\eta(\eta-1)q^{2}}{2\Delta}\right\rceil$ signature matrices. However, the error in this approximation is constant (specifically, it is at most $1$) and cannot be better controlled. We will address this issue when we discuss simulation in Section V.
+
+### IV.2 The kinetic energy operator
+
+In the previous subsection, we considered the problem of applying a cutoff to the potential energy operator to ensure that its norm is bounded. The kinetic energy operator has a similar problem in that its norm is not finite. Additionally, while the potential energy operator is diagonal in the position basis, the kinetic energy operator is not. This further complicates the problem of decomposing the kinetic energy operator into a linear combination of easily-applied unitary operators.
+
+We address these issues with two simplifications. First, we approximate the kinetic energy operator using arbitrary high-order central difference formulas for the second derivative [39]. Second, we work only with wave functions with a maximum momentum $k_{\max}$ such that $\psi(k)=0$ if $\|k\|_{\infty}\geq k_{\max}$. These two simplifications are linked, and, after determining a bound on the sum of the norms of the finite difference coefficients in Lemma 6, we will use that bound together with the momentum cutoff to bound the error incurred by the finite difference approximation in Theorem 7.
+
+We numerically approximate the Laplacian using a $(2a+1)$-point central difference formula for the second derivative of the $i^{\text{th}}$ particle’s position in each dimension $n$. The $(2a+1)$-point central difference formula for a single such coordinate is [39]
+
+$$
+\partial^{2}_{in}\psi(x)= h^{-2}\sum_{j=-a}^{a}d_{2a+1,j}\psi(x+jh\hat{e}_{i,n})+O_{2a+1}, \tag{20}
+$$
+
+where $\hat{e}_{i,n}$ is the unit vector along the $(i,n)$ component of $x$, $(x_{i,n}+jh\hat{e}_{i,n})$ is evaluated modulo the grid length $L$, and
+
+$$
+d_{2a+1,j\neq 0}=\frac{2(-1)^{a+j+1}(a!)^{2}}{(a+j)!(a-j)!j^{2}}. \tag{21}
+$$
+
+The $j=0$ coefficient is the opposite of the sum of the others, $d_{2a+1,j=0}=-\sum_{j=-a,j\neq 0}^{a}d_{2a+1,j}$.
+
+Surprisingly, the sum of the norms of the finite difference coefficients $d_{2a+1,j\neq 0}$ is bounded by a constant. We prove this fact below, and then use it to bound the error term $O_{2a+1}$.
+
+**Lemma 6.**
+
+The sum of the norms of the coefficients $d_{2a+1,j\neq 0}$ in the $(2a+1)$-point central finite difference formula is bounded above by $\frac{2}{3}\pi^{2}$ for $a\in\mathbb{Z}_{+}$.
+
+**Proof.**
+
+The sum of the norms of the coefficients is
+
+$$
+\sum_{j=-a,j\neq 0}^{a}\left|d_{2a+1,j}\right| =\sum_{j=-a,j\neq 0}^{a}\frac{2(a!)^{2}}{(a+j)!(a-j)!j^{2}}
+$$
+$$
+<\sum_{j=-\infty,j\neq 0}^{\infty}\frac{2}{j^{2}}
+$$
+$$
+=\frac{2\pi^{2}}{3},
+$$
+
+where in the second step we used the fact that $(a+j)!(a-j)!\geq(a!)^{2}$ for $|j|\leq a$ when $a\geq 1$, and extended the sum over $j$ up to infinity. ∎
+
+**Theorem 7.**
+
+Let $\psi(x)\in\mathbb{C}^{2a+1}$ on $x\in\mathbb{R}$ for $a\in\mathbb{Z}_{+}$. Then the error in the $(2a+1)$-point centered difference formula for the second derivative of $\psi(x)$ evaluated on a uniform mesh with spacing $h$ is at most
+
+$$
+|O_{2a+1}|\leq\frac{\pi^{3/2}}{9}e^{2a[1-\ln 2]}h^{2a-1}\max_{x}\left|\psi^{(2a+1)}(x)\right|. \tag{22}
+$$
+
+**Proof.**
+
+Using the expression for the error in Corollary 2.2 of Ref. [39] and the triangle inequality we have that
+
+$$
+|O_{2a+1}| \leq\frac{h^{2a-1}}{(2a+1)!}\max_{x}\left|\psi^{(2a+1)}(x)\right|\sum_{j=-a,j\neq 0}^{a}|d_{2a+1,j}||j|^{2a+1}
+$$
+$$
+\leq\frac{h^{2a-1}a^{2a+1}}{(2a+1)!}\max_{x}\left|\psi^{(2a+1)}(x)\right|\sum_{j=-a,j\neq 0}^{a}|d_{2a+1,j}|
+$$
+$$
+<\frac{2\pi^{2}h^{2a-1}a^{2a+1}}{3(2a+1)!}\max_{x}\left|\psi^{(2a+1)}(x)\right|, \tag{23}
+$$
+
+where we used Lemma 6 in the final step. Using Stirling’s approximation and the fact that $a\in\mathbb{Z}_{+}$ and hence $a\geq 1$ we have that
+
+$$
+\frac{a^{2a+1}}{(2a+1)!}\leq\frac{\sqrt{a}e^{2a[1-\ln 2]}}{2(2a+1)\sqrt{\pi}}\leq\frac{e^{2a[1-\ln 2]}}{6\sqrt{\pi}}, \tag{24}
+$$
+
+and then we find by substituting the result into Eq. (23) that
+
+$$
+|O_{2a+1}| \leq\frac{\pi^{3/2}}{9}e^{2a[1-\ln 2]}h^{2a-1}\max_{x}\left|\psi^{(2a+1)}(x)\right|. \tag{25}
+$$
+
+∎
+
+We approximate the kinetic energy operator $T=-\sum_{i,n}\frac{1}{2m_{i}}\partial_{i,n}^{2}$ using this finite difference formula. By choosing $a$ sufficiently large, we can do this to arbitrary precision assuming $\psi(x)$ is smooth and that its derivatives, $\partial_{x}^{p}\psi(x)$, grow at most exponentially in magnitude with $p$.
+
+## V Applying the Hamiltonian
+
+We approximate the discretized Hamiltonian $\tilde{H}$ by a linear combination of easily-applied unitary operators as in Eq. (4). To approximate $\tilde{H}$ to arbitrary precision while keeping the operators $V_{\chi}$ simple (i.e. only signature matrices and adders), we will in fact approximate the scaled Hamiltonian $M\tilde{H}$ by a linear combination of unitary operators, i.e.,
+
+$$
+M\tilde{H}\approx\sum_{\chi}d_{\chi}V_{\chi}, \tag{26}
+$$
+
+where $M>0$ determines the precision to which the sum, divided by $M$, approximates $\tilde{H}$. Then, rather than simulating evolution under the Hamiltonian $\tilde{H}$ for time $t$, we instead simulate evolution of $\psi(y(x))$ under the scaled Hamiltonian $M\tilde{H}$ for time $t/M$. In Section III, we discussed how to simulate evolution when the Hamiltonian is a linear combination of unitary operators using two operators: $\textrm{select}(W)$ (Eq. (12)), which maps $\mathinner{|{\alpha}\rangle}\mathinner{|{\psi}\rangle}\mapsto\mathinner{|{\alpha}\rangle}W_{\alpha}\mathinner{|{\psi}\rangle}$, where $\sum_{\alpha}c_{\alpha}W_{\alpha}$ approximates $U(t/r)$, and $B$ (Eq. (13)), which maps $\mathinner{|{0}\rangle}\mapsto\frac{1}{\sqrt{c}}\sum_{\alpha}\sqrt{c_{\alpha}}\mathinner{|{\alpha}\rangle}$, where $c=\sum_{\alpha}c_{\alpha}$ is the normalization constant $\sqrt{c}$ squared [20].
+
+As in Ref. [20], we construct $\textrm{select}(W)$ using $K$ copies of an operator $\textrm{select}(V)$ which chooses a single unitary operator $V_{\chi}$ from the sum Eq. (26) and applies it to the position register $\mathinner{|{x}\rangle}$. In this section, we construct the operator $\textrm{select}(V)$ so that it determines $V_{\chi}$ using an index register $\mathinner{|{\chi}\rangle}$. Its action is
+
+$$
+\textrm{select}(V)\mathinner{|{\chi}\rangle}\mathinner{|{x}\rangle}=\mathinner{|{\chi}\rangle}V_{\chi}\mathinner{|{x}\rangle}. \tag{27}
+$$
+
+Let us explain Eq. (27) in greater detail. We wish to approximately apply $M\tilde{H}=M(\tilde{T}+\tilde{V})$ to $\mathinner{|{x}\rangle}$. However, $M\tilde{H}$ is not in general unitary, so we approximate $M\tilde{H}$ by a linear combination of unitary operators $V_{\chi}$ to some precision, and then use products of that linear combination to simulate evolution under $M\tilde{H}$. This means that for simulation we must work with a superposition of the different states $\chi$ of the index register, weighted by the factors $d_{\chi}$.
+
+We show below that $M\tilde{H}$ can be approximated to arbitrary precision $\delta>0$ by a linear combination of unitary operators—specifically, adder circuits and signature matrices—with $|\{\chi\}|=2\eta Da+\left\lceil V_{\max}/\delta\right\rceil$ terms for a general potential bounded by $V_{\max}$. For the modified Coulomb potential this can be done with $2\eta Da+\left\lceil\frac{\eta(\eta-1)q^{2}}{2\Delta\delta}\right\rceil$ terms.
+
+**Lemma 8.**
+
+Let $V$ be some position-dependent potential energy operator bounded by $\|V(x)\|_{\infty}\leq V_{\max}$, where $V_{\max}\geq 0$. Let $\delta>0$, and let $\tilde{H}$ be the Hamiltonian in Definition 2, with the discretized potential energy operator $\tilde{V}(x)=V(y(x))$. We can approximate $\tilde{H}$ to accuracy $\delta$ by a linear combination of $2\eta Da$ addition circuits and $M\geq V_{\max}/\delta$ signature matrices, that is,
+
+$$
+\left\|\tilde{H}-\frac{1}{M}\sum_{\chi}d_{\chi}V_{\chi}\right\|\leq\delta,
+$$
+
+where $d_{\chi}>0$ and each $V_{\chi}$ is either a unitary adder or a signature matrix.
+
+**Proof.**
+
+$\tilde{T}$ is purely off-diagonal, and $\tilde{V}$ is purely diagonal. Furthermore, $\tilde{T}$ is a sum of the finite difference operators $S_{i,n}$ of Definition 1. From the central difference formula Eq. (20),
+
+$$
+M\tilde{T}=Mh^{-2}\sum_{i,n}\sum_{j=-a,j\neq 0}^{j=a}\frac{d_{2a+1,j}}{2m_{i}}A_{j}, \tag{28}
+$$
+
+where $A_{j}$ represents unitary addition by $j$, $A_{j}\mathinner{|{x_{i,n}}\rangle}=A_{j}\mathinner{|{(x_{i,n}+j)\!\!\!\mod b}\rangle}$. Because $\tilde{V}$ is purely diagonal, we can approximate $M\tilde{V}$ to precision $V_{\max}$ by
+
+$$
+M\tilde{V}\approx V_{\max}\sum_{j=1}^{M}S_{j}, \tag{29}
+$$
+
+where each $S_{j}$ is a signature matrix (a diagonal matrix whose elements are all $\pm 1$). With these decompositions, the Hamiltonian $M\tilde{H}$ is explicitly a linear combination of addition circuits and signature matrices.
+
+Let $d_{\chi}$ and $V_{\chi}$ be defined as in Eq. (28) and Eq. (29): for $0\leq\chi<2\eta Da$, $d_{\chi}=Mh^{-2}\frac{d_{2a+1,j}}{2m_{i}}$ and $V_{\chi}=A_{j}$, and for $2\eta Da\leq\chi<2\eta Da+M$, $d_{\chi}=V_{\max}$ and $V_{\chi}=S_{j}$. (We do not specify exactly the mapping between $\chi$ and $(i,n,j)$.) We consider the error in the diagonal of $\tilde{H}$, and then the error in the off-diagonal. The diagonal of $M\tilde{H}$ is $M\tilde{V}$; it is approximated by the sum $\sum_{\chi\geq 2\eta Da}d_{\chi}V_{\chi}$. The off-diagonal matrix elements of $M\tilde{H}$ are $M\tilde{T}$ and are given exactly by the sum $\sum_{\chi<2\eta Da}d_{\chi}V_{\chi}$, so the error in the off-diagonal is zero. Thus, the error in approximating $M\tilde{H}$ is only the error in approximating $M\tilde{V}$. As in Eq. (29), the error in approximating $M\tilde{V}$ is at most $V_{\max}$, so the error in approximating $\tilde{V}$, and hence $\tilde{H}$, is at most $V_{\max}/M$. Choosing $M\geq V_{\max}/\delta$ then ensures that
+
+$$
+\left\|\tilde{H}-\frac{1}{M}\sum_{\chi}d_{\chi}V_{\chi}\right\|_{\max}\leq\delta. \tag{30}
+$$
+
+Finally our result follows from the fact that the max–norm and the spectral norm are equal for diagonal operators. ∎
+
+The modified Coulomb potential energy operator of Eq. (18) has $\|V_{\text{Coulomb}}\|_{\infty}\leq V_{\max}=\frac{\eta(\eta-1)q^{2}}{2\Delta}$, which implies that its discretized counterpart $\tilde{V}$ also satisfies $\|\tilde{V}\|_{\infty}\leq\frac{\eta(\eta-1)q^{2}}{2\Delta}$. Hence $M=\left\lceil\frac{\eta(\eta-1)q^{2}}{2\Delta\delta}\right\rceil\geq\lceil V_{\max}/\delta\rceil$ is sufficient by Lemma 8, and we can approximate $\tilde{H}$ with the potential $\tilde{V}(x)=V_{\text{Coulomb}}(y(x))$ to precision $\delta$ by a linear combination of $2\eta Da+\left\lceil\frac{\eta(\eta-1)q^{2}}{2\Delta\delta}\right\rceil$ terms. The index register $\mathinner{|{\chi}\rangle}$ must determine which of the $2\eta Da+M$ unitary operators to apply, so it must have at least $\lceil\log(2\eta Da+M)\rceil$ qubits.
+
+## VI Complexity of evolving under the Hamiltonian
+
+We now analyze the complexity of evolving under the discretized Hamiltonian using the BCCKS technique for Hamiltonian simulation [20], reviewed in Section III. We break the total simulation time $t$ into $r$ segments each of length $t/r$. Then, we approximate the time evolution operator $U(t)=\exp(-i\tilde{H}t)$ by a Taylor series truncated to order $K$, which results in an error of $O\left(\frac{(\|\tilde{H}\|t/r)^{K+1}}{(K+1)!}\right)$. By choosing $r\geq\|\tilde{H}\|t$, the numerator of the leading error term is less than or equal to 1; we can thus choose $K\in O\left(\log(r/\epsilon)/\log\log(r/\epsilon)\right)$ to bound the Taylor series simulation error to $O(\epsilon)$ [20].
+
+The final two missing pieces from the simulation are the operators $B$ and $\textrm{select}(W)$ from Section III. We wish to simulate time evolution under $\tilde{H}$ for time $t/r$ (equivalently, under $M\tilde{H}$ for time $t/rM$), which we can do approximately as in Eq. (9),
+
+$$
+U(t/r)\approx W(t/r)=\sum_{k=0}^{K}\sum_{\chi_{1},\dotsc,\chi_{k}}\frac{(-it/rM)^{k}}{k!}d_{\chi_{1}}\dotsm d_{\chi_{k}}V_{\chi_{1}}\dotsm V_{\chi_{k}},
+$$
+
+using $U(t)=\exp\big(-i\tilde{H}t\big)=\exp\big(-iM\tilde{H}(t/M)\big)$. In Eq. (10) of Section III, we defined a multi-index $\alpha$ encompassing $k$ and $\chi_{1}$ through $\chi_{k}$, through which we simplified this expression to
+
+$$
+W(t/r)=\sum_{\alpha}c_{\alpha}W_{\alpha},
+$$
+
+where $c_{\alpha}=(t/rM)^{k}/k!\prod_{k^{\prime}=1}^{k}d_{\chi_{k^{\prime}}}$ includes all the real coefficients, and $W_{\alpha}=(-i)^{k}\prod_{k^{\prime}=1}^{k}V_{\chi_{k}}$ includes all the unitary operators. Recall from Eq. (12) that $\textrm{select}(W)$ gives $W_{\alpha}$, and from Eq. (13) that $B$ handles the appropriate coefficients and the sum over the index register $\mathinner{|{\chi}\rangle}$, that is, $c_{\alpha}$. The implementation of $B$ is discussed in Ref. [19], and is of less interest because of our cost model. Let us describe how to implement $\textrm{select}(W)$ in detail.
+
+The operator $\textrm{select}(W)$ is $K$ controlled applications of $\textrm{select}(V)$ and $K$ controlled phase gates. The operators $V_{\chi_{i}}$ are those obtained by applying $\textrm{select}(V)$ to the index state $\mathinner{|{\chi_{i}}\rangle}$. We can obtain a product of up to $K$ of these operators by using $K$ copies of the index registers $\mathinner{|{\chi}\rangle}$, and applying $\textrm{select}(V)$ to each of them. But how do we account for the fact that we do not always want a product of exactly $K$ operators $-iV_{\chi_{i}}$? This is done using a register $\mathinner{|{k}\rangle}$ of $K$ qubits, which encodes the value $k$ in unary. We apply $\textrm{select}(V)$ to the index register $\mathinner{|{\chi_{i}}\rangle}$, controlled on the $i^{\text{th}}$ qubit of $\mathinner{|{k}\rangle}$. We can apply the phase gates directly to the qubits of $\mathinner{|{k}\rangle}$; these gates need not be controlled. The unary register $\mathinner{|{k}\rangle}$, as well as the $K$ index registers $\mathinner{|{\chi_{1}}\rangle}\dotsm\mathinner{|{\chi_{K}}\rangle}$, are initialized in some superposition state by $B$.
+
+As in Section III and Ref. [20], the action of the operator $A=(B^{\dagger}\otimes\mathds{1})\textrm{select}(W)(B\otimes\mathds{1})$ on the ancilla and state registers is given by
+
+$$
+A\mathinner{|{0}\rangle}\mathinner{|{\psi}\rangle}=\frac{1}{c}\mathinner{|{0}\rangle}W(t/r)\mathinner{|{\psi}\rangle}+\sqrt{1-\frac{1}{c^{2}}}\mathinner{|{\phi}\rangle}, \tag{31}
+$$
+
+where $\mathinner{|{\phi}\rangle}$ is some state with the ancilla orthogonal to $\mathinner{|{0}\rangle}$. Provided that $c\approx 2$, we can perform oblivious amplitude amplification: with $P_{0}$ the projection operator onto the zero ancilla state and $R=\mathds{1}-2P_{0}$, the oblivious amplitude amplification operator $G=-ARA^{\dagger}RA$ satisfies
+
+$$
+\|P_{0}G\mathinner{|{0}\rangle}\mathinner{|{\psi}\rangle}-\mathinner{|{0}\rangle}U(t/r)\mathinner{|{\psi}\rangle}\|\in O(\epsilon/r). \tag{32}
+$$
+
+We repeat this process $r$ times to approximate the action of $U(t)$ on $\mathinner{|{\psi}\rangle}$ to precision $O(\epsilon)$. We now show that this process can expediently simulate quantum dynamics in real space and thereby prove Theorem 3.
+
+Proof of Theorem 3. Rather than simulating $\tilde{H}$ acting on $\psi(y(x))$ for time $t$, we instead simulate the approximation of $M\tilde{H}$ from Lemma 8 for time $t/M$, where $M\geq\lceil V_{\max}/\delta\rceil$. The error in approximating $\tilde{H}$ is $\delta$, so we must choose $\delta\in O(\epsilon/t)$ so that $\left\|e^{-i\tilde{H}t}-e^{-i(t/M)\sum_{\chi}d_{\chi}V_{\chi}}\right\|\leq O(\epsilon)$. The Hamiltonian is simulated by applying $P_{0}G$ (Eq. (32)) $r$ times. This simulates evolution under $M\tilde{H}\approx\sum_{\chi}d_{\chi}V_{\chi}$ for time $t/M$ to precision $O(\epsilon)$; by the triangle inequality, the total precision is also $O(\epsilon)$.
+
+Each application of $P_{0}G$ uses $A$ three times and each application of $A$ uses $\textrm{select}(W)$ once. $\textrm{select}(W)$ applies a product of up to $K$ unitary operators $V_{\chi}$ and uses $\textrm{select}(V)$ $K$ times, where
+
+$$
+K\in O\left(\frac{\log(r/\epsilon)}{\log\log(r/\epsilon)}\right), \tag{33}
+$$
+
+from Eq. (4) of Ref. [20]. Therefore the cost of applying $P_{0}G$ is $K$ times the query complexity of implementing $\textrm{select}(V)$.
+
+At first glance $\textrm{select}(V)$ would seem to require $2\eta Da+M$ queries because the Hamiltonian can be decomposed into $2\eta Da+M$ unitary matrices; in fact, it can be implemented using $\Theta(1)$ queries. To see this, let us first begin with implementing $V(x)$. We see from the arguments of Ref. [20] that such a term can be simulated using a single query to an oracle that gives $V(x)$ and a polynomial amount of additional control logic to make the $M$ unitary terms (known as signature matrices) sum to the correct value. The less obvious fact is that the $2\eta Da$ unitary adders can also be simulated using similar intuition. This can be seen by noting that using appropriate control logic, it is possible to swap the register that a given adder acts on to a common location so only one addition needs to be performed.
+
+To see this, consider the register that stores the index for the state $\mathinner{|{\chi}\rangle}=\mathinner{|{i,n,j}\rangle}$ where $n$ is the index for the dimension, $i$ is the index for the particle, and $j\in[-a,\dotsc,a]\setminus 0$. Consider a computational basis state that encodes the positions of each particle and the unitary adder that needs to be performed of the form
+
+$$
+\mathinner{|{\chi}\rangle}\mathinner{|{x_{1,1}}\rangle}\dotsm\mathinner{|{x_{i,n}}\rangle}\dotsm\mathinner{|{x_{\eta,D}}\rangle}. \tag{34}
+$$
+
+Then using the data in $\mathinner{|{\chi}\rangle}$ a series of swap operations can be performed such that
+
+$$
+\mathinner{|{\chi}\rangle}\mathinner{|{x_{1,1}}\rangle}\dotsm\mathinner{|{x_{i,n}}\rangle}\dotsm\mathinner{|{x_{\eta,D}}\rangle}\mapsto\mathinner{|{\chi}\rangle}\mathinner{|{x_{i,n}}\rangle}\dotsm\mathinner{|{x_{1,1}}\rangle}\dotsm\mathinner{|{x_{\eta,D}}\rangle}. \tag{35}
+$$
+
+The addition of $j$ to this register can then be performed by applying,
+
+$$
+\mathinner{|{\chi}\rangle}\mathinner{|{x_{i,n}}\rangle}\dotsm\mathinner{|{x_{1,1}}\rangle}\dotsm\mathinner{|{x_{\eta,D}}\rangle}\mapsto\mathinner{|{i,n}\rangle}{\rm Add}\left(\mathinner{|{j}\rangle}\mathinner{|{x_{i,n}}\rangle}\right)\dotsm\mathinner{|{x_{1,1}}\rangle}\dotsm\mathinner{|{x_{\eta,D}}\rangle}. \tag{36}
+$$
+
+The desired result then follows from inverting the swap gates. Since quantum mechanics is linear, any unitary that performs such swaps for an arbitrary value of $\chi$ that is stored in the ancilla register will also have the correct action on a superposition state. Thus it is possible to perform the addition using a single query to an adder circuit, given that such a network of controlled swaps can be implemented.
+
+Such a series of swaps can be shown constructively to exist by using a strategy similar to binary search. The steps are as follows. For $k\in[1,\lceil\log\eta\rceil]$: controlled on the $k^{\text{th}}$ qubit of $i$, swap $\mathinner{|{x_{i^{\prime}}}\rangle}$ with $\mathinner{|{x_{i^{\prime}-2^{\lceil\log\eta\rceil-k}}}\rangle}$ for $i^{\prime}\in[2^{\lceil\log\eta\rceil-k}+1,2^{\lceil\log\eta\rceil-k+1}]$. Figure 3 gives an example of this procedure for $i=6$ with $\eta=8$. After each stage, the desired $\mathinner{|{x_{i}}\rangle}$ register is in position $i\!\!\mod 2^{\lceil\log\eta\rceil-k}$. Thus, after all $\lceil\log\eta\rceil$ iterations $\mathinner{|{x_{i}}\rangle}$ occupies the first particle position $i^{\prime}=1$. We repeat the same process for the coordinate $n$, so that $\mathinner{|{x_{in}}\rangle}$ is first in the $\mathinner{|{x}\rangle}$ register, and apply the unitary adder to it, adding by $j$. Finally, we run the sequence of controlled swap gates in reverse to return all the registers in $\mathinner{|{x}\rangle}$ to their original positions. The controlled swaps require $O(\eta D\log(L/h))$ gates but only depth $O(\log(\eta D))$.
+
+So $\textrm{select}(V)$ requires $\Theta(1)$ queries to the potential energy oracle and $\Theta(1)$ unitary adders. Each application of $P_{0}G$ requires, from Eq. (33), $3K\in O\left(\frac{\log(r/\epsilon)}{\log\log(r/\epsilon)}\right)$ uses of $\textrm{select}(V)$, and as such $\Theta(K)$ unitary adders and calls to the potential energy oracle. The query complexity within our model then scales as [20]
+
+$$
+\Theta(Kr)\subseteq O\left(\frac{r\log(r/\epsilon)}{\log\log(r/\epsilon)}\right). \tag{37}
+$$
+
+The results in Ref. [20] require that $r\geq\|\tilde{H}\|t=\|\tilde{H}\|t$. A stricter requirement, that $r=\sum_{\chi}|d_{\chi}|t/\ln 2$, is given by the condition of oblivious amplitude amplification that $c=\sum_{\alpha}c_{\alpha}\approx 2$. If $r$ is not an integer, we can take the ceiling of this as $r$, and the final segment will have $c<2$, which can be compensated for using an ancilla qubit [20]. In order to guarantee that we have enough segments to satisfy these requirements we choose
+
+$$
+r= \left\lceil\sum_{\chi}|d_{\chi}|t/M\ln 2\right\rceil \tag{38}
+$$
+$$
+\leq \left(h^{-2}\sum_{i,n}\sum_{j=-a,j\neq 0}^{j=a}\frac{|d_{2a+1,j}|}{2m_{i}}+V_{\max}\right)t/\ln 2+1,
+$$
+
+where we used Eq. (28) and Eq. (29). This upper bound on $r$ then allows us to determine an upper bound on how many adder circuits or how many queries to an oracle for the potential energy are required for simulation.
+
+We then see from Lemma 6 and Eq. (38) that the number of times that $P_{0}G$ is applied, $r$, obeys
+
+$$
+r\leq\left(\frac{\pi^{2}\eta D}{3mh^{2}}+V_{\max}\right)t/\ln 2+1. \tag{39}
+$$
+
+Finally using Eq. (39) we have that the total number of queries made to $V$ and $T$ scales as
+
+$$
+\Theta(Kr)\subseteq O\left(\left(\frac{\eta D}{mh^{2}}+V_{\max}\right)t\left[\frac{\log\left(\frac{\eta Dt}{mh^{2}\epsilon}+\frac{V_{\max}t}{\epsilon}\right)}{\log\left(\log\left(\frac{\eta Dt}{mh^{2}\epsilon}+\frac{V_{\max}t}{\epsilon}\right)\right)}\right]\right), \tag{40}
+$$
+
+as claimed. ∎
+
+This shows that if a modest value of $h$ can be tolerated then the continuous-variable simulation that we discuss above will require a number of resources that scales slightly superlinearly with the number of particles.
+
+A possible criticism of the above cost analysis is that the potential energy oracle considered requires a number of operations that scales polynomially with the number of particles were we to implement it using elementary operations for pairwise Hamiltonians such as the Coulomb Hamiltonian. One way to deal with this is to use oracles that have complexity that is constant in the size of the simulation, such as an oracle for each of the pairwise interactions. We show in the corollary below that switching to such a pairwise oracle and optimizing the simulation against it leads to a query complexity that is the same as that in Theorem 3 (potentially up to logarithmic factors).
+
+**Corollary 9.**
+
+Let $V_{ij}$ be the potential energy operator for the two-particle interaction between particles $i$ and $j$. With $\tilde{H}$ be as in Theorem 3 with $V=\sum_{i<j}V_{ij}$, we can simulate $e^{-i\tilde{H}t}\mathinner{|{\psi}\rangle}$ for time $t>0$ within error $\epsilon>0$ with
+
+$$
+\tilde{O}\left(\left(\frac{\eta D}{mh^{2}}+V_{\max}\right)t\log\left(1/\epsilon\right)\right)
+$$
+
+unitary adders and queries to an oracle for the two-particle potential energy $V_{ij}$.
+
+**Proof.**
+
+The intuition behind our approach is to use the result in Theorem 3 for truncated Taylor-series simulation of the particle system, but to multiply the cost of the simulation by the cost of implementing the query using the pairwise oracles. Since there are $\eta^{2}$ such terms one would expect that the complexity should be $\eta^{2}$ times that quoted in Theorem 3. However, we can optimize the algorithm for the pairwise oracle to perform the simulation by using a swap network similar to that exploited for the kinetic energy to reduce the cost.
+
+We replace the potential energy operator $\tilde{V}$ by a sum of two-particle potential energies, so that the Hamiltonian we simulate is
+
+$$
+\tilde{H}=h^{-2}\sum_{i,n}\sum_{j=-a,j\neq 0}^{j=a}\frac{d_{2a+1,j}}{2m_{i}}A_{j}+\sum_{i\neq j}\tilde{V}_{ij}.
+$$
+
+In Theorem 3, we showed how to implement the $2\eta Da$ terms in the kinetic energy operator using a single adder circuit, and $V$ using a single query to the total potential energy. That is, for a two-particle potential, we evaluate $\sum_{i\neq j}V_{ij}$ by a single query to $V$. Thus, in order to show our claim that we can perform a single segment of evolution under $\tilde{H}$ using a constant number of unitary adders and queries to an oracle for the two-particle potential energy $V_{ij}$, we must show that the potential $V_{ij}$ can be evaluated with a constant number of queries to the pairwise potential.
+
+In general, the pairwise potential energy is a function of the properties of the particles $i$ and $j$ as well as their positions. The action of the pairwise oracle $V_{p}$ is
+
+$$
+V_{p}\left(\mathinner{|{ij}\rangle}\mathinner{|{0}\rangle}\mathinner{|{x_{a}}\rangle}\mathinner{|{x_{b}}\rangle}\right)\coloneqq\mathinner{|{ij}\rangle}\mathinner{|{V_{ij}(x_{a},x_{b})}\rangle}\mathinner{|{x_{a}}\rangle}\mathinner{|{x_{b}}\rangle},
+$$
+
+where $x_{a}$ and $x_{b}$ are the positions of particles $a$ and $b$.
+
+The implementation of a segment in the truncated Taylor series simulation requires that we implement the Hamiltonian as a linear combination of unitaries. We showed in Theorem 3 that the kinetic energy part of the linear combination can be implemented using a constant number of adder circuits. Therefore, in order to show that the pairwise Hamiltonian can also be implemented using a constant number of queries in this model we need to show that the two-particle potential terms in the linear combination can be enacted using a constant number of queries to $V_{p}$.
+
+We show that the potential terms can be performed using a single query to $V_{p}$ using a swap network reminiscent of that used for the kinetic energy terms in Theorem 3. Let us assume that we want to implement the $\chi^{\rm th}$ term in the decomposition, $H_{\chi}=V_{ij}$. Then we can write the state of the control register and the simulator subspace as
+
+$$
+\mathinner{|{\chi}\rangle}\mathinner{|{0}\rangle}\mathinner{|{x_{1}}\rangle}\dotsm\mathinner{|{x_{i}}\rangle}\dotsm\mathinner{|{x_{j}}\rangle}\dotsm\mathinner{|{x_{\eta}}\rangle}. \tag{41}
+$$
+
+We use the data in the control register $\mathinner{|{\chi}\rangle}$ to perform a series of controlled-swap operations such that
+
+$$
+\mathinner{|{\chi}\rangle}\mathinner{|{0}\rangle}\mathinner{|{x_{1}}\rangle}\dotsm\mathinner{|{x_{i}}\rangle}\mathinner{|{x_{j}}\rangle}\mathinner{|{x_{\eta}}\rangle}\mapsto\mathinner{|{\chi}\rangle}\mathinner{|{0}\rangle}\mathinner{|{x_{i}}\rangle}\mathinner{|{x_{j}}\rangle}\dotsm\mathinner{|{x_{1}}\rangle}\dotsm\mathinner{|{x_{\eta}}\rangle}. \tag{42}
+$$
+
+This process uses ${\rm poly}(\eta)$ controlled swaps and no queries. We then query the pairwise oracle $V_{p}$ to prepare the state
+
+$$
+\mathinner{|{\chi}\rangle}\mathinner{|{0}\rangle}\mathinner{|{x_{i}}\rangle}\mathinner{|{x_{j}}\rangle}\dotsm\mathinner{|{x_{1}}\rangle}\dotsm\mathinner{|{x_{\eta}}\rangle}\mapsto\mathinner{|{\chi}\rangle}\mathinner{|{V_{ij}(x_{i},x_{j})}\rangle}\mathinner{|{x_{i}}\rangle}\mathinner{|{x_{j}}\rangle}\dotsm\mathinner{|{x_{1}}\rangle}\dotsm\mathinner{|{x_{\eta}}\rangle}.
+$$
+
+Then, using the signature matrix trick, we can implement these terms as a sum of unitary operations within arbitrarily small error after appropriately cleaning the ancilla qubits. Because this circuit works uniformly for all pairwise interactions, the entire segment can be implemented using only one application of the above routine for simulating the potential terms and the routine for simulating the kinetic terms from Theorem 3. As argued, the routine requires only a constant number of queries, and therefore each segment requires only a constant number of queries to the adder circuit and $V_{p}$. The corollary then follows from the bounds on the number of segments in Theorem 3. ∎
+
+This is significant because the best methods known for performing such simulations not only require the Born-Oppenheimer approximation, but also require $\tilde{O}(\eta^{5})$ operations (assuming $\eta$ is proportional to the number of spin-orbitals) [24, 25]. Thus, depending on the value of $h$ needed, this approach can potentially have major advantages in simulation time.
+
+The value of $h$ needed for such a simulation is difficult to address as it depends sensitively on the input state being simulated. In the next section, we provide estimates of the scaling of this parameter that show that the above intuition may not hold without strong assumptions about the states being simulated. Specifically, we find that that the value of $h$ needed to guarantee that the simulation error is within $\epsilon$ can shrink exponentially with $\eta D$ in some pathological cases.
+
+## VII Errors in Hamiltonian model
+
+In our discussion thus far, we have introduced several approximations and simplifications of the Hamiltonian so as to make the simulation problem well-defined and also tractable. In this section, we bound the errors incurred by these choices. At the heart of these approximations is the discretization of the system coordinates into $b$ hypercubes of side length $h$ along each spatial direction from Definition 2.
+
+We begin by bounding the errors in the kinetic and potential energy operators, starting off with an upper bound on derivatives of the wave function assuming a maximum momentum $k_{\max}$ in Lemma 10. We apply this upper bound to determine the maximum error in the finite difference approximation for the kinetic energy operator in Theorem 11. Following that, in Lemma 12, we upper bound the error in the potential energy operator due to discretization (the difference between $V(x)$ and $\tilde{V}(x)=V(y(x))$ of Definition 2).
+
+We shift our focus from errors in the operators to simulation errors beginning in Lemma 13, where we give the error in evolving under $\tilde{H}$ rather than $H$. In Lemma 14 we bound the error in evolving the discretized wave function rather than the wave function itself. We give the total simulation error in Corollary 15, and in Lemma 16 give the difference between simulating the wave function $\psi(x)$ and the discretized wave function $\psi(y(x))$ due to normalization. Finally, in Theorem 4 we determine the values of $a$ and $h$ needed to bound the total simulation error to arbitrary $\epsilon>0$ in the worst case, before discussing for which states the worst case holds, and then determining the requirements on $a$ and $h$ under more optimistic assumptions about the scaling of the derivatives of the wave function in Corollary 5.
+
+We begin by introducing a lemma which we use to bound the errors in the kinetic and potential energy operators, assuming a maximum momentum:
+
+**Lemma 10.**
+
+Let $\psi(k):\mathbb{R}^{N}\mapsto\mathbb{C}$ and $\psi(x):\mathbb{R}^{N}\mapsto\mathbb{C}$ be conjugate momentum and position representations of the same wave function in $N$ dimensions and assume that $\psi(k)=0$ if $\|k\|_{\infty}>k_{\rm max}$. Then for any position component $x_{i}$, and any non-negative integer $r$,
+
+$$
+|\partial_{x_{i}}^{r}\psi(x)|\leq\frac{k_{\max}^{r}}{\sqrt{2r+1}}\left(\frac{k_{\max}}{\pi}\right)^{N/2}.
+$$
+
+**Proof.**
+
+$$
+\partial_{x_{i}}^{r}\psi(x) =i^{r}\mathinner{\langle{x}|}p_{i}^{r}\mathinner{|{\psi}\rangle}
+$$
+$$
+=i^{r}\int_{-\infty}^{\infty}\dotsi\int_{-\infty}^{\infty}\mathinner{\langle{x}|}p_{i}^{r}\mathinner{|{k}\rangle}\langle k|\psi\rangle\,\mathrm{d}^{N}k. \tag{43}
+$$
+
+Using the momentum cutoff and the fact that $\langle x|k\rangle=\frac{e^{ix\cdot k}}{(2\pi)^{N/2}}$ in $N$ dimensions, we then have
+
+$$
+\partial_{x_{i}}^{r}\psi(x) =\frac{i^{r}}{(2\pi)^{N/2}}\int_{-k_{\max}}^{k_{\max}}\dotsi\int_{-k_{\max}}^{k_{\max}}k_{i}^{r}e^{ik\cdot x}\langle k|\psi\rangle\,\mathrm{d}^{N}k. \tag{44}
+$$
+
+Here $k_{i}$ refers to the $i^{\text{th}}$ component of the $k$-vector. We then use the Cauchy-Schwarz inequality to separate the terms in the integrand to find
+
+$$
+|\partial_{x_{i}}^{r}\psi(x)| \leq\frac{1}{(2\pi)^{N/2}}\sqrt{\int_{-k_{\max}}^{k_{\max}}\dotsi\int_{-k_{\max}}^{k_{\max}}k_{i}^{2r}\,\mathrm{d}^{N}k\int_{-k_{\max}}^{k_{\max}}\dotsi\int_{-k_{\max}}^{k_{\max}}|\psi(k)|^{2}\,\mathrm{d}^{N}k}
+$$
+$$
+=\frac{1}{(2\pi)^{N/2}}\sqrt{\int_{-k_{\max}}^{k_{\max}}\dotsi\int_{-k_{\max}}^{k_{\max}}k_{i}^{2r}\,\mathrm{d}^{N}k}
+$$
+$$
+=\frac{k_{\max}^{r}}{\sqrt{2r+1}}\left(\frac{k_{\max}}{\pi}\right)^{N/2}. \tag{45}
+$$
+
+∎
+
+Recall that $m=\min_{i}m_{i}$ is the minimum mass of any particle in the system. Lemma 10 leads to the following useful bounds:
+
+$$
+|\psi(x)| \leq\left(\frac{k_{\max}}{\pi}\right)^{\eta D/2} \tag{46}
+$$
+$$
+|\partial_{x_{i,n}}\psi(x)| \leq\frac{k_{\max}}{\sqrt{3}}\left(\frac{k_{\max}}{\pi}\right)^{\eta D/2} \tag{47}
+$$
+$$
+|T\psi(x)| \leq\frac{\eta Dk_{\max}^{2}}{2m\sqrt{5}}\left(\frac{k_{\max}}{\pi}\right)^{\eta D/2} \tag{48}
+$$
+$$
+|T\partial_{x_{i,n}}\psi(x)| \leq\frac{\eta Dk_{\max}^{3}}{2m\sqrt{7}}\left(\frac{k_{\max}}{\pi}\right)^{\eta D/2} \tag{49}
+$$
+
+We now bound the error in the finite difference approximation for the kinetic energy operator using Lemma 10.
+
+**Theorem 11.**
+
+Let $\psi(k):\mathbb{R}^{\eta D}\mapsto\mathbb{C}$ and $\psi(x):\mathbb{R}^{\eta D}\mapsto\mathbb{C}$ be conjugate momentum and position representations of an $\eta$-particle wave function in $D$ spatial dimensions satisfying the assumptions of Lemma 10, and let $T=\sum_{i,n}T_{i,n}$ and $\tilde{T}=\sum_{i,n}S_{i,n}$, where $T_{i,n}=p_{i,n}^{2}/2m_{i}$. Then
+
+$$
+|(T-\tilde{T})\psi(x)|\leq\frac{\pi^{3/2}e^{2a[1-\ln 2]}}{18m\sqrt{4a+3}}\eta Dk_{\max}^{2a+1}\left(\frac{k_{\max}}{\pi}\right)^{\eta D/2}h^{2a-1},
+$$
+
+where $m=\min_{i}m_{i}$.
+
+**Proof.**
+
+Recall from Theorem 7 that, for a single coordinate, the error $|O_{2a+1}|$ in the $(2a+1)$-point central difference approximation of the second derivative is upper-bounded by
+
+$$
+\frac{\pi^{3/2}}{9}e^{2a[1-\ln 2]}h^{2a-1}\max_{x}\big|\psi^{(2a+1)}(x)\big|,
+$$
+
+where $h$ is the grid spacing. By Lemma 10, $\max_{x}\left|\psi^{(2a+1)}(x)\right|\leq\frac{k_{\max}^{2a+1}}{\sqrt{4a+3}}\left(\frac{k_{\max}}{\pi}\right)^{\eta D/2}$. Thus for any coordinate $(i,n)$,
+
+$$
+|(T_{i,n}-S_{i,n})\psi(x)| \leq\frac{\pi^{3/2}}{18m}e^{2a[1-\ln 2]}h^{2a-1}\frac{k_{\max}^{2a+1}}{\sqrt{4a+3}}\left(\frac{k_{\max}}{\pi}\right)^{\eta D/2}. \tag{50}
+$$
+
+The result follows by summing over all $\eta$ particles and $D$ dimensions. ∎
+
+Theorem 11 does not require that $\psi(x)$ be discretized as in Definition 2: the second derivative of any wave function with maximum momentum $k_{\max}$ can be calculated in this way. We have finished addressing the error in the kinetic energy operator and move now to the error in the potential energy operator.
+
+**Lemma 12.**
+
+Let $\psi(x):\mathbb{R}^{\eta D}\mapsto\mathbb{C}$ and $\tilde{V}:\mathbb{R}^{\eta D}\mapsto\mathbb{R}$ satisfy the assumptions of Lemma 10 such that $\tilde{V}(x)=V(y(x))$, where $\|\nabla V(x)\|_{\infty}\leq V^{\prime}_{\max}$. Then
+
+$$
+|(V-\tilde{V})\psi(x)|\leq\frac{h{\eta D}}{2}\left(\frac{k_{\max}}{\pi}\right)^{\eta D/2}V^{\prime}_{\max}.
+$$
+
+In particular, for the modified Coulomb potential energy operator,
+
+$$
+\left|(V_{\text{Coulomb}}-\tilde{V}_{\text{Coulomb}})\psi(x)\right|\leq\frac{h{\eta D}}{2}\frac{\eta^{2}q^{2}\sqrt{3}}{9\Delta^{2}}\left(\frac{k_{\max}}{\pi}\right)^{\eta D/2}. \tag{51}
+$$
+
+**Proof.**
+
+$V$ and $\tilde{V}$ differ in that $\tilde{V}$ is evaluated at a centroid of a hypercube whereas $V$ is evaluated at the “true” coordinates. The distance from the corner of a hypercube to its center is at most $h\sqrt{\eta D}/2$, so because $\|\cdot\|\leq\sqrt{\eta D}\|\cdot\|_{\infty}$ for vectors of dimension $\eta D$,
+
+$$
+|(V-\tilde{V})\psi(x)|=|(V(x)-V(y(x)))\psi(x)|\leq\frac{h{\eta D}}{2}\left|\max_{i}\partial_{x_{i}}V(x)\right|\left(\frac{k_{\max}}{\pi}\right)^{\eta D/2}, \tag{52}
+$$
+
+where we used the bound on $|\psi(x)|$ of Eq. (46). The result follows from the assumption that $\|\nabla V(x)\|_{\infty}\leq V^{\prime}_{\max}$.
+
+For the modified Coulomb potential energy operator $V_{\text{Coulomb}}=\sum_{i<j}\frac{q_{i}q_{j}}{\sqrt{\|x_{i}-x_{j}\|^{2}+\Delta^{2}}}$ it is easy to verify that
+
+$$
+|\partial_{x_{i}}V_{\text{Coulomb}}(x)|=\left|\partial_{x_{i}}\sum_{k\neq j}\frac{q_{k}q_{j}}{\sqrt{\|x_{k}-x_{j}\|^{2}+\Delta^{2}}}\right|\leq\frac{\eta^{2}q^{2}}{2}\max\left|\partial_{x_{i}}\frac{1}{\sqrt{\|x_{k}-x_{j}\|^{2}+\Delta^{2}}}\right|\leq\frac{\eta^{2}q^{2}\sqrt{3}}{9\Delta^{2}}, \tag{53}
+$$
+
+from which the second result follows. ∎
+
+At this point, we have bounds on the error in the approximations of the kinetic and potential energy operators. We apply these to determine the error in simulating $\tilde{H}$ rather than $H$. After that, we determine the maximum error in time-evolving the discretized wave function $\psi(y(x))$ rather than $\psi(x)$, and then combine the two results.
+
+**Lemma 13.**
+
+If the assumptions of Theorem 11 are met for the wave functions $e^{-iHs}\psi$ and $e^{-i\tilde{H}s}\psi$ for all $s\in[0,t]$ where $\psi:\mathbb{R}^{\eta D}\mapsto\mathbb{C}$, and $|\nabla V(x)|_{\infty}\leq V^{\prime}_{\max}$, then for any square integrable $\phi:\mathbb{R}^{\eta D}\mapsto\mathbb{C}$ and $Q\subseteq S$
+
+$$
+\left|\int_{Q}\phi^{*}\left(e^{-iHt}-e^{-i\tilde{H}t}\right)\psi\,\mathrm{d}^{\eta D}x\right|\leq t\left(\frac{\pi^{3/2}e^{2a[1-\ln 2]}}{\sqrt{4a+3}}\frac{\eta Dk_{\max}^{2a+1}h^{2a-1}}{18m}+\frac{h{\eta D}}{2}V^{\prime}_{\max}\right)\left(\frac{k_{\max}}{\pi}\right)^{\eta D/2}\sqrt{\int_{Q}\mathrm{d}x^{\eta D}\int_{Q}|\phi|^{2}\,\mathrm{d}x^{\eta D}}
+$$
+
+**Proof.**
+
+From the Cauchy-Schwarz inequality
+
+$$
+\left|\int_{Q}\phi^{*}\left(e^{-iHt}-e^{-i\tilde{H}t}\right)\psi(x)\,\mathrm{d}^{\eta D}x\right|\leq\max_{x}\left|\left(e^{-iHt}-e^{-i\tilde{H}t}\right)\psi(x)\right|\sqrt{\int_{Q}\mathrm{d}x^{\eta D}\int_{Q}\|\phi\|^{2}\,\mathrm{d}x^{\eta D}} \tag{54}
+$$
+
+Repeating the standard argument from Box 4.1 of Nielsen and Chuang [40] and using the fact that for the input state $\psi$, $|H\psi(x,t)|$ is bounded, we have that
+
+$$
+\left|\left(e^{-iHt}-e^{-i\tilde{H}t}\right)\psi(x)\right|=\lim_{r\rightarrow\infty}\left|\left(\left(e^{-iHt/r}\right)^{r}-\left(e^{-i\tilde{H}t/r}\right)^{r}\right)\psi(x)\right|\leq\max_{x,\psi}\left|(H-\tilde{H})\psi(x)\right|t. \tag{55}
+$$
+
+Here the maximization over $\psi$ is meant to be a maximization over all $\psi$ that satisfy the assumptions of Theorem 11.
+
+We then apply Theorem 11 to find that
+
+$$
+\max_{x}|(T-\tilde{T})\psi(x)|\leq\frac{\pi^{3/2}e^{2a[1-\ln 2]}}{\sqrt{4a+3}}\frac{\eta Dk_{\max}^{2a+1}h^{2a-1}}{18m}\left(\frac{k_{\max}}{\pi}\right)^{\eta D/2}. \tag{56}
+$$
+
+Similarly we have from Lemma 12 that
+
+$$
+\max_{x}|(V-\tilde{V})\psi(x)|\leq\frac{h{\eta D}}{2}\left(\frac{k_{\max}}{\pi}\right)^{\eta D/2}V^{\prime}_{\max}. \tag{57}
+$$
+
+The claim of the lemma then follows by combining these three parts together. ∎
+
+**Lemma 14.**
+
+If the assumptions of Theorem 11 are met for the wave function $e^{-i\tilde{H}s}\psi$ for all $s\in[0,t]$ where $\psi:\mathbb{R}^{\eta D}\mapsto\mathbb{C}$ then for any square integrable $\phi:\mathbb{R}^{\eta D}\mapsto\mathbb{C}$, $v\in\mathbb{R}^{\eta D}$ such that $\|v\|\leq h\sqrt{\eta D}/2$ and $Q\subseteq S$
+
+$$
+\left|\int_{Q}\phi^{*}(x)(e^{-i\tilde{H}t}\psi(x)-e^{-i\tilde{H}t}\psi(x+v))\,\mathrm{d}x^{\eta D}\right|\leq\frac{k_{\max}\eta Dh}{2\sqrt{3}}\left(\frac{k_{\max}}{\pi}\right)^{\eta D/2}\sqrt{\int_{Q}\mathrm{d}x^{\eta D}\int_{Q}|e^{iHt}\phi|^{2}\,\mathrm{d}x^{\eta D}}.
+$$
+
+**Proof.**
+
+Under our assumptions we have that
+
+$$
+\left|\int_{Q}\phi^{*}(x)(e^{-i\tilde{H}t}\psi(x)-e^{-i\tilde{H}t}\psi(x+v))\,\mathrm{d}x^{\eta D}\right|=\left|\int_{Q}\phi^{*}(x)e^{-i\tilde{H}t}(\psi(x)-\psi(x+v))\,\mathrm{d}x^{\eta D}\right|. \tag{58}
+$$
+
+Since $\psi(x)$ is differentiable, we have from the fact that for vectors of dimension $\eta D$, $\|\cdot\|\leq\sqrt{\eta D}\|\cdot\|_{\infty}$ that
+
+$$
+|\psi(x)-\psi(x+v)|\leq\|v\|\max_{x}\|\nabla\psi(x)\|\leq\frac{\eta Dh}{2}\max_{x}|\partial_{x_{i,n}}\psi(x)|. \tag{59}
+$$
+
+Eq. (47) then implies that
+
+$$
+|\psi(x)-\psi(x+v)|\leq\frac{k_{\max}\eta Dh}{2\sqrt{3}}\left(\frac{k_{\max}}{\pi}\right)^{\eta D/2}. \tag{60}
+$$
+
+The remainder follows from the Cauchy-Schwarz inequality. ∎
+
+Recall from Definition 2 that $y:x\mapsto\min_{u\in\{y_{j}\}}\|x-u\|$, so $\|x-y(x)\|\leq h\sqrt{\eta D}/2$. Lemma 14 is thus slightly more general than just bounding the error in time-evolving $\psi(y(x))$ rather than $\psi(x)$, but it suffices for our purposes. We next combine the previous two lemmas to bound the error in evolving the discretized wave function $\psi(y(x))$ under the discretized Hamiltonian $\tilde{H}$ rather than evolving the true $\psi$ under $H$.
+
+**Corollary 15.**
+
+If the assumptions of Theorem 11 are met for the wave functions $e^{-iHs}\psi$ and $e^{-i\tilde{H}s}\psi$ for all $s\in[0,t]$ where $\psi:\mathbb{R}^{\eta D}\mapsto\mathbb{C}$, and $\|\nabla V(x)\|_{\infty}\leq V^{\prime}_{\max}$, then for any square integrable wave function $\phi:S\mapsto\mathbb{C}$ we have that $|\int_{S}\phi^{*}(x)e^{-iHt}\psi(x)\,\mathrm{d}^{\eta D}x-\int_{S}\phi^{*}(x)e^{-i\tilde{H}t}\psi(y(x))\,\mathrm{d}^{\eta D}x|$ is bounded above by
+
+$$
+\left[\frac{k_{\max}\eta Dh}{2\sqrt{3}}+t\left(\frac{\pi^{3/2}e^{2a[1-\ln 2]}}{\sqrt{4a+3}}\frac{\eta Dk_{\max}^{2a+1}h^{2a-1}}{18m}+\frac{h{\eta D}}{2}V^{\prime}_{\max}\right)\right]\left(\frac{k_{\max}L}{\pi}\right)^{\eta D/2}.
+$$
+
+**Proof.**
+
+By the triangle inequality,
+
+$$
+\left|\int_{S}\phi^{*}(x)e^{-iHt}\psi(x)\,\mathrm{d}^{\eta D}x-\int_{S}\phi^{*}(x)e^{-i\tilde{H}t}\psi(y(x))\,\mathrm{d}^{\eta D}x\right|
+$$
+$$
+\qquad\leq\left|\int_{S}\phi^{*}(x)e^{-iHt}\psi(x)\,\mathrm{d}^{\eta D}x-\int_{S}\phi^{*}(x)e^{-i\tilde{H}t}\psi(x)\,\mathrm{d}^{\eta D}x\right|
+$$
+$$
+\qquad~+\left|\int_{S}\phi^{*}(x)e^{-i\tilde{H}t}\psi(x)\,\mathrm{d}^{\eta D}x-\int_{S}\phi^{*}(x)e^{-i\tilde{H}t}\psi(y(x))\,\mathrm{d}^{\eta D}x\right|. \tag{61}
+$$
+
+Lemma 13 and Lemma 14 can be used to bound these terms. First note that because we assume that $\phi$ is a wave function that has support only on $S$, it follows from the definition of $\tilde{T}$ that $\tilde{T}\phi$ does also. Therefore it follows from Taylor’s theorem and the fact that $\tilde{V}$ is diagonal that $e^{-i\tilde{H}t}\phi$ has support only on $S$. Since $\phi$ has norm $1$ this implies that
+
+$$
+\sqrt{\int_{S}\mathrm{d}x^{\eta D}\int_{S}|e^{i\tilde{H}t}\phi|^{2}\,\mathrm{d}x^{\eta D}}=L^{\eta D/2}, \tag{62}
+$$
+
+and similarly
+
+$$
+\sqrt{\int_{S}\mathrm{d}x^{\eta D}\int_{S}|\phi|^{2}\,\mathrm{d}x^{\eta D}}=L^{\eta D/2}. \tag{63}
+$$
+
+The result then follows by substituting these results as well as those of Lemma 13 and Lemma 14 into Eq. (61). ∎
+
+A final issue is that, while $\psi(x)$ is normalized, $\psi(y(x))$ in general will not be. Initializing the quantum computer renormalizes $\psi(y(x))$, so the wave function simulated by the quantum computer is in fact $\psi(y(x))\bigg/\sqrt{\int_{S}|\psi(y(x))|^{2}\,\mathrm{d}x^{\eta D}}$. The following lemma bounds the contribution of this final source of error.
+
+**Lemma 16.**
+
+If the assumptions of Lemma 10 hold then for any bounded Hermitian operator $H$, $t\geq 0$, and square integrable wave function $\phi:S\mapsto\mathbb{C}^{\eta D}$ such that $\int_{S}|\phi(x)|^{2}\mathrm{d}x^{\eta D}=1$, we have that
+
+$$
+\left|\int_{S}\phi(x)^{*}e^{-iHt}\psi(y(x))\mathrm{d}x^{\eta D}-\int_{S}\frac{\phi(x)^{*}e^{-iHt}\psi(y(x))}{\sqrt{\int_{S}|\psi(y(x))|^{2}\mathrm{d}x^{\eta D}}}\mathrm{d}x^{\eta D}\right|\leq\delta,
+$$
+
+for
+
+$$
+h\leq 3\sqrt{\frac{\min(\delta,\sqrt{3/8})}{\eta D}}\frac{1}{k_{\max}}\left(\frac{k_{\max}L}{\pi}\right)^{-\eta D/2}.
+$$
+
+**Proof.**
+
+The Cauchy-Schwarz inequality and the fact that $\phi(x)$ is normalized show that
+
+$$
+\left|\int_{S}\phi(x)^{*}e^{-iHt}\psi(y(x))\mathrm{d}x^{\eta D}-\int_{S}\frac{\phi(x)^{*}e^{-iHt}\psi(y(x))}{\sqrt{\int_{S}|\psi(y(x))|^{2}\mathrm{d}x^{\eta D}}}\mathrm{d}x^{\eta D}\right|
+$$
+$$
+\qquad\leq\left|\int_{S}\phi(x)^{*}e^{-iHt}\psi(y(x))\mathrm{d}x^{\eta D}\right|\left|1-\frac{1}{\sqrt{\int_{S}|\psi(y(x))|^{2}\mathrm{d}x^{\eta D}}}\right|.
+$$
+$$
+\qquad\leq\sqrt{\int_{S}|\psi(y(x))|^{2}\mathrm{d}x^{\eta D}\int_{S}|\phi(x)|^{2}\mathrm{d}x^{\eta D}}\left|1-\frac{1}{\sqrt{\int_{S}|\psi(y(x))|^{2}\mathrm{d}x^{\eta D}}}\right|
+$$
+$$
+\qquad=\sqrt{\int_{S}|\psi(y(x))|^{2}\mathrm{d}x^{\eta D}}\left|1-\frac{1}{\sqrt{\int_{S}|\psi(y(x))|^{2}\mathrm{d}x^{\eta D}}}\right|. \tag{64}
+$$
+
+Next, by applying the midpoint rule on each of the $\eta D$ dimensions in the integral we have that
+
+$$
+\left|\int_{S}|\psi(y(x))|^{2}\mathrm{d}x^{\eta D}-\int_{S}|\psi(x)|^{2}\mathrm{d}x^{\eta D}\right| =\left|\int_{S}|\psi(y(x))|^{2}\mathrm{d}x^{\eta D}-1\right|
+$$
+$$
+\leq\frac{\eta Dh^{2}\max\big|\partial^{2}_{x_{i,n}}|\psi(x)|^{2}\big|L^{\eta D}}{24}. \tag{65}
+$$
+
+Using the fact that $|\psi(x)|^{2}=\psi(x)\psi^{*}(x)$ we find that
+
+$$
+\max\big|\partial^{2}_{x_{i,n}}|\psi(x)|^{2}\big|\leq 2\max|\partial^{2}_{x_{i,n}}\psi(x)|\max|\psi(x)|+2\max|\partial_{x_{i,n}}\psi(x)|^{2}, \tag{66}
+$$
+
+which from Lemma 10 is upper bounded by
+
+$$
+\left(\frac{2}{\sqrt{5}}+\frac{2}{3}\right)k_{\max}^{2}\left(\frac{k_{\max}}{\pi}\right)^{\eta D}=\left(\frac{6+2\sqrt{5}}{3\sqrt{5}}\right)k_{\max}^{2}\left(\frac{k_{\max}}{\pi}\right)^{\eta D}. \tag{67}
+$$
+
+Now substituting Eq. (67) into Eq. (65) yields
+
+$$
+\left|\int_{S}|\psi(y(x))|^{2}\mathrm{d}x^{\eta D}-1\right|\leq h^{2}\left(\frac{(6+2\sqrt{5})\eta D}{72\sqrt{5}}\right)k_{\max}^{2}\left(\frac{k_{\max}L}{\pi}\right)^{\eta D}. \tag{68}
+$$
+
+Eq. (68) is then at most $\tilde{\delta}$ if
+
+$$
+h\leq\sqrt{\frac{72\sqrt{5}\tilde{\delta}}{(6+2\sqrt{5})\eta D}}\frac{1}{k_{\max}}\left(\frac{k_{\max}L}{\pi}\right)^{-\eta D/2}. \tag{69}
+$$
+
+Thus under this assumption on $h$ we have that
+
+$$
+\sqrt{\int_{S}|\psi(y(x))|^{2}\mathrm{d}x^{\eta D}}\left|1-\frac{1}{\sqrt{\int_{S}|\psi(y(x))|^{2}\mathrm{d}x^{\eta D}}}\right|\leq\sqrt{1+\tilde{\delta}}\left(\frac{1}{\sqrt{1-\tilde{\delta}}}-1\right) \tag{70}
+$$
+
+If we assume $\tilde{\delta}\leq 1/2$ then it is easy to verify that
+
+$$
+\sqrt{1+\tilde{\delta}}\left(\frac{1}{\sqrt{1-\tilde{\delta}}}-1\right)\leq\sqrt{\frac{3}{2}}\tilde{\delta}. \tag{71}
+$$
+
+Thus if we wish the upper bound in the error given in Eq. (70) to be at most $\delta$ it suffices to take $\tilde{\delta}=\sqrt{\frac{2}{3}}\delta$ and similarly $\delta\leq\sqrt{\frac{3}{8}}$ implies our assumption on $\tilde{\delta}$. The result then follows from substituting this choice of $\tilde{\delta}$ into Eq. (69), minimizing and using the fact that $(72\sqrt{10/3})/(6+2\sqrt{5})\approx 12.6>9$. ∎
+
+Combining Corollary 15 and Lemma 16 allows us to prove Theorem 4.
+
+Proof of Theorem 4. We use the triangle inequality to break the simulation error into two terms corresponding to the results of Corollary 15 and Lemma 16, respectively.
+
+$$
+\left|\int_{S}\phi^{*}(x)e^{-iHt}\psi(x)\,\mathrm{d}^{\eta D}x-\int_{S}\phi^{*}(x)e^{-i\tilde{H}t}\psi(y(x))\,\mathrm{d}^{\eta D}x\bigg/\sqrt{\int_{S}|\psi(y(x))|^{2}\,\mathrm{d}x^{\eta D}}\right|
+$$
+$$
+\qquad\leq\left|\int_{S}\phi^{*}(x)e^{-iHt}\psi(x)\,\mathrm{d}^{\eta D}x-\int_{S}\phi^{*}(x)e^{-i\tilde{H}t}\psi(y(x))\,\mathrm{d}^{\eta D}x\right|
+$$
+$$
+\qquad~+\left|\int_{S}\phi^{*}(x)e^{-i\tilde{H}t}\psi(y(x))\,\mathrm{d}^{\eta D}x-\int_{S}\phi^{*}(x)e^{-i\tilde{H}t}\psi(y(x))\,\mathrm{d}^{\eta D}x\bigg/\sqrt{\int_{S}|\psi(y(x))|^{2}\,\mathrm{d}x^{\eta D}}\right|
+$$
+$$
+\qquad\leq\left[\frac{k_{\max}\eta Dh}{2\sqrt{3}}+t\left(\frac{\pi^{3/2}e^{2a[1-\ln 2]}}{\sqrt{4a+3}}\frac{\eta Dk_{\max}^{2a+1}h^{2a-1}}{18m}+\frac{h{\eta D}}{2}V^{\prime}_{\max}\right)\right]\left(\frac{k_{\max}L}{\pi}\right)^{\eta D/2}+\delta. \tag{72}
+$$
+
+In order to be able to use Lemma 16 we must choose
+
+$$
+h\leq 3\sqrt{\frac{\min(\delta,\sqrt{3/8})}{\eta D}}\frac{1}{k_{\max}}\left(\frac{k_{\max}L}{\pi}\right)^{-\eta D/2}. \tag{73}
+$$
+
+Next we want to find a value of $h$ such that
+
+$$
+\left[\frac{k_{\max}\eta Dh}{2\sqrt{3}}+\frac{h{\eta D}t}{2}V^{\prime}_{\max}\right]\left(\frac{k_{\max}L}{\pi}\right)^{\eta D/2}<\left[\frac{k_{\max}\eta Dh}{2}+\frac{h{\eta D}t}{2}V^{\prime}_{\max}\right]\left(\frac{k_{\max}L}{\pi}\right)^{\eta D/2}\leq\delta \tag{74}
+$$
+
+Thus we additionally require that
+
+$$
+h\leq\frac{2\delta}{\eta D\left(k_{\max}+V^{\prime}_{\max}t\right)}\left(\frac{k_{\max}L}{\pi}\right)^{-\eta D/2}. \tag{75}
+$$
+
+We would like to make a uniform choice of $h$ in the theorem and to this end it is clear that $2\delta\leq 3\sqrt{\min(\delta,\sqrt{3/8})}$ for $\delta\leq 1/2$. Thus since $\eta D\geq 1$ and $V^{\prime}_{\max}t\geq 0$ it follows that Eq. (75) implies Eq. (73) under our assumptions. We therefore take Eq. (75) as $h$.
+
+We then want to bound
+
+$$
+\frac{\pi^{3/2}e^{2a[1-\ln 2]}}{\sqrt{4a+3}}\frac{\eta Dk_{\max}^{2a+1}h^{2a-1}}{18m}t\left(\frac{k_{\max}L}{\pi}\right)^{\eta D/2}<\frac{\pi^{3/2}e^{-2a/3}}{\sqrt{7}}\frac{\eta Dk_{\max}^{2a+1}h^{2a-1}}{18m}t\left(\frac{k_{\max}L}{\pi}\right)^{\eta D/2}\leq\delta, \tag{76}
+$$
+
+which holds if $k_{\max}h<e^{1/3}$ and
+
+$$
+a\geq\frac{3}{2}\frac{\log\left(\frac{1}{18\sqrt{7}}\frac{\pi^{3/2}\eta Dtk_{\max}}{\delta mh}\right)+\eta D\log\left(\frac{k_{\max}L}{\pi}\right)/2}{1-3\ln(k_{\max}h)}. \tag{77}
+$$
+
+Therefore, assuming the worst-case scenario for $a$ where $k_{\max}\in O(1/h)$ we have from this choice of $a$ and the value of $h$ chosen in Eq. (75) that there exists $a$ such that the overall error is at most $\delta$ and
+
+$$
+a\in O\left(\eta D\log(k_{\max}L)+\log\left(\frac{\eta^{2}D^{2}tk_{\max}(k_{\max}+V^{\prime}_{\max}t)}{m\delta^{2}}\right)\right). \tag{78}
+$$
+
+The requirement that $k_{\max}h<e^{1/3}$ is then implied by Eq. (75), $\delta\leq 1/2$ and
+
+$$
+k_{\max}L>\pi(2e^{-1/3})^{2/\eta D}. \tag{79}
+$$
+
+Then given these choices we have from Eq. (72), Eq. (74) and Eq. (76) that
+
+$$
+\left[\frac{k_{\max}\eta Dh}{2\sqrt{3}}+t\left(\frac{\pi^{3/2}e^{2a[1-\ln 2]}}{\sqrt{4a+3}}\frac{\eta Dk_{\max}^{2a+1}h^{2a-1}}{18m}+\frac{h{\eta D}}{2}V^{\prime}_{\max}\right)\right]\left(\frac{k_{\max}L}{\pi}\right)^{\eta D/2}+\delta\leq 3\delta. \tag{80}
+$$
+
+Hence the claim of the theorem holds for $\delta=\epsilon/3$. ∎The requirement on $a$ in Theorem 4 is surprising: despite the fact that the derivatives of the wave function can scale exponentially with the number of particles $\eta$, as $k_{\max}^{\eta D}$, it is always possible to suppress this error with $a$ linear in $\eta$ and $D$, and in fact logarithmic in $k_{\max}$ and the inverse precision $1/\epsilon$.
+
+However, the above work suggests that it is possible to get exponentially small upper bounds on the size of $h$ needed for the simulation if we make worst-case assumptions about the system and only impose a momentum cutoff. It may seem reasonable to expect that such results come only from the fact that we have used worst-case assumptions and triangle inequalities to propagate the error. However, in some cases this analysis is tight, as we show below.
+
+Consider the minimum-uncertainty state for $D=1$,
+
+$$
+\psi(x)=G(x):=\frac{\exp(-x^{2}/4\Delta x^{2})}{\sqrt{\sqrt{2\pi}\Delta x}}. \tag{81}
+$$
+
+A simple exercise in calculus and the fact that $\Delta x\Delta p=\frac{1}{2}$ shows that
+
+$$
+\max_{x}|\partial_{x}\psi(x)|=\left(\frac{8}{\pi e^{2}}\right)^{1/4}\Delta p^{3/2}. \tag{82}
+$$
+
+This result shows that if we take $\Delta p\propto k_{\max}$ then it would follow that $|\partial_{x}\psi(x)|\in\Omega(k_{\max}^{3/2})$ which coincides with the upper bound in Eq. (47). However, this is not directly comparable because the Gaussian function used here does not have compact support in either position or momentum.
+
+We can deal with this issue of a lack of compact support in a formal sense by considering a truncated (unnormalized) minimum-uncertainty state:
+
+$$
+\Psi(k)=\frac{\exp(-k^{2}/4\Delta p^{2})}{\sqrt{\sqrt{2\pi}\Delta p}}{\rm Rect}\left(\frac{k}{2k_{\max}}\right), \tag{83}
+$$
+
+where ${\rm Rect}(x)$ is the rectangle function, ${\rm Rect}(x)=1$ if $x\in(-1/2,1/2)$, ${\rm Rect}(x)=0$ if $x\in\mathbb{R}\setminus[-1/2,1/2]$ and ${\rm Rect}(x)=1/2$ if $|x|=1/2$. This function clearly has compact support in momentum space and thus satisfies the assumptions above. We can rewrite this as
+
+$$
+\Psi(k)=\psi(k)+\frac{\exp(-k^{2}/4\Delta p^{2})}{\sqrt{\sqrt{2\pi}\Delta p}}\left({\rm Rect}\left(\frac{k}{2k_{\max}}\right)-1\right), \tag{84}
+$$
+
+By applying the Fourier transform and using standard bounds on the tail of a Gaussian distribution we then see that
+
+$$
+|\partial_{x}\Psi(x)|=|\partial_{x}\psi(x)|+e^{-O(k_{\max}^{2}/\Delta p^{2})}. \tag{85}
+$$
+
+Thus we can take $k_{\max}\in\Theta(\Delta p)$ and make the approximation error that arises from truncating the support in momentum space exponentially small. Thus these states have derivative $\Omega(k_{\max}^{3/2})$.
+
+Now let us go beyond $\eta=1$ to $\eta>1$. Since $\Delta x\propto 1/k_{\max}$ for this minimum-uncertainty state it then follows that $\partial_{x_{i}}\left(\Psi(x)^{\otimes\eta}\right)\in\Omega(k_{\max}(k_{\max})^{\eta/2})$ from Eq. (81) and Eq. (85). This means that the estimates of the derivatives used in the above results cannot be tightened without making assumptions about the quantum states in the system. This further means that the exponential bounds cited above cannot be dramatically improved without either imposing energy cutoffs in addition to momentum cutoffs, or making appropriate restrictions on the initial state.
+
+It may seem surprising that such a simple state should be so difficult to simulate. The reason for this is that we discretize into a uniform grid without making any assumptions about the state beyond a momentum cutoff: in this regard, uniform discretization is the basis choice corresponding to near-minimal assumptions about the system. Uniformly discretizating means that multi-dimensional Gaussian states becomes difficult to distinguish from a $\delta$ function as they becomes narrower and narrower, where with more knowledge of the system, we might be able to better parametrize the state, or to construct a better basis in which to represent the state, and thereby more efficiently simulate the system. Even when, as in this work, discretization is the first step in approximating evolution, Gaussian-like states can be efficiently simulated without exponentially small grid spacing for some Hamiltonians [37]. More generally, there is the difficulty of not knowing which states might evolve into a high-derivative state at some future time, which is why we must also require the momentum cutoff to hold throughout the evolution.
+
+Corollary 5, which we prove below, relies on the stricter assumption that the derivatives of the wave function obey $|\psi^{(r)}(x)|\leq\beta k_{\max}^{r}/(\sqrt{2r+1}L^{\eta D/2})$ for the full duration of the simulation, rather than the worst-case bound $|\psi^{(r)}(x)|\leq\frac{k_{\max}^{r}}{\sqrt{2r+1}}\left(\frac{k_{\max}}{\pi}\right)^{N/2}$ from Lemma 10 that was used in Theorem 4.
+
+Proof of Corollary 5. The proof follows from the exact same steps used to prove Theorem 4. By taking $|\partial^{r}_{x}\psi(x)|\in O(k_{\max}^{r}/(\sqrt{2r+1}L^{\eta D/2}))$ we can replicate all of the prior steps but substituting each $(k_{\max}/\pi)^{\eta D/2}$ with $\beta/L^{\eta D/2}$. Thus each factor of $(k_{\max}L/\pi)^{\eta D/2}$ becomes $\beta$ after making this assumption. This causes the additional additive term of $\eta D\log(k_{\max}L)$ to become zero in $a$ as well. The claimed results then follow after making these substitutions. For added clarity, we recapitulate the key steps in this argument below.
+
+If we repeat the steps required in the proof of Corollary 15 and Lemma 16 we see that
+
+$$
+\left|\int_{S}\phi^{*}(x)e^{-iHt}\psi(x)\,\mathrm{d}^{\eta D}x-\int_{S}\phi^{*}(x)e^{-i\tilde{H}t}\psi(y(x))\,\mathrm{d}^{\eta D}x\bigg/\sqrt{\int_{S}|\psi(y(x))|^{2}\,\mathrm{d}x^{\eta D}}\right|
+$$
+$$
+\qquad\leq\beta\left[\frac{k_{\max}\eta Dh}{2\sqrt{3}}+t\left(\frac{\pi^{3/2}e^{2a[1-\ln 2]}}{\sqrt{4a+3}}\frac{\eta Dk_{\max}^{2a+1}h^{2a-1}}{18m}+\frac{h{\eta D}}{2}V^{\prime}_{\max}\right)\right]+\delta, \tag{86}
+$$
+
+if
+
+$$
+h\leq 3\sqrt{\frac{\min(\delta,\sqrt{3/8})}{\beta^{2}\eta D}}\frac{1}{k_{\max}}. \tag{87}
+$$
+
+Following the exact same reasoning as in the proof of Theorem 4,
+
+$$
+\left[\frac{k_{\max}\eta Dh}{2\sqrt{3}}+\frac{h{\eta D}t}{2}V^{\prime}_{\max}\right]\leq\frac{\delta}{\beta}, \tag{88}
+$$
+
+if
+
+$$
+h\leq\frac{2\delta}{\beta\eta D\left(k_{\max}+V^{\prime}_{\max}t\right)}. \tag{89}
+$$
+
+Finally again following the same reasoning that if $k_{\max}h\leq e^{1/3}$ then
+
+$$
+\frac{\pi^{3/2}e^{2a[1-\ln 2]}}{\sqrt{4a+3}}\frac{\eta Dk_{\max}^{2a+1}h^{2a-1}}{18m}t\leq\frac{\delta}{\beta}, \tag{90}
+$$
+
+for a value of $a$ that scales at most as
+
+$$
+a\in O\left(\log\left(\frac{\eta^{2}D^{2}\beta^{2}tk_{\max}(k_{\max}+V^{\prime}_{\max}t)}{m\delta^{2}}\right)\right). \tag{91}
+$$
+
+Thus Eq. (86) is bounded above by at most $3\delta$ given these choices and we can take $\delta=\epsilon/3$ to make all the results hold. The result then follows by noting that the most restrictive scaling for $h$ out of the three requirements we place on it is
+
+$$
+h\in O\left(\frac{\delta}{\beta\eta D\left(k_{\max}+V^{\prime}_{\max}t\right)}\right), \tag{92}
+$$
+
+and using the fact that $\delta\in\Theta(\epsilon)$ and the assumption that $\beta\in\Theta(1)$ both here and in Eq. (91). ∎
+
+## VIII Discussion
+
+Conventional lore in quantum chemistry simulation has long postulated that continuous-variable simulations of chemicals affords far better scaling with the number of electrons than second-quantized methods, at the price of requiring more qubits. Given the recent improvements in simulation algorithms for both first- and second-quantized Hamiltonians it is important to address the efficiency of quantum simulations using similar optimizations for continuous-variable simulations. We investigate this question and find that through the use of high–order derivative formulas, it is possible under some circumstances to perform simulations using a number of calls to unitary adders and the pairwise interaction oracle that scale as $\tilde{O}(\eta^{2}t\log(1/\epsilon))$. This is better than the best rigorous bounds proven for basis-based first- and second-quantized schemes, which scale as $\tilde{O}(\eta^{5}t\log(1/\epsilon))$ [24, 25] assuming the number of spin-orbitals is proportional to the number of particles.
+
+When we consider the discretization error after only assuming a momentum cutoff in the problem, we quickly see that in worst-case scenarios it is possible for such simulations to require a number of operations that scales exponentially in $\eta D$. We further show that the derivative scaling that leads to this worst-case behavior can appear for minimum-uncertainty states. This shows that although continuous-variable simulations offer great promise for quantum simulation, there are other caveats that must be met before they can be said to be efficient. This problem also exists, to some extent, in second-quantized methods where such problems are implicitly dealt with by assuming that a sufficiently large basis is chosen to represent the problem.
+
+We also show that these issues do not arise for more typical states, that is, states that have support that is much broader than a minimum-uncertainty state. This demonstrates that the problems that can emerge when a highly localized state is provided as input do not necessarily appear for typical states that would be reasonable for ground state approximation and further agrees with the results of decades of experience in classical simulation of position space Hamiltonians.
+
+There are a number of interesting questions that emerge from this work. The first point is that many of the challenges that these methods face arise because of the use of a bad basis to represent the problem. It is entirely possible that these issues can typically be addressed on a case-by-case basis, by choosing clever representations for the Hamiltonian as is typical in modern computational chemistry. Investigating the role that more intelligent choices of basis have for such simulations is an important future direction for research.
+
+One further issue that this work does not address is the complexity of initial state preparation. This problem is addressed in part in other work on quantum simulation in real space [41], and some common many-body states such as Slater determinants are known to be preparable with cost polynomial in $\eta$ and $1/\epsilon$ [42]. However, the costs of preparing more general appropriately symmetrized initial states can be considerable for fermionic simulations. More work is needed to address such issues since the relative ease of state preparation for second-quantized methods can also be a major selling point for such fermionic simulations.
+
+Another issue that needs to be addressed is that despite the fact that continuous quantum simulations of chemistry using a cubic mesh are much more logical qubit-intensive than second-quantized simulations, they need not require more physical qubits because the lion’s share of physical qubits are taken up by magic state distillation in simulations [36, 31]. Further work is needed to differentiate the resource requirements of these methods at a fault-tolerant level.
+
+Looking forward, despite the challenges posed by adversarially-chosen initial states, our work reveals that under many circumstances highly efficient simulations are possible for quantum chemistry that have better scaling than existing approaches. This approach further does not require approximations such as the Born-Oppenheimer approximation to function, and thus can be straightforwardly applied in situations where such approximations are inappropriate. Along these lines, it is important to develop a diverse arsenal of methods to bring to bear against simulation problems and understand the strengths as well as the limitations of each method. It is our firm belief that as new approaches such as ours develop, quantum simulation will be thought of less as an algorithm and more as its own field of science that is viewed on the same level as numerical analysis, computational physics or quantum chemistry.
+
+Finally, we note that a new linear combination-based technique [21] allows the multiplicative factors in the cost to be separated if the grid spacing $h$ is fixed. This reduces the number of queries to the potential energy oracle to $\tilde{O}(\eta^{2}t+\log(1/\epsilon)$. In general, however, the grid spacing may depend on $\epsilon$, removing this improvement.
+
+**Acknowledgements.**
+
+We would like to acknowledge the Telluride Science Research Center for hosting us during the early phases of this project. I. D. K. thanks Peter J. Love and Guang Hao Low for stimulating discussions. A. A.-G. acknowledges the Army Research Office under award W911NF-15-1-0256 and the Department of Defense Vannevar Bush Faculty Fellowship managed by the Office of Naval Research under award N00014-16-1-2008.
+
+## References
+
+[1] Y. Manin, Computable and uncomputable (Sovetskoye Radio, Moscow, 1980).
+
+[2] R. P. Feynman, International Journal of Theoretical Physics 21, 467 (1982).
+
+[3] M. Suzuki, Journal of Mathematical Physics 32, 400 (1991).
+
+[4] S. Lloyd, Science 273, 1073 (1996).
+
+[5] D. Aharonov and A. Ta-Shma, in Proceedings of the Thirty-fifth Annual ACM Symposium on Theory of Computing, STOC ’03 (ACM, New York, NY, USA, 2003) pp. 20–29.
+
+[6] A. M. Childs, Quantum information processing in continuous time, Ph.D. thesis, Massachusetts Institute of Technology (2004).
+
+[7] D. W. Berry, G. Ahokas, R. Cleve, and B. C. Sanders, Communications in Mathematical Physics 270, 359 (2007).
+
+[8] A. M. Childs, Communications in Mathematical Physics 294, 581 (2010).
+
+[9] N. Wiebe, D. Berry, P. Høyer, and B. C. Sanders, Journal of Physics A: Mathematical and Theoretical 43, 065203 (2010).
+
+[10] A. M. Childs and R. Kothari, “Simulating sparse hamiltonians with star decompositions,” in Theory of Quantum Computation, Communication, and Cryptography: 5th Conference, TQC 2010, Leeds, UK, April 13-15, 2010, Revised Selected Papers, edited by W. van Dam, V. M. Kendon, and S. Severini (Springer Berlin Heidelberg, Berlin, Heidelberg, 2011) pp. 94–103.
+
+[11] D. Poulin, A. Qarry, R. Somma, and F. Verstraete, Phys. Rev. Lett. 106, 170501 (2011).
+
+[12] N. Wiebe, D. W. Berry, P. Høyer, and B. C. Sanders, Journal of Physics A: Mathematical and Theoretical 44, 445308 (2011).
+
+[13] D. W. Berry and A. M. Childs, Quantum Info. Comput. 12, 29 (2012).
+
+[14] D. A. Lidar and H. Wang, Phys. Rev. E 59, 2429 (1999).
+
+[15] A. Aspuru-Guzik, A. D. Dutoi, P. J. Love, and M. Head-Gordon, Science 309, 1704 (2005).
+
+[16] S. P. Jordan, K. S. M. Lee, and J. Preskill, Science 336, 1130 (2012).
+
+[17] U. L. Heras, A. Mezzacapo, L. Lamata, S. Filipp, A. Wallraff, and E. Solano, Phys. Rev. Lett. 112, 200501 (2014).
+
+[18] A. M. Childs and N. Wiebe, Quantum Info. Comput. 12, 901 (2012).
+
+[19] D. W. Berry, A. M. Childs, R. Cleve, R. Kothari, and R. D. Somma, in Proceedings of the 46th Annual ACM Symposium on Theory of Computing, STOC ’14 (ACM, New York, NY, USA, 2014) pp. 283–292.
+
+[20] D. W. Berry, A. M. Childs, R. Cleve, R. Kothari, and R. D. Somma, Phys. Rev. Lett. 114, 090502 (2015).
+
+[21] G. H. Low and I. L. Chuang, arXiv preprint arXiv:1610.06546 (2016).
+
+[22] A. M. Childs, R. Kothari, and R. D. Somma, arXiv preprint arXiv:1511.02306 (2015).
+
+[23] A. N. Chowdhury and R. D. Somma, arXiv preprint arXiv:1603.02940 (2016).
+
+[24] R. Babbush, D. W. Berry, I. D. Kivlichan, A. Y. Wei, P. J. Love, and A. Aspuru-Guzik, New Journal of Physics 18, 033032 (2016).
+
+[25] R. Babbush, D. W. Berry, I. D. Kivlichan, A. Y. Wei, P. J. Love, and A. Aspuru-Guzik, arXiv preprint arXiv:1506.01029 (2015a).
+
+[26] D. Wecker, B. Bauer, B. K. Clark, M. B. Hastings, and M. Troyer, Phys. Rev. A 90, 022305 (2014).
+
+[27] M. B. Hastings, D. Wecker, B. Bauer, and M. Troyer, Quantum Info. Comput. 15, 1 (2015).
+
+[28] D. Poulin, M. B. Hastings, D. Wecker, N. Wiebe, A. C. Doberty, and M. Troyer, Quantum Info. Comput. 15, 361 (2015).
+
+[29] J. R. McClean, R. Babbush, P. J. Love, and A. Aspuru-Guzik, The Journal of Physical Chemistry Letters 5, 4368 (2014).
+
+[30] R. Babbush, J. McClean, D. Wecker, A. Aspuru-Guzik, and N. Wiebe, Phys. Rev. A 91, 022311 (2015b).
+
+[31] M. Reiher, N. Wiebe, K. M. Svore, D. Wecker, and M. Troyer, arXiv preprint arXiv:1605.03590 (2016).
+
+[32] S. Wiesner, arXiv preprint quant-ph/9603028 (1996).
+
+[33] C. Zalka, Proceedings of the Royal Society of London A: Mathematical, Physical and Engineering Sciences 454, 313 (1998a).
+
+[34] C. Zalka, Fortschritte der Physik 46, 877 (1998b).
+
+[35] B. M. Boghosian and W. Taylor, Physica D: Nonlinear Phenomena 120, 30 (1998).
+
+[36] N. C. Jones, J. D. Whitfield, P. L. McMahon, M.-H. Yung, R. V. Meter, A. Aspuru-Guzik, and Y. Yamamoto, New Journal of Physics 14, 115023 (2012).
+
+[37] R. D. Somma, arXiv preprint arXiv:1503.06319 (2015).
+
+[38] R. D. Somma, Journal of Mathematical Physics 57, 062202 (2016).
+
+[39] J. Li, Journal of Computational and Applied Mathematics 183, 29 (2005).
+
+[40] M. A. Nielsen and I. L. Chuang, Quantum Computation and Quantum Information: 10th Anniversary Edition (Cambridge University Press, New York, NY, USA, 2011).
+
+[41] I. Kassal, S. P. Jordan, P. J. Love, M. Mohseni, and A. Aspuru-Guzik, Proceedings of the National Academy of Sciences 105, 18681 (2008).
+
+[42] N. J. Ward, I. Kassal, and A. Aspuru-Guzik, The Journal of Chemical Physics 130, 194105 (2009).

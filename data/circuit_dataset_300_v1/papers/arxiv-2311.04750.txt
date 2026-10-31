@@ -1,0 +1,666 @@
+## I. INTRODUCTION
+
+There is an ongoing global effort to develop a new generation of quantum technologies with an unprecedented level of control over individual quantum states of manyparticle quantum systems. This field encompasses four areas [1]: quantum communication, simulation, computation and sensing, each of them promising to drastically improve on preceding classical technologies. An outstanding challenge that is present in all the aforementioned areas is that quantum states are vulnerable to the unwanted effects of noise; if not addressed, the advantages offered over classical technologies disappear altogether.
+
+Quantum error correction (QEC) is a field which emerges from the union of quantum mechanics and classical error correction [2], and it is the approach that is thought to be essential to achieve maturity in the current wave of quantum technologies. The core idea of QEC is to redundantly embed the quantum information within a subspace (called code space) of a larger Hilbert space in such a way that different errors map the code space to mutually orthogonal subspaces. If successful, the action of each of these errors can be reverted and the quantum process can continue error-free [3]. QEC is necessary for large-scale fault-tolerant quantum computing [4, 5]. The past few years have witnessed dramatic progress in experimental realizations of QEC on different platforms [6-10], reaching a point where the lifetime of qubits has been extended by applying QEC [11].
+
+Since Shor's original breakthrough [12], different qubitbased QEC codes have been constructed, both analytically and numerically, leading to a zoo of codes, each of them conventionally labeled [[n, k, d]], where n is the number of physical qubits, k the number of encoded logical qubits, and d the code distance that defines the number d - 1 of detectable errors . The first examples are provided by the [[5, 1, 3]] perfect code [13], the [[7, 1, 3]] Steane [14] and the [[9, 1, 3]] Shor [12] codes, which encode one logical qubit into 5, 7 and 9 physical qubits, respectively, being able to detect up to 2 physical errors and correct up to 1 error on any physical qubit. The most promising approach so far is probably the family of the so-called toric or surface codes [15], which encode a logical qubit into the joint entangled state of a d×d square of physical qubits. More recently, examples of quantum Low-Density Parity Check (LDPC) codes that are competitive with the surface code have been discovered [16].
+
+∗ jan.olle@mpl.mpg.de
+
+Numerical techniques have already been employed to construct QEC codes. Often, this has involved greedy algorithms, which may lead to sub-optimal solutions but can be relatively fast. For instance, in [17] a greedy algorithm was implemented to extend classical linear codes, code concatenation was explored in [18], and greedy search for finding stabilizer codes was used in [19]. Often, such numerical methods for QEC code construction were restricted to finding a subclass of codes of a particular structure, e.g. using reduction to classical code search [20].
+
+However, knowledge of a code does not automatically translate to knowing how to encode the logical states of that code in an efficient way. The reason is that standard approaches are unconstrained, meaning that an all-to-all connectivity between qubits is assumed as well as a set of gates that are not necessarily native to the hardware platform of interest [21, 22]. This then leads to largerthan-necessary circuits when implementing them on specific devices.
+
+The recent advent of powerful tools from the domains of machine learning and, more generally, Artificial Intelligence (AI), are transforming the way in which scientific discovery can be achieved [23]. From these, Reinforcement Learning (RL), which is designed to solve complex decision-making problems by autonomously following an action-reward scheme [24], is a promising artificial discovery tool for QEC strategies. The task to solve is encoded in a reward function, and the aim of RL training algorithms is to maximize such a reward over time. RL can provide new answers to difficult questions, in particular in fields where optimization in a high-dimensional search space plays a crucial role. For this reason, RL can be an efficient tool to tackle the problem of QEC code construction and encoding under hardware-specific constraints.
+
+The first example of RL-based automated discovery of QEC strategies [25] did not rely on any human knowledge of QEC concepts. While this allowed exploration without any restrictions, e.g. going beyond stabilizer codes, it was limited to only small qubit numbers. More recent works have moved towards optimizing only certain QEC subtasks, injecting substantial human knowledge. For example, RL has been used for optimization of given QEC codes [26], and to discover tensor network codes [27] or codes based on "Quantum Lego" parametrizations [28, 29]. Additionally, RL has been used to find efficient decoding processes [30-33] and self-correcting control protocols [34].
+
+At this moment, a multitude of experimental platforms are scaling up towards the regime of qubit numbers that make it possible to implement QEC (this includes especially various superconducting qubit architectures, ion traps, quantum dots, and neutral atoms). Given the strong differences in native gate sets, qubit connectivities, and relevant noise models, there is a strong need for a flexible and efficient scheme to automatically discover not only codes but also efficient encoding circuits, adapted to the platform at hand. In our work, we significantly expand the scaling capabilities of RL code discovery by introducing two critical components. The first one is a highly parallelized Clifford circuit simulator that runs entirely on modern AI chip accelerators such as GPUs or TPUs. The second one is an efficient and general reward based on the Knill-Laflamme error correction conditions. The result is a scheme based on deep RL in order to simultaneously discover QEC codes together with the encoding circuit from scratch, tailored to specific noise models, native gate sets and connectivities, minimizing the circuit size for improved hardware efficiency. In particular, our RL agent can be made noise-aware, meaning that one and the same agent is able to switch its encoding strategy based on the specific noise that is present in the system. Our approach is flexible and general, and can be readily applied to quantum communication scenarios [35, 36].
+
+While [37] also set themselves the task of finding both codes and their encoding circuits, this was done using variational quantum circuits involving continuously parametrized gates, which leads to much more costly numerical simulations and eventually only an approximate QEC scheme. By contrast, our RL-based approach does not rely on any human-provided circuit ansatz, can use directly any given discrete gate set, is able to exploit highly efficient Clifford simulations, and produces a meta-agent able to cover strategies for a range of noise models.
+
+The paper is organized as follows: in Section II we provide the theoretical background for stabilizer codes, code classification and reinforcement learning. In Section III we describe our approach to build a noise-aware reinforcement learning agent that discovers multiple QEC codes in asymmetric noise channels. We present and analyze our numerical results in Section IV and we discuss how our approach can be scaled up to larger code parameters in Section V.
+
+## II. BACKGROUND
+
+## A. Stabilizer Codes
+
+Some of the most promising QEC codes are based on the stabilizer formalism [21], which leverages the properties of the Pauli group Gn on n qubits. The basic idea of the stabilizer formalism is that many quantum states of interest for QEC can be more compactly described by listing the set of n operators that stabilize them, where an operator O stabilizes a state |ψ⟩ if |ψ⟩ is an eigenvector of O with eigenvalue +1: O|ψ⟩ = |ψ⟩. The Pauli group on a single qubit G1 is defined as the group that is generated by the Pauli matrices X, Y,Z under matrix multiplication. Explicitly, G1 = {±I,±iI,±X,±iX,±Y,±iY,±Z,±iZ}. The generalization to n qubits consists of all n-fold tensor products of Pauli matrices (called Pauli strings).
+
+A code that encodes k logical qubits into n physical qubits is a 2k -dimensional subspace (the code space C) of the full 2n -dimensional Hilbert space. It is completely specified by the set of Pauli strings SC that stabilize it, i.e. SC = {si ∈ Gn | si|ψ⟩ = |ψ⟩, ∀|ψ⟩ ∈ C}. SC is called the stabilizer group of C and is usually written in terms of its group generators gi as SC = ⟨g1, g2, . . . , gn-k⟩, where each gi is a Pauli string.
+
+Noise affecting quantum processes can be represented using the so-called operator-sum representation [38], where a quantum noise channel N induces dynamics on the state ρ according to
+
+$$
+\mathcal { N } ( \rho ) = \sum _ { \alpha } E _ { \alpha } \rho E _ { \alpha } ^ { \dagger } \, ,
+$$
+
+where Eα are Kraus operators, satisfying ∑α E†αEα = I. The most elementary example is the so-called depolarizing noise channel,
+
+$$
+\mathcal { N } _ { D P } ( \rho ) = p _ { I } \rho + p _ { X } X \rho X + p _ { Y } Y \rho Y + p _ { Z } Z \rho Z \ , \quad ( 2 ) \\
+$$
+
+where pI + pX + pY + pZ = 1 and the set of Kraus operators are Eα = {√pII, √pXX, √pY Y, √pZZ}. When considering n qubits, one can generalize the depolarizing noise channel by introducing the global depolarizing channel,
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-001.png` (ollama:gemma4:26b, prompt sci-v1):* This is a scientific diagram illustrating a reinforcement learning framework for code discovery in quantum computing. On the far left, a vertical bracket groups "Error Operators $\{I, X, Y, Z, \dots\}$", "Clifford Gate Set" (represented by a Hadamard gate $H$ and a controlled-NOT gate symbol), and "Qubit Connectivity" (represented by a graph of six interconnected nodes labeled $q_1$ through $q_6$) pointing toward a box labeled "Code Discovery". The central portion is a light orange rectangle containing a feedback loop: a green "Environment" box shows a quantum circuit with four lines labeled $|\psi\rangle, |0\rangle, |0\rangle, |0\rangle$ and gates including $H$ and CNOT; an orange arrow labeled "Observation" points from the Environment to a blue "RL Agent" box containing a neural network icon; an orange arrow labeled "Reward" points from the RL Agent back to the Environment; and an orange arrow labeled "Action" points from the RL Agent to an "Apply Gate" box containing the instruction "CX $(0,3)$" with a CNOT symbol, which then points back to the Environment. Above the Environment, a box labeled "Code Generators" lists sequences of Pauli operators: $g_1: XIXIIX, g_2: IIZZIIZ, g_3: IIZIIIZ, g_4: IIIZIIZ, g_5: XZIIZIZ$ and a box labeled "Noise parameter(s)". On the far right, a large light green arrow points toward three separate quantum circuit diagrams labeled "Noise model 1", "Noise model 2", and "Noise model 3". "Noise model 1" consists of four lines with four $H$ gates and two CNOT gates. "Noise model 2" consists of four lines with four $H$ gates and two CNOT gates, but arranged differently. "Noise model 3" consists of four lines with six $H$ gates and three CNOT gates.
+
+$$
+\mathcal { N } _ { G D P } ( \rho ) = \bigotimes _ { j = 1 } ^ { n } \mathcal { N } _ { D P } ^ { ( j ) } ( \rho _ { j } ) \ , \quad \ \ \ ( 3 ) \quad
+$$
+
+consisting of local depolarizing channels acting on each qubit j independently. Taken as is, this error model generates all 4n Pauli strings by expanding (3). A commonly used simplification is the following. Assume that all error probabilities are identical, i.e. pX = pY = pZ ≡ p (and pI = 1 - 3p). Then, the probability that a given error occurs decreases with the number of qubits it affects. For instance, if we consider 3 qubits, the probability associated with XII is p(XII) = p(1-3p)2 , and in general the leading order contribution to the probability of an error affecting m qubits is pm. This leads to the concept of the weight of an operator as the number of qubits on which it differs from the identity and to a hierarchical approach to building QEC codes. In particular, stabilizer codes are described by specifying what is the minimal weight in the Pauli group that they cannot detect.
+
+The fundamental theorem in QEC is a set of necessary and sufficient conditions for quantum error detection discovered independently by Bennett, DiVincenzo, Smolin and Wootters [39], and by Knill and Laflamme in [40] (KL conditions from now on). These state that a code C with associated stabilizer group SC can detect a set of errors {Eµ} ⊆ Gn, if and only if for all Eµ we have either
+
+$$
+\{ E _ { \mu } , g _ { i } \} & = 0 \ , & ( 4 ) & \quad \text {For} \\ & \quad
+$$
+
+for at least one gi, or the error itself is harmless, i.e.
+
+$$
+E _ { \mu } \in S _ { C } \, .
+$$
+
+The smallest weight in Gn for which none of the above two conditions hold is called the distance of the code. For instance, a distance-3 code is capable of detecting all Pauli strings of up to weight 2, meaning that KL conditions (4), (5) are satisfied for all Pauli strings of weights 0, 1 and 2. Moreover, the smallest weight for which these are not satisfied is 3, meaning that there is at least one weight-3 Pauli string violating both (4) and (5). However, some weight-3 Pauli strings (and higher weights) will satisfy the KL conditions, in general.
+
+While these conditions are framed in the context of quantum error detection, there is a direct correspondence with quantum error correction. Indeed, a quantum code of distance d can correct all errors of up to weight t = ⌊(d - 1)/2⌋ [21]. If all the errors that are detected with a weight smaller than d obey (4), the code is called nondegenerate. On the other hand, if some of the errors satisfy (5), the code is called degenerate.
+
+The default weight-based [[n, k, d]] classification of QEC codes implicitly assumes that the error channel is symmetric, meaning that the probabilities of Pauli X, Y and Z errors are equal. However, this is usually not the case in experimental setups: for example, dephasing (Z errors) may dominate bit-flip (X) errors. In our work, we will consider an asymmetric noise channel where pX = pY but pX ̸= pZ. To quantify the asymmetry, we use the bias parameter cZ [37], defined as
+
+$$
+c _ { Z } = \frac { \log p _ { Z } } { \log p _ { X } } \ .
+$$
+
+For symmetric error channels, cZ = 1. If Z-errors dominate, then 0 < cZ < 1, since pZ = pcZ X and pX, pZ ≪ 1; conversely cZ > 1 when X/Y errors are more likely than Z errors. The weight of operators and the code distance can both be generalized to asymmetric noise channels [41-44]. Consider a Pauli string operator Eµ and denote as wX the number of Pauli X inside Eµ (likewise for Y , Z). Then one can introduce the cZ-effective weight [37] of Eµ as
+
+$$
+w _ { e } ( E _ { \mu } , c _ { Z } ) = w _ { X } ( E _ { \mu } ) + w _ { Y } ( E _ { \mu } ) + c _ { Z } w _ { Z } ( E _ { \mu } ) \ , \quad ( 7 ) \quad _ { \text {shift} } ^ { \text {e} }
+$$
+
+which reduces to the symmetric weight for cZ = 1, as expected. The cZ-effective distance of a code de(cZ) is then defined [37] as the largest possible integer such that the KL conditions (4), (5) hold for all Pauli strings Eµ with we(Eµ, cZ) < de(cZ). Like in the symmetric noise case, the meaning of this effective distance is that all error operators with an effective weight smaller than de can be detected.
+
+## B. Code Classification
+
+It is well known that there is no unique way to describe quantum codes. For instance, there are multiple sets of code generators that generate the same stabilizer group, hence describing the same code. Moreover, the choice of logical basis is not unique and qubit labeling is arbitrary. While such redundancies are convenient for describing quantum codes in a compact way, comparing and classifying different codes can be rather subtle. Fortunately, precise notions of code equivalence have been available in the literature since the early days of this field. In this work, we will refer to families of codes based on their quantum weight enumerators (QWE) [45], A(z) and B(z), which are polynomials with coefficients
+
+$$
+D ( z ) , \text { where } & \text { for } \text { of } \text { pc } 0 \\ & \quad A _ { j } \, = \, \frac { 1 } { ( 2 ^ { k } ) ^ { 2 } } \sum _ { w ( E _ { \mu } ) = j } \text {Tr} \left ( E _ { \mu } P _ { \mathcal { C } } \right ) \text {Tr} \left ( E _ { \mu } ^ { \dagger } P _ { \mathcal { C } } \right ) \, , \\ & \quad B _ { j } \, = \, \frac { 1 } { 2 ^ { k } } \sum _ { w ( E _ { \mu } ) = j } \text {Tr} \left ( E _ { \mu } P _ { \mathcal { C } } E _ { \mu } ^ { \dagger } P _ { \mathcal { C } } \right ) \, , \\ & \quad ( 8 ) \\ & \quad \cdot \cdot \cdot \text { } 1 \\
+$$
+
+where w is the operator (cZ = 1) weight, j runs from 0 to n and PC is the orthogonal projector onto the code space. Intuitively, Aj counts the number of error operators of weight j in SC while Bj counts the number of error operators of weight j that commute with all elements of SC. Logical errors are thus the ones that commute with SC but are not in SC, and these are counted with Bj -Aj .
+
+Such a classification is especially useful in scenarios with symmetric noise channels, where it is irrelevant whether the undetected errors contain a specific Pauli operator at a specific position. However, such a distinction can in principle be important in asymmetric noise channels. One could in principle generalize (8) to asymmetric noise channels substituting the weight w by the effective weight we of operators, but then comparing codes across different values of noise bias becomes cumbersome. Hence, in the present work we will always refer to (symmetric) code families according to (8) for all values of cZ, i.e. we will effectively pretend that cZ = 1 when computing the weight enumerators of asymmetric codes.
+
+## C. Reinforcement Learning
+
+Reinforcement Learning (RL) [46] is designed to discover optimal action sequences in decision-making problems. The goal in any RL task is encoded by choosing a suitable reward r, a quantity that measures how well the task has been solved, and consists of an agent (the entity making the decisions) interacting with an environment (the physical system). In each time step t, the environment's state st is observed. Based on this observation, the agent takes an action at which then affects the current state of the environment. A trajectory is a sequence of state and action pairs that the agent takes. An episode is a trajectory from an initial state to a terminal state. For each action, the agent receives a reward rt, and the goal of RL algorithms is to maximize the expected cumulative reward (return), E [∑t rt]. The agent's behavior is defined by the policy πθ(at|st), which denotes the probability of choosing action at given observation st, and that we parameterize by a neural network with parameters θ. Within RL, policy gradient methods [24] optimize the policy by maximizing the expected return with respect to the parameters θ with gradient ascent. One of the most successful algorithms within policy gradient methods is the actor-critic algorithm [47]. The idea is to have two neural networks: an actor network that acts as the agent and that defines the policy, and a critic network, which measures how good was the action taken by the agent. In this paper, we use a state-of-the-art policy-gradient actor-critic method called Proximal Policy Optimization (PPO) [48], which improves the efficiency and stability of policy gradient methods.
+
+## III. REINFORCEMENT LEARNING APPROACH TO QEC CODE DISCOVERY
+
+The main objective of this work is to automatize the discovery of QEC codes and their encoding circuits using RL. We will consider a scenario where the encoding circuit is assumed to be error-free (non fault-tolerant encoding). This is applicable to quantum communication or quantum memories, where the majority of errors happen during transmission over a noisy channel or during the time the memory is retaining the information. Eventually we will show that it is possible to train a meta-agent that is capable of adapting its strategy according to the noise model, without any retraining. This leverages the concept of transfer learning, where improvements gained in training for one scenario (here, one value of a noise parameter) carry over and accelerate the training progress for other scenarios. A scheme of our approach can be found in Fig. 1.
+
+Out[ ]=
+
+n
+
+0
+
+4 6 8 10 12 14 16
+
+n
+
+4 6 8 10 12 14 16
+
+n
+
+● k=1 ■ k=2 ◆ k=3 ▲ k=4 ▼ k=5
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-002.png` (ollama:gemma4:26b, prompt sci-v1):* This image consists of two side-by-side line plots showing "Circuit size" on the y-axis versus "Number of physical qubits" on the x-axis, with separate panels for $d=3$ and $d=4$. A single legend at the top applies to both: "Number of logical qubits: $k=1$ (red circle), $k=2$ (blue square), $k=3$ (green diamond), $k=4$ (cyan triangle), $k=5$ (orange pentagon), $k=6$ (purple open circle), $k=7$ (brown star), $k=8$ (light blue square), $k=9$ (black diamond)". The left plot for $d=3$ has an x-axis ranging from 4 to 16 and a y-axis from 0 to 40. The $k=1$ series (red) contains points labeled $(1,0)$, $(0,1)$, $(3,7)$, $(10,26)$, and $(25,143)$, with "Perfect code" pointing to $(1,0)$ and "$\downarrow$ incl. Steane" pointing to $(10,26)$. The $k=2$ series (blue) contains points labeled $(1,0)$, $(6,1)$, $(11,2)$, $(12,0)$, and $(19,243)$ [Note: $(19,243)$ is partially obscured/unclear, likely $(102,105)$ or $(243,118)$]. The $k=3$ series (green) has points $(1,0)$, $(11,2)$, and $(12,0)$. The $k=4$ series (cyan) has points $(8,0)$ and $(1,0)$. The $k=5$ series (orange) has points $(13,0)$ and $(14,2)$. The $k=6$ series (purple) has points $(12,0)$, $(14,0)$, and $(341,13)$. The $k=7$ series (brown) has points $(14,0)$ and $(142,2)$. The $k=8$ series (light blue) has point $(8,0)$. The $k=9$ series (black) has point $(1,0)$. A label "Smallest quantum Hamming code" points to the $k=2$ point $(1,0)$. The right plot for $d=4$ has an x-axis ranging from 9 to 14 and a y-axis from 10 to 40. The $k=1$ series (red) contains points $(1,0)$, $(7,5)$, $(26,167)$, and $(77,239)$. The $k=2$ series (blue) contains points $(1,0)$, $(16,5)$, and $(117,181)$. The $k=3$ series (green) contains points $(31,0)$ and $(234,56)$.
+
+n
+
+● k=1 ■ k=2 ◆ k=3 ▲ k=4 ▼ k=5 ○ k=6 ● k=7 ■ k=8 ◆ k=9 FIG. 2. Discovering codes and encoding circuits for various numbers of physical qubits, logical qubits, and distances (see main text and Appendix F for d = 5). Families of stabilizer codes tailored to symmetric depolarizing noise channels, found with our RL framework. The labels (x, y) indicate the number of non-degenerate (x) and degenerate (y) code families. The circuit size shown is the absolute minimum throughout all families, and different families in general have different minimal circuit sizes. Since further training runs do not increase family populations, it is likely that there are no more stabilizer codes for the shown code parameters.
+
+## A. Encoding Circuit
+
+In order to encode the state of k logical qubits on n physical qubits one must find a sequence of quantum gates that will entangle the quantum information in such a way that QEC is possible with respect to a target noise channel. Initially, we imagine the first k qubits as the original containers of our (yet unencoded) quantum information, which can be in any state |ψ⟩ ∈ (C2)⊗k . The remaining n- k qubits are chosen to each be initialized in the state |0⟩. These will be turned into the corresponding logical state |ψ⟩L ∈ (C2)⊗n via the application of a sequence of Clifford gates on any of the n qubits (where Clifford gates are defined to be those that map Pauli strings to Pauli strings and are generated by the Hadamard H, the Phase S and the CNOT gates). In the stabilizer formalism, this means that initially the generators of the stabilizer group are
+
+$$
+Z _ { k + 1 } , \ Z _ { k + 2 } , \dots , Z _ { n } \ . \quad
+$$
+
+The task of the RL agent is to discover a suitable encoding sequence of gates for the particular error model under consideration. After applying each gate, the n-k code generators (9) are updated. The agent then receives a representation of these generators as input (as its observation) and suggests the next gate (action) to apply. In this way, an encoding circuit is built up step by step, taking into account the available gate set and connectivity for the particular hardware platform. This process terminates when the KL conditions (4), (5) are satisfied for the target error channel and the learned circuit can then be used to encode any state |ψ⟩ of choice. To gain clarity in our exposition, we include in Appendix A a detailed description of the encoding process of the threequbit repetition code.
+
+## B. Reward
+
+The most delicate matter in RL problems is building a suitable reward for the task at hand. Our goal is to design an agent that, given an error model that includes a set of errors {Eµ} ⊆ Gn with associated occurrence probabilities {pµ}, is able to find an encoding sequence that protects the quantum information from such noise. Let us consider a quantum communication setup to have a concrete picture. Here, we imagine Alice and Bob exchanging some quantum bits of information contained in a state |ψ⟩. We assume that they are able to implement all gates and measurements without errors and that errors only happen while the message is traveling through the communication channel, which they have previously characterized. Alice encodes state |ψ⟩ into |ψ⟩L and sends it through the noisy channel, after which it is received by Bob in the form of a possibly corrupted, mixed state. Since Bob knows the encoding that Alice has used, he also knows what are the stabilizer generators. Hence, Bob proceeds to perform syndrome measurements according to the stabilizer generators of the code and finally corrects the errors that he believes have happened along the way. If done perfectly, the corrected state becomes the original state |ψ⟩L sent by Alice. However, even when both Alice and Bob have access to perfect gates and measurements, the probability of recovering the state is not one. The reason is that multiple errors may trigger the same syndrome measurement, and in some cases Bob will mistakenly correct for an error that did not actually happen. An option for our RL agent could thus be to maximize the probability of recovering the initial state, or what is the same, minimizing the probability that Bob applies a wrong error correction operation. Unfortunately, optimizing for this task is computationally very expensive. Indeed, for each syndrome, there are different errors that could have triggered it. On top of that, from all the errors that could have triggered that syndrome, computational resources have to be employed in finding the most dangerous one, which then has to be selected as the candidate error to be corrected. Such expensive calculations would have to be carried out in every step of the RL procedure. A much cheaper alternative that avoids performing such error categorization is to use a scheme where the cumulative reward (which RL optimizes) simply is maximized whenever all the KL conditions are fulfilled. One implementation of this idea uses the (negative) weighted KL sum as an instantaneous reward:
+
+$$
+r _ { t } = - \sum _ { \mu } \lambda _ { \mu } K _ { \mu } \ , & & ( 1 0 ) & & \stackrel { y o n } { \deg } \\
+$$
+
+where Kµ = 0 if either (4) or (5) are satisfied for the corresponding error operator Eµ, and Kµ = 1 otherwise. Here λµ are real positive numbers that we will take to be hyperparameters quantifying how dangerous each error is. For any choice of λµ, if all errors in {Eµ} can be detected, the reward is zero, and is negative otherwise, thus leading the agent towards the goal we set out to solve. The range of the index µ is found by counting the number of Pauli strings of weight w < d, which is
+
+$$
+| \{ E _ { \mu } \} | _ { w < d } = \sum _ { w = 0 } ^ { d - 1 } 3 ^ { w } \binom { n } { w } \ , \quad \ ( 1 1 ) \quad \begin{matrix} \text {op} \\ \text {t} \\ \text {t} \\ \text {to p} \end{matrix}
+$$
+
+where the factor of three is for X, Y,Z. Thus, the fact that (11) grows exponentially with d will impose the most severe limitation in our approach (as is the case in any QEC application). Later, we will also be interested in situations where not all errors can be corrected simultaneously and a good compromise has to be found. In that case, one simple heuristic choice for the reward (10) would be λµ = pµ, giving more weight to errors that occur more frequently. While we will later see that maximizing the KL reward given here is not precisely equivalent to minimizing the overall probability of incorrectly classifying errors, one can still expect a reasonable performance at this task, which would be the ultimate goal in any QEC scheme.
+
+A nice feature of our reward is that one can favor certain types of codes. For instance, we can target nondegenerate codes only by ignoring (5). Moreover, making the reward non-positive favors short gate sequences, which is desirable when preparing these codes in actual quantum devices.
+
+As a final remark, we note that RL optimizes the cumulative reward R, i.e. the sum of rt over all time steps. Therefore, defining the instantaneous reward rt in terms of the weighted KL sum means we are asking the agent that it keeps this sum as small as possible on average. While this might seem less desirable than setting R itself to be the KL sum at the final time step, we have heuristically found that the ansatz adopted here produces more stable and faster training behavior than by taking R itself to be the KL sum.
+
+## C. Noise-aware meta-agent
+
+Regarding the error channel to be targeted, here there are in principle several choices that can be made. The most straightforward one is choosing a global depolarizing channel as given by (3). This still allows for asymmetric noise, i.e. different probabilities pX, pY , pZ. One option would be to train an agent for any given, fixed choice of these probabilities, necessitating retraining if these characteristics change. However, we want to go beyond that and discover a single agent being capable of deciding what is the optimal encoding strategy for any level of bias in the noise channel (6). For instance, we want this noise-aware agent to be able to understand that it should prioritize detecting more Z errors than X ones when the channel is biased towards Z, yet it should do the opposite when X errors become more likely. This translates into two aspects: The first one is that the agent has to receive the noise parameters as input. In the illustrative example further below, we will choose to supply the bias parameter cZ as an extra observation, while keeping the overall error probability fixed. The second aspect is that the list of error operators will have to contain more operators than the total number that can actually be detected reliably, since it is now part of the agent's task to prioritize some of those errors while ignoring the least likely errors. All in all, the list of operators participating in the reward (10) will be fixed and we will choose those with at most (symmetric) weight d - 1, for a certain d; the idea is then that when varying cZ, the probabilities of these errors will change and the agent will have to figure out which are the most dangerous errors that must be detected in every case.
+
+## D. Vectorized Clifford simulator
+
+We finally comment on a few more detailed aspects of our implementation, with further details in Appendix B. RL algorithms exploit trial-and-error loops until a signal of a good strategy is picked up and convergence is reached, so it is of paramount importance that simulations of our RL environment are extremely fast. Luckily, thanks to the Gottesman-Knill theorem, the Clifford circuits needed here can be simulated efficiently on classical computers. Optimized numerical implementations exist, e.g. Stim [49]. However, in an RL application we want to be able to run multiple circuits in parallel in an efficient, vectorized way that is compatible with modern machine learning frameworks. For that reason, we have implemented our own special-purpose vectorized Clifford simulator, which is publicly available in our repository [50]. Briefly, we use the symplectic binary formalism of the Pauli group [22] to represent the stabilizer generators. SC is then represented by a check matrix H [22], which is a (n - k) × 2n binary matrix where each row i represents the Pauli string gi from SC. Clifford gates are also implemented using binary matrices, and we achieve a massive parallelization by running Clifford-based simulations of quantum circuits in parallel, meaning that the agent interacts with a batch of RL environments (quantum circuits) at every timestep. Our Clifford simulator is implemented using Jax [51], a state-of-the-art modern machine learning framework with good vectorization and just-in-time compilation capabilities. On top of that, we also train multiple RL agents in parallel on a single GPU. This is achieved by interfacing with PureJaxRL [52], a library that offers a high-performance end-to-end Jax RL implementation. We have included further implementation details and performance of the RL algorithm used in this work in Appendix C. The source code for our project is available on GitHub under the name QDX [50], which is an acronym for Quantum Discovery with Jax. It includes both the Clifford simulator, the PPO algorithm and demo Jupyter notebooks to reproduce some of our main results.
+
+The efficiency of Clifford simulations, as well as the use of powerful state-of-the-art RL algorithms, enables us to easily go beyond the recent results of [37], which were based on variational quantum circuits. In particular, we are able to straightforwardly discover codes and encoding circuits for both larger number of qubits (14 vs 20) and larger code distances (4 vs 5).
+
+## IV. RESULTS
+
+We will first illustrate the basic workings of our approach for a symmetric noise channel before introducing the meta-agent that is able to simultaneously discover strategies for a range of noise models.
+
+## A. Codes in a symmetric depolarizing noise channel
+
+We now illustrate the versatility of our approach by discovering a library of different [[n, k, d]] codes and their associated encoding circuits.
+
+We fix the error model to be a symmetric depolarizing channel with error probability p, meaning pI = 1 - 3p, pX = pY = pZ = p, and thus no noise parameter is needed. We also vary the target code distance d from 3 to 5. The corresponding target error set is Eµ = {I,Xi, Yi, Yj,XiXj, . . . ,ZiZj} for d = 3, and likewise for d = 4, 5, with the set for d = 5 including all Pauli string operators of up to weight 4. In our numerical experiments, we choose pI = 0.9, which enters the reward function where we choose the weights proportional to the error probabilities (recall the discussion above). Although the final discovered codes and encoding circuits are independent of this choice, it can affect the learning progress.
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-003.png` (ollama:gemma4:26b, prompt sci-v1):* This image consists of two vertical bar charts, one above the other, sharing a common horizontal axis label "Family Label" and both featuring a secondary vertical axis on the right labeled "Average Circuit Size" in orange text. Both charts have a left vertical axis labeled "Number of Encoding Circuits" in black text. At the top of the image is the label $[[9,3,3]]$. In the top chart, the left axis ranges from 0 to 2500, and the right axis ranges from 0 to 30. The horizontal axis has labels 1, 2, 3, 4, 5, 6, 7, 8, 9*, 10*, 11, 12, and 13*. Blue bars represent the "Number of Encoding Circuits": the bars have heights of approximately 2400 for 1, 500 for 2, 1050 for 3, 2000 for 4, 500 for 5, 1050 for 6, 2200 for 7, 150 for 8, 50 for 9*, 50 for 10*, 50 for 11, 20 for 12, and 10 for 13*. Orange error bars represent the "Average Circuit Size": values are approximately 28 for 1, 23 for 2, 22 for 3, 24 for 4, 22 for 5, 24 for 6, 23 for 7, 21 for 8, 23 for 9*, 23 for 10*, 24 for 11, 24 for 12, and 24 for 13*. In the bottom right of the top chart, there is a diagram of an "all-to-all" graph consisting of 8 nodes arranged in a circle, with every node connected to every other node by a line. In the bottom chart, the left axis ranges from 0 to 1000, and the right axis ranges from 0 to 30. The horizontal axis labels are the same: 1, 2, 3, 4, 5, 6, 7, 8, 9*, 10*, 11, 12, and 13*. Blue bars have heights of approximately 950 for 1, 200 for 2, 620 for 3, 320 for 4, 500 for 5, 480 for 6, 840 for 7, 50 for 8, 20 for 9*, 10 for 10*, 10 for 11, 10 for 12, and 10 for 13*. Orange error bars have values approximately 26 for 1, 24 for 2, 24 for 3, 24 for 4, 24 for 5, 24 for 6, 24 for 7, 24 for 8, 24 for 9*, 24 for 10*, 24 for 11, 24 for 12, and 24 for 13*. In the bottom right of the bottom chart, there is a diagram of a 3x3 grid graph consisting of 9 nodes arranged in three rows and three columns, with nodes connected to their immediate horizontal and vertical neighbors.
+
+For illustrative purposes, we take the gateset to be {Hi,CNOT(i < j)}, i.e. a directed all-to-all connectivity, which is sufficient given that our unencoded logical state is at the first qubits by design. Nevertheless, we will also see examples with alternative gatesets and other connectivities. The final physical hyperparameter is the maximal number of gates that we allow before restarting the learning trajectory. This number will be varied from 20 to 50, depending on the target code parameters. Unless we say so explicitly, we target both non-degenerate and degenerate codes.
+
+For d = 3 and d = 4 codes we proceed as follows: for any given target [[n, k, d]], we launch a few training runs. Once the codes are collected, we categorize them by calculating their quantum weight enumerators, see Eq. (8), leading to a certain number of non-degenerate (Ad-1 = Bd-1 = 0) and degenerate (Ad-1 = Bd-1 ̸= 0) families. We repeat this process and keep launching new training runs until no new families are found by further runs. In this way, our strategy presumably finds all stabilizer codes that are possible for the given parameters n, k, d. This total number of families is shown in Fig. 2, with labels (x, y) for each [[n, k, d]], where x is the number of non-degenerate families and y is the number of degenerate ones. It should be stressed that categorizing all stabilizer code families is in general an NP-complete problem [53], yet our framework is very effective at solving this task. To the best of our knowledge, this work provides the most detailed tabulation of (x, y) populations together with optimal encoding circuits for the code parameters shown here.
+
+This approach discovers suitable encoding circuits, given the assumed gate set, for a large set of codes. Among them are the following known codes for d = 3 (see [54] for explicit constructions of codes [[n, n- r, 3]] with minimal r, for all n): The first one is the five-qubit perfect code [13], which consists of a single non-degenerate [[5, 1, 3]] code family and is the smallest stabilizer code that corrects an arbitrary single-qubit error. Next are the 10 families [53] of [[7, 1, 3]] codes, one of which corresponds to Steane's code [14]. The smallest single-errorcorrecting surface code, Shor's code [12], is rediscovered as one of the 143 degenerate code families with parameters [[9, 1, 3]]. The smallest quantum Hamming code [55] [[8, 3, 3]] is obtained as well. Our approach is efficient enough to reach up to 20 physical qubits. The largest code parameters that we have considered for d = 3 is [[20, 13, 3]], finding an encoding circuit with 45 gates (see Appendix G).
+
+The circuit size shown for each [[n, k, d]] in Fig. 2 is the minimal one found across all discovered families. In general, different families have different circuit sizes, and even within the same family we find variations in circuit sizes.
+
+The RL framework presented here easily allows to find encoding circuits for different connectivities. The connectivity affects the likelihood of discovering codes within a certain family during RL training as well as the typical circuit sizes. In Fig. 3 we illustrate this for the case of [[9, 3, 3]] codes, with their 13 families, for two different connectivities: an all-to-all (directed, i.e. CNOT(i < j)) and a nearest-neighbor square lattice connectivity (see also Appendix D for examples using different gatesets and a larger variety of connectivities). More precisely, we train 10240 agents for each of both cases and find that 9574 of these were successful in the all-to-all connectivity, while this number went down to 3808 for the square lattice connectivity, given a finite allotted time. The frequency with which each code family was found can be seen to be comparably similar in both cases with the sole exception of family 9 (degenerate), which is found more frequently using the square lattice connectivity. On average, the agent needs one less gate to prepare the encoding on the all-to-all connectivity than when having using the square lattice.
+
+We now move to distance d = 5 codes. These are more challenging to find due to the significantly increased number of error operators (11) to keep track of, which impacts both the computation time and the hardness of satisfying all KL conditions simultaneously. Nevertheless, our strategy is also successful in this case. It is known that the smallest possible distance-5 code has parameters [[11, 1, 5]], a result that we confirm with our strategy. We find the single family of this code to have weight enumerators,
+
+$$
+A = ( 1 , 0 , 0 , 0 , 0 , 1 9 8 , 0 , 4 9 5 , 0 , 3 3 0 , 0 ) \ ,
+$$
+
+$$
+B = ( 1 , 0 , 0 , 0 , 0 , 1 9 8 , 1 9 8 , 9 9 0 , 4 9 5 , 1 6 5 0 , 3 3 0 , 2 3 4 ) \ ,
+$$
+
+with an encoding circuit consisting of 32 gates in the minimal example, which we show in Appendix G.
+
+The largest d = 5 code that we have considered is [[15, 2, 5]]. Due to the larger code parameter values, we have restricted the search to non-degenerate codes. We have found a single code family with weight enumerators
+
+$$
+A = ( 1 , 0 , 0 , 0 , 0 , 0 , 2 3 , 9 6 , 3 6 1 , 7 7 6 , 1 3 1 8 , 1 8 3 2 ,
+$$
+
+$$
+\begin{array} {
+$$
+
+and an encoding circuit consisting of 49 gates shown in Appendix G. Other code parameters for d = 5 that we have successfully discovered are shown in Appendix F.
+
+## B. Noise-aware meta-agent
+
+We now move on to codes in more general asymmetric depolarizing noise channels. This lets us illustrate a powerful aspect of RL-based encoding and code discovery: One and the same agent can learn to switch its encoding strategy depending on some parameter characterizing the noise channel. This can be realized by training this noise-aware agent on many different runs with varying choices of the parameter, which is fed as an additional input to the agent. One motivation for this approach is that the agent may learn to generalize, i.e. transfer what it has learned between different values of the parameter.
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-004.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains four separate line plots labeled a, b, c, and d. Plot a has the y-axis "Weighted KL sum" on a logarithmic scale ranging from $10^{-4}$ to $10^{-3}$ and the x-axis "Bias parameter $c_Z$" from 0.5 to 2.0. Two series are plotted: an orange line with square markers and a green line with circle markers. Both series peak at $c_Z = 1.0$ with a value of approximately $1.5 \times 10^{-3}$. The green line declines more steeply than the orange line as $c_Z$ increases toward 2.0. Plot b has the y-axis "Failure probability" from 0.06 to 0.12 and the x-axis "Bias parameter $c_Z$" from 0.5 to 2.0. The orange square-marked series peaks at $c_Z = 1.0$ with a value of approximately 0.12, while the green circle-marked series peaks at $c_Z = 1.2$ with a value of approximately 0.13. Plot c has the y-axis "Smallest undetected effective weight" from 2.5 to 5.0 and the x-axis "Bias parameter $c_Z$" from 0.5 to 2.0. The orange square-marked series rises from 2.5, stays around 3.0 between $c_Z=0.7$ and $c_Z=1.0$, rises to 4.0 at $c_Z=1.5$, and stays at 4.0 until $c_Z=2.0$. The green circle-marked series follows a similar path but continues to rise from 4.0 at $c_Z=1.5$ to 5.0 at $c_Z=2.0$. Plot d is a log-log plot with the y-axis "Failure probability" from $10^{-7}$ to $10^{-1}$ and the x-axis "$1-p_I$" from $10^{-3}$ to $10^{-1}$. Three lines are shown: a blue line with circle markers for $c_Z=0.5$, a red line with square markers for $c_Z=1.0$, and a purple line with triangle markers for $c_Z=2.0$. The blue line is labeled $\sim (1-p_I)^{2.98}$, the red line is labeled $\sim (1-p_I)^2$, and the purple line is labeled $\sim (1-p_I)^{2.07}$.
+
+In the present example, the parameter in question is the bias parameter cZ = log pZ/ log pX introduced above, Eq. (6). This allows the same agent to switch its strategy depending on the kind of bias present in the noise channel. Once a particular value of cZ is chosen, the error probabilities characterizing the noise channel are (pI , pX , pX , pcZ X ). Normalization of the error probabilities imposes a relationship between pI and pX, which means that there is only one other free parameter besides cZ, either pI or pX. It is more beneficial for training and generalization to keep pI fixed and solve for pX; otherwise the magnitude of the probabilities {pµ} changes a lot when varying cZ, leading to poorer performance.
+
+The error set Eµ is now taken to be all Pauli strings of (symmetric) weight ≤ 4, i.e. {Eµ} = {I,Xi, Yi,Zi,XiXj, . . . ,ZiZjZkZl}, but their associated error probabilities (and thus their effective weights according to (7)) will vary depending on cZ. For every RL training trajectory, a new cZ is chosen and the error probabilities pµ are updated correspondingly. For the number of physical qubits that we will consider, the KL conditions (4), (5) cannot be exactly satisfied. Hence, we are forcing the agent to achieve some compromise: the most likely errors will have to be detected at the expense of not detecting other, less likely ones.
+
+Regarding more detailed aspects of our implementation, we sample cZ from the set cZ ∈ {0.5, 0.6, 0.7, . . . , 1.9, 2} with a uniform probability distribution. The hyperparameters λµ of the reward (10) are defined as
+
+$$
+\lambda _ { \mu } = \frac { p _ { \mu } } { \max ( p _ { \mu } ) } \Big | _ { c _ { Z } } \ ,
+$$
+
+by which we mean that for every cZ, the corresponding set of pµ's gets normalized by the maximal value of pµ in that set. We choose pI = 0.9, even though both slightly smaller and larger values around pI ≈ 0.9 perform equally well. However, going below pI <∼ 0.8 or c Z = 0.5
+
+c Z = 0.9
+
+c Z = 1.4
+
+c Z = 2.0
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-005.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a scientific figure divided into three panels labeled a, b, and c. Panel a, titled "Encoding circuits," displays four quantum circuit diagrams corresponding to different values of the bias parameter $c_Z$: $0.5, 0.9, 1.4,$ and $2.0$. Each circuit consists of 8 horizontal qubit lines. The gates include single-qubit gates labeled $H$ (Hadamard) and $S$, and two-qubit controlled-Z gates indicated by vertical lines connecting qubits with a $\oplus$ symbol. Several gates are grouped within colored shaded regions: pink, yellow, red, and green. The sequence of gates and their connections change as $c_Z$ increases. Panel b, titled "Code generators," shows four heatmaps corresponding to the same $c_Z$ values. Each heatmap is an $8 \times 8$ grid of colored cells representing qubit indices $q_i$ on the vertical axis and generators $g_i$ on the horizontal axis. A legend at the bottom right indicates that gray cells represent $I$ (Identity), purple cells represent $Z$, and red cells represent $X/Y$. Panel c, titled "Weight enumerators," shows two columns labeled A and B. The vertical axis is "Bias parameter $c_Z$" with values $0.5, 1.0, 1.5,$ and $2.0$. The top section, for $c_Z = 0.5$, is a white table with values: Column A: $1, 1, 0, 0, 4, 50, \dots$; Column B: $1, 0, 0, 4, 42, \dots$. The bottom section, for $c_Z \ge 1.0$, is a solid dark red block with white text showing values: Column A: $1, 0, 0, 0, \dots$; Column B: $1, 0, 0, 4, 42, \dots$.
+
+above pI >∼ 0.95 comes with different challenges. In the former (for large errors), we lose the important property that the sum of pµ's decreases as a function of weight, (∑µ pµ)w=1 > (∑µ pµ)w=2 > . . . . In the latter (small errors), the range of values of pµ is so large that one would need to use a 64-bit floating-point representation to compute the reward with sufficient precision. Since both RL algorithms and GPUs are currently designed to work best with 32-bit precision, we decide to avoid this range of values for pI during training, but we will still evaluate the strategies found by the RL agent on different values of pI.
+
+We apply this strategy to target codes with parameters n = 9, k = 1 in asymmetric noise channels. We allow a maximum number of 35 gates. Moreover, we consider an all-to-all connectivity, taking as available gate set {Hi, Si,CNOT(i, j)}, where Si is the phase gate acting on qubit i.
+
+As is the case for most RL learning procedures, every independent learning run will typically result in a different learned strategy by the agent. We will thus train many agents and post-select the few best performing ones. Now, there are in principle two different ways to make this selection: The first one is based on how well they minimize the weighted KL sum (which is what they were trained for). The second one is by evaluating the probability that a single error correction cycle will end in failure, i.e. the probability that the wrong correction would be applied based on the detected syndrome. More concretely, we classify the agents by summing these two quantities over cZ. By evaluating them based on these two criteria we will be able to see whether agents trained with a computationally cheaper reward (the weighted KL sum) can be reused for the more complex task of minimizing the failure probability. To be precise, we define the failure probability as
+
+$$
+p _ { f } & = \sum _ { \text {syn} } p ( \text {correct wrong error} | \text {syn} ) p ( \text {syn} ) \ , \\
+$$
+
+where syn is one of the possible 2n-k syndromes, and where the error correction strategy is to always correct the most likely error to have happened given that specific syndrome. If more than one error is equally likely, we randomly select one of them.
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-006.png` (ollama:gemma4:26b, prompt sci-v1):* This is a heatmap plot titled "Code generator $g_1$". The y-axis is labeled "Qubit index $q_j$" and shows integer values from 1 to 9. The x-axis is labeled "Bias parameter $c_z$" and shows values from 0.5 to 2.0 in increments of 0.5. A legend in the top-left corner shows three colored squares representing categories: a red square for $t$, a light purple square for $\frac{x}{z}$, and a gray square for $z$. The heatmap consists of a grid where cells are colored based on these three categories. Row 1 is entirely gray. Row 2 is gray from 0.5 to approximately 0.8, light purple from 0.8 to 1.0, and red from 1.0 to 2.0. Row 3 is gray from 0.5 to 0.7, red from 0.7 to 1.0, and gray from 1.0 to 2.0. Row 4 is gray from 0.5 to 0.6, red from 0.6 to 2.0. Row 5 is gray from 0.5 to 0.6, red from 0.6 to 2.0. Row 6 is gray from 0.5 to 0.9, light purple from 0.9 to 1.0, and red from 1.0 to 2.0. Row 7 is red from 0.5 to 0.6, light purple from 0.6 to 1.0, gray from 1.0 to 1.4, light purple from 1.4 to 1.7, and red from 1.7 to 2.0. Row 8 is red from 0.5 to 0.6, light purple from 0.6 to 1.0, red from 1.0 to 1.4, and light purple from 1.4 to 2.0. Row 9 is red from 0.5 to 0.6, light purple from 0.6 to 0.9, and gray from 0.9 to 2.0.
+
+We discover codes with the following parameters: [[9, 1, de(cZ = 0.5) = 2]], [[9, 1, de(cZ = 0.6) = 3]], [[9, 1, de(cZ = 1.4) = 4]], [[9, 1, de(cZ = 2) = 5]]. To the best of our knowledge, the last two codes are new. Codes inbetween, 0.5 ≤ cZ < 0.6, have de = 2, 0.6 ≤ cZ < 1.4 have de = 3, and so on. Even though all encodings that the agent outputs have circuit size 35, we notice that trivial gate sequences are applied at the last few steps, effectively reducing the overall gate count. We remark that this feature is not problematic: it means that the agent is done well before a new training run is launched, and the best thing it can do is collecting small negative rewards until the end. We manually prune the encodings to get rid of such trivial operations, and the resulting circuit sizes vary from 22 to 35, depending on the value of cZ.
+
+The main results are shown in Fig. 4. We start by comparing the two best-performing post-selected agents according to minimizing the weighted KL sum (green) and minimizing the failure probability (orange), see Fig. 4a,b. There we see that it is in general not true that minimizing the weighted KL sum will automatically correspond to a lower failure probability. Nevertheless, there is a nice correlation between the two, especially in the region cZ < 1. More explicitly, the two best-performing agents show an almost identical performance in terms of both the weighted KL sum and the failure probability in this region. The situation changes when cZ ≥ 1, where we see that the optimal agents for the weighted KL sum are not optimal in terms of minimizing the failure probability, especially when cZ ≥ 1.5.
+
+The results from Fig. 4a,b suggest that there are two branches separated by a kink at cZ = 1. Indeed, the twobranch structure can be easily understood in terms of the degree of asymmetry in the noise channel. For cZ < 1, Z-errors are more likely than X/Y-errors, while the opposite happens for cZ > 1. For cZ < 1, a single error species had to be prioritized, but this number grows to two for cZ > 1. At the middle point, cZ = 1, there is no preference for any of the three species.
+
+The last comparison between these two agents that we do is based on the smallest undetected effective weight of the codes found in Fig. 4c. The same behavior as before is observed: almost-perfect correlation up to cZ = 1, and discrepancy at larger values of cZ. Surprisingly, the code found by the best agent according to the weighted KL sum (green) at cZ = 2 has de = 5, while the best code at minimizing the failure probability (orange) has de = 4. However, at the specific point cZ = 2 these two codes perform equally in terms of the failure probability (see Fig. 4b). An extended analysis of the performance of these two meta-agents, including a comparison against an ensemble of agents trained on a single value of cZ is included in Appendix H.
+
+Now we focus on the agent that performs best at minimizing the failure probability (orange) since it is the one of most interest in practical scenarios. We are specifically interested in doing a more detailed analysis to understand what are the characteristics of the codes that are being found. We begin by evaluating the performance of the same agent on different values of pI. This is shown in Fig. 4d, where we see that there is indeed a gain by encoding the quantum state, and it asymptotically follows a power law with exponent >∼ 2 depending on the specific value of cZ.
+
+We continue by analyzing the encoding circuits and code generators for some selected values of cZ. These are chosen after computing the (symmetric) quantum weight enumerators according to Eq. (8), which we show in Fig. 5c. There we see that the same code family is kept for 0.5 ≤ cZ < 0.9, where Z errors are more likely than X/Y . From that point onward, the agent switches to a new code family that is kept until the end, cZ = 2. We thus choose to analyze the encoding circuits and their associated code generators for the values cZ = {0.5, 0.9, 1.4, 2}.
+
+We begin by showing the encoding circuits in Fig. 5a, highlighting common motifs that are re-used across various values of cZ with different colors, indicative of transfer learning. Another interesting behavior is that S gates are used more prominently at small values of cZ, in particular in the combination S ·H. What this combination of gates does is a permutation: X → Y , Y →Z, Z →X (ignoring signs), which is very useful to exchange Y by Z efficiently. Moreover, we recall that the circuits that we show are pruned, i.e. trivial sequences of gates are manually eliminated. The agent actually uses lots of S gates at the very end of the encoding for almost all values of cZ. This is no accident: we have constructed a scenario in which X/Y errors are essentially indistinguishable, in the sense that they occur with equal probability. Thus the S
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-007.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains two parts, labeled **a** and **b**. Part **a** is a quantum circuit diagram. On the left, there are multiple horizontal lines representing wires. The top two wires are labeled $|\psi_1\rangle$ and $|\psi_k\rangle$ in orange. Below these, a series of wires are labeled $|0\rangle$ in black. A green rectangular block labeled "Hadamard block" spans the lower wires, with vertical dots indicating multiple wires in between. To the right of this block, a light blue rectangular block labeled "CNOT block" spans all wires, from the orange $|\psi_1\rangle$ line down to the bottom $|0\rangle$ line, with vertical dots indicating it spans the intermediate wires. Part **b** is a line plot. The x-axis is labeled "Number of physical qubits n" and ranges from 20 to 100. The y-axis is labeled "GPU memory (A100)" and uses a logarithmic scale ranging from $10^{-7}$ to $10^{10}$. Several colored curves are plotted: a red curve for $d=5$, a dark blue curve for $d=6$, an orange curve for $d=7$, a grey curve for $d=8$, a green curve for $d=10$, and a dark teal curve for $d=10$. Two star symbols are present: an orange star with a black outline at approximately $(n=72, \text{memory}=12.6)$ labeled $\star [72,12.6]$ of ref [16], and a dark blue star at approximately $(n=90, \text{memory}=8.10)$ labeled $\star [90,8.10]$. A grey shaded rectangle is labeled "Region of opportunity" that covers a range of $n$ from approximately 30 to 70 and memory from $10^{-7}$ to approximately $10^{-2}$.
+
+gate (which exchanges X by Y) acts like an idling operation. This is cleverly leveraged by the agent to shorten the encoding circuits: once it cannot improve the final reward further, the strategy then becomes to reach that point as soon as possible and collect that final reward for as many steps as possible.
+
+The final aspect we investigate is the code generators of such encoding circuits, which are shown in Fig. 5b. To aid visualization, we have chosen different colors for different Pauli matrices. However, since our scenario is by construction symmetric in X/Y , we choose to represent X and Y by the same color. Since the code used at cZ = 0.5 is the only one from a different code family, it is natural that its code generator pattern is the most distinct. However, we see that the generators of the remaining values of cZ have similar structures at certain points. We also include in Fig. 6 how the first code generator g1 (the first column in Fig. 5) changes across all values of cZ. For instance, the transition between different code families is clearly visible at cZ = 0.9. In addition, other (not shown) features such as the agent using the same circuit throughout 1.2 ≤ cZ ≤ 1.6 can also be glimpsed from Fig. 6 (even though one would need to analyze how all the generators evolve).
+
+## V. TOWARDS LARGE CODE DISCOVERY
+
+It is estimated [56] that practical applications of quantum computers such as executing Shor's algorithm to factor 2048 RSA integers would require code distances in their 20s for physical gate error rates of order 10-3 . Therefore, it is important to explore to which extent our RL-based strategy can be scaled up. In this Section, we will see that by restricting from stabilizer codes to CSS codes we are able to reduce the computational demands of our algorithms, leading to an estimated better scaling with larger code parameters.
+
+A particularly useful subclass of stabilizer codes are Calderbank-Shor-Steane (CSS) codes [12, 14]. They are defined by their stabilizer generators containing either only X or only Z Pauli operators. This restriction is useful because X-type and Z-type errors are detected independently, thereby implying the detection of Y-type errors when the corresponding X and Z-type stabilizers fire simultaneously. Moreover, strong contenders for implementation in large-scale quantum computations such as surface codes or color codes are of the CSS type.
+
+The independence of X and Z-type error detection means that the number of error operators that we have to keep track of drastically reduces from (11) to
+
+$$
+| \left \{ E _ { \mu } \right \} ^ { C S S } | _ { w \leq d - 1 } = 2 \sum _ { w = 0 } ^ { d - 1 } \binom { n } { w } \ , \quad ( 1 6 )
+$$
+
+where the overall factor of 2 counts both X and Z-type errors. Crucially, there is roughly an exponential factor in d less number of errors than in the case of general stabilizer codes (11) that have to be considered.
+
+Motivated by this reduction, we present a strategy that will exclusively target CSS code discovery. In order to implement such a restriction while being able to codiscover the encoding circuit simultaneously, it is sufficient to constrain the structure of the circuit. Indeed, if the circuit is built from an initial block of Hadamard gates applied to a subset of the qubits followed by CNOT gates thereafter guarantees that the resulting code will be CSS (see Appendix I for a proof and Fig. 7a for a schematic representation). This can be seen intuitively by the fact that a Hadamard gate exchanges an X by a Z (and viceversa), and CNOT gates propagate those Paulis to different positions within that stabilizer generator (without mixing X's and Z's).
+
+There are several possible modifications that we could do to our RL strategy, even though here we will only contemplate two. The first one would be to keep as actions both H and CNOT gates for the agent to use, but penalize the agent every time that a Hadamard gate is used after a CNOT gate. This would in principle lead to an agent that would know what is the correct architecture to be used for CSS codes at expenses of having to fine-tune this new penalty term in the reward. The second option would be to only allow the agent to use CNOT gates and we would be the ones deciding where to place the initial Hadamard gates. The advantage of this strategy with respect to the first one is that the search space of strategies for the agent is greatly reduced and the learning procedure would be much easier.
+
+Since the purpose of this Section is to explore the potential of an idea rather than giving definitive results, we choose the mixed human-AI strategy where we are the ones deciding the content of the Hadamard block and where the agent has to discover suitable CNOT blocks. In this way, we simplify the task of the agent as much as possible. For a schematic picture of this approach we refer the reader to Fig. 7a.
+
+Next, we make some estimations on the practical limits of CSS code discovery using a KL-based reward. As we have seen, a crucial ingredient of efficient QEC code discovery driven by RL is being able to both simulate the environment and train the RL agent with GPUs. With this in mind, we estimate the amount of memory that would be needed to store all error operators for some code parameters n and d (this calculation is independent of k). This estimation amounts to counting the number of error operators (16), times the amount of binary digits that have to be specified for each of them. We show the results of this estimation in Fig. 7b for code distances from 5 to 10 and physical qubit numbers of 20 to 100. In particular, we consider what fraction of memory they would occupy in an NVIDIA A100 GPU, which is the modern GPU model standard (see Appendix J for all the details of our estimation). The results shown in Fig. 7b indicate that our approach can be extended to ∼ 100 physical qubit numbers (d = 6) and to approximately 40 physical qubits and d = 10 in a single GPU. Moreover, we identify a region of opportunity that could potentially lead to new codes surpassing the properties of the smaller qLDPC codes found in [16] since we do not have an ansatz that limits the families of codes that we could find. We emphasize that not only would we discover the code, but the encoding circuit would also be simultaneously discovered.
+
+We have tested this approach by targeting weakly selfdual codes (meaning num(H) = (n - k)/2) of distance d = 5 using a next-to-nearest neighbor CNOT connectivity (with periodic boundary conditions) and initial Hadamard gates in alternating qubit indices. We have found that we can discover [[17, 1, 5]] codes (with num(H) = 8) in roughly 20 minutes, from scratch and with their encoding circuit. An example of such a discovered circuit is the following:
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-008.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a diagram of a quantum circuit. The circuit consists of 17 horizontal wire lines, labeled on the left from $q_0$ to $q_{16}$. The gates and their connections are as follows: $q_0$ has a single-qubit gate (a black dot) and is the target of controlled gates from $q_1$, $q_3$, $q_5$, $q_7$, $q_9$, $q_{11}$, $q_{13}$, and $q_{15}$ (indicated by vertical lines connecting a black dot on the control line to a circled plus sign on $q_0$). $q_1$ has a Hadamard gate ($H$), a single-qubit gate (black dot), and is the target of controlled gates from $q_2$, $q_4$, $q_6$, $q_8$, $q_{10}$, $q_{12}$, and $q_{14}$. $q_2$ has a single-qubit gate (black dot) and is the target of controlled gates from $q_3$, $q_5$, $q_7$, $q_9$, $q_{11}$, $q_{13}$, and $q_{15}$. $q_3$ has a Hadamard gate ($H$), a single-qubit gate (black dot), and is the target of controlled gates from $q_4$, $q_6$, $q_8$, $q_{10}$, $q_{12}$, and $q_{14}$. $q_4$ has a single-qubit gate (black dot) and is the target of controlled gates from $q_5$, $q_7$, $q_9$, $q_{11}$, $q_{13}$, and $q_{15}$. $q_5$ has a Hadamard gate ($H$), a single-qubit gate (black dot), and is the target of controlled gates from $q_6$, $q_8$, $q_{10}$, $q_{12}$, and $q_{14}$. $q_6$ has a single-qubit gate (black dot) and is the target of controlled gates from $q_7$, $q_9$, $q_{11}$, $q_{13}$, and $q_{15}$. $q_7$ has a Hadamard gate ($H$), a single-qubit gate (black dot), and is the target of controlled gates from $q_8$, $q_{10}$, $q_{12}$, and $q_{14}$. $q_8$ has a single-qubit gate (black dot) and is the target of controlled gates from $q_9$, $q_{11}$, $q_{13}$, and $q_{15}$. $q_9$ has a Hadamard gate ($H$), a single-qubit gate (black dot), and is the target of controlled gates from $q_{10}$, $q_{12}$, and $q_{14}$. $q_{10}$ has a single-qubit gate (black dot) and is the target of controlled gates from $q_{11}$, $q_{13}$, and $q_{15}$. $q_{11}$ has a Hadamard gate ($H$), a single-qubit gate (black dot), and is the target of controlled gates from $q_{12}$ and $q_{14}$. $q_{12}$ has a single-qubit gate (black dot) and is the target of controlled gates from $q_{13}$ and $q_{15}$. $q_{13}$ has a Hadamard gate ($H$), a single-qubit gate (black dot), and is the target of controlled gates from $q_{14}$. $q_{14}$ has a single-qubit gate (black dot) and is the target of controlled gates from $q_{15}$. $q_{15}$ has a Hadamard gate ($H$), a single-qubit gate (black dot), and is the target of controlled gates from $q_{16}$. $q_{16}$ has a Hadamard gate ($H$) and a single-qubit gate (black dot). All controlled gates are represented by a vertical line connecting a solid dot (control) to a circled plus sign (target).
+
+q16 : H ·
+
+·
+
+It consists of 8 Hadamard gates (that we chose) and a remaining sequence of 46 CNOT gates discovered by the agent. An interesting strategy that the agent uses is first building Bell pairs between adjacent qubits (which are [[2, 0, 2]] codes) and then entangle these pairs with each other to gradually build up a d = 5 code.
+
+We remind the reader that the largest (non-CSS) code that we had shown in previous sections was [[15, 2, 5]] and it needs roughly 4 hours of computing. Encouraged by this result, we have tried targeting n ≥ 20 and d ≥ 6. The result is that while codes with d = 5 have been found, we have been unsuccessful with d ≥ 6. Our training curves suggest that the loss landscape of this problem is quite complex and an auxiliary, conceptually novel strategy that allows us to navigate such a vast space of circuits in a more effective way is needed. In any case, we leave this study for future work.
+
+## VI. CONCLUSIONS AND OUTLOOK
+
+We have presented an efficient RL framework that is able to simultaneously discover QEC codes and their encoding circuits from scratch, given a qubit connectivity, gate set, and error operators. It learns strategies simultaneously for a range of noise models, thus re-using and transferring discoveries between different noise regimes. We have been able to discover codes and circuits up to 20 physical qubits and code distance 5. This is thanks to our formulation in terms of stabilizers, that serve both as compact input to the agent as well as the basis for rapid Clifford simulations, which we implemented in a vectorized fashion using a modern machine-learning framework.
+
+In the present work, we have focused on the quantum communication or quantum memory scenario, where the encoding circuit itself can be assumed error-free since we focus on errors happening during transmission. As a result, our encoding circuits are not fault tolerant, i.e. single errors, when introduced, might sometimes proliferate to become incorrigible. Flag-based fault tolerance [57] added on top of our encoding circuits could turn them fault tolerant.
+
+We have also shown how to efficiently scale up this strategy by exclusively targeting CSS codes, potentially being able to outperform the recent quasi-cyclic codes from [16] in the near future. In addition, not only would the codes be discovered, but their encoding circuits would also be automatically known.
+
+One of the limits of our approach is GPU memory. However, this could be circumvented through different means. While it is always possible to trade performance by memory load, the tendency to train very large AI models is thrusting both the development of novel hardware with increased memory capabilities and the integration of distributed computing options in modern machine learning libraries. These developments makes us envision scenarios where the framework presented in this work could be scaled up straightforwardly. This makes us optimistic about the future of AI-discovered QEC in the very near future.
+
+## ACKNOWLEDGMENTS
+
+Fruitful discussions with Sangkha Borah, Jonas Landgraf, Maximilian Naegele and Oleg Yevtushenko are thankfully acknowledged. We are thankful to Markus Grassl for comments on the first version of this manuscript. This research is part of the Munich Quantum Valley, which is supported by the Bavarian state government with funds from the Hightech Agenda Bayern Plus.
+
+- [1] A. Acín, I. Bloch, H. Buhrman, T. Calarco, C. Eichler, J. Eisert, D. Esteve, N. Gisin, S. J. Glaser, F. Jelezko, et al., The quantum technologies roadmap: a european community view, New Journal of Physics 20, 080201 (2018).
+- [2] S. M. Girvin, Introduction to quantum error correction and fault tolerance, SciPost Physics Lecture Notes 10.21468/scipostphyslectnotes.70 (2023).
+- [3] M. Inguscio, W. Ketterle, and C. Salomon, Proceedings of the International School of Physics" Enrico Fermi.", Vol. 164 (IOS press, 2007).
+- [4] J. Preskill, Fault-tolerant quantum computation (1997), arXiv:quant-ph/9712048 [quant-ph].
+- [5] A. Paler and S. J. Devitt, An introduction into fault-tolerant quantum computing, in 2015 52nd ACM/EDAC/IEEE Design Automation Conference (DAC) (2015) pp. 1-6.
+- [6] S. Krinner, N. Lacroix, A. Remm, A. Di Paolo, E. Genois, C. Leroux, C. Hellings, S. Lazar, F. Swiadek, J. Herrmann, et al., Realizing repeated quantum error correction in a distance-three surface code, Nature 605, 669 (2022).
+- [7] C. Ryan-Anderson, J. G. Bohnet, K. Lee, D. Gresh, A. Hankin, J. Gaebler, D. Francois, A. Chernoguzov, D. Lucchetti, N. C. Brown, et al., Realization of real-time fault-tolerant quantum error correction, Physical Review X 11, 041058 (2021).
+- [8] L. Postler, S. Heuβen, I. Pogorelov, M. Rispler, T. Feldker, M. Meth, C. D. Marciniak, R. Stricker, M. Ringbauer, R. Blatt, et al., Demonstration of fault-tolerant universal quantum gate operations, Nature 605, 675 (2022).
+- [9] I. Cong, H. Levine, A. Keesling, D. Bluvstein, S.- T. Wang, and M. D. Lukin, Hardware-efficient, faulttolerant quantum computation with rydberg atoms, Physical Review X 12, 021049 (2022).
+- [10] R. Acharya, I. Aleiner, R. Allen, T. I. Andersen, M. Ansmann, F. Arute, K. Arya, A. Asfaw, J. Atalaya, R. Bab-
+
+bush, et al., Suppressing quantum errors by scaling a surface code logical qubit, Nature 614, 676 (2023).
+
+- [11] V. Sivak, A. Eickbusch, B. Royer, S. Singh, I. Tsioutsios, S. Ganjam, A. Miano, B. Brock, A. Ding, L. Frunzio, et al., Real-time quantum error correction beyond breakeven, Nature 616, 50 (2023).
+- [12] A. R. Calderbank and P. W. Shor, Good quantum errorcorrecting codes exist, Phys. Rev. A 54, 1098 (1996).
+- [13] R. Laflamme, C. Miquel, J. P. Paz, and W. H. Zurek, Perfect quantum error correcting code, Phys. Rev. Lett. 77, 198 (1996).
+- [14] A. M. Steane, Simple quantum error-correcting codes, Phys. Rev. A 54, 4741 (1996).
+- [15] A. Y. Kitaev, Quantum computations: algorithms and error correction, Russian Mathematical Surveys 52, 1191 (1997).
+- [16] S. Bravyi, A. W. Cross, J. M. Gambetta, D. Maslov, P. Rall, and T. J. Yoder, High-threshold and lowoverhead fault-tolerant quantum memory, Nature 627, 778 (2024).
+- [17] M. Grassl and S. Han, Computing extensions of linear codes using a greedy algorithm, in 2012 IEEE International Symposium on Information Theory Proceedings (2012) pp. 1568-1572.
+- [18] M. Grassl, P. W. Shor, G. Smith, J. Smolin, and B. Zeng, New constructions of codes for asymmetric channels via concatenation, IEEE Transactions on Information Theory 61, 1879 (2015).
+- [19] M. Li, M. Gutiérrez, S. E. David, A. Hernandez, and K. R. Brown, Fault tolerance with bare ancillary qubits for a [[7,1,3]] code, Phys. Rev. A 10.1103/PhysRevA.96.032341 (2017).
+- [20] I. Chuang, A. Cross, G. Smith, J. Smolin, and B. Zeng, Codeword stabilized quantum codes: Algorithm and structure, Journal of Mathematical Physics 10.1063/1.3086833 (2009), https://pubs.aip.org/aip/jmp/articlepdf/doi/10.1063/1.3086833/15610997/042109 1 online.pdf.
+
+- [21] D. Gottesman, Stabilizer codes and quantum error correction (1997), quant-ph/9705052 [quant-ph].
+- [22] S. Aaronson and D. Gottesman, Improved simulation of stabilizer circuits, Phys. Rev. A 10.1103/physreva.70.052328 (2004).
+- [23] H. Wang, T. Fu, Y. Du, W. Gao, K. Huang, Z. Liu, P. Chandak, S. Liu, P. Van Katwyk, A. Deac, et al., Scientific discovery in the age of artificial intelligence, Nature 620, 47 (2023).
+- [24] R. S. Sutton, D. McAllester, S. Singh, and Y. Mansour, Policy gradient methods for reinforcement learning with function approximation, Advances in neural information processing systems 12 (1999).
+- [25] T. Fösel, P. Tighineanu, T. Weiss, and F. Marquardt, Reinforcement learning with neural networks for quantum feedback, Phys. Rev. X 10.1103/PhysRevX.8.031084 (2018).
+- [26] H. P. Nautrup, N. Delfosse, V. Dunjko, H. J. Briegel, and N. Friis, Optimizing quantum error correction codes with reinforcement learning, Quantum 10.22331/q-201912-16-215 (2019).
+- [27] C. Mauron, T. Farrelly, and T. M. Stace, Optimization of tensor network codes with reinforcement learning, arXiv:2305.11470 (2023).
+- [28] V. P. Su, C. Cao, H.-Y. Hu, Y. Yanay, C. Tahan, and B. Swingle, Discovery of optimal quantum error correcting codes via reinforcement learning (2023), arXiv:2305.06378 [quant-ph].
+- [29] C. Cao and B. Lackey, Quantum lego: Building quantum error correction codes from tensor networks, PRX Quantum 3, 020332 (2022).
+- [30] P. Andreasson, J. Johansson, S. Liljestrand, and M. Granath, Quantum error correction for the toric code using deep reinforcement learning, Quantum 3, 183 (2019).
+- [31] R. Sweke, M. S. Kesselring, E. P. van Nieuwenburg, and J. Eisert, Reinforcement learning decoders for faulttolerant quantum computation, Machine Learning: Science and Technology 2, 025005 (2020).
+- [32] L. D. Colomer, M. Skotiniotis, and R. Muñoz-Tapia, Reinforcement learning for optimal error correction of toric codes, Physics Letters A 384, 126353 (2020).
+- [33] D. Fitzek, M. Eliasson, A. F. Kockum, and M. Granath, Deep q-learning decoder for depolarizing noise on the toric code, Physical Review Research 2, 023230 (2020).
+- [34] F. Metz and M. Bukov, Self-correcting quantum manybody control using reinforcement learning with tensor networks, Nature Machine Intelligence 5, 780 (2023).
+- [35] P.-J. Stas, Y. Q. Huan, B. Machielse, E. N. Knall, A. Suleymanzade, B. Pingault, M. Sutula, S. W. Ding, C. M. Knaut, D. R. Assumpcao, et al., Robust multi-qubit quantum network node with integrated error detection, Science 378, 557 (2022), https://www.science.org/doi/pdf/10.1126/science.add9771.
+- [36] K. Azuma, S. E. Economou, D. Elkouss, P. Hilaire, L. Jiang, H.-K. Lo, and I. Tzitrin, Quantum repeaters: From quantum networks to the quantum internet, Rev. Mod. Phys. 95, 045006 (2023).
+- [37] C. Cao, C. Zhang, Z. Wu, M. Grassl, and B. Zeng, Quantum variational learning for quantum error-correcting codes, Quantum 10.22331/q-2022-10-06-828 (2022).
+- [38] M. A. Nielsen and I. L. Chuang, Quantum computation and quantum information (Cambridge university press, 2010).
+- [39] C. H. Bennett, D. P. DiVincenzo, J. A. Smolin, and W. K. Wootters, Mixed-state entanglement and quantum error correction, Phys. Rev. A 54, 3824 (1996).
+- [40] E. Knill and R. Laflamme, Theory of quantum error-correcting codes, Phys. Rev. A 10.1103/PhysRevA.55.900 (1997).
+- [41] L. Ioffe and M. Mézard, Asymmetric quantum error-correcting codes, Phys. Rev. A 10.1103/PhysRevA.75.032345 (2007).
+- [42] L. Wang, K. Feng, S. Ling, and C. Xing, Asymmetric quantum codes: Characterization and constructions, IEEE Transactions on Information Theory 56, 2938 (2010).
+- [43] M. F. Ezerman, S. Ling, and P. Sole, Additive asymmetric quantum codes, IEEE Transactions on Information Theory 57, 5536 (2011).
+- [44] G. G. L. Guardia, On the construction of asymmetric quantum codes, International Journal of Theoretical Physics 10.1007/s10773-014-2031-y (2014).
+- [45] P. Shor and R. Laflamme, Quantum analog of the macwilliams identities for classical coding theory (1997).
+- [46] R. S. Sutton and A. G. Barto, Reinforcement learning: An introduction (MIT press, 2018).
+- [47] V. Konda and J. Tsitsiklis, Actor-critic algorithms, Advances in neural information processing systems 12 (1999).
+- [48] J. Schulman, F. Wolski, P. Dhariwal, A. Radford, and O. Klimov, Proximal policy optimization algorithms, arXiv:1707.06347 (2017).
+- [49] C. Gidney, Stim: a fast stabilizer circuit simulator, Quantum 5, 497 (2021).
+- [50] QDX: An AI discovery tool for quantum error correction codes, https://github.com/jolle-ag/qdx.
+- [51] J. Bradbury, R. Frostig, P. Hawkins, M. J. Johnson, C. Leary, D. Maclaurin, A. P. George Necula, J. VanderPlas, S. Wanderman-Milne, and Q. Zhang, JAX: composable transformations of Python+NumPy programs (2018).
+- [52] C. Lu, J. Kuba, A. Letcher, L. Metz, C. S. de Witt, and J. Foerster, Discovered policy optimisation, Advances in Neural Information Processing Systems , 16455 (2022).
+- [53] S. Yu, Q. Chen, and C. H. Oh, Graphical quantum errorcorrecting codes (2007), arXiv:0709.1780 [quant-ph].
+- [54] S. Yu, J. Bierbrauer, Y. Dong, Q. Chen, and C. Oh, All the stabilizer codes of distance 3, IEEE transactions on information theory 59, 5179 (2013).
+- [55] D. Gottesman, Class of quantum error-correcting codes saturating the quantum hamming bound, Phys. Rev. A 54, 1862 (1996).
+- [56] C. Gidney and M. Ekerå, How to factor 2048 bit rsa integers in 8 hours using 20 million noisy qubits, Quantum 5, 433 (2021).
+- [57] R. Chao and B. W. Reichardt, Quantum error correction with only two extra qubits, Phys. Rev. Lett. 10.1103/physrevlett.121.050502 (2018).
+
+## Appendix A: Elementary example: The three qubit repetition code.
+
+Here we illustrate the encoding process of the three qubit repetition code, which is a [[3, 1]] code that can correct single-qubit bit flips. The whole procedure is summarized in Fig. 8.
+
+There are two code generators and the targeted error set consists of all weight-1 and weight-2 bit-flip (Pauli-X) operators: XII, IXI, IIX,XXI,XIX, IXX. We remind the reader that detecting this set implies being able to correct all single-qubit bit-flips. The generators start being IZI, IIZ in the absence of gates, and transform into ZZI,ZIZ after applying two CNOT gates with control on the first qubit and target on the second and third qubits (see Fig. 8). Initially, only the error operator XII is not detected (the other error operators can be checked to satisfy the Knill-Laflamme (KL) conditions (4), (5)). After the first CNOT gate, the undetected error becomes XXI, and after the second CNOT all target errors are detected.
+
+In order to have a single number that quantifies to which degree the KL conditions are not satisfied, we introduce a quantity that we call the KL sum,
+
+$$
+\sum _ { \mu } p _ { \mu } K _ { \mu } \ , & & ( A 1 ) & &
+$$
+
+with the index µ running over the number of operators and where Kµ is 0 if the corresponding error Eµ is detected and 1 otherwise, with pµ being the occurrence probability of Eµ. The KL sum is closely related to the reward that we have used in our RL framework (see (10)) and is a useful indicator of how close a gate sequence is to be able to detect all the errors that were chosen.
+
+In the 3-qubit repetition code under consideration (see Fig. 8), the KL sum starts being pXp2I because only the error operator XII is not detected, changing to p2X pI < pXp2I after application of the first CNOT gate. When all KL conditions are satisfied, the KL sum is zero and all error operators that were considered can be detected, leading to a successful encoding.
+
+## Appendix B: Implementation details of the vectorized Clifford simulator
+
+Here we give more details on the implementation of our simulations, which are based on the binary symplectic formalism of the Pauli group and that have been optimized to be compatible with modern vectorized machine learning frameworks running on Graphical Processing Units (GPU). In particular, we ignore global phases in our approach, since they play no role in the KL conditions Eq. (4), (5).
+
+A stabilizer generator gi is formally represented as a Pauli string P1 ⊗ P2 ⊗ · · · ⊗ Pn, where Pi ∈ {I, X, Y, Z} is any Pauli operator, and numerically as a binary vector of size 2n. For example, the Pauli matrices are represented as I = (0, 0), X = (1, 0), Y = (1, 1), Z = (0, 1), and a general Pauli string is represented as (x1, . . . , xn, z1, . . . , zn), where all xi and zi are either 0 or 1. For instance, the binary vector (1, 1, 0, 0, 0, 1, 1, 0)
+
+=
+
+=
+
+=
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-009.png` (ollama:gemma4:26b, prompt sci-v1):* This is a diagram of a quantum circuit and associated error correction data. At the top, a quantum circuit consists of three qubits over three time steps, labeled $t=0$, $t=1$, and $t=2$. The first qubit starts in state $|\psi\rangle$. At $t=1$, a controlled-NOT gate is applied with the first qubit as the control and the second qubit (initially in state $|0\rangle$) as the target. At $t=2$, another controlled-NOT gate is applied with the first qubit as the control and the third qubit (initially in state $|0\rangle$) as the target. Below the circuit are three rectangular boxes containing text. The first box, labeled "Code Generators", contains "IZI" over "IIZ". The second box, labeled "Error Operators", contains two columns of text: the first column has "XII, IXI, IIX, XIX" and the second column has "XII, IXI, XXI, IXX, XIX, XIX" (note: the text is arranged in two vertical columns within the box). The third box, labeled "KL sum", contains a mathematical expression: $P_X P_I^2$ in the first column, $P_X^2 P_I$ in the second column, and $0$ in the third column. All boxes and labels are vertically aligned under their respective time steps or categories.
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-010.png` (ollama:gemma4:26b, prompt sci-v1):* This is a line plot comparing compute times on a log-log scale. The x-axis is labeled "Number of Circuits" and ranges from $10^0$ to $10^4$ using a logarithmic scale. The y-axis is labeled "Compute time (ms)" and ranges from $10^1$ to $10^5$ using a logarithmic scale. There are two data series: a green line labeled "Stim (CPU)" that trends upward linearly on this log-log plot, starting at approximately $3 \times 10^1$ ms for $10^0$ circuits and reaching $10^5$ ms at $10^4$ circuits; and an orange line labeled "Ours (GPU)" that starts near $4 \times 10^1$ ms for $10^0$ circuits, stays relatively flat between $10^1$ and $10^2$ circuits, and then increases to approximately $2 \times 10^3$ ms at $10^4$ circuits. A vertical double-headed arrow between the two lines at $10^3$ circuits is labeled "54x faster". The plot is set against a gray grid of dashed lines.
+
+represents the Pauli string XY ZI. Matrix multiplication gets mapped to binary sum (ignoring global phases), e.g.
+
+$$
+X \cdot Y = Z \longleftrightarrow ( 1 , 0 ) + ( 1 , 1 ) = ( 0 , 1 ) \ ( \bmod { 2 } ) \ . \quad ( B 1 )
+$$
+
+A stabilizer code is specified by n-k stabilizer group generators SC = ⟨g1, g2, . . . , gn-k⟩ and is therefore represented by a check matrix G [22], which is a (n-k)×2n binary matrix where each row i represents the Pauli string gi from SC. Clifford gates map Pauli strings to Pauli strings, meaning that a check matrix G gets mapped to a different check matrix G′ under the action of any Clifford gate. It is sufficient to consider the action of the Clifford gates H,S,CNOT on X/Z stabilizers. For instance, the action of H is the well-known
+
+$$
+H X H = Z , \, H Z H = X \ ,
+$$
+
+meaning that it exchanges X by Z. More generally, Hi exchanges columns i and i +n of a check matrix G. We implement this transformation by representing Hi with a binary matrix H(i)b and by performing binary matrix multiplication between G and H(i)b. Explicitly, H(i)b is the 2n× 2n identity matrix with columns i and i +n exchanged,
+
+$$
+\begin{array} {
+$$
+
+and matrix multiplication must be done from the right, i.e. G′ = G · H(i)b (mod2). Binary matrix representations can be built for all Si and CNOT(i, j) gates in a similar manner.
+
+Two Pauli strings P1 and P2 either commute or anticommute. We compute this by evaluating the binary symplectic bilinear
+
+$$
+P _ { 1 } \cdot \Omega \cdot P _ { 2 } ^ { T } = \begin{cases} \ 0 & \text {if } P _ { 1 } \text { and } P _ { 2 } \text { commute} , \\ \ 1 & \text {if } P _ { 1 } \text { and } P _ { 2 } \text { anticommute} \end{cases}
+$$
+
+where P1 and P2 are the corresponding binary representations and Ω is the 2n × 2n symplectic metric
+
+$$
+\Omega = \begin{pmatrix} \mathbb { 0 } _ { n } & \mathbb { 1 } _ { n } \\ \mathbb { 1 } _ { n } & \mathbb { 0 } _ { n } \end{pmatrix} \ .
+$$
+
+In our problem, we want to determine whether a list of operators {Eµ} anticommute with any of the code generators gi. We group the error operators inside a binary matrix EM, where each row corresponds to the binary representation of a different operator, and we compute
+
+$$
+E _ { M } \cdot \Omega \cdot G ^ { T } \ . & & ( B 5 ) & & \stackrel { \ararepsilon } { \ t h }
+$$
+
+The result is a binary matrix with dimensions (num(Eµ), n - k). The first KL condition Eq. (4) requires checking whether at least one code generator gi anticommutes with any given error operator. This means that the result has to be transformed into a binary array of dimension num(Eµ), where a 1 means that the first KL condition Eq. (4) is satisfied for the corresponding operator Eµ and that is zero otherwise.
+
+The second KL condition Eq. (5) requires checking whether any error operator Eµ ∈ SC. In principle, the full stabilizer group of 2n-k elements must be built at every time step of our simulations. For the physical qubit numbers that we have considered in our work, this computation is still fast enough, becoming more challenging as n - k ≥ 13. In practice, not many error operators end up being in SC, which we leverage by introducing a softness parameter s such that only a subgroup of SC is built. More precisely, s = 0 means that this subgroup is empty, s = 1 means taking only the generators gi as the subgroup, s = 2 means taking the generators gi and all pairwise combinations of generators gigj, and so on for larger s.
+
+In the end, all the operations that are required for both simulating the quantum circuits and to compute the reward have been implemented using binary linear algebra (matrix-vector multiplication). These are efficiently vectorizable operations using modern machine learning frameworks such as Jax [51] and are extremely fast on a GPU. In particular, we compare the compute time needed to evolve random Clifford circuits of 1000 gates on 40 qubits with our simulator and with Stim [49] in Fig. 9, and we see that in this regime we are around 50 times faster than Stim.
+
+## Appendix C: RL algorithm hyperparameters and performance
+
+In this work we use a state-of-the-art policy-gradient method called Proximal Policy Optimization (PPO) [48]. It is an actor-critic method with two separate entities that we implement as neural networks: the policy network predicts action probabilities (which quantum gate should be applied next) and the critic network predicts the advantage of that action (how valuable it was).
+
+We use the PPO implementation of [52], which we will break down in more detail (see also Fig. 10 and Table I for a list of hyperparameters). In our implementation, the RL environment is vectorized, meaning that the agent interacts with multiple different quantum circuits at the same time. The hyperparameter that determines this number of RL environments is called NUM ENVS. The learning algorithm consists of two processes: collect and update. During collection, the agent interacts with the environments and a total of NUM STEPS sequences of (observation, action, reward) are collected per environment. Following the collection, the update process begins. Here, we have a total of NUM ENVS ∗ NUM STEPS individual steps that are shuffled and reshaped into NUM MINIBATCHES minibatches (each of size BATCH SIZE). These are used for updating the weights of the neural networks through stochastic gradient descent, which happens a number of UPDATE EPOCHS times during every update process. The whole collection-update cycle gets repeated NUM EPOCHS times.
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-011.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a flowchart diagram illustrating a reinforcement learning process, divided into two main stages: "Collect" and "Update." The "Collect" stage is enclosed in a large orange rounded rectangle and contains multiple elements: a stack of three rectangles labeled "NUM_ENVS" with arrows pointing to a central processing block; this central block contains two sub-modules, "ACTOR" and "VALUE," each represented by a small blue neural network diagram with nodes and connecting lines. Above "ACTOR," the label $[2n(n-k), h, h, n_A]$ is written, and above "VALUE," the label $[2n(n-k), h, h, 1]$ is written. A large arrow labeled "NUM_STEPS" points from the "Collect" stage down to the "Update" stage. The "Update" stage is enclosed in a large light-blue rounded rectangle and contains a white box with the text "MINI_BATCH_SIZE $\times$ NUM_MINIBATCHES." An arrow points from this box to a transformation symbol $\theta \rightarrow \theta'$, which then points to two adjacent blue neural network diagrams. A vertical label on the far right, spanning the height of both the "Collect" and "Update" stages, reads "NUM_EPOCHS."
+
+The neural networks that we have chosen are standard feedforward fully-connected neural networks with identical architectures for both the actor and value networks. In particular, they both consist of an input layer of size 2n(n-k) given by the observation from the environment, followed by two hidden layers of size h and an output layer of size nA (number of actions) in the case of the actor network and of size 1 for the value network (see Fig. 10). The number of actions nA is determined by the available gate set and qubit connectivity.
+
+Other hyperparameters that participate in the PPO implementation which we include for completeness (but that we refer to [48] for further explanations) are the discount factor γ, the generalized advantage estimator (GAE) parameter λ, the actor loss clipping parameter ε, the entropy coefficient and the value function (VF) coefficient.
+
+Regarding the optimizer itself, we use ADAM with a clipping in the norm of the gradient (MAX GRAD NORM) and some initial learning rate (LR) that gets annealed (ANNEAL LR) using a linear schedule as the training evolves, see Table I for specific numerical values.
+
+Finally, our actor and critic networks are chosen to be identical with two layers of between 16 and 400 neurons in each hidden layer and a ReLU activation function. Next, we show an example of a typical training trajectory in Fig. 11 together with all the hyperparameter numerical values that were used and the execution time on a single NVIDIA Quadro RTX 6000 GPU. There, 4 agents are tasked to find [[7, 1, 3]] codes, which each of them completes successfully running in parallel in 20 sec. The error channel is chosen to be global symmetric depolarizing with pI = 0.9 (i.e. pX = pY = pZ = 1 - pI/3). The average circuit size starts being 20 by design, i.e. if no code has been found after 20 gates, the circuit gets reinitialized. This number starts decreasing when codes start being found and it saturates to a final value, which is in general different for each agent. As a final remark, running the same script on a CPU node with two Xeon Gold 6130 processors takes 7 min 40 sec.
+
+Finally, we show how the runtime scales when increasing the number of physical qubits n and the code distance d. In order to get a meaningful comparison, we fix all other hyperparameters to be identical to those shown in Fig. 11. We remark that in general the agents will not have converged to a successful encoding sequence given the allotted resources.
+
+TABLE I. Hyperparameters that were used during training with some typical range of values that we have seen to lead to good performance (see text for a description of each hyperparameter).
+
+| Hyperparameter   | Value          |
+|------------------|----------------|
+| LR               | (1 - 5) × 10-4 |
+| NUM ENVS         | 8-1024         |
+| NUM STEPS        | 8-32           |
+| NUM EPOCHS       | 1000-12000     |
+| UPDATE EPOCHS    | 2-4            |
+| NUM MINIBATCHES  | 8-128          |
+| GAMMA            | 0.99           |
+| GAE LAMBDA       | 0.95           |
+| CLIP EPS         | 0.1-0.2        |
+| ENT COEF         | 0.01-0.05      |
+| VF COEF          | 0.5            |
+| MAX GRAD NORM    | 0.05-0.25      |
+| ANNEAL LR        | True           |
+
+## Appendix D: Different connectivities and gatesets
+
+Here we present results for some other selected gatesets and connectivities to show the flexibility of our approach. For concreteness, we choose codes with parameters [[7, 1, 3]] and show the shortest encoding circuit for each case. More concretely, we pick three different gatesets and three different connectivities according to Fig. 13. We have trained 640 agents in every case.
+
+## 1. Line connectivity:
+
+G1:
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-012.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains two parts, labeled "a" and "b". Part a is a line plot showing "Return" on the y-axis and "Number of Epochs" on the x-axis. The x-axis ranges from 0 to 2000. The left y-axis, labeled "Return", ranges from -15 to -5. The right y-axis, labeled "Circuit Size" in orange, ranges from 12 to 20. A blue line starts at approximately -18 at epoch 0 and increases rapidly to a plateau just below -5 by epoch 250. An orange line starts at a circuit size of 20, remains constant until approximately epoch 250, then drops sharply to approximately 14 by epoch 500, where it fluctuates between 13 and 15 for the remainder of the plot. At the top of the plot, the text reads "Target: [[7.1.3]]". At the bottom, a black box contains the text "Total time: 19.5 sec". Part b contains a diagram and a table. The diagram shows a stack of four overlapping orange-outlined rectangles, representing "4 agents". Within one rectangle, there is a "Collect" block containing a teal box labeled "$\times 64$" connected to a diamond shape with a blue icon, which is connected to another diamond shape with a blue icon labeled "$h=16$". Below this, an "Update" block contains a teal box labeled "64", a blue arrow labeled "$\theta \to \theta'$", a red box labeled "64", and another teal box labeled "$\times 64$". An arrow labeled "$\times 1953$" points from the "Update" block back towards the "Collect" block. The entire stack is labeled "Single GPU". To the right is a table titled "All other hyperparameters". The table has two columns. The rows are: "Learning rate" | "0.0005"; "$\gamma$" | "0.99"; "GAE $\lambda$" | "0.95"; "Clip $\varepsilon$" | "0.1"; "Entropy coefficient" | "0.01"; "VF coefficient" | "0.5"; "Max grad norm" | "0.05"; "Activation" | "ReLU"; "Anneal learning rate" | "True"; "$p_l$" | "1"; "$\lambda_{\mu}$" | "$10p_{\mu}$"; "Qubit connectivity" | "All-to-All"; "Softness" | "1".
+
+| Learning rate        | 0.0005     |
+|----------------------|------------|
+| γ                    | 0.99       |
+| GAE λ                | 0.95       |
+| Clip ε               | 0.1        |
+| Entropy coefficient  | 0.01       |
+| VF coefficient       | 0.5        |
+| Max grad norm        | 0.05       |
+| Activation           | ReLU       |
+| Anneal learning rate | True       |
+| p I                  | 0.9        |
+| λ μ                  | 10 p μ     |
+| Qubit connectivity   | All-to-All |
+| Softness             | 1          |
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-013.png` (ollama:gemma4:26b, prompt sci-v1):* This is a line plot showing the relationship between the number of physical qubits and the time required to reach $1\text{e}6$ steps. The y-axis is labeled "Time to reach $1\text{e}6$ steps (sec)" and is on a logarithmic scale ranging from $10^1$ to $10^5$. The x-axis is labeled "Number of physical qubits" and has a linear scale ranging from approximately 5 to 25, with major tick marks at 10, 15, and 20. There are four data series, each represented by a different color of connected markers: a green series labeled "$d=3$" at the bottom, ranging from approximately $2 \times 10^1$ to $6 \times 10^1$ seconds; a magenta series labeled "$d=4$" starting at approximately $2 \times 10^1$ and increasing to approximately $3 \times 10^2$ seconds; a blue series labeled "$d=5$" starting at approximately $2 \times 10^1$ and increasing to approximately $2 \times 10^3$ seconds; and an orange series labeled "$d=6$" at the top, starting at approximately $3 \times 10^3$ and increasing to approximately $3 \times 10^4$ seconds. All series show an increasing trend with the number of physical qubits, and the rate of increase is higher for larger values of $d$.
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-014.png` (ollama:gemma4:26b, prompt sci-v1):* This image consists of two parts, labeled 'a' and 'b', showing graph structures and quantum circuit diagrams. Part 'a' is titled "Connectivities" and displays three undirected graphs: "Line" consists of four nodes labeled 0, 1, 2, and 3 connected in a straight sequence (0-1, 1-2, 2-3); "Brick" consists of six nodes labeled 0, 1, 2, 3, 4, 5, and 6 forming a rectangular grid with two rows (top row 0-1-2, bottom row 3-4-5, and vertical connections 0-3, 1-4, 2-5) and an additional node 6 connected to node 5; "Square" consists of six nodes labeled 0, 1, 2, 3, 4, 5, and 6 arranged in a grid with two rows (top row 0-1-2, bottom row 3-4-5, and vertical connections 0-3, 1-4, 2-5) with node 6 connected to node 5. Part 'b' displays three quantum circuit diagrams labeled "G1", "G2", and "G3". G1 features a single line with a sequence of three gates: a box containing "H", followed by a box containing "S", followed by a two-qubit controlled-Z gate represented by a vertical line connecting a solid dot on the top line and a small cross symbol on the bottom line. G2 features a single line with a sequence of three gates: a box containing "H", followed by a box containing "S", followed by a box containing $\sqrt{xx}$. G3 features a single line with a sequence of three gates: a box containing "S", followed by a box containing $\sqrt{x}$, followed by a two-qubit controlled-Z gate represented by a vertical line connecting a solid dot on the top line and a small cross symbol on the bottom line.
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-015.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains three separate quantum circuit diagrams labeled G1, G2, and G3. In G1, there are seven horizontal wires labeled $q_0$ through $q_6$. A vertical line of $H$ gates connects $q_1$ through $q_6$ at the beginning. Following this, several controlled-Z gates (represented by a dot on the control wire and a small circle on the target wire) connect various pairs: $(q_0, q_1)$, $(q_0, q_2)$, $(q_1, q_3)$, $(q_2, q_4)$, $(q_3, q_5)$, and $(q_4, q_6)$. Additionally, there are $H$ gates on $q_0, q_2$, and $q_4$. In G2, there are seven horizontal wires labeled $q_0$ through $q_6$. The circuit consists of a sequence of gates: $\sqrt{XX}$ on $q_0$, $\sqrt{XX}$ on $q_1$, $\sqrt{XX}$ on $q_6$, $\sqrt{XX}$ on $q_5$, $H$ on $q_0$, $\sqrt{XX}$ on $q_1$, $\sqrt{XX}$ on $q_2$, $H$ on $q_2$, $\sqrt{XX}$ on $q_3$, $H$ on $q_3$, $S$ on $q_1$, $\sqrt{XX}$ on $q_4$, $S$ on $q_3$, and $\sqrt{XX}$ on $q_2$. In G3, there are seven horizontal wires labeled $q_0$ through $q_6$. The circuit features controlled-NOT (CNOT) gates and $\sqrt{X}$ gates: a CNOT with control $q_0$ and target $q_1$; a CNOT with control $q_1$ and target $q_5$; a $\sqrt{X}$ gate on $q_2$; a CNOT with control $q_2$ and target $q_3$; a $\sqrt{X}$ gate on $q_4$; a CNOT with control $q_3$ and target $q_2$; a CNOT with control $q_4$ and target $q_0$; a CNOT with control $q_0$ and target $q_6$; a $\sqrt{X}$ gate on $q_2$; a CNOT with control $q_2$ and target $q_1$; a CNOT with control $q_1$ and target $q_6$; and a CNOT with control $q_5$ and target $q_1$.
+
+2. Brick connectivity:
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-016.png` (ollama:gemma4:26b, prompt sci-v1):* This image contains multiple quantum circuit diagrams organized under headings labeled "G2:" and "G3:", and a section titled "3. Square connectivity:" which contains its own "G1:", "G2:", and "G3:" subheadings. The first set of circuits (top) is unlabeled but contains three diagrams: The first diagram has 7 qubits labeled $q_0$ to $q_6$. Qubits $q_1$ through $q_6$ each have an $H$ gate. This is followed by a multi-controlled gate where one control is on $q_0$ and others are on $q_1$ through $q_6$. Then, $q_1$ and $q_3$ have $H$ gates. The second diagram for G2 has 7 qubits $q_0$ to $q_6$. Qubits $q_0, q_1, q_3,$ and $q_6$ have $\sqrt{XX}$ gates. Qubits $q_1$ and $q_2$ have $\sqrt{XX}$ gates. Qubits $q_2$ and $q_4$ have $H$ and $S$ gates respectively, and $q_3$ has an $S$ gate. The third diagram for G3 has 7 qubits $q_0$ to $q_6$. Qubits $q_2$ and $q_5$ have $\sqrt{X}$ gates. There are controlled-NOT gates: $q_1$ is control for $q_0$, $q_1$ is control for $q_2$, $q_4$ is control for $q_3$, $q_4$ is control for $q_5$, and $q_6$ is control for $q_5$. Under the heading "3. Square connectivity:", the first diagram for G1 has 7 qubits $q_0$ to $q_6$. Qubits $q_1$ through $q_6$ have $H$ gates. A multi-controlled gate uses $q_0$ and $q_1$ through $q_6$ as controls. Qubits $q_0$ and $q_2$ have $H$ gates. The second diagram for G2 has 7 qubits $q_0$ to $q_6$. Qubits $q_0, q_1,$ and $q_2$ have $\sqrt{XX}$ gates. Qubit $q_0$ has an $S$ gate, $q_1$ has an $S$ gate, $q_2$ has an $H$ gate, and $q_3$ has an $H$ gate. Qubits $q_3$ and $q_4$ have $\sqrt{XX}$ gates. Qubits $q_4$ and $q_6$ have $\sqrt{XX}$ gates. The third diagram for G3 is empty.
+
+Appendix E: Quantum Weight Enumerators of [[9, 3, 3]]
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-017.png` (ollama:gemma4:26b, prompt sci-v1):* This is a diagram of a quantum circuit consisting of seven horizontal lines labeled from top to bottom as $q_0, q_1, q_2, q_3, q_4, q_5,$ and $q_6$. The circuit contains several gates connected by vertical lines. On line $q_0$, there is a $\sqrt{\text{X}}$ gate. On line $q_1$, there is a $\sqrt{\text{X}}$ gate at the beginning. On line $q_5$, there is a $\sqrt{\text{X}}$ gate. The controlled gates are as follows: a controlled-NOT gate with control on $q_0$ and target on $q_1$; a controlled-NOT gate with control on $q_1$ and target on $q_2$; a controlled-NOT gate with control on $q_1$ and target on $q_4$; a controlled-NOT gate with control on $q_4$ and target on $q_3$; a controlled-NOT gate with control on $q_3$ and target on $q_5$; a controlled-NOT gate with control on $q_5$ and target on $q_6$; and a controlled-NOT gate with control on $q_0$ and target on $q_5$. Each control is represented by a solid black dot on its respective line, and each target is represented by a circle containing a plus sign.
+
+Here we list the quantum weight enumerators of the 13 families of [[9, 3, 3]] codes appearing in the main text, ordered accordingly.
+
+$$
+A & = ( 1 , 0 , 0 , 0 , 6 , 1 6 , 2 4 , 1 5 , 2 ) \ , \\ B & = ( 1 , 0 , 0 , 4 0 , 1 6 2 , 4 8 0 , 9 5 2 , 1 2 2 4 , 9 3 3 , 3 0 4 ) \ ,
+$$
+
+$$
+A & = ( 1 , 0 , 0 , 0 , 2 , 4 , 1 2 , 2 8 , 1 7 , 0 ) \ , \\ B & = ( 1 , 0 , 0 , 4 8 , 1 4 6 , 4 7 2 , 9 8 4 , 1 2 1 6 , 9 1 7 , 3 1 2 ) \ ,
+$$
+
+$$
+A & = ( 1 , 0 , 0 , 0 , 2 , 2 , 1 6 , 2 8 , 1 3 , 2 ) \ , \\ B & = ( 1 , 0 , 0 , 4 4 , 1 6 2 , 4 5 2 , 9 8 4 , 1 2 3 6 , 9 0 1 , 3 1 6 ) \ ,
+$$
+
+$$
+A & = ( 1 , 0 , 0 , 1 , 3 , 1 8 , 2 6 , 1 2 , 3 ) \ , \\ B & = ( 1 , 0 , 0 , 4 0 , 1 7 0 , 4 5 6 , 9 6 8 , 1 2 4 0 , 9 0 9 , 3 1 2 ) \ ,
+$$
+
+$$
+A & = ( 1 , 0 , 0 , 1 , 0 , 3 , 1 6 , 2 7 , 1 5 , 1 ) \ , \\ B & = ( 1 , 0 , 0 , 4 8 , 1 6 2 , 4 5 6 , 9 5 2 , 1 2 4 8 , 9 3 3 , 2 9 6 ) \ ,
+$$
+
+$$
+A & = ( 1 , 0 , 0 , 0 , 4 , 2 0 , 2 4 , 1 1 , 4 ) \ , \\ B & = ( 1 , 0 , 0 , 3 6 , 1 7 8 , 4 6 0 , 9 5 2 , 1 2 4 4 , 9 1 7 , 3 0 8 ) \ ,
+$$
+
+$$
+A & = ( 1 , 0 , 0 , 0 , 1 , 5 , 1 4 , 2 6 , 1 6 , 1 ) \ , \\ B & = ( 1 , 0 , 0 , 4 4 , 1 5 4 , 4 7 6 , 9 6 8 , 1 2 2 0 , 9 2 5 , 3 0 8 ) \ ,
+$$
+
+$$
+A & = ( 1 , 0 , 0 , 1 , 0 , 1 , 2 0 , 2 7 , 1 1 , 3 ) \ , \\ B & = ( 1 , 0 , 0 , 4 4 , 1 7 8 , 4 3 6 , 9 5 2 , 1 2 6 8 , 9 1 7 , 3 0 0 ) \ ,
+$$
+
+Out[ ]=
+
+$$
+A & = ( 1 , 0 , 1 , 0 , 0 , 4 , 1 3 , 2 8 , 1 7 , 0 ) \ , \\ B & = ( 1 , 0 , 1 , 5 7 , 1 7 1 , 4 8 1 , 9 3 1 , 1 1 7 1 , 9 4 4 , 3 3 9 ) \ , \\
+$$
+
+$$
+A & = ( 1 , 0 , 0 , 0 , 4 , 0 , 1 2 , 3 2 , 1 5 , 0 ) \ , \\ B & = ( 1 , 0 , 0 , 5 2 , 1 4 6 , 4 4 4 , 1 0 1 6 , 1 2 2 8 , 8 8 5 , 3 2 4 ) \ , \quad ( E 1 0 )
+$$
+
+$$
+A & = ( 1 , 0 , 0 , 0 , 0 , 3 6 , 0 , 2 7 , 0 ) \ , \\ B & = ( 1 , 0 , 0 , 3 6 , 1 6 2 , 5 4 0 , 7 9 2 , 1 4 0 4 , 8 3 7 , 3 2 4 ) \ ,
+$$
+
+$$
+A & = ( 1 , 0 , 0 , 2 , 0 , 0 , 1 6 , 3 0 , 1 5 , 0 ) \ , \\ B & = ( 1 , 0 , 0 , 5 6 , 1 6 2 , 4 3 2 , 9 5 2 , 1 2 7 2 , 9 3 3 , 2 8 8 ) \ ,
+$$
+
+$$
+A & = ( 1 , 0 , 1 , 0 , 0 , 0 , 2 1 , 2 8 , 9 , 4 ) \ , \\ B & = ( 1 , 0 , 1 , 4 9 , 2 0 3 , 4 4 1 , 9 3 1 , 1 2 1 1 , 9 1 2 , 3 4 7 ) \ ,
+$$
+
+## Appendix F: Distance 5 stabilizer codes
+
+Here we show the code families that were found for d = 5. In order to reduce computational effort, for n ≥ 14 we ignored (5), and as a result the codes found in Fig. 2 n ≥ 14 are only non-degenerate. Moreover, the increased memory requirements from keeping track of more error operators (11) means that the number of agents that can be trained in parallel on a single GPU decreases. For instance, from the 4 agents that we train in parallel, it is rare that any of them finds an encoding sequence that leads to d = 5 code discovery. In addition, each of these training runs needs 1-4 hours, depending on the code parameters and whether degenerate codes are also targeted. Out[ ]= 10 20 30 40 L Out[ ]= 10 20 30 40 L
+
+## Appendix G: Encoding circuits
+
+Here we show some minimal encoding circuits for selected code parameters.
+
+[[11, 1, 5]]: 32 gates in a directed all-to-all connectivity:
+
+[[15, 2, 5]]: 49 gates in a directed all-to-all connectivity:
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-018.png` (ollama:gemma4:26b, prompt sci-v1):* This is a diagram of a quantum circuit consisting of seven horizontal wires representing qubits. The circuit includes several gates: Hadamard gates labeled 'H' (shown as squares), controlled-NOT (CNOT) gates (shown as a solid dot on a control line connected to a circle with a plus sign $\oplus$ on a target line), and no other gates are visible. From top to bottom, the gates and connections are: on wire 1, there is an 'H' gate, followed by a control dot for a CNOT targeting wire 3, then another control dot for a CNOT targeting wire 4, then an 'H' gate, then a control dot for a CNOT targeting wire 6, and finally a control dot for a CNOT targeting wire 7. On wire 2, there is an 'H' gate, followed by a control dot for a CNOT targeting wire 3, then a control dot for a CNOT targeting wire 5, and finally a control dot for a CNOT targeting wire 6. On wire 3, there is an 'H' gate, followed by a target $\oplus$ from wire 1, then a target $\oplus$ from wire 2, then an 'H' gate, then a target $\oplus$ from wire 1, then an 'H' gate, then a target $\oplus$ from wire 2, and finally a target $\oplus$ from wire 5. On wire 4, there is a target $\oplus$ from wire 1, followed by a target $\oplus$ from wire 2, and then a target $\oplus$ from wire 3. On wire 5, there is a target $\oplus$ from wire 2, followed by a target $\oplus$ from wire 3, and then a target $\oplus$ from wire 4. On wire 6, there is a target $\oplus$ from wire 1, followed by a target $\oplus$ from wire 2, and then a target $\oplus$ from wire 3. On wire 7, there is a target $\oplus$ from wire 1, followed by a target $\oplus$ from wire 2, and finally a target $\oplus$ from wire 4. Note: The connections follow vertical lines between control dots and target $\oplus$ symbols.
+
+[[20, 13, 3]]: 45 gates in an all-to-all connectivity:
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-019.png` (ollama:gemma4:26b, prompt sci-v1):* This image is a diagram of a quantum circuit consisting of 9 horizontal wires representing qubits. From top to bottom, the circuit contains the following components: the first wire has an $\text{H}$ gate; the second wire has an $\text{H}$ gate followed by a $\oplus$ symbol; the third wire has a $\oplus$ symbol followed by an $\text{H}$ gate; the fourth wire has an $\text{H}$ gate; the fifth wire has an $\text{H}$ gate; the sixth wire has an $\text{H}$ gate followed by an $\text{H}$ gate; the seventh wire has an $\text{H}$ gate; the eighth wire has a $\oplus$ symbol followed by a $\oplus$ symbol; and the ninth wire has a $\oplus$ symbol followed by a $\oplus$ symbol. Controlled operations are indicated by vertical lines connecting a dot on one wire to a $\oplus$ symbol on another. Specifically, there are controlled-NOT (CNOT) gates where the control is on a wire with a black dot and the target is the $\oplus$ symbol. The connections are as follows: qubit 1 controls qubit 2; qubit 2 controls qubit 3; qubit 3 controls qubit 4; qubit 4 controls qubit 5; qubit 5 controls qubit 6; qubit 6 controls qubit 7; qubit 7 controls qubit 8; qubit 8 controls qubit 9; qubit 3 also controls qubit 5; qubit 5 also controls qubit 7; qubit 2 also controls qubit 6; qubit 4 also controls qubit 8; qubit 6 also controls qubit 9; qubit 1 also controls qubit 3; and qubit 8 also controls qubit 1. The circuit flows from left to right.
+
+◆ ◆ ◆
+
+● ● ● ● ●
+
+■ ■ ■
+
+● ● ● ● ●
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-020.png` (ollama:gemma4:26b, prompt sci-v1):* This is a line and scatter plot showing the relationship between the "Number of physical qubits" on the x-axis and "Circuit size" on the y-axis. The x-axis ranges from $10$ to $16$ with major ticks at $10, 11, 12, 13, 14, 15, 16$. The y-axis ranges from $25$ to $50$ with major ticks at $25, 30, 35, 40, 45, 50$. A legend titled "Number of logical qubits:" contains two entries: a red line with circular markers for $k=1$ and a blue square marker for $k=2$. The $k=1$ series consists of four red circular data points connected by red lines: $(11, 32)$ labeled as $(1,0)$, $(13, 43)$ labeled as $(2,2)$, $(14, 36)$ labeled as $(22,0)$, and $(15, 39)$ labeled as $(14,0)$. The $k=2$ series consists of a single blue square data point at $(15.2, 49)$ labeled as $(1,0)$. All labels are in black text.
+
+n
+
+0
+
+4 6 8 10 12 14 16
+
+● k=1 ■ k=2 ◆ k=3 ▲ k=5 ▼ k=7 ○ k=9
+
+● k=1 ■ k=2 ◆ k=3 ▲ k=5 ▼ k=7 ○ k=9
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-021.png` (ollama:gemma4:26b, prompt sci-v1):* This is a diagram of a quantum circuit consisting of 10 horizontal wire lines. The circuit is composed of various quantum gates represented by symbols placed on the wires. The gates include: several controlled-NOT (CNOT) gates, indicated by a small circle with a cross inside connected by a vertical line to a solid dot on another wire; several Hadamard gates, represented by a square containing the symbol $\text{H}$; and several single-qubit gates represented by solid black dots on a wire. The connections and gates are distributed across the 10 lines as follows: starting from the top wire, the gates and connections occur at various intervals, interacting with other wires through CNOT control and target connections. The $\text{H}$ gates are placed on the 4th, 7th, 8th, 9th, and 10th wires. The overall structure shows multiple entangling operations across the parallel wires.
+
+·
+
+Appendix H: Noise-aware meta-agent vs an ensemble of agents
+
+In this work we have shown that a single meta-agent trained on different values of the noise bias parameter can find suitable strategies for all values of such parameter. Here, we want to compare the performance of such metaagent against an ensemble of agents that each have been trained on a single value of the noise bias parameter.
+
+We begin by defining the settings of this experiment in order to make a fair comparison. First, there are 16 possible values of the bias parameter cZ = {0.5, 0.6, . . . , 1.9, 2}. Since each meta-agent has seen instances of all 16 values, we will only allow the singlecZ agents to be trained on one sixteenth of the total timesteps than the ones used for each meta-agent. In addition, our main results in Section IV are based on the best post-selected meta-agents out of 714 training runs. Therefore, we will train 714×16 = 11424 single-cZ agents to make the comparison. All other hyperparameters will be kept fixed.
+
+The results are shown in Fig. 15. In panel a we start by recalling the best post-selected meta-agents at minimizing the KL sum (green) and at minimizing the failure probability (orange), also adding the next four bestperforming meta-agents for better comparison. In panel b we include with cyan star markers the results for the best single-cZ agent at every value of cZ. The first stark result is that their performance is rather bad at the extreme values cZ = 1.9 and cZ = 2 (which some of the meta-agents also struggle with, see panel a). Other than these two, they perform comparably to the best metaagents, even slightly outperforming them at minimizing the KL sum. However, the meta-agent strategy yields better performance at minimizing the failure probability, which is what is in the end relevant for practical applications.
+
+## Appendix I: Circuit structure of CSS codes
+
+Here we give a proof of the claim that codes resulting from circuits with an initial block of Hadamard gates on a subset of the qubits and followed by CNOT gates thereafter can only be CSS.
+
+Let us label physical qubits with index 1 ≤ q ≤ n and target a CSS code with parameters [[n, k, d]]. Let's assume for simplicity that the initial block of Hadamard gates is applied to qubits k + 1, . . . , k + nH, with nH < n-k. The initial tableau of the would-be code reads
+
+$$
+\text {mutual table of the world-be code reads} & \quad \text {that} \\ g _ { 1 } & = X _ { k + 1 } \ , & \text {correction} \\ g _ { 2 } & = X _ { k + 2 } \ , & \text {sort} \\ & \cdots & & \text {group} \\ g _ { n _ { H } } & = X _ { k + n _ { H } } \ , & & \text {of} \\ g _ { n _ { H } + 1 } & = Z _ { k + n _ { H } + 1 } \ , & & \text {the} \\ & \cdots & & \text {Ea} \\ g _ { n - k } & = Z _ { n } \ . & & \text {wh}
+$$
+
+From this moment forward, only CNOT gates are allowed. Let's start by considering what is the effect of a CNOT gate with control qubit inside the H-block, i.e. control ∈ {k+1, . . . , k+nH}. For whatever target qubit, what such a CNOT does is populate the target position of the corresponding stabilizer gcontrol with an X. Subsequent CNOT gates affecting those positions, either as control or target qubits, will either introduce additional X's or simply do nothing. Since X2 = 1, the stabilizers g1, g2, . . . gnH will only ever contain either X's or 1's. Similarly, the effect of CNOTs on stabilizers gnH+1, . . . , gn-k is simply populating them with Z's or 1's. Since the set of stabilizer generators can be clearly separated into a subset built with only X's and 1's and another one with only Z's and 1's, such a tableau describes a CSS code.
+
+## Appendix J: GPU memory estimation
+
+Thanks to the separability of X and Z in the stabilizer generators, the tableaus that we have to simulate are block-diagonal,
+
+$$
+\begin{pmatrix} g _ { X } & 0 \\ 0 & g _ { Z } \end{pmatrix} ,
+$$
+
+where gX is a binary matrix of size num(H)×n containing the X-type stabilizer generators, and gZ is of size (nk - num(H)) × n and it contains the representation of the Z-type generators. Here, num(H) is the number of Hadamard gates that are applied at the very beginning (see Fig. 7a).
+
+Separability of X- and Z-type error detection implies that gX must detect all Z-type errors (by the first KL condition (4)), and correspondingly for gZ with X-type errors. If the code is degenerate, it must happen that some X-type errors are elements of the stabilizer subgroup generated by gX and likewise for Z.
+
+All in all, this means that we can reduce the number of error operators (16) by a factor of 2 (since we use the same representation for both X and Z-type errors). Each of such error operator is a binary array of size n, which amounts to n bytes of memory.
+
+> *Generated caption of `2311.04750_-_Simultaneous_Discovery_of_Quantum_Error_Correction_Codes_and_Encoders_with_a_Noise-Aware_Reinforcement_Learning_Agent_assets/figure-022.png` (ollama:gemma4:26b, prompt sci-v1):* This image consists of two rows of three line plots, labeled 'a' and 'b', each containing three subplots. Row 'a' is the top row and row 'b' is the bottom row. Each row shares the same x-axis label: "Bias parameter $c_{\text{Z}}$" with a range from $0.5$ to $2.0$. The first column plots "Weighted KL sum" on a logarithmic y-axis ranging from $10^{-4}$ to $10^{-3}$. In row 'a', there are three series: a thick orange line, a thick green line, and a thin light green line. The orange line peaks at $c_{\text{Z}} = 1.0$, the green line peaks slightly after $1.0$, and the thin line shows higher fluctuations. In row 'b', there are two thick lines (orange and green) and several light cyan dots scattered around them. The orange and green lines follow a similar trend, peaking at $c_{\text{Z}} = 1.0$. The second column plots "Failure probability" on a y-axis ranging from $0.06$ to $0.12$. In row 'a', the orange line peaks at $c_{\text{Z}} = 1.0$ with a value of approximately $0.11$, the green line peaks at $c_{\text{Z}} \approx 1.1$ with a value of approximately $0.13$, and the thin light green line shows higher, more erratic peaks. In row 'b', the orange and green lines both peak at $c_{\text{Z}} = 1.0$ with a value of approximately $0.12$, with cyan dots scattered around the lines. The third column plots "Smallest undetected effective weight" on a y-axis ranging from $2.5$ to $5.0$. In row 'a', the orange line rises from $2.7$ and plateaus at $4.0$ for $c_{\text{Z}} \geq 1.4$, the green line rises steadily to $5.0$, and the thin light green line also rises steadily. In row 'b', the orange line rises and plateaus at $4.0$ for $c_{\text{Z}} \geq 1.4$, the green line rises steadily to $5.0$, and cyan dots are scattered near the lines.

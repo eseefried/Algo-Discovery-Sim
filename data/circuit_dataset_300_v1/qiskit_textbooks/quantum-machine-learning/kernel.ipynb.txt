@@ -1,0 +1,382 @@
+# Quantum feature maps and kernels
+
+In this page, we'll explore quantum feature maps and kernels in detail. We'll use them in a classification algorithm, introduce kernel alignment, and discuss the current state of the art.
+
+
+## Introduction
+
+The general task of machine learning is to find and study patterns in data. Many machine learning algorithms map their input dataset to a higher dimensional feature space, through the use of a kernel function:
+
+$$
+k(\vec{x}_i, \vec{x}_j) = \langle f(\vec{x}_i), f(\vec{x}_j) \rangle
+$$
+
+where $k$ is the kernel function, $\vec{x}_i, \vec{x}_j$ are $n$ dimensional inputs, $f$ is a map from $n$-dimension to $m$-dimension space and $\langle a,b \rangle$ denotes the dot product. When considering finite data, a kernel function can be represented as a matrix:
+
+$$
+\cssId{_k-sub-ij}{K_{ij}} = k(\vec{x}_i,\vec{x}_j)
+$$
+
+Let's demonstrate the concept of mapping a dataset to a higher dimensional feature space, with the circles dataset, which contains a large circle containing a smaller circle in two dimensions:
+
+
+[Python source: cell 2]
+import matplotlib.pyplot as plt
+import numpy as np
+import pylab as pl
+from sklearn.datasets import make_circles
+
+# Create circles dataset
+X, Y = make_circles(n_samples=200, noise=0.05, factor=0.4)
+
+# Separate smaller and larger circles
+A = X[np.where(Y==0)]
+B = X[np.where(Y==1)]
+
+# Plot in 2D
+plt.figure(figsize=(5,5))
+plt.scatter(A[:,0],A[:,1], marker='o')
+plt.scatter(B[:,0],B[:,1], marker='s', c='C3')
+plt.show()
+
+
+Looking at the dataset, it's clear there is structure to it, but the two circles are not linearly separable in two dimensions. Let's transform the data into three dimensions, where $z = x^2 + y^2$:
+
+
+[Python source: cell 4]
+def transform_function(x, y):
+    """ Implements f(x,y) = [x, y, z = x^2 + y^2] """
+    # pylint: disable=invalid-name
+    return np.array([x, y, x**2.0 + y**2.0])
+
+# Transform
+A1 = np.array([transform_function(x, y) for
+               x, y in zip(np.ravel(A[:,0]), np.ravel(A[:,1]))])
+B1 = np.array([transform_function(x, y)
+               for x, y in zip(np.ravel(B[:,0]), np.ravel(B[:,1]))])
+
+# Plot in 3D
+fig = plt.figure(figsize=(10,5))
+ax = fig.add_subplot(121, projection='3d')
+ax.set_title("Data in 3D (separable with hyperplane)")
+ax.scatter(A1[:,0], A1[:,1], A1[:,2], marker='o')
+ax.scatter(B1[:,0], B1[:,1], B1[:,2], marker='s', c='C3')  # make red
+ax.view_init(5, 60)
+x = np.arange(-1.25, 1.25, 0.25)
+y = np.arange(-1.25, 1.25, 0.26)
+X, Y = np.meshgrid(x, y)
+Z = np.zeros(X.shape)
+Z[:,:] = 0.5
+ax.plot_surface(X, Y, Z, color='#343A3F')
+
+# Project data to 2D
+ax2d = fig.add_subplot(122)
+ax2d.set_title("Data in 2D (with hyperplane projection)")
+ax2d.scatter(A1[:,0], A1[:,1], marker='o')
+ax2d.scatter(B1[:,0], B1[:,1], marker='s',
+            c='C3')  # make red
+ax2d.add_patch(pl.Circle((0,0), radius=np.sqrt(0.5),
+               fill=False, linestyle='solid', linewidth=4.0,
+               color='#343A3F'))
+plt.show()
+
+
+As we can see above, in three dimensions, the data is separable by a hyperplane at $z = 0.5$, and if we project the data back to two dimensions, this hyperplane is nonlinear.
+
+
+## Quantum feature maps
+
+In quantum machine learning, a quantum feature map, $\phi(\vec{x})$, maps a classical feature vector, $\vec{x}$, to a quantum Hilbert space, $| \phi(\vec{x})\rangle \langle \phi(\vec{x})|$. The quantum feature map transforms $\vec{x} \rightarrow | \phi(\vec{x})\rangle$ using a unitary transformation $\vec{U_\phi}(\vec{x})$, which is typically a parameterized quantum circuit.
+
+Constructing quantum feature maps based on parameterized quantum circuits that are hard to simulate classically is an important step towards possibly obtaining an advantage over classical machine learning approaches, and is an active area of current research.
+
+In Reference 1, the authors propose a family of quantum feature maps that are conjectured to be hard to simulate classically, and can be implemented as short-depth circuits on near-term quantum devices. Qiskit implements these as the `PauliFeatureMap`. The quantum feature map of depth $d$ is implemented by the unitary operator:
+
+$$ \mathcal{U}_{\Phi(\vec{x})}=\prod_d U_{\Phi(\vec{x})}H^{\otimes n},\ U_{\Phi(\vec{x})}=\exp\left(i\sum_{S\subseteq[n]}\phi_S(\vec{x})\prod_{k\in S} P_i\right)$$
+
+which contains layers of Hadamard gates interleaved with entangling blocks,
+
+$U_{\Phi(\vec{x})}$, encoding the classical data as shown in circuit diagram below for $d=2$.
+
+Within the entangling blocks, $U_{\Phi(\vec{x})}$: $P_i \in \{ I, X, Y, Z \}$ denotes the Pauli matrices, the index $S$ describes connectivity between different qubits or data points: $S \in \{\binom{n}{k}\ \mathrm{combinations,\ }k = 1,... n \}$, and by default the data mapping function $\phi_S(\vec{x})$ is
+
+$$\cssId{_map-1}{\phi_S:\vec{x}\mapsto} \Bigg\{\begin{array}{ll}
+    x_i & \mbox{if}\ S=\{i\} \\
+        (\pi-x_i)(\pi-x_j) & \mbox{if}\ S=\{i,j\}
+    \end{array}$$
+
+when $k = 2, P_0 = Z, P_1 = ZZ$, this is the `ZZFeatureMap` in Qiskit:
+
+$$\cssId{_script-u}{\mathcal{U}_{\Phi(\vec{x})}} = \left( \exp\left(i\sum_{jk} \phi_{\{j,k\}}(\vec{x}) \, Z_j \otimes Z_k\right) \, \exp\left(i\sum_j \phi_{\{j\}}(\vec{x}) \, Z_j\right) \, H^{\otimes n} \right)^d$$
+
+
+[Python source: cell 7]
+from qiskit.circuit.library import ZZFeatureMap
+# 3 features, depth 1
+map_zz = ZZFeatureMap(feature_dimension=3, reps=1)
+map_zz.decompose().draw()
+
+
+Let's have a look at the `adhoc` dataset in Qiskit, which is a two class dataset sampled from the `ZZFeatureMap` used in Reference 1, creating 20 training data points and 5 testing data points of 2 features from each class:
+
+
+[Python source: cell 9]
+from qiskit.utils import algorithm_globals
+algorithm_globals.random_seed = 12345
+
+from qiskit_machine_learning.datasets import ad_hoc_data
+train_data, train_labels, test_data, test_labels, sample_total = (
+    ad_hoc_data(training_size=20, test_size=5, n=2, gap=0.3,
+                include_sample_total=True, one_hot=False))
+
+
+[Python source: cell 10]
+# Plot data and class boundaries
+fig = plt.figure(figsize=(15, 5))
+axdata = fig.add_subplot(131)
+axdata.set_title("Data")
+axdata.set_ylim(0, 2 * np.pi)
+axdata.set_xlim(0, 2 * np.pi)
+plt.scatter(train_data[np.where(train_labels[:] == 0), 0],
+            train_data[np.where(train_labels[:] == 0), 1],
+            marker='s', facecolors='w', edgecolors='C0',
+            label="A train")
+plt.scatter(train_data[np.where(train_labels[:] == 1), 0],
+            train_data[np.where(train_labels[:] == 1), 1],
+            marker='o', facecolors='w', edgecolors='C3',
+            label="B train")
+plt.scatter(test_data[np.where(test_labels[:] == 0), 0],
+            test_data[np.where(test_labels[:] == 0), 1],
+            marker='s', facecolors='C0', label="A test")
+plt.scatter(test_data[np.where(test_labels[:] == 1), 0],
+            test_data[np.where(test_labels[:] == 1), 1],
+            marker='o', facecolors='C3', label="B test")
+plt.legend()
+
+from matplotlib.colors import ListedColormap
+cmap = ListedColormap(["C3","w","C0"])
+axmap = fig.add_subplot(132)
+axmap.set_title("Class Boundaries")
+axmap.set_ylim(0, 2 * np.pi)
+axmap.set_xlim(0, 2 * np.pi)
+axmap.imshow(np.asmatrix(sample_total).T,
+             interpolation='nearest',
+             origin='lower', cmap=cmap,
+             extent=[0, 2 * np.pi, 0, 2 * np.pi])
+axboth = fig.add_subplot(133)
+axboth.set_title("Data overlaid on Class Boundaries")
+axboth.set_ylim(0, 2 * np.pi)
+axboth.set_xlim(0, 2 * np.pi)
+axboth.imshow(np.asmatrix(sample_total).T, interpolation='nearest',
+              origin='lower', cmap=cmap,
+              extent=[0, 2 * np.pi, 0, 2 * np.pi])
+axboth.scatter(train_data[np.where(train_labels[:] == 0), 0],
+               train_data[np.where(train_labels[:] == 0), 1],
+               marker='s', facecolors='w', edgecolors='C0', label="A")
+axboth.scatter(train_data[np.where(train_labels[:] == 1), 0],
+               train_data[np.where(train_labels[:] == 1), 1],
+               marker='o', facecolors='w', edgecolors='C3', label="B")
+axboth.scatter(test_data[np.where(test_labels[:] == 0), 0],
+               test_data[np.where(test_labels[:] == 0), 1],
+               marker='s', facecolors='C0', edgecolors='w',
+               label="A test")
+axboth.scatter(test_data[np.where(test_labels[:] == 1), 0],
+               test_data[np.where(test_labels[:] == 1), 1],
+               marker='o', facecolors='C3', edgecolors='w',
+               label="B test")
+plt.show()
+
+
+On the left above, we see 25 two-dimensional data points from each class in `adhoc` dataset, noting that there is no obvious pattern as to which data point belongs to which class. In the middle above, is the two-dimensional projection of the sixteen-dimensional (fifteen in reality) feature space described by the `ZZFeatureMap` used to create the dataset, noting how complicated the class boundaries are in two dimensions. On the right, we see the data points overlaid on the class boundaries.
+
+
+## Quantum kernels
+
+A quantum feature map, $\phi(\vec{x})$, naturally gives rise to a quantum kernel, $k(\vec{x}_i,\vec{x}_j)= \phi(\vec{x}_j)^\dagger\phi(\vec{x}_i)$, which we can think of as a measure of similarity; $k(\vec{x}_i,\vec{x}_j)$ is large when $\vec{x}_i$ and $\vec{x}_j$ are close.
+
+When considering finite data, we can represent the quantum kernel as a matrix:
+
+$K_{ij} = \left| \langle \phi^\dagger(\vec{x}_j)| \phi(\vec{x}_i) \rangle \right|^{2}$. We can calculate each element of this kernel matrix on a quantum computer by calculating the transition amplitude:
+
+$$
+\left| \langle \phi^\dagger(\vec{x}_j)| \phi(\vec{x}_i) \rangle \right|^{2} =
+\left| \langle 0^{\otimes n} | U^\dagger_{\phi(\vec{x}_j)} U^\phantom{\dagger}_{\phi(\vec{x}_i)} | 0^{\otimes n} \rangle \right|^{2}
+$$
+
+assuming the feature map is a parameterized quantum circuit, which can be described as a unitary transformation $U_\phi(\vec{x})$ on $n$ qubits.
+This provides us with an estimate of the quantum kernel matrix, which we can then use in a kernel machine learning algorithm, such as support vector classification.
+
+
+Let's analytically calculate and plot the kernel matrix for the training data points in the `adhoc` dataset we created earlier. For the feature map, we will using the `ZZFeatureMap` for 2 features with 2 repetitions. Note that the `calculate_kernel` function here is a simpler version of the `evaluate` function in the Qiskit `QuantumKernel` class.
+
+
+[Python source: cell 14]
+from qiskit import opflow
+def calculate_kernel(feature_map, x_data, y_data=None):
+    """
+        Calculates  kernel matrix from provided feature map and
+        dataset(s), x & (y). If y isn't given, self inner product
+        of x is calculated.
+        No error checking is performed, feature map and datasets
+        assumed to have the same dimension
+    """
+    if y_data is None:
+        y_data = x_data
+    # Use Operator Flow to create a list of feature map circuits,
+    # parameterized by each data point
+    x_circuits = opflow.CircuitStateFn(feature_map).bind_parameters(
+        dict(zip(feature_map.parameters, np.transpose(x_data).tolist()))
+        )
+    y_circuits = opflow.CircuitStateFn(feature_map).bind_parameters(
+        dict(zip(feature_map.parameters, np.transpose(y_data).tolist()))
+        )
+    # Compute the square of the conjugate inner product of the feature
+    # map circuits: the kernel matrix
+    kernel = np.abs(
+        (~y_circuits.to_matrix_op() @ x_circuits.to_matrix_op()).eval()
+    )**2
+    return kernel
+
+adhoc_feature_map = ZZFeatureMap(feature_dimension=2, reps=2)
+kernel = calculate_kernel(adhoc_feature_map, train_data)
+plt.figure(figsize=(5, 5))
+plt.imshow(np.asmatrix(kernel),interpolation='nearest', origin='upper')
+plt.title("Analytical Kernel Matrix")
+plt.show()
+
+
+A few things to note about the kernel matrix:
+1. Each row / column represents the transition amplitude of a single data point, with all other data points in the dataset
+2. The transition amplitude of a data point with itself is 1, so the matrix has a unit diagonal
+3. The matrix is symmetric, the transition amplitude of $x \rightarrow y$ is the same as $y \rightarrow x$.
+
+
+## Quantum support vector classification
+
+As mentioned at the start of this section, many machine learning algorithms use kernel functions to map their input dataset to a higher dimensional feature space. The well known support vector machine classification algorithm is one of these.  For more information about the support vector classification algorithm, see the `scikit-learn` User Guide.
+
+A support vector machine constructs a hyperplane in feature space, which can then be used for classification, regression or other tasks. For classification, the hyperplane ideally has the largest distance to the nearest training data points for any class. The figure below shows the decision function for a linearly separable problem, with three samples on the class boundaries, called “*support vectors*”:
+
+Introduced in References 1 and 2, the quantum kernel support vector classification algorithm consists of these steps:
+
+1. Build the train and test quantum kernel matrices.
+    1. For each pair of data points in the training dataset `{latex}\vec{x}_{i},\vec{x}_j`, apply the feature map and measure the transition probability: `{latex} K_{ij} = \left| \langle 0 | U^\dagger_{\Phi(\vec{x}_j)} U^\phantom{\dagger}_{\Phi(\vec{x}_i)} | 0 \rangle \right|^2 `.
+    2. For each training data point `{latex}\vec{x}_i` and testing point `{latex}\vec{y}_i`, apply the feature map and measure the transition probability: `{latex} K_{ij} = \left| \langle 0 | U^\dagger_{\Phi(\vec{y}_i)} U^\phantom{\dagger}_{\Phi(\vec{x}_i)} | 0 \rangle \right|^2 `.
+2. Use the train and test quantum kernel matrices in a classical support vector machine classification algorithm.
+
+Let's execute the quantum kernel support vector classification algorithm  on the `adhoc` dataset we generated earlier. Recall that this dataset was created from the `ZZFeatureMap` with `depth = 2` and `dimension = 2`, and consisted of 2 classes, with 20 training and 5 testing data points from each class.
+
+First, let's calculate the training and testing quantum kernel matrices using the `calculate_kernel` function we wrote earlier:
+
+
+[Python source: cell 17]
+train_kernel = calculate_kernel(adhoc_feature_map, train_data)
+test_kernel = calculate_kernel(adhoc_feature_map, train_data, test_data)
+# plot analytical matrices
+fig, axs = plt.subplots(1, 2, figsize=(10,5))
+axs[0].imshow(np.asmatrix(train_kernel), interpolation='nearest',
+              origin='upper')
+axs[0].set_title("Analytical Train Matrix")
+axs[1].imshow(np.asmatrix(test_kernel), interpolation='nearest',
+              origin='upper', cmap='Blues')
+axs[1].set_title("Analytical Test Matrix")
+plt.show()
+
+
+Now let's use them in the `scikit-learn` `svc` algorithm:
+
+
+[Python source: cell 19]
+from sklearn.svm import SVC
+# train scikit-learn svm model
+model = SVC(kernel='precomputed')
+model.fit(train_kernel, train_labels)
+print("Number of support vectors for each class:",model.n_support_)
+print("Indices of support vectors:", model.support_)
+
+
+Remember that a support vector machine constructs a hyperplane in feature space, and for classification, the hyperplane ideally has the largest distance to the nearest training data points for any class. The nearest training data points to the separating hyperplane in each class are called “support vectors”.
+So here the `scikit-learn` `svc` algorithm has identified 9 support vectors for the first class, and 10 support vectors for the second class, out of the training dataset, which had 20 data points from each class.
+
+
+[Python source: cell 21]
+# Plot support vectors
+plt.figure(figsize=(5, 5))
+plt.ylim(0, 2 * np.pi)
+plt.xlim(0, 2 * np.pi)
+plt.scatter(train_data[model.support_[0:model.n_support_[0]], 0],
+            train_data[model.support_[0:model.n_support_[0]], 1],
+            marker='s', label="A support")
+plt.scatter(train_data[model.support_[model.n_support_[0]:], 0],
+            train_data[model.support_[model.n_support_[0]:], 1],
+            marker='o', c='C3', label="B support")
+plt.legend(loc='upper left', frameon=False)
+plt.show()
+
+
+[Python source: cell 22]
+# test svm model
+model.score(test_kernel, test_labels)
+
+
+We see that since the training and testing data points were generated using the same feature map used in the quantum kernel support vector classification algorithm, we are able to classify the testing data points perfectly. This will possibly not be the case using hardware due to noise, and probably not be the case for a real world dataset.
+
+
+### Qiskit implementation
+
+Qiskit contains a `QuantumKernel` class, which can be used directly in the `scikit-learn` `svc` algorithm. Here is a how to use that class with the same dataset.
+
+
+[Python source: cell 25]
+from qiskit import BasicAer
+from qiskit_machine_learning.kernels import QuantumKernel
+# Create the quantum feature map
+adhoc_feature_map = ZZFeatureMap(feature_dimension=2,
+                                 reps=2,
+                                 entanglement='linear')
+# Create the quantum kernel
+adhoc_kernel = QuantumKernel(feature_map=adhoc_feature_map,
+                             quantum_instance=BasicAer.get_backend(
+                                             'statevector_simulator'))
+
+# Set the SVC algorithm to use our custom kernel
+adhoc_svc = SVC(kernel=adhoc_kernel.evaluate)
+adhoc_svc.fit(train_data, train_labels)
+adhoc_svc.score(test_data, test_labels)
+
+
+## Quantum kernel alignment
+
+All the feature map (data encoding) circuits we have seen so far haven't contained any trainable parameters - all the parameters in the circuits are defined by the data being encoded. Quantum feature maps can have variational parameters, that can be optimized using a technique called kernel alignment, as discussed in References 3 and 4, and described in the Quantum Kernel Alignment with Qiskit Runtime Tutorial. This is analogous to kernel alignment in classical machine learning.
+
+
+## Quantum kernel machine learning
+
+As we have seen, quantum kernel methods provide a way to use a quantum processor in machine learning. The most prevalent quantum kernel algorithm is the quantum kernel support vector machine (QKSVM) introduced by References 1 and 2 in 2019, which since has been studied in detail. Notably:
+
+- In Reference 1, kernel based training is shown to find better or equally good quantum models than variational circuit training, using less quantum processing.
+
+- In Reference 5, QKSVM is proven to provide a speed up over classical methods for certain specific input data classes.
+
+- In Reference 6, QKSVM is used to quantify the computational power of data in quantum machine learning algorithms and understand the conditions under which quantum models will be capable of outperforming classical ones.
+
+- In Reference 7, a technique call quantum metric learning is introduced which enables effective quantum kernel alignment.
+
+Quantum kernels can also be used for other machine learning tasks, not just classification. For an example of clustering using a quantum kernel, see the Qiskit Quantum Kernel Machine Learning Tutorial.
+
+
+## References
+
+1. Vojtech Havlicek, Antonio D. Córcoles, Kristan Temme, Aram W. Harrow, Abhinav  Kandala, Jerry M. Chow and Jay M. Gambetta, *Supervised learning with quantum enhanced feature spaces*, Nature 567, 209-212 (2019), doi.org:10.1038/s41586-019-0980-2, arXiv:1804.11326.
+1. Maria Schuld and Nathan Killoran, *Quantum machine learning in feature Hilbert spaces*, Phys. Rev. Lett. 122, 040504 (2019), doi.org:10.1103/PhysRevLett.122.040504, arXiv:1803.07128.
+1. Jennifer R. Glick, Tanvi P. Gujarati, Antonio D. Corcoles, Youngseok Kim, Abhinav Kandala, Jay M. Gambetta and Kristan Temme, *Covariant quantum kernels for data with group structure*, arXiv:2105.03406
+1. Thomas Hubregtsen, David Wierichs, Elies Gil-Fuster, Peter-Jan H. S. Derks, Paul K. Faehrmann and Johannes Jakob Meyer, *Training Quantum Embedding Kernels on Near-Term Quantum Computers*, arXiv:2105.02276
+1. Yunchao Liu, Srinivasan Arunachalam and Kristan Temme, *A rigorous and robust quantum speed-up in supervised machine learning* (2020), arXiv:2010.02174.
+1. Hsin-Yuan Huang, Michael Broughton, Masoud Mohseni, Ryan Babbush, Sergio Boixo, Hartmut Neven and Jarrod R. McClean, *Power of data in quantum machine learning* (2020), arXiv:2011.01938.
+1. Lloyd, Seth, Maria Schuld, Aroosa Ijaz, Josh Izaac, and Nathan Killoran. "Quantum embeddings for machine learning." *arXiv preprint available at arXiv:2001.03622* (2020).
+
+
+[Python source: cell 29]
+# pylint: disable=unused-import
+import qiskit.tools.jupyter
+%qiskit_version_table

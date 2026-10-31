@@ -1,0 +1,406 @@
+## I Introduction
+
+The idea that the simulation of quantum systems would be efficient on a quantum computer dates back to Feynman’s original work on quantum mechanical computers [Feynman1982]. Almost a decade after Abrams and Lloyd [Abrams1997] demonstrated a scalable scheme for the quantum simulation of fermions, Aspuru-Guzik et al. [Aspuru-Guzik2006] proposed that these techniques could be used to efficiently determine the ground state energy of molecular Hamiltonians, solving what chemists refer to as the electronic structure problem. Since then, a great deal of work has focused on specific strategies for the quantum simulation of quantum chemistry. While most of these approaches are based on a second quantized representation of the problem making use of both phase estimation and Trotterization [Ortiz2001, Aspuru-Guzik2006, Wang2008, Wang2009, Whitfield2010, CodyJones2012, Seeley2012, Wecker2013, Hastings2014, Poulin2014, McClean2014], recently some have proposed alternative schemes such as the quantum variational eigensolver [McClean2013], an adiabiatic algorithm [Babbush2014] and an oracular approach based on a 1-sparse decomposition of the configuration interaction Hamiltonian [Toloui2013]. In fact, quantum chemistry is such a popular application that toy problems in chemistry have been solved on a variety of experimental quantum information processors which include quantum optical systems [Lanyon2009, McClean2013], nuclear magnetic resonance [Du2010, Lu2011] and solid-state Nitrogen-vacancy center systems [Wang2014].
+
+Recently, a series of papers [Wecker2013, Hastings2014, Poulin2014, McClean2014] has provided improved analytical and empirical bounds on the resources required to simulate classically intractable benchmarks using a quantum computer. While the initial findings in [Wecker2013] were pessimistic, improvements in both bounds and algorithms introduced in [Hastings2014] and [Poulin2014] have reduced these estimates by more than thirteen orders of magnitude for simulations of Ferredoxin. The primary contribution of [McClean2014] was to point out that in the limit of large molecules, the use of a local basis can substantially reduce asymptotic complexity of these algorithms. In this paper we build on the findings of [Wecker2013, Hastings2014, Poulin2014, McClean2014] to offer new perspectives regarding the scaling of the second quantized, Trotterized, phase estimation algorithm for quantum chemistry. In particular, we question a basic assumption implicit in all of these works: that the Trotter error explicitly depends on the number of spin orbitals being simulated.
+
+Instead, we argue that chemical properties such as the filling fraction of electrons in a given basis, the particular choice of orbital basis and the nuclear potential play a more significant role in determining the Trotter error than does the number of spin orbitals for small molecules. We support these arguments with numerical analysis based on the explicit computation of the Trotter error operator derived in [Poulin2014]. Additionally, we show that classically tractable approximations to the ground state wavefunction can be used to efficiently estimate the Trotter error expected in a particular ground state simulation. This result is of significant practical importance because without a procedure for estimating the Trotter error, one must rely on analytical error bounds which (as we show) tend to overestimate the ground state error by many orders of magnitude. Finally, we show asymptotically improved circuits for state preparation based on these classical ansatz states.
+
+### I.1 The electronic structure problem
+
+The electronic structure problem is to estimate the energy of electrons interacting in a fixed nuclear potential to within an additive error of $\epsilon$. This Hamiltonian may be written as,
+
+$$
+H=-\sum_{i}\frac{\nabla_{r_{i}}^{2}}{2}-\sum_{i,j}\frac{Z_{i}}{|R_{i}-r_{j}|}+\sum_{i,j>i}\frac{1}{|r_{i}-r_{j}|} \tag{1}
+$$
+
+where we have used atomic units, $\{R_{i}\}$ denotes nuclear coordinates, $\{r_{i}\}$ electronic coordinates, and $\{Z_{i}\}$ nuclear charge. Often times, the utility of these energies is to provide Born-Oppenheimer surfaces for molecular modeling at finite temperatures. Usually, chemists are interested in obtaining free energy landscapes which provide mechanistic insight into chemical events of significant practical importance such as drug binding, catalysis and material properties. These free energy landscapes must be extremely accurate as chemical rates are exponentially sensitive to changes in free energy. Under typical laboratory conditions of room temperature and atmospheric pressure, “chemical accuracy” is required which sets $\epsilon$ to the order of $10^{-3}$ hartree [Helgaker2013] where $1$ hartree is $\frac{\hbar^{2}}{m_{e}e^{2}a_{0}^{2}}$ and $m_{e}$, $e$ and $a_{0}$ denote the mass of an electron, charge of an electron and Bohr radius, respectively.
+
+We represent the electronic structure Hamiltonian in second quantization [Helgaker2013] as this requires significantly fewer qubits than approaches using the first quantized Hamiltonian [Zalka1998, Kassal2008],
+
+$$
+H=\sum_{pq}h_{pq}a_{p}^{\dagger}a_{q}+\frac{1}{2}\sum_{pqrs}h_{pqrs}a_{p}^{\dagger}a_{q}^{\dagger}a_{r}a_{s} \tag{2}
+$$
+
+in which creation and annihilation operators act on a basis of orthogonal spin orbitals, $\{\varphi_{i}\}$ and the one-electron and two-electron integrals are
+
+$$
+h_{pq}=\int d\sigma\ \varphi_{p}^{*}(\sigma)\left(-\frac{\nabla_{r}^{2}}{2}-\sum_{i}\frac{Z_{i}}{|R_{i}-r|}\right)\varphi_{q}(\sigma) \tag{3}
+$$
+$$
+h_{pqrs}=\int d\sigma_{1}\ d\sigma_{2}\ \frac{\varphi_{p}^{*}(\sigma_{1})\varphi_{q}^{*}(\sigma_{2})\varphi_{s}(\sigma_{1})\varphi_{r}(\sigma_{2})}{|r_{1}-r_{2}|} \tag{4}
+$$
+
+where $\sigma_{i}$ contains spatial and spin degrees of freedom for the electrons. The operators $a_{p}^{\dagger}$ and $a_{r}$ obey the fermionic anti-commutation relations
+
+$$
+\{a_{p}^{\dagger},a_{r}\}=\delta_{p,r},\quad\quad\{a_{p}^{\dagger},a_{r}^{\dagger}\}=\{a_{p},a_{r}\}=0. \tag{5}
+$$
+
+In principle, the number of spin orbitals used to represent a molecule is not a property of the molecule. However, the quantum chemistry community has certain conventions (based on periodic trends) for the number of spin orbitals that should be used for each atom in the period table, depending on the desired level accuracy in the calculation. In a minimal basis, first period atoms receive two spin orbitals, second period atoms receive 10 spin orbitals and third period atoms receive 18 spin orbitals. The reasoning behind this scheme is that the most important orbitals are those which have a principal quantum number less than or equal to that of the highest occupied orbital according to Hund’s rules.
+
+In addition to choosing a spatial basis, one must choose an orbital basis that associates orthogonal spatial functions constructed from the spatial basis, with the second quantized sites. Throughout this paper we investigate three such orbital basis sets: the “local basis” is the set of orthogonal atomic orbitals discussed in [McClean2014], the ‘‘canonical basis’’ is the Hartree-Fock molecular orbitals, and the ‘‘natural basis’’ is that which diagonalizes the one-electron density matrices associated with the exact ground state[^1]. It is worth pointing out that the canonical orbitals are the natural orbitals of a Hartree-Fock calculation using a single determinant.
+
+[^1]: The natural basis can be well approximated without performing an exact calculation by repeating truncated configuration interaction calculations from reference states defined using the natural orbitals associated with a previous solution.
+
+From Eq. (2), we see that the number of terms in the Hamiltonian scales as $\Theta\left(N^{4}\right)$[^2]. However, McClean et al. [McClean2014] recently pointed out that the basis functions decay super-exponentially with distance in a local basis. This means that the integrals in Eq. (3) and Eq. (4) will be negligibly small for many of the orbitals which in turn allows the number of terms in the Hamiltonian to be truncated to $\tilde{\mathcal{O}}\left(N^{2}\right)$ or $\tilde{\mathcal{O}}\left(N\right)$ depending on the size and geometry of the molecule. All of the particular benchmarks studied in this paper involve less than four atoms and so we consider the number of non-negligible terms in the Hamiltonian to scale as $\Theta(N^{4})$, even in a local basis.
+
+[^2]: We use the typical computer science convention that $f\in\Theta(g)$, for any functions $f$ and $g$, if $f$ is asymptotically upper and lower bounded by a multiple of $g$, ${\cal O}$ indicates an asymptotic upper bound, $\tilde{{\cal O}}$ indicates an asymptotic upper bound up to polylogarithmic factors, $\Omega$ indicates the asymptotic lower bound and $f\in o(g)$ implies $f/g\rightarrow 0$ in the asymptotic limit.
+
+### I.2 Quantum simulation of quantum chemistry
+
+The electronic structure problem is classically intractable to current methods even after discretizing the Hilbert space. This intractability can be understood as a consequence of the exponential size of the Hilbert space for the second quantized Hamiltonian. Similarly, existing methods such as configuration interaction, require consideration of a number of electronic configuration states that increases exponentially as the approximation becomes more exact. Quantum simulation offers a way to circumvent these challenges by directly mapping the chemical system onto a set of qubits that can be manipulated using a quantum computer. The particular problem that we focus on is the problem of computing the ground state energy of the system. Other important physical quantities such as dipole moments can be found by evaluating their expectation value with respect to the prepared state. The simulation problem that we consider is as follows.
+
+Problem: Assume that the user is provided with a classical database containing $h_{pq}$ and $h_{pqrs}$ for a molecule with $N$ spin orbitals and a blackbox state preparation algorithm that prepares an approximation $\mathinner{|{\tilde{0}}\rangle}$ to the ground state $\mathinner{|{0}\rangle}$ such that $|\langle\tilde{0}|0\rangle|^{2}\in\Omega\left(\textrm{poly}\left(N^{-1}\right)\right)$. Design a quantum circuit that uses these elements to estimate the ground state energy of Eq. (2) within additive error $\epsilon$ using a minimal expected number of gates and qubits.
+
+Most proposals for quantum computer simulation of chemical systems use similar strategies to solve this problem. The first step involves translating the basis of the second quantized Hamiltonian to that of the quantum computer. The standard way to do this is to use the occupation number basis in which individual qubits encode the occupation of a spin orbital. For example, the state $\mathinner{|{00011}\rangle}$ would refer to an electronic state where the first two spin orbitals are occupied and the remaining three spin orbitals are unoccupied.
+
+Although representing states is trivial, representing the Hamiltonian is not. The reason is that, although it may seem that the creation and annihilation operators $a_{i}^{\dagger}$ and $a_{i}$ are translated to $(X_{i}-iY_{i})/{2}$ and $(X_{i}+iY_{i})/{2}$ respectively, the resulting operators do not obey the anti-commutation relations in Eq. (5). This problem is addressed by using either the Jordan-Wigner transformation [Somma2002, Aspuru-Guzik2006] or the Bravyi-Kitaev transformation [Bravyi2000, Seeley2012] to modify these operators to have the correct anti-commutation relations. Importantly, the operators that result from using either of these representations are tensor products of Pauli operations. While the number of such terms in the transformed Hamiltonian scales as ${\cal O}(N^{4})$ using both approaches, the locality (i.e. many-body order) of these terms scales as ${\cal O}\left(N\right)$ under the Jordan-Wigner transformation and ${\cal O}\left(\log N\right)$ under the Bravyi-Kitaev transformation [Seeley2012].
+
+Since exponentials of a polynomial number of Pauli operators are known to be efficiently simulatable, $e^{-iHt}\mathinner{|{\tilde{\psi}}\rangle}$ can be implemented using a polynomial number of gates using a quantum computer. There are many different approaches that can be used to achieve this and the majority of these rely on Trotter decompositions, which we will discuss in more detail later. However, each of these methods solves a dynamical simulation problem and does not directly solve the ground state energy estimation problem. The phase estimation algorithm provides the connection needed to relate the eigenvalue estimation problem to a dynamical simulation problem.
+
+The quantum phase estimation algorithm (PEA) uses a quantum computer to efficiently estimate energies from the phases $\{\theta_{n}\left(t\right)\}$ accumulated during time evolution under a propagator $U_{H}\left(t\right)$ associated with the Hamiltonian of interest $H$; i.e.
+
+$$
+e^{iHt}\mathinner{|{n}\rangle}=U_{H}\left(t\right)\mathinner{|{\psi_{n}}\rangle}=e^{i\theta_{n}\left(t\right)}\mathinner{|{\psi_{n}}\rangle} \tag{6}
+$$
+$$
+\theta_{n}\left(t\right)=\left(E_{n}t\right)\mod 2\pi \tag{7}
+$$
+
+where $\{\mathinner{|{\psi_{n}}\rangle}\}$ and $\{E_{n}\}$ represent eigenstates and eigenvalues of $H$. If we initialize a quantum register in a state $\mathinner{|{\tilde{\psi_{0}}}\rangle}$ then time evolution under a static Hamiltonian produces the superposition,
+
+$$
+U_{H}\left(t\right)\mathinner{|{\tilde{\psi_{0}}}\rangle}=\left(\sum_{n=0}^{2^{N}-1}e^{i\theta_{n}\left(t\right)}\mathinner{|{\psi_{n}}\rangle}\!\!\mathinner{\langle{\psi_{n}}|}\right)\mathinner{|{\tilde{\psi_{0}}}\rangle}. \tag{8}
+$$
+
+Measuring the phase of this superposition projects the system to state $\mathinner{|{\psi_{0}}\rangle}$ with probability $|\langle\psi_{0}|\tilde{\psi_{0}}\rangle|^{2}$. Thus, under the assumptions of our problem, at most a polynomial number of repetitions of the phase estimation algorithm will be needed to find the ground state energy.
+
+There are obviously two contributions to the cost of solving the electronic structure problem via quantum computing: ($a$) the overlap $|\langle\psi_{0}|\tilde{\psi_{0}}\rangle|^{2}$ and (b) the cost of simulating the dynamics of the system. Since the overlap is independent of the simulation method used (to second-order in perturbation theory) most work on the topic has focused on reducing the latter cost. We discuss both of these issues in the following.
+
+Our main focus is on Trotter-Suzuki based methods, which involve a discretization of the time evolution known as Trotterization. Trotterization approximates $U_{H}\left(t\right)$ as a series of time steps known as “Trotter slices” during which only one of the Hamiltonian terms is actually active. A Trotter series containing $\mu$ Trotter slices is said to have a “Trotter number” of $\mu$ and the error in this approximation, which arises from non-commutativity of the Hamiltonian terms, vanishes as $\mu\rightarrow\infty$. For a fixed order Trotter-Suzuki formula, each Trotter slice contains a number of gates that is proportional to the number of terms in the Hamiltonian, $m$. The value of $m$ depends on basis and molecular size and its scaling with $N$ ranges from $\tilde{\mathcal{O}}\left(N\right)-\tilde{\mathcal{O}}\left(N^{4}\right)$. Since the the total complexity of the quantum simulation circuit for chemistry is $\tilde{\mathcal{O}}\left(m\mu\right)$, understanding how both of these terms scales is vital for determining whether quantum chemistry will be viable on small scale quantum computers.
+
+The big question that several recent papers have attempted to address is: “how does $\mu$ scale with $N$?” Indeed, this issue is central to the optimizations introduced in many of these simulation methods. Given the importance of this issue in the literature, the data in Figure 1 may come as a complete surprise. We see there that for modestly small molecules, the error in the second-order Trotter-Suzuki formula does not have a clear functional dependence on $N$. This is especially surprising for cases of canonical and natural orbitals where there is little evidence of even an increasing trend in the error as a function of $N$. This lack of monotonicity is particularly striking for the atoms N, O, F, Ne which show negligibly small Trotter errors. In fact, for these molecules (along with others such as Helium Hydride and Lithium Hydride) $\mu=1$ or $\mu=2$ is sufficient to achieve chemical accuracy despite the fact that their Hamiltonians contain hundreds of non-commuting terms.
+
+In order to understand why the Trotter error deviates so strongly from prior expectations, we analyze a leading order perturbative expression for the error in the second-order Trotter formula. The insights gained from this analysis raise an interesting point: although there is not a strong correlation between $N$ and the Trotter error, other chemical properties play a decisive role in the Trotter error. This forces us to reconsider how we conceptualize the scaling of quantum chemistry simulation relative to prior results in quantum simulation, e.g. [Abrams1997, Aspuru-Guzik2006, Kassal2008, Aharonov2003, Childs2013a, Berry2012, Berry2013, Hastings2014, Poulin2014, McClean2014].
+
+## II Analysis of Trotter error operator
+
+The second-order Trotter-Suzuki decomposition allows us to approximate the propagator as a series of unitaries corresponding to the individual Hamiltonian terms. In particular, the second-order[^3] Trotter formula gives us,
+
+[^3]: Note that in work that focuses on high-order Trotter-Suzuki formulas Eq. (9) is often called the first-order Trotter Suzuki formula because it is the lowest iteration order in Suzuki’s iterative construction of high-order splitting formulas.
+
+$$
+U_{H}^{\textrm{TS}}\left(\Delta_{t}\right)\equiv\prod_{\alpha=0}^{m-1}U_{m-\alpha}\left(\frac{\Delta_{t}}{2}\right)\prod_{\alpha=1}^{m}U_{\alpha}\left(\frac{\Delta_{t}}{2}\right) \tag{9}
+$$
+
+where,
+
+$$
+U_{\alpha}\left(\frac{\Delta_{t}}{2}\right)=e^{-iH_{\alpha}\Delta_{t}/2}. \tag{10}
+$$
+
+The second-order formula applies each unitary twice with the second half of the Trotter series in reverse order of the first half to cancel out error terms in the ground state energy that would arise at first-order in $\Delta_{t}$. We use this to make the approximation, valid for sufficiently small values of $\Delta_{t}$, that
+
+$$
+U=e^{iHt}\approx\left(U^{\textrm{TS}}\left(\Delta_{t}\right)\right)^{\mu},\quad\Delta_{t}=t/\mu. \tag{11}
+$$
+
+Poulin et al. [Poulin2014] focus on bounding the error in this approximation with the Baker-Campbell-Hausdorff (BCH) formula,
+
+$$
+\log\left(e^{X}e^{Y}\right) =X+Y+\frac{1}{2}\left[X,Y\right] \tag{12}
+$$
+$$
++\frac{1}{12}\left[X,\left[X,Y\right]\right]-\frac{1}{12}\left[Y,\left[X,Y\right]\right]+...
+$$
+
+By recursively applying Eq. (12) to Eq. (9), the error operator may be written as $V=\sum_{j=1}^{\infty}V^{(j)}$. The leading order term in this expansion is,
+
+$$
+V^{\left(1\right)}=-\frac{\Delta_{t}^{2}}{12}\sum_{\alpha\leq\beta}\sum_{\beta}\sum_{\gamma<\beta}\left[H_{\alpha}\left(1-\frac{\delta_{\alpha,\beta}}{2}\right),\left[H_{\beta},H_{\gamma}\right]\right] \tag{13}
+$$
+
+with errors on the order of ${\cal O}\left(\Delta_{t}^{4}\right)$.
+
+The leading order shift in the energy of the $i^{\textrm{th}}$ eigenstate is given by non-degenerate perturbation theory as,
+
+$$
+\Delta E_{i}=\mathinner{\langle{\psi_{i}}|}V^{\left(1\right)}\mathinner{|{\psi_{i}}\rangle}+{\cal O}\left(\Delta_{t}^{4}\right) \tag{14}
+$$
+
+where $H\mathinner{|{\psi_{i}}\rangle}=E_{i}\mathinner{|{\psi_{i}}\rangle}$. Solving the electronic structure problem requires fixed precision in the energy, i.e. $\Delta E={\cal O}\left(1\right)$. This suggests that we must shrink the time step for larger problem instances in order to offset any increase in Trotter error. In order to make the leading order shift in the energy eigenvalue at most $\delta$ it suffices to take
+
+$$
+\mu\! =\!{\cal O}\!\left(\!t\sqrt{\frac{1}{\delta}\!\left\langle\sum_{\alpha\leq\beta}\sum_{\beta}\sum_{\gamma<\beta}\left[H_{\alpha}\!\left(1\!-\!\frac{\delta_{\alpha,\beta}}{2}\right)\!,\left[H_{\beta},H_{\gamma}\right]\right]\!\right\rangle}\!\right). \tag{15}
+$$
+
+Higher-order Trotter-Suzuki algorithms can be used to reduce the scaling of $\mu$; however they require a number of gates that scales exponentially with the order of the Trotter formula. This means that for many problems with modest error tolerances, the second-order Trotter formula Eq. (9) yields the most efficient results. Although a similar expression based on degenerate perturbation theory must be used for molecules near disassociation, in most practical cases Eq. (15) will accurately predict the required Trotter number in the limit of small $\delta$.
+
+In practice, it is difficult to determine precisely how this error scales with problem size for real molecules. By inspection of Eq. (13), a loose bound of $\mu={\cal O}\left(N^{5}\right)$ is obtained [Poulin2014]. This bound is obtained by recognizing that the double commutator sum in Eq. (13) contains $\mathcal{O}(N^{12})$ terms but only $\mathcal{O}(N^{10})$ such terms are non–zero. In some cases, such as large molecules represented in a local orbital basis, many of these interactions can be neglected and the actual scaling of $\mu$ needed to achieve chemical accuracy may be closer to $\mu=\tilde{\mathcal{O}}\left(N^{3}\right)$ or $\mu=\tilde{\mathcal{O}}\left(N^{3/2}\right)$.
+
+All of these scalings follow from worst case assumptions about the error and liberal application of the triangle inequality. Such arguments are not sufficient to explain the data in Figure 1 which does not show a clear dependence of $\mu$ on $N$. We therefore focus in the remainder on two quantities: ($a$) the error in the ground state energy and ($b$) the operator norm of the Trotter error operator. While ($a$) is the best measure of the error in quantum chemistry simulation, we also focus on $(b)$ because it upper bounds ($a$) and because it can be well approximated without diagonalizing the Hamiltonian.
+
+In the numerics that follow we construct error operators by explicitly computing all ${\cal O}(N^{10})$ nonzero terms in Eq. (13). Once all the terms in the error operator are constructed, we simplify the resulting expression by normal-ordering the result. Here normal-ordering refers to a sorting process where any chain of creation and annihilation operators that result from Eq. (13) are reordered such that creation operators always occur at the left-most part of the chain. This reordering is done by using the anti-commutation relations in Eq. (5). For example, $a_{2}a_{1}a^{\dagger}_{1}a_{3}^{\dagger}=a_{1}^{\dagger}a_{3}^{\dagger}a_{1}a_{2}-a_{3}^{\dagger}a_{2}$. These normal-ordered terms are then grouped, allowing their actions on computational basis states to be efficiently computed.
+
+The Trotter scheme we investigate does not use the coalescing strategies introduced in [Poulin2014], which would surely lead to even more error cancellation. We use a minimal spatial basis (STO-6G). The Trotter series is ordered in the “interleaving” scheme introduced in [Hastings2014] and PQRS terms are ordered lexicographically. All molecular integrals in this work were calculated at equilibrium configurations using the GAMESS electronic structure package [gamess1, gamess2]. While computing the error operator is efficient, evaluating the error operator on an eigenstate of the Hamiltonian cannot be performed in polynomial time on a classical computer. Due to the expensive nature of these calculations, we limit our investigation to benchmarks containing less than twenty spin orbitals. We study the scaling of the norm of the Trotter error operator as this quantity is the focus of analytical bounds introduced in [Wecker2013] and [Poulin2014]. Though the bounds in [Poulin2014] are based on a upper bound for the operator norm of the error operator, here we use the exact value of $\|V^{(1)}\|$.
+
+### II.1 Comparison of norm of error operator and ground state error
+
+An important question to ask is, “how does the error in the simulated ground state energy compare to that predicted by the norm of the error operator?” This is important for two reasons. The first reason is that there can be substantial cancellation in the sum implicit in Eq. (14). This effect is also discussed in [Poulin2014]. The second reason is that the ground state may only have limited overlap with the eigenstates of the error operator that have large eigenvalues. We will discuss these two effects in detail later, but for now it suffices to ask how substantial the differences between the two measures are.
+
+Figure 2 shows that substantial differences exist between the computed Trotter error and the norm of the error operator. In particular, for O, F and Ne these discrepancies can be as large as sixteen orders of magnitude. Other molecules, such as ${\rm H}_{2}$O and HF differ by only two orders of magnitude. This shows that existing estimates of the error can ludicrously overestimate the error in Trotter Suzuki formulas if the properties of the ground state are not also taken into account. Similar comparable results have also been observed for random many-body Hamiltonians [Raeisi2012].
+
+To see this, let us consider Ne. By the convention for second-period atoms, Ne is given $10$ spin orbitals in a minimal basis but it also has $10$ electrons. This means that all of its spin orbitals will be occupied, i.e. $\mathinner{|{\psi_{0}}\rangle}=\mathinner{|{1}\rangle}^{\otimes 10}$. If we consider the action of a single normal-ordered term from Eq. (14), $\alpha\,a^{\dagger}_{p_{1}}\cdots a^{\dagger}_{p_{5}}a_{q_{1}}\cdots a_{q_{5}}$, then we see that $\mathinner{\langle{\psi_{0}}|}\alpha\,a^{\dagger}_{p_{1}}\cdots a^{\dagger}_{p_{5}}a_{q_{1}}\cdots a_{q_{5}}\mathinner{|{\psi_{0}}\rangle}=0$ unless $\{p_{1},\ldots,p_{5}\}=\{q_{1},\ldots,q_{5}\}$ up to permutations. Thus, the vast majority of the terms present in the error operator will evaluate to zero, irrespective of the magnitude of their coefficients. A similar argument can be made for F and O except that the ground state will no longer precisely be the Hartree-Fock state and instead will be a linear combination of computational basis states. Nonetheless, it is easy to see that the vast majority of these expectation values will be zero for these highly constrained systems. We therefore expect from this argument that molecules that have spin orbitals that are nearly fully occupied will have abnormally low error compared to molecules that are half filled where the dimension of the space is maximal for a given number of basis functions. This not only justifies the shockingly small error in N, O, F, and Ne but also explains why only considering the norm of the error operator obscures this trend.
+
+For most benchmarks there is still evidence of correlation between the norm of the error operator and the Trotter error. This means that trends in the norm of the error operator are often reflected in the simulation error. As we have seen, the properties of the molecules in question can change the nature of this relationship.
+
+### II.2 Dependence on basis
+
+Table 1: Ratio of ground state error to error operator norm for molecular hydrogen in various basis sets.
+
+| Basis | Type | Orbitals | error / norm |
+|---|---|---|---|
+| STO-6G | local | 4 | 0.2063 |
+| 3-21G | local | 8 | 0.0568 |
+| 6-31G | local | 8 | 0.0592 |
+| 6-31++G | local | 12 | 0.0328 |
+| STO-6G | canonical | 4 | 0.1131 |
+| 3-21G | canonical | 8 | 0.0231 |
+| 6-31G | canonical | 8 | 0.0242 |
+| 6-31++G | canonical | 12 | 0.0108 |
+| STO-6G | natural | 4 | 0.1131 |
+| 3-21G | natural | 8 | 0.0472 |
+| 6-31G | natural | 8 | 0.0547 |
+| 6-31++G | natural | 12 | 0.0194 |
+
+In addition to showing that Trotter error in the ground state is usually substantially less than the error operator norm, Figure 2 suggests that the error is also basis dependent. While previous works have focused on the local and canonical basis sets, this figure suggests that using natural orbitals can often lower Trotter error by several orders of magnitude relative to a local orbital basis.
+
+Furthermore, we argue that the discrepancy between error norm and ground state error increases with the number of spin orbitals to such an extent that the former should not be used to make arguments about the asymptotic scaling of the latter. One can always add more spin orbitals to a molecular Hamiltonian but given a reasonable orbital basis, the ground state and physically meaningful excited states will have increasingly limited occupancy in high energy orbitals. In this context, the energy of an orbital is understood to mean the energy of a single electron occupying that orbital in the absence of other electrons (appropriate for atomic orbitals) or in the presence of the average density of all other electrons (appropriate for the canonical orbitals). Additionally, the natural orbital basis is known to have the property that states with an odd number of excitations from ground state reference often have negligible overlap with the exact ground state [Benavides2014].
+
+While the error operator will inevitably contain many terms involving excitations to and from these high energy spin orbitals, eigenstates of physical interest (e.g. the ground state) are superpositions of configurations which have a limited number of excitations. Accordingly, terms involving combinations of high energy orbitals are not expected to significantly contribute to the error induced in relevant eigenstates despite increasing the norm of the error operator. This principle is demonstrated in Table 1 which shows the ratio between ground state error and error norm for molecular hydrogen in various basis sets.
+
+### II.3 Dependence on nuclear charge
+
+Figure 3 indicates that Trotter error norm correlates especially well with the maximum nuclear charge, as further demonstrated in Figure 4. The local basis is formed from the set of orthogonal atomic orbitals which are obtained for molecules using Löwdin symmetric orthogonalization on the original non-orthogonal local Gaussian orbitals [McClean2014]. These Gaussian basis functions are constructed as approximations to eigenfunctions of Hydrogen-like systems, with some fitting adjustments. As such, we can determine the scaling behavior by considering the eigenfunctions of Hydrogen-like systems which are simple enough to permit analytical determination of how each term in the Hamiltonian will scale with nuclear charge. We begin by writing the eigenfunctions of a single electron in the potential of a point charge $Z$ in a convenient way,
+
+$$
+\psi_{n\ell m}\left(\rho,\theta,\phi\right)= \tag{16}
+$$
+$$
+\sqrt{\left(\frac{2Z}{n}\right)^{3}\frac{\left(n-\ell-1\right)!}{2n\left(n+\ell\right)!}}e^{-\frac{\rho}{n}}\!\left(\frac{2\rho}{n}\right)^{\ell}\!L^{2\ell+1}_{n-\ell-1}\!\left(\frac{2\rho}{n}\right)Y_{\ell}^{m}\!\left(\theta,\phi\right)
+$$
+
+where $\rho=rZ$, $L^{2\ell+1}_{n-\ell-1}\left(\frac{2\rho}{n}\right)$ is a generalized Laguerre polynomial of degree $n-\ell-1$, and $Y_{\ell}^{m}\left(\theta,\phi\right)$ is a spherical harmonic of degree $\ell$ and order $m$. With the convention,
+
+$$
+\varphi_{p}\left(\sigma_{i}\right) =\psi_{p}\left(\rho_{i},\theta_{i},\phi_{i}\right)\chi\left(s_{i}\right)\propto Z^{3/2} \tag{17}
+$$
+$$
+d\sigma_{i} =\frac{\rho_{i}^{2}\,d\rho_{i}}{Z^{3}}\sin\left(\theta_{i}\right)\,d\theta_{i}\,d\phi_{i}\,ds_{i}\propto Z^{-3} \tag{18}
+$$
+$$
+\nabla^{2} =Z^{2}\left(\frac{\partial^{2}}{\partial\rho^{2}}+\frac{2}{\rho}\frac{\partial}{\partial\rho}\right)+\frac{Z^{2}}{\rho^{2}\sin^{2}\left(\theta\right)}\frac{\partial^{2}}{\partial\phi^{2}}
+$$
+$$
++\frac{Z^{2}}{\rho^{2}\sin^{2}\left(\theta\right)}\frac{\partial^{2}}{\partial\phi^{2}}\propto Z^{2} \tag{19}
+$$
+
+where $\chi\left(s_{i}\right)$ is a spin assignment and $\sigma$ represents all degrees of freedom for an electron, we rewrite Eq. (3) and Eq. (4) in terms of $\rho$, assuming a single nuclei,
+
+$$
+h_{pq} =\int d\sigma\ \varphi_{p}^{*}(\sigma)\left(-\frac{\nabla^{2}}{2}-\frac{Z^{2}}{\rho}\right)\varphi_{q}(\sigma) \tag{20}
+$$
+$$
+h_{pqrs} =\int d\sigma_{1}\,d\sigma_{2}\frac{\varphi_{p}\left(\sigma_{1}\right)\varphi_{q}\left(\sigma_{2}\right)\varphi_{s}\left(\sigma_{1}\right)\varphi_{r}\left(\sigma_{2}\right)}{|\rho_{1}-\rho_{2}|/Z}. \tag{21}
+$$
+
+For both integrals, factors of $Z$ from the differential volume elements $d\sigma$ cancel with factors of $Z$ from the spin orbitals $\varphi$ and we find that,
+
+$$
+|h_{pq}| =\Theta\left(Z^{2}\right) \tag{22}
+$$
+$$
+|h_{pqrs}| =\Theta\left(Z\right). \tag{23}
+$$
+
+Thus, it is clear that we can upper bound the scaling of individual Hamiltonian terms with nuclear charge as ${\cal O}\left(Z_{\textrm{max}}^{2}\right)$. While this result is rigorous only when the orbital basis is the basis of true atomic orbitals, we expect qualitatively similar behavior in other bases. Assuming the $h_{pq}$ terms dominates the error in the Trotter formula then Eq. (13) implies that the Trotter error should scale as $\mathcal{O}(Z_{\rm max}^{6})$. This scaling is qualitatively consistent with the empirical scaling in Figure 4 which fits $Z_{\textrm{max}}^{6}$ scaling to the norm of the error operator with an $r^{2}$-value of 0.994. Comparable results to this scaling have also been observed in diffusion Monte Carlo algorithms [Ceperley1986, Hammond1987].
+
+These results imply that if an atomic basis is used then the error in the second-order Trotter-Suzuki formula scales at most as
+
+$$
+\|V^{(1)}\|\in\mathcal{O}\left(N^{4}Z_{\rm max}^{6}+N^{10}Z_{\rm max}^{3}\right). \tag{24}
+$$
+
+This result is a direct consequence of bounds on the Trotter-Suzuki error in [Hastings2014] and the observation that double commutators of the one- and two-body terms produce at most $N^{4}$ and $N^{10}$ terms respectively. This implies that the computational complexity of performing the simulation on an arbitrary state, given fixed error tolerance of chemical accuracy, is $\mathcal{O}(N^{4}(N^{2}Z_{\rm max}^{3}+N^{5}Z_{\rm max}^{3/2}))$. However, our numerical results are consistent with an $\mathcal{O}(N^{4}Z_{\rm max}^{3})$ which suggests that this scaling may be loose. It also important to note that the gate depth can be further reduced by using interleaving and nesting as per [Hastings2014], which is significant when the algorithm is implemented on systems where quantum operations can be executed in parallel. It is also worth noting that the one-body terms dominate the two-body terms in every numerical example that we considered. Larger molecules with more $h_{pqrs}$ terms may lead to Trotter errors that scale as $\mathcal{O}(Z_{\max}^{3})$ rather than $\mathcal{O}(Z_{\max}^{6})$. More extensive numerical results may be needed to determine the conditions under which the two-body terms asymptotically dominate the one-body terms (if such conditions exist).
+
+Figure 5 shows that these error estimates are pessimistic for the molecules considered when using the canonical basis. While the error norm is still strongly correlated to nuclear charge, unlike the scaling in the local basis, the fit to a $Z_{\max}^{6}$ scaling is less convincing. Instead, the data empirically seems to follow a $Z_{\max}^{5}$ scaling. Intuitively, this is easy to envision because the molecular orbitals are inherently delocalized and thus it is natural to expect that the maximum nuclear charge should make less of an impact in this basis. We also see no evidence of explicit scaling with $N$ over this range in $Z_{\max}$. It is interesting to note that although the number of non-negligible integrals in a local orbital basis can be quadratically or quartically smaller than the size of an untruncated canonical molecular orbital basis, the scaling with $Z_{\textrm{max}}$ seems to be better by a linear factor. This suggests interesting trade-offs between the two methods and hints that neither is intrinsically superior for quantum simulation.
+
+### II.4 Dependence on orbital structure
+
+The terms that appear in the error operator include interactions between every orbital in the basis set. This begs the question of whether terms in the Hamiltonian that involve particular orbitals have larger contribution to the error. In order to assess this, we compute the error operator for a number of different molecules and normal-order the resultant operator. We then sum the magnitudes of every remaining term that either create or annihilate an electron in each of the orbitals. An example of this is provided in Figure 6, which shows the marginal coefficient magnitudes of all terms in the error operator (after normal-ordering) in terms of two spin orbitals they contain. Appendix shows similar analysis for other molecules in other basis sets. As we can see, terms which involve the inner shell electrons dominate the norm of the error operator in the local basis.
+
+We see from such figures that the inner orbitals, especially the single particle terms which are on the diagonal of the plot above, have a substantial impact on the Trotter error. This is not surprising as the inner atomic orbitals interact very strongly with nuclei so the single particle integrals are likely to be much larger than the interaction integrals for these orbitals. Interestingly, although the valence shell electrons are often the most important for determining the chemical properties of a molecule, the inner orbitals are the ones that affect the error most significantly. This suggests that pseudo-potentials, which allow the core electrons to be treated as effectively “frozen”, may provide a way to reduce the Trotter error in some circumstances. We leave this as an open question for future work.
+
+### II.5 Dependence on structure of eigenstates
+
+Due to the substantial discrepancy between error induced on the ground state and operator norm, we might ask the following question: given the error operators for real molecules, what is the distribution of errors that would be induced on a random ensemble of vectors? This question is important as the answer will help us to identify the source of the observed error cancellation. We consider the ensemble of Haar random vectors which form a unitarily invariant ensemble of vectors with uniformly distributed complex elements. Unitary invariance ensures that the ensemble has uniform distribution in an arbitrary complete, orthonormal basis such as the eigenbasis of the error operator.
+
+Denoting vectors from the random ensemble as $\mathinner{|{v}\rangle}$ and eigenvectors of the error operator as $\mathinner{|{k}\rangle}$ with eigenvalue $\lambda_{k}$, we are interested in analyzing properties of the following distribution of expected errors given by,
+
+$$
+\Delta E\left(v\right)=\sum_{k}\lambda_{k}|\langle v\mathinner{|{k}\rangle}\!|^{2}. \tag{25}
+$$
+
+First, note that $\sum_{k}\lambda_{k}=0$. This is because if $C=[A,B]=\sum_{j}\lambda_{k}\mathinner{|{k}\rangle}\!\!\mathinner{\langle{k}|}$ then
+
+$$
+\sum_{k}\lambda_{k}=\rm{Tr}(C)=\rm{Tr}(AB)-\rm{Tr}(BA)=0, \tag{26}
+$$
+
+from the cyclic property of the trace. Since $V^{(1)}$ is the sum of such operators, it follows that its trace is also zero. This implies that the Haar-expectation value of the error, over all possible random states, is
+
+$$
+\mathbb{E}_{H}(\Delta E(v))=\sum_{k}\lambda_{k}\mathbb{E}_{H}|\langle v\mathinner{|{k}\rangle}\!|^{2}=\frac{1}{2^{N}}\sum_{k}\lambda_{k}=0. \tag{27}
+$$
+
+This shows that there is no inherent bias that arises from Trotterization towards either overestimating or underestimating the true expectation value.
+
+This result does not represent the typical error that we expect to see in a simulation. We also need to find the Haar variance of the expected error to estimate the typical variation of simulation errors about the mean. It is then easy to see that the Haar variance is
+
+$$
+\mathbb{V}_{H}(\sum_{k}\lambda_{k}|\langle v|k\rangle\!|^{2})=\sum_{k}\lambda_{k}^{2}\mathbb{V}_{H}(|\langle v|k\rangle|^{2}). \tag{28}
+$$
+
+In Appendix , we derive the Haar variance of the squared projection,
+
+$$
+\mathbb{V}_{H}\left(|\langle v\mathinner{|{k}\rangle}|^{2}\right)=\frac{2}{2^{N}\left(2^{N}+1\right)}-\frac{1}{2^{2N}}, \tag{29}
+$$
+
+where $N$ is the number of spin orbitals. Combining Eq. (29) and Eq. (28) and using Chebyshev’s inequality, we see that with high probability over $\mathinner{|{v}\rangle}$
+
+$$
+|\mathinner{\langle{v}|}V^{(1)}\mathinner{|{v}\rangle}|\in O\left(\frac{\sqrt{\sum_{k}\lambda_{k}^{2}}}{2^{N}}\right). \tag{30}
+$$
+
+Eq. (30), surprisingly, shows that a concentration of measure argument causes the expectation of the Trotter error to be asymptotically zero if ($a$) $\mathinner{|{v}\rangle}$ is typical of a Haar random state, (b) $\sum_{k}\lambda_{k}^{2}\in o(2^{2N})$ and ($c$) $\mathinner{|{v}\rangle}$ is chosen independently of the $\mathinner{|{k}\rangle}$.
+
+We do not expect a concentration of measure argument like this to hold for actual quantum simulations because it would imply that the Trotter errors in eigenvalue estimation shrink rapidly with system size for physically reasonable distributions of $\lambda_{k}$. Thus, it is natural to expect that one or both of assumptions ($a$) and ($c$) are not reasonable for eigenvalue estimation.
+
+In Figure 7, we show the expected errors according to Eq. (25) over an ensemble of Haar random vectors as well as the expected errors over the eigenstates of the Hamiltonian for water. The results clearly show that the errors observed in this chemical example are much greater than we would expect from Haar random states. Furthermore, we see little evidence of concentration of measure of the errors about zero for the case where $\mathinner{|{v}\rangle}$ is an eigenvector of $H$; whereas the Haar random $\mathinner{|{v}\rangle}$ lead to results that are much more concentrated about zero error. This suggests that the discrepancies between the norm of the error operator and the ground state error cannot be explained by a simple randomization argument as the actual errors observed are much worse than would be otherwise expected.
+
+Eq. (25) shows that the expected error is the convolution of the functions $\lambda_{k}$ and $|\langle v|k\rangle|^{2}$. Thus, we expect the distribution of errors to resemble the underlying distribution of eigenvalues of $V^{(1)}$. This intuition can easily be seen by comparing Figure 7 to the eigenspectrum of the water error operator in Figure 8a. As expected, the distribution of errors for the random ensemble (Figure 7) resembles the error operator eigenspectrum (Figure 8a) with concentration about the mean (as anticipated by Eq. (30)). Also, it is interesting to note that the eigenspectra of the error operators for various molecules and atoms studied in this paper bear a remarkable degree of similarity and appear extremely structured as Figure 8 demonstrates. Additionally, every example has a sharp peak in its spectrum about zero error. This suggests that much of the rift between the norm of the error operator in Figure 2 may be due to the large number of eigenvectors with near-zero eigenvalue.
+
+## III Improved simulation methods inspired by classical approaches to quantum chemistry
+
+Given the large disparity between error operator norm and error induced on the exact ground state, any efficient method which allows one to approximate the error induced on the ground state (which implies an estimate for the number of Trotter steps needed) would be of critical importance for anyone wishing to actually run a quantum chemistry simulation on a quantum computer. A natural way to address this problem is to directly evaluate the error over a mesh in position and fit the data to a power law. This process can be made efficient using the SWAP test, as proposed by Wiebe et al [WBH+11]. A major drawback of this approach is that it requires roughly twice the qubits that the basic simulation used and also the variance in the estimate returned by the SWAP test can be prohibitively large. In this section, we propose an alternative method that estimates the error in the ground state energy by evaluating the error operator on a classical ansatz for the ground state numerically. This method also allows the contribution to the error in the quantum simulation from the Trotter error to be subtracted off of the final estimate, improving the accuracy of the simulation without requiring additional quantum operations.
+
+Perhaps the most well-known classical algorithm for solving the electronic structure problem is a mean-field approach known as the Hartree-Fock method [Helgaker2013]. In this scheme, single particle molecular orbitals are obtained using a self-consistent variational procedure in which each particle is made to interact with the average density of the other particles. The output of this calculation provides molecular orbitals which, together with a spin assignment, are used to approximate the $n$-particle wavefunction as an anti-symmetric product of the orbitals (known by chemists as a Slater determinant).
+
+Unfortunately, the Hartree-Fock method is incapable of approximating dynamic electron correlation and is known to overestimate energies by an amount that is typically well above the threshold of chemical accuracy. To correct for this problem, one can expand the wavefunction in a basis of multiple Slater determinants and variationally solve for the coefficients which minimize the electronic energy. In general, there are $M=\binom{N}{n}$ valid configurations for $n$ electrons arranged into $N$ spin orbitals. The ground state wavefunction in Eq. (1) may be represented as a linear combinations of these arrangements,
+
+$$
+\mathinner{|{\Psi}\rangle}=\sum_{i=1}^{M}a_{i}\mathinner{|{i}\rangle}. \tag{31}
+$$
+
+The energies may be solved for variationally,
+
+$$
+E=\min_{\left\{a_{i}\right\}}\frac{\mathinner{\langle{\Psi}|}H\mathinner{|{\Psi}\rangle}}{\langle\Psi|\Psi\rangle}\quad\rightarrow\quad H^{\textrm{CI}}\mathinner{|{\Psi}\rangle}=E\mathinner{|{\Psi}\rangle} \tag{32}
+$$
+
+where $H_{ij}^{\textrm{CI}}=\mathinner{\langle{i}|}H\mathinner{|{j}\rangle}$. In chemistry this method is known as full configuration interaction (FCI).
+
+FCI is strongly believed to be classically intractable because $M$ scales combinatorially with $N$ and $n$. Accordingly, a common classical approach is to truncate the expansion in Eq. (31) to include only configurations that represent a fixed number of excitations from a reference configuration. Though this work and recent work [McClean2014] discuss using different orbital basis choices, usually the reference is taken to be the Hartree-Fock state (this orbital basis is known in chemistry literature as the “canonical basis”). This approach defines a hierarchy of methods referred to as truncated configuration interaction (CI) which approach exactness as the number of excitations is increased to the FCI space spanned by $N-n$ excitations. Fixing the maximum number of excitations at $k$, combinatorics suggests that the number of basis functions in truncated CI scales as $\Theta\left({N-n\choose k}{n\choose k}\right)$. Truncation to the level of single and double excitations is referred to as configuration interaction singles, doubles (CISD) and is used for several purposes in this paper. Finally, we note that the accuracy of truncated CI is extremely sensitive to the quality of the reference state and it is therefore difficult to determine when these methods are expected to approximate the ground state energy within even a fixed multiplicative error.
+
+Since the error operator can be efficiently computed and normal-ordered in second quantized form, we suggest evaluating the expectation value of this operator on a classical ansatz for the ground state. In particular, we focus on the use of the configuration interaction ansatz. Figure 9 illustrates the utility of this idea by showing the discrepancy between actual error and the error from evaluation of the error operator using a classical ansatz. Figure 10 shows the extent to which the effective error is reduced using a classical ansatz.
+
+Apart from estimating errors, CISD states may also be of use in coalescing schemes [Poulin2014] which use the Hartree-Fock approximation to determine whether a term in the Hamiltonian can be executed less frequently without significantly impacting the quality of the simulation. This process can substantially reduce the costs of simulating molecules with many small, but non–negligible, $h_{pqrs}$ terms but may fail if the Hartree-Fock approximation breaks down. In such cases, the use of CISD states may lead to superior coalescing schemes at the price of requiring more classical computing time to find the coalescing schedule.
+
+Though the Hartree-Fock ansatz is usually not accurate enough to reduce error by an order of magnitude, the use of a truncated CI ansatz often exhibits enough accuracy to very substantially reduce effective error. While we focus on the CI ansatz to provide proof-of-principle, we believe that more intelligent truncation schemes can substantially increase ansatz accuracy without additional computational cost. For instance, the use of multi-reference methods has been shown to greatly improve the quality of the classical solution in many cases, especially near molecular dissociation limits where the exact electronic states become nearly degenerate [Helgaker2013].
+
+The idea of using a classical ansatz to reduce the effective error in a quantum calculation is useful for two reasons. The first reason is that the error in a quantum simulation can usually be reduced by approximating the error with a classical ansatz at the CISD level of theory or greater, as demonstrated in Figure 10. The second (and perhaps more important) reason this technique is useful is that it gives a realistic a priori estimate of the error to expect in the quantum simulation (expected to be correct to at least an order of magnitude) which provides a methodology for selecting the number of Trotter steps required to obtain a desired precision. Finally, we point out that while the error operator might be computationally costly to compute (albeit, efficient in the polynomial-time scaling sense), Monte Carlo methods could be used to tractably sample the error operator expectation values with a classical ansatz.
+
+### III.1 Circuit for state preparation based on CI ansatz
+
+In contrast to the Hartree-Fock states, CISD states are not computational basis states. Instead they are a linear combination of quantum states that are formed by single and double excitations away from a reference state which is often taken to be the Hartree-Fock state. Although the CISD state can be efficiently computed for a given electronic structure problem, preparing the state on a quantum computer is non-trivial. Here we present a method based on state-of-the-art multi-qubit synthesis methods to prepare the CISD state. Previous work has considered preparing this state using single qubit rotations and CNOT gates [OGK01, WAF09, Yung2013]. Such gate sets are unrealistic for fault tolerant quantum computing so we discuss the problem of compiling the state preparation circuit into Clifford and $T$ gates. In the following analysis we will take the cost of the circuit to be given by the number of $T$ gates because these gates are the most expensive gates to implement fault tolerantly in error correcting codes such as the surface code.
+
+Let us begin by assuming the initial state for the quantum simulation (i.e. the state we wish to prepare) is of the form
+
+$$
+\mathinner{|{\psi}\rangle}=\sum_{k=1}^{D}\alpha_{k}\mathinner{|{j_{k}}\rangle}, \tag{33}
+$$
+
+where $j_{k}$ is a sequence of computational basis vectors that spans the space that state has support over and $D$ is the dimension of that space.
+
+It is unrealistic to assume that the state $\mathinner{|{\psi}\rangle}$ will be exactly preparable using gates from the Clifford + $T$ gate library. Instead, the initial state will typically have to be approximated using these circuit elements. For years the Solovay-Kitaev algorithm provided the best known method for solving this approximation problem, but recently more advanced methods based on number theoretic results have provided much more efficient ways of performing this decomposition [KMM13, RS14, BRS14].
+
+Therefore the problem of finding the best sequence of Clifford and $T$ gates to approximate a multi-qubit unitary reduces to the following problem
+
+1. Find integers $x_{0},x_{1},y_{0},y_{1}$ such that
+  $$
+  U_{p,q}\approx\tilde{U}_{p,q}=\frac{x_{0}+x_{1}\sqrt{2}+iy_{0}+iy_{1}\sqrt{2}}{\sqrt{2}^{m}}.
+  $$
+  and $\tilde{U}$ is a unitary that can be exactly synthesized using elements from the gate library.
+2. Find a sequence of Clifford and $T$ gates that exactly implements $\tilde{U}$.
+
+Note that because we are interested in preparing a state, not implementing a multi-qubit unitary, only the first column of $U$ needs to be approximated. In particular, the first column of $\tilde{U}$ should approximate $\mathinner{|{\psi}\rangle}$ to within a fixed error tolerance $\delta$.
+
+Before proceeding it is necessary to briefly review number theoretic approaches to multi-qubit circuit synthesis using Clifford and $T$ gates. The key insight behind this strategy is that the unitary matrices that can be prepared with such circuits take on a very special form. The form can easily be seen from the Hadamard and $T$ gates,
+
+$$
+H=\frac{1}{\sqrt{2}}\begin{bmatrix}1&1\\ 1&-1\end{bmatrix},\quad\quad T=\begin{bmatrix}1&0\\ 0&\frac{1+i}{\sqrt{2}}\end{bmatrix}. \tag{34}
+$$
+
+It is then clear that any unitary matrix formed by a sequence of $H$ and $T$ gates will consist of matrix elements that are of the form
+
+$$
+\tilde{U}_{i,j}=\frac{x_{0}+x_{1}\sqrt{2}+iy_{0}+iy_{1}\sqrt{2}}{\sqrt{2}^{m}}, \tag{35}
+$$
+
+for integer $x_{0},x_{1},y_{0},y_{1}$. Since the remainder of the gate set consists of CNOT gates and Pauli gates which have (complex) integer valued matrix elements, it is then clear that every unitary that can be formed by the gate library also has matrix elements whose denominators are powers of $\sqrt{2}$ and whose numerators are in the ring of Gaussian integers $\mathbb{Z}[1/\sqrt{2},i]$.
+
+Just like ordinary fractions, these fractions also can be reduced. This notion of reducing a fraction manifests itself as the least denominator exponent $k$. In order to understand this concept concretely, it is necessary to introduce some terminology. Let $\omega=e^{i\pi/4}$ and
+
+$$
+\mathbb{Z}[\omega]=\{a\omega^{3}+b\omega^{2}+c\omega+d|a,b,c,d\in\mathbb{Z}\}. \tag{36}
+$$
+
+Similarly, if we let $\mathbb{D}=\{a2^{-b}|a,b\in\mathbb{Z}\}$ denote the ring of dyadic fractions then we can express the ring $\mathbb{Z}[1/\sqrt{2},i]$ as
+
+$$
+\mathbb{D}[\omega]=\{a\omega^{3}+b\omega^{2}+c\omega+d|a,b,c,d\in\mathbb{D}\}. \tag{37}
+$$
+
+Then for every $t\in\mathbb{D}[\omega]$ there is a notion of a least denominator exponent that describes the fraction in Eq. (35) and uses the smallest value of $m$ possible while requiring that $x_{0},x_{1},y_{0},y_{1}$ are integer. Or more formally, the least denominator exponent, $k$, is the smallest non-negative integer such that $t\sqrt{2}^{k}\in\mathbb{Z}[\omega]$.
+
+The smallest denominator exponent measures the precision in the approximation $U\approx\tilde{U}$ because Eq. (35) allows arbitrary complex numbers to be represented with zero error in the limit as $k\rightarrow\infty$. This means that the value of $k$ used in the rounding process of the first column of $U$ is a key property for characterizing the complexity of the state preparation. In fact, the problem of bounding the error in this approximation problem as a function of $k$ has already been solved by Kliuchnikov [Kli13]:
+
+$$
+\|(U-\tilde{U})\mathinner{|{0}\rangle}\|\leq 2(D+2)2^{-4k}+2\sqrt{2(D+2)}2^{-2k}, \tag{38}
+$$
+
+where $D$ is the number of nonzero components of the state $\mathinner{|{\psi}\rangle}=U\mathinner{|{0}\rangle}$. As a technical point, the dimension of $\tilde{U}$ is at most $D+2$ rather than $D$ because the first column of $U$ must have at least two zero-valued components in order to guarantee that a solution exists to the Diophantine equation for $\tilde{U}$. This requires enlarging the Hilbert space dimension by two in the worst case scenario, which may require adding at most an additional qubit. However, the CISD state vector will likely have many zero valued components so this extra qubit will often not be needed in practice.
+
+Using Eq. (38) we see that the state preparation error can be made less than $\delta$ by choosing
+
+$$
+k=\left\lceil\frac{1}{4}\left[1+\log_{2}\left(\frac{D+2}{(\sqrt{1+\delta}-1)^{2}}\right)\right]\right\rceil. \tag{39}
+$$
+
+This means that if $D$ is polynomial in $n$ then $k\in O(\log(n/\delta))$.
+
+Once the unitary $\tilde{U}$ has been found then the task of decomposing the unitary into fundamental operations remains a non-trivial problem. This problem is addressed by Giles and Selinger in [GS13]. The idea behind this approach is to decompose $\tilde{U}$ into a series of two level unitary operations. These two level unitary operations are then implemented using a Clifford circuit and a series of controlled operations to map each two level subspace to a single qubit. This process involves first identifying pairs of levels that can be simplified and then performing circuits of the form $H^{w}T^{x}H^{y}T^{z}$ to the two level subspace such that the denominator exponent is systematically reduced. Once the least denominator exponent is reduced to $0$ then the subspace either takes the form $[\omega^{p},0]^{T}$ or $[0,\omega^{p}]^{T}$ for integer $p$. Thus, the inverse of the state preparation circuit can be found (up to a global phase) by performing this reduction process iteratively of the $D$ dimensional initial state until only one nonzero component remains and then mapping this component to $\mathinner{|{0}\rangle}$ using a Clifford circuit and a multiply controlled not gate.
+
+At most $k$ reduction steps are needed to reduce each two level subspace and there are at most $(D+2)-1$ subspaces that must be looped through. Therefore, there are at most $k(D+1)$ reduction steps taken. Each reduction step consists of applying at most two $H$ gates and two $T^{x}$ gates to each subspace, as well as a multiply controlled not gate to map the final state to one proportional to $\mathinner{|{0}\rangle}$. Hence, in order to assess the cost of the algorithm we need to compute the costs of each of these gates.
+
+Let us imagine that we need to perform a gate on the subspace ${\rm span}(\mathinner{|{j}\rangle},\mathinner{|{k}\rangle})$. We want to map this to ${\rm span}(\mathinner{|{2^{n}-1}\rangle},\mathinner{|{2^{n}-2}\rangle})$ so that the gate can be applied to the last qubit. By performing a sequence of $\mathcal{O}(n)$ $X$ gates, we can map
+
+$$
+{\rm span}(\mathinner{|{j}\rangle},\mathinner{|{k}\rangle})\rightarrow{\rm span}(\mathinner{|{j\oplus k\oplus 2^{n}-1}\rangle},\mathinner{|{2^{n}-1}\rangle}),
+$$
+
+where $\oplus$ is bitwise exclusive or. There are two cases that we need to consider. If $j\oplus k=1\mod 2$ then the least significant bit of $j\oplus k\oplus 2^{n}-1$ is $0$. This means that the state $\mathinner{|{j\oplus k\oplus 2^{n}-1}\rangle}$ can be mapped to $\mathinner{|{2^{n}-2}\rangle}$ using a sequence of $n-1$ zero-controlled not gates while not affecting $\mathinner{|{2^{n}-1}\rangle}$. Otherwise, if $j\oplus k=1\mod 2$ then we can reduce this case by finding the least significant bit where $j$ and $k$ differ and swap that bit with the least significant bit. Since $\mathinner{|{2^{n}-1}\rangle}$ is an eigenstate of the swap operator, the swap does not affect that vector. Hence in either case we can perform the subspace mapping using $\mathcal{O}(n)$ Clifford operations.
+
+In order to apply the $H$ and $T$ gates required by the synthesis algorithm on the correct qubits, we need to implement controlled variants of these circuits. There are many constructions for these controlled gates [BCD95, Jones2013, Selinger2013]. Here we anticipate that the cost of state preparation for the CISD state will be sub-dominant to the cost of the simulation. This means that minimizing the number of qubits needed is an important design goal. Let us define $\Lambda_{m}(G)$ to be the $m$-controlled version of the gate $G$. Then the gate $\Lambda_{m}(H)$ can be implemented using two $\Lambda_{n-1}(X)$ gates, a $\Lambda_{1}(H)$ gate and an ancilla qubit,

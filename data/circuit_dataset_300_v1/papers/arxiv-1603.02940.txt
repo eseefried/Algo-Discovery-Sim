@@ -1,0 +1,1034 @@
+## I Introduction
+
+Two important problems in statistical mechanics and stochastic processes are sampling from the thermal or Gibbs distribution of a physical system at a certain temperature and the estimation of hitting times of classical Markov chains. The first such problem has a wide range of applications as it allows us to compute quantities like the partition function, energy, or entropy of the system, and understand its physical properties in thermal equilibrium [1]. This problem has also applications in many other scientific areas including optimization [2]. Hitting times are also paramount in the study of classical random processes and they allow for a characterization of Markov chains [3]. Roughly, a hitting time is the time required by a diffusive random walk to reach a particular configuration with high probability. Besides their use in physics, hitting times are also important in solving search problems where the goal is to find a marked configuration of the Markov chain [4].
+
+In a classical setting, these two problems are commonly solved using Monte-Carlo techniques [5]. Each step in a Monte-Carlo simulation corresponds to applying a particular probability rule that determines a Markov chain and an associated stochastic matrix. In the case of sampling from Gibbs distributions, for example, the fixed point of the Markov chain (i.e., the eigenvector of the stochastic matrix with eigenvalue 1) corresponds to the desired distribution. Such a distribution can then be prepared by repeated applications of the probability rule. To sample from probability distributions associated with thermal Gibbs states of quantum systems, quantum Monte-Carlo techniques may be used [6]. The running time of a Monte-Carlo simulation is typically dominated by the number of times the probability rule is applied to prepare the desired distribution with some given precision. This running time depends on properties of the Markov chain such as the spectral gap of the stochastic matrix [3].
+
+In recent years, there has been significant interest in the development of quantum algorithms for simulating stochastic processes. Quantum algorithms for thermal Gibbs state preparation were developed in various works (c.f., [7, 8, 9, 10, 11, 12]) and showed to provide polynomial quantum speedups in terms of various parameters, such as the spectral gap of the stochastic matrix or the dimension of the Hilbert space. The notion of quantum hitting time was also introduced in numerous works (c.f., [13, 14, 15, 16, 17]). Often, quantum hitting times of quantum walks on different graphs are significantly (e.g., polynomially) smaller than their classical counterparts. There are also various quantum algorithms to accelerate classical Monte-Carlo methods for estimating different quantities, such as expected values or partition functions (c.f., [18, 19]). Our results advance these areas further by providing new quantum algorithms with various improvements in the running time with respect to known classical and quantum algorithms for some of these problems.
+
+In more detail, we present two quantum algorithms for preparing thermal Gibbs states of quantum systems and for estimating hitting times, respectively. The first algorithm runs in time $\tilde{O}(\sqrt{N\beta/{\cal Z}})$, where $N$ is the Hilbert space dimension, $\beta$ is the inverse temperature, and ${\cal Z}$ is the partition function of the quantum system. The $\tilde{O}$ notation hides polylogarithmic factors in these quantities and $1/\epsilon$, where $\epsilon$ is the desired precision of the output state. This is a quadratic improvement in $\beta$ and an exponential improvement in $1/\epsilon$ with respect to a related algorithm presented in [8, 9]. In fact, the main difference between our quantum algorithm and that of [8, 9] is in the implementation of the operator $e^{-\beta H/2}$, where $H$ is the Hamiltonian of the system. Rather than using phase estimation, we use a technique introduced in [20, 21, 22] to decompose $e^{-\beta H/2}$ as a linear combination of unitary operations and then apply results of spectral gap amplification in [23] to implement each such unitary. The same idea can be used to improve the running time of the algorithm presented in [10]. The second algorithm provides an estimate of $t_{h}$, the hitting time of a reversible, irreducible, and aperiodic Markov chain. It runs in time $\tilde{O}(1/(\epsilon\Delta^{3/2}))$, where $\epsilon$ is the absolute precision in the estimation and $\Delta$ is a parameter that satisfies $1/\Delta\geq t_{h}$. The $\tilde{O}$ notation hides factors that are polynomial in $\log(1/(\epsilon\Delta))$ and $\log(N)$, where $N$ is the dimension of the configuration space. In addition to the techniques used by the first algorithm, the second algorithm also uses recent methods for the quantum linear systems algorithm in [22] and methods to estimate quantities at the so-called quantum metrology limit described in [18].
+
+The paper is organized as follows. In Sec. II we describe the main techniques introduced in [23, 21, 24, 22, 18] that are also used by our algorithms. Then, the quantum algorithm for the preparation of thermal Gibbs states of quantum systems is described in Sec. III and the quantum algorithm for estimating hitting times of classical Markov chains is described in Sec. IV. We provide concluding remarks in Sec. V.
+
+## II Main techniques
+
+Our algorithms are based on techniques developed in the context of spectral gap amplification [23], Hamiltonian simulation [21, 24], quantum metrology [18], and solving linear systems of equations [22]. We first consider an arbitrary finite-dimensional quantum system modeled by a Hamiltonian $H$ that satisfies
+
+$$
+H\left|\psi_{j}\right\rangle=E_{j}\left|\psi_{j}\right\rangle\;. \tag{1}
+$$
+
+$E_{j}$ are the eigenenergies and $\left|\psi_{j}\right\rangle$ are the eigenstates, $j=0,1,\ldots N-1$, and $N$ is the dimension of the Hilbert space. We assume that $H$ describes a system of $n$ qubits and $N=2^{n}$ [25, 20]. Furthermore, we assume that $H$ can be decomposed as
+
+$$
+H=\sum_{k=1}^{K}h_{k}\;, \tag{2}
+$$
+
+where each $h_{k}\geq 0$ is a semidefinite positive Hermitian operator. In some cases, the assumption on $h_{k}$ can be satisfied after a simple rescaling of $H$ depending on its specification.
+
+The results in [23] use the Hamiltonian
+
+$$
+\tilde{H}=\sum_{k=1}^{K}\sqrt{h_{k}}\otimes\left(\left|k\right\rangle\!\left\langle 0\right|_{\rm a_{1}}+\left|0\right\rangle\!\left\langle k\right|_{\rm a_{1}}\right)\;, \tag{3}
+$$
+
+where $\rm a_{1}$ refers to an ancillary qubit register of dimension $O(\log(K))$. The important property is
+
+$$
+(\tilde{H})^{2}\left|\phi\right\rangle\otimes\left|0\right\rangle_{\rm a_{1}}=\left(H\left|\phi\right\rangle\right)\otimes\left|0\right\rangle_{\rm a_{1}}\;, \tag{4}
+$$
+
+for any $\left|\phi\right\rangle$. Roughly, $\tilde{H}$ can be thought of as the square root of $H$. Our algorithms will require evolving with $\tilde{H}$ for arbitrary time:
+
+**Definition 1.**
+
+Let $\tilde{W}(t):=\exp(-i\tilde{H}t)$ be the evolution operator of $\tilde{H}$ for time $t$, and $\epsilon>0$ a precision parameter. We define $W$ as a quantum circuit that satisfies $\|\tilde{W}(t)-W\|\leq\epsilon$. The number of two-qubit gates to implement $W$ (i.e., the gate complexity) is $C_{W}(t,\epsilon)$.
+
+When $H$ is a physical Hamiltonian described by local operators, $\tilde{H}$ may be efficiently obtained with some classical preprocessing. To obtain $C_{W}(t,\epsilon)$ in some instances, we note that the results in [21, 24] provide an efficient method for simulating Hamiltonians of complexity polylogarithmic in $1/\epsilon$. In more detail, we could assume that we have a presentation of the Hamiltonian as
+
+$$
+H=\sum_{k=1}^{K}\alpha_{k}\Pi_{k}\;, \tag{5}
+$$
+
+or
+
+$$
+H=\frac{1}{2}\sum_{k=1}^{K}\alpha_{k}U_{k}\;, \tag{6}
+$$
+
+where the coefficients satisfy $\alpha_{k}>0$. The operators $\Pi_{k}$ are projectors (i.e., $(\Pi_{k})^{2}=\Pi_{k}$) and $U_{k}$ are unitaries of eigenvalues $\pm 1$ in this case. Many qubit Hamiltonians can be represented in this way, where the $U_{k}$ correspond, for example, to Pauli operators. We note that Eq. (6) can be reduced to Eq. (5) by a simple rescaling in which $\Pi_{k}=(U_{k}+{\mathchoice{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.5mul}{\rm 1\mskip-5.0mul}}_{N})/2$ and disregarding the factor proportional to the $N\times N$ identity operator ${\mathchoice{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.5mul}{\rm 1\mskip-5.0mul}}_{N}$. In either case, we assume that there is a mechanism available to simulate $\Pi_{k}$ or $U_{k}$; that is, we assume access to a unitary
+
+$$
+Q =-\sum_{k=1}^{K}e^{i\pi\Pi_{k}}\otimes\left|k\right\rangle\!\left\langle k\right|_{\rm a_{2}}
+$$
+$$
+=\sum_{k=1}^{K}U_{k}\otimes\left|k\right\rangle\!\left\langle k\right|_{\rm a_{2}}\;, \tag{7}
+$$
+
+where $\rm a_{2}$ is also an ancillary register of $O(\log(K))$ qubits. The gate complexity of each $U_{k}$ is $C_{U}$, which depends on the problem, and the gate complexity of the conditional $U_{k}$ operation is $O(C_{U}\log(K))$.
+
+Once the Hamiltonian $H$ has been reduced to the form of Eq. (5), we obtain
+
+$$
+\tilde{H}=\sum_{k=1}^{K}\sqrt{\alpha_{k}}\Pi_{k}\otimes\left(\left|k\right\rangle\!\left\langle 0\right|_{\rm a_{1}}+\left|0\right\rangle\!\left\langle k\right|_{\rm a_{1}}\right)\;. \tag{8}
+$$
+
+To be able to use the results in [24] for simulating $\tilde{H}$ in this case, we note that
+
+$$
+\left|k\right\rangle\!\left\langle 0\right|_{\rm a_{1}}+\left|0\right\rangle\!\left\langle k\right|_{\rm a_{1}}= \frac{i}{2}\left[e^{-i(\pi/2)(\left|k\right\rangle\left\langle 0\right|_{\rm a_{1}}+\left|0\right\rangle\left\langle k\right|_{\rm a_{1}})}-\right.
+$$
+$$
+\left.-e^{i(\pi/2)(\left|k\right\rangle\left\langle 0\right|_{\rm a_{1}}+\left|0\right\rangle\left\langle k\right|_{\rm a_{1}})}\right]\;. \tag{9}
+$$
+
+This provides a decomposition of $\tilde{H}$ as a linear combination of $\tilde{K}=O(K)$ unitary operations $\tilde{U}_{k}$; that is,
+
+$$
+\tilde{H}=\sum_{k=1}^{\tilde{K}}\tilde{\alpha}_{k}\tilde{U}_{k}\;, \tag{10}
+$$
+
+and $\tilde{\alpha}_{k}>0$. The unitaries in the right hand side of Eq. (9) can be implemented with $O(\log(K))$ two-qubit gates using standard techniques. The algorithm in [24] assumes the ability to implement the unitary
+
+$$
+\tilde{Q}=\sum_{k=1}^{\tilde{K}}\tilde{U}_{k}\otimes\left|k\right\rangle\!\left\langle k\right|_{\rm a_{2}}\;. \tag{11}
+$$
+
+Since the unitaries $\tilde{U}_{k}$ are directly related to the $U_{k}$, $\tilde{Q}$ can be simulated with $O(1)$ uses of $Q$ and additional two-qubit gates that do not contribute significantly to the final gate complexity.
+
+The query complexity of the method in [24] is determined by the number of uses of $\tilde{Q}$ to implement an approximation of $\tilde{W}(t)$. The gate complexity stated in [24] is the number of additional two-qubit gates required. Then, the results in [24] provide a Hamiltonian simulation method $W$ to approximate $\tilde{W}(t)$ for this case, within precision $\epsilon$, of query complexity
+
+$$
+O\left(\tau\log(\tau/\epsilon)/\log\log(\tau/\epsilon)\right)\;. \tag{12}
+$$
+
+Here, $\tau=|t|\sum_{k}{\tilde{\alpha}_{k}}$ and thus $\tau=O(|t|\sum_{k}{\sqrt{\alpha_{k}}})$. The additional gate complexity of $W$ obtained in [24] for this case is
+
+$$
+O\left(K\tau\log(\tau/\epsilon)/\log\log(\tau/\epsilon)\right)\;. \tag{13}
+$$
+
+These results also imply that the overall gate complexity of $W$ is
+
+$$
+C_{W}(t,\epsilon)=O\left((\log(K)C_{U}+K)\tau\frac{\log(\tau/\epsilon)}{\log\log(\tau/\epsilon)}\right)\;. \tag{14}
+$$
+
+We refer to [24] for more details.
+
+In general, our quantum algorithm to sample from Gibbs distributions provides an exponential improvement in terms of $1/\epsilon$, with respect to other known algorithms [8, 9, 11], whenever $C_{W}(t,\epsilon)$ is polylogarithmic in $1/\epsilon$. As discussed, this is the case for a large class of Hamiltonians such as those when the $U_{k}$ are presented as Pauli operators, so that $C_{U}=O(n)$.
+
+For the quantum algorithm that computes an estimate of the hitting time of a Markov chain, we will assume that we have query access to the Hamiltonian $H$, and that $H$ can be presented as in Eq. (5). This assumes the existence of a procedure that outputs the matrix elements of $H$. Constructing a quantum circuit $W$ that approximates the evolution with $\tilde{H}$ in this case is technically involved and we leave that analysis for Appx. A. As in the previous case, we use the methods in [21, 24] to show that $C_{W}(t,\epsilon)$ is almost linear in $|t|$ and sublogarithmic in $|t|/\epsilon$.
+
+Another useful technique for our quantum algorithms, also used in [20, 26, 24, 22], regards the implementation of linear combinations of unitary operations. More specifically, assume that $X=\sum_{l=0}^{L-1}\gamma_{l}V_{l}$, where $\gamma_{l}>0$ and $V_{l}$ are unitary operations, and that there is a mechanism to implement $V_{l}$. That is, we have access to the unitary
+
+$$
+R=\sum_{l=0}^{L-1}V_{l}\otimes\left|l\right\rangle\!\left\langle l\right|_{\rm a_{3}}\;, \tag{15}
+$$
+
+where $\rm a_{3}$ is an ancillary register of $O(\log(L))$ qubits. Lemma 6 of [22] implies that we can prepare a normalized version of the state $X\left|\phi\right\rangle$ with $O(\gamma/\|X\left|\phi\right\rangle\|)$ uses of $R$ in addition to $O(L\gamma/\|X\left|\phi\right\rangle\|)$ two-qubit gates, where $\gamma=\sum_{l=0}^{L-1}\gamma_{l}$. When $V_{l}=V^{l}$, for some unitary $V$, and the gate complexity of $V$ is $C_{V}$, the gate complexity of $R$ is $O(LC_{V})$. In this case, the overall gate complexity of the algorithm is $O(LC_{V}\gamma/\|X\left|\phi\right\rangle\|)$. This result follows from Lemma 8 of [22]. The implication is that the overall gate complexity is dominated by the largest gate complexity of the unitaries in $R$ times the number of amplitude amplification steps.
+
+For completeness, the quantum algorithm to implement $X$ is built upon $O(\gamma/\|X\left|\phi\right\rangle\|)$ amplitude amplification steps [27]. The operation for state preparation starts by preparing the ancillary state
+
+$$
+B\left|0\right\rangle_{\rm a_{3}}=\frac{1}{\sqrt{\gamma}}\sum_{l=0}^{L-1}\sqrt{\gamma_{l}}\left|l\right\rangle_{\rm a_{3}}\;, \tag{16}
+$$
+
+where $B$ is unitary. Applying $B$ requires $O(L)$ two-qubit gates and, in those cases where we can exploit the structure of the coefficients $\gamma_{l}$, it can be done more efficiently. The state preparation step then applies $R$ followed by $B^{\dagger}$. One can show that the final state of this step is
+
+$$
+\left(\frac{X}{\gamma}\left|\phi\right\rangle\right)\otimes\left|0\right\rangle_{\rm a_{3}}+|\Theta^{\perp}\rangle\;, \tag{17}
+$$
+
+where $|\Theta^{\perp}\rangle$ is supported in the subspace orthogonal to $\left|0\right\rangle_{\rm a_{3}}$. Amplitude amplification allows us to amplify the probability of observing the state $\left|0\right\rangle_{\rm a_{3}}$ to a constant. This state corresponds to the desired outcome. The number of amplitude amplification steps is linear in the inverse of $\|(X/\gamma)\left|\phi\right\rangle\|$.
+
+The third useful technique regards amplitude estimation [18]. Let $T$ be a unitary that implements
+
+$$
+T\left|\phi\right\rangle\left|0\right\rangle=(A\left|\phi\right\rangle)\left|0\right\rangle+\left|\Phi^{\perp}\right\rangle\left|1\right\rangle\;, \tag{18}
+$$
+
+where $A$ is an operator that satisfies $\|A\|\leq 1$ and $\|\left|\Phi^{\perp}\right\rangle\|\leq 1$. Our goal is to obtain an estimate of $\left\langle\phi\right|A\left|\phi\right\rangle=\left\langle\phi\right|\left\langle 0\right|T\left|\phi\right\rangle\left|0\right\rangle$. The results in [18] imply that there exists a quantum algorithm that outputs an estimate of the expectation value of $T$ within precision $\epsilon$. For constant confidence level ($c\approx 0.81$), the quantum algorithm uses $T$ and other two-qubit gates $O(1/\epsilon)$ times. It also uses the unitary that prepares the initial state $\left|\phi\right\rangle$, $O(1/\epsilon)$ times. Increasing the confidence level can be done with an additional overhead that is logarithmic in $|1-c|$.
+
+## III Preparation of Gibbs states
+
+The thermal Gibbs state of a quantum system $H$ at inverse temperature $\beta\geq 0$ is the density matrix
+
+$$
+\rho=\frac{1}{\cal Z}e^{-\beta H}\;, \tag{19}
+$$
+
+where ${\cal Z}=\mathrm{Tr}[e^{-\beta H}]=\sum_{j}e^{-\beta E_{j}}$ is the partition function. Then, the probability of encountering the system in the quantum state $\left|\psi_{j}\right\rangle$, after measurement, is $p_{j}=e^{-\beta E_{j}}/{\cal Z}$.
+
+Given a precision parameter $\epsilon>0$, a quantum algorithm to sample from the Gibbs distribution $p_{j}$ can be obtained from a unitary $\bar{V}$ that satisfies
+
+$$
+\mathrm{Tr}_{\rm a}\left[\bar{V}\left(\left|0\right\rangle\!\left\langle 0\right|\otimes\left|0\right\rangle\!\left\langle 0\right|_{\rm a}\right)\bar{V}^{\dagger}\right]=\hat{\rho} \tag{20}
+$$
+
+and
+
+$$
+\frac{1}{2}\|\hat{\rho}-\rho\|_{1}\leq\epsilon\;. \tag{21}
+$$
+
+We use the label ${\bf a}$ for an ancillary qubit system that will be discarded at the end of the computation. The dimension of ${\bf a}$ depends on the algorithm. The requirement on the trace distance in Eq. (21) implies that no measurement can distinguish between $\rho$ and $\hat{\rho}$ with probability greater than $\epsilon$ [28].
+
+The main result of this section is:
+
+**Theorem 1.**
+
+There exists a quantum algorithm that prepares an approximation of the Gibbs state. The quantum algorithm implements a unitary $\bar{V}$ of gate complexity
+
+$$
+O\left(\sqrt{\frac{N}{\cal Z}}\left(C_{W}(t,\epsilon^{\prime})+n+\log(J)\right)\right)\;, \tag{22}
+$$
+
+with $t=O(\sqrt{\beta\log(1/\epsilon^{\prime})})$, $\epsilon^{\prime}=O(\epsilon\sqrt{{\cal Z}/N})$, and $J=O(\sqrt{\|H\|\beta}\log(1/\epsilon^{\prime}))$.
+
+When $H$ is presented as in Eq. (5), we can replace $C_{W}(t,\epsilon^{\prime})$ by Eq. (14) if we use the best-known Hamiltonian simulation algorithm. In cases of interest, such as qubit systems given by Hamiltonians that are linear combinations of Pauli operators, we have $\alpha_{k}=O(1)$, $C_{U}=O(n)=O(\log(N))$, and $K=O(n)=O(\log(N))$. In this case, the overall gate complexity is
+
+$$
+O\left(\sqrt{\frac{N\beta}{\cal Z}}{\rm polylog}\left(\sqrt{\frac{N\beta}{\cal Z}}\frac{1}{\epsilon}\right)\right)\;. \tag{23}
+$$
+
+The important result is that the complexity of our algorithm is polylogarithmic in $1/\epsilon$ and also improves upon the complexity in $\beta$ with respect to the methods in [8, 9].
+
+Our quantum algorithm to sample from Gibbs distributions uses the two techniques discussed in Sec. II. In this case, we will be interested in implementing an operator proportional to $e^{-\beta H/2}$. To find a decomposition as a linear combination of unitaries, we invoke the so-called Hubbard-Stratonovich transformation [29]:
+
+$$
+e^{-\beta H/2}=\sqrt{\frac{1}{2\pi}}\int_{-\infty}^{\infty}dy\;e^{-y^{2}/2}e^{-iy\sqrt{\beta H}}\;. \tag{24}
+$$
+
+In our case, we do not have a method to simulate the evolution with $\sqrt{H}$. Nevertheless, we assume that we can evolve with $\tilde{H}$, which satisfies Eq. (4). Then,
+
+$$
+(e^{-\beta H/2} \left|\phi\right\rangle)\otimes\left|0\right\rangle_{\rm a_{1}}= \tag{25}
+$$
+$$
+=\left(\sqrt{\frac{1}{2\pi}}\int_{-\infty}^{\infty}dy\;e^{-y^{2}/2}e^{-iy\sqrt{\beta}\tilde{H}}\right)\left|\phi\right\rangle\left|0\right\rangle_{\rm a_{1}}\;,
+$$
+
+for any state $\left|\phi\right\rangle$. Note that the ancilla $\rm a_{1}$ remains in the state $\left|0\right\rangle_{\rm a_{1}}$ and will be discarded at the end of the computation. Equation (25) implies that the operator $e^{-\beta H/2}$ can be approximated by a linear combination of evolutions under $\tilde{H}$. Because $y\in(-\infty,\infty)$, we will need to find an approximation by a finite, discrete sum of operators $e^{-iy_{j}\sqrt{\beta}\tilde{H}}$. We obtain:
+
+**Lemma 1.**
+
+Let
+
+$$
+X^{\prime}=\sqrt{\frac{1}{2\pi}}\sum_{j=-J}^{J}\delta y\;e^{-y_{j}^{2}/2}e^{-iy_{j}\sqrt{\beta}\tilde{H}}\;, \tag{26}
+$$
+
+where $y_{j}=j\delta y$, for some $J=\Theta(\sqrt{\|H\|\beta}\log(1/\epsilon^{\prime}))$ and $\delta y=\Theta(1/\sqrt{\|H\|\beta\log(1/\epsilon^{\prime})})$. Then, if $\|H\|\beta\geq 4$ and $\log(1/\epsilon^{\prime})\geq 4$,
+
+$$
+\|(e^{-\beta H/2}\left|\phi\right\rangle)\otimes\left|0\right\rangle_{\rm a_{1}}-X^{\prime}\left|\phi\right\rangle\left|0\right\rangle_{\rm a_{1}}\|\leq\epsilon^{\prime}/2\;, \tag{27}
+$$
+
+for all states $\left|\phi\right\rangle$.
+
+**Proof.**
+
+Consider the real function
+
+$$
+f(\tilde{x})=\frac{1}{\sqrt{2\pi}}\sum_{j=-\infty}^{\infty}\delta y\;e^{-y_{j}^{2}/2}e^{-iy_{j}\sqrt{\beta}\tilde{x}} \tag{28}
+$$
+
+where $\tilde{x}\in\mathbb{R}$ and assume $|\tilde{x}|\leq a<\infty$. The Poisson summation formula and the Fourier transform of the Gaussian imply
+
+$$
+f(\tilde{x})=\sum_{k=-\infty}^{\infty}e^{-\omega_{k}^{2}/2}\;, \tag{29}
+$$
+
+where $\omega_{k}=-\sqrt{\beta}\tilde{x}+k/\delta y$. Then, there exists
+
+$$
+\delta y=\Omega\left(\frac{1}{a\sqrt{\beta}+\sqrt{\log(1/\epsilon^{\prime})}}\right) \tag{30}
+$$
+
+such that $|f(\tilde{x})-e^{-\omega_{0}^{2}/2}|\leq\epsilon^{\prime}/4$. Note that if $a\sqrt{\beta}\geq 2$ and $\sqrt{\log(1/\epsilon^{\prime})}\geq 2$, we can choose
+
+$$
+\delta y=\Theta\left(\frac{1}{a\sqrt{\beta\log(1/\epsilon^{\prime})}}\right)\;. \tag{31}
+$$
+
+Also,
+
+$$
+\left|\frac{1}{\sqrt{2\pi}}\sum_{j=J}^{\infty}\delta y\;e^{-y_{j}^{2}/2}e^{-iy_{j}\sqrt{\beta}\tilde{x}}\right| \leq\frac{\delta y}{\sqrt{2\pi}}\sum_{j=J}^{\infty}e^{-y_{j}^{2}/2}
+$$
+$$
+\leq\frac{\delta y}{\sqrt{2\pi}}\sum_{j=J}^{\infty}e^{-y_{J}y_{j}/2}
+$$
+$$
+\leq\frac{\delta y}{\sqrt{2\pi}}\frac{e^{-y_{J}^{2}/2}}{1-e^{-y_{J}\delta y/2}}\;.
+$$
+
+It follows that there exists a value for $J$, which implies $y_{J}=\Theta(\sqrt{\log(1/\epsilon^{\prime})})$, such that
+
+$$
+\left|f(\tilde{x})-\frac{1}{\sqrt{2\pi}}\sum_{j=-J}^{J}\delta y\;e^{-y_{j}^{2}/2}e^{-iy_{j}\sqrt{\beta}\tilde{x}}\right|\leq\epsilon^{\prime}/4\;. \tag{32}
+$$
+
+Using the triangle inequality we obtain
+
+$$
+\left|e^{-\omega_{0}^{2}/2}-\frac{1}{\sqrt{2\pi}}\sum_{j=-J}^{J}\delta y\;e^{-y_{j}^{2}/2}e^{-iy_{j}\sqrt{\beta}\tilde{x}}\right|\leq\epsilon^{\prime}/2\;, \tag{33}
+$$
+
+and we can represent
+
+$$
+e^{-\omega_{0}^{2}/2}=\frac{1}{\sqrt{2\pi}}\int_{-\infty}^{\infty}dy\;e^{-y^{2}/2}e^{-iy\sqrt{\beta}\tilde{x}}\;. \tag{34}
+$$
+
+To prove the Lemma, it suffices to act with $X^{\prime}$ on the eigenstates of $\tilde{H}$. We can then use the previous bounds if we assume that $\tilde{x}$ denotes the corresponding eigenvalue of $\tilde{H}$. In particular, $a=\|\tilde{H}\|$. Then, if $\|\tilde{H}\|\sqrt{\beta}\geq 2$ and $\sqrt{\log(1/\epsilon^{\prime})}\geq 2$, it suffices to choose
+
+$$
+\delta y=\Theta\left(\frac{1}{\|\tilde{H}\|\sqrt{\beta\log(1/\epsilon^{\prime})}}\right) \tag{35}
+$$
+
+and
+
+$$
+J=\frac{y_{J}}{\delta y}=\Theta\left(\log(1/\epsilon^{\prime})\|\tilde{H}\|\sqrt{\beta}\right)\;. \tag{36}
+$$
+
+The result follows from noticing that $\|\tilde{H}\|=O(\sqrt{\|H\|})$ and that $X^{\prime}$ then approximates $e^{-\beta(\tilde{H})^{2}/2}$. Since we act on initial states of the form $\left|\phi\right\rangle\left|0\right\rangle_{\rm a_{1}}$, the action of $e^{-\beta(\tilde{H})^{2}/2}$ is the same as that of $e^{-\beta H/2}$ on these states.
+
+∎
+
+In general, we cannot implement the unitaries $e^{-iy_{j}\sqrt{\beta}\tilde{H}}$ exactly but we can do so up to an approximation error. We obtain:
+
+**Corollary 1.**
+
+Let $\log(1/\epsilon^{\prime})\geq 4$, $\|H\|\beta\geq 4$, and $W_{j}$ be a unitary that satisfies
+
+$$
+\|W_{j}-e^{-iy_{j}\sqrt{\beta}\tilde{H}}\|\leq\epsilon^{\prime}/4\; \tag{37}
+$$
+
+for all $j=-J,-J+1,\ldots,J$. Let
+
+$$
+X=\sqrt{\frac{1}{2\pi}}\sum_{j=-J}^{J}\delta y\;e^{-y_{j}^{2}/2}W_{j}\;. \tag{38}
+$$
+
+Then,
+
+$$
+\|(e^{-\beta H/2}\left|\phi\right\rangle)\otimes\left|0\right\rangle_{\rm a_{1}}-X\left|\phi\right\rangle\left|0\right\rangle_{\rm a_{1}}\|\leq\epsilon^{\prime}\;. \tag{39}
+$$
+
+**Proof.**
+
+The coefficients in the decomposition of $X^{\prime}$ in Lemma 1 satisfy
+
+$$
+\left|\sqrt{\frac{1}{2\pi}}\sum_{j=-J}^{J}\delta y\;e^{-y_{j}^{2}/2}-1\right|\leq\epsilon^{\prime}/2\leq 1/4\;, \tag{40}
+$$
+
+and thus
+
+$$
+\left|\sqrt{\frac{1}{2\pi}}\sum_{j=-J}^{J}\delta y\;e^{-y_{j}^{2}/2}\right|\leq 5/4\;. \tag{41}
+$$
+
+This follows from Eq. (27) for the case of $H=\tilde{H}=0$. The triangle inequality and Eq. (37) imply
+
+$$
+\|X-X^{\prime}\|\leq(5/16)\epsilon^{\prime}\;, \tag{42}
+$$
+
+and together with Eq. (27) we obtain the desired result. ∎
+
+In Sec. II we described a technique to implement $X=\sum_{l=0}^{L-1}\gamma_{l}V_{l}$. In this case, $l=j+J$ and $L=2J+1$. The coefficients and unitaries are $e^{-y_{j}^{2}/2}$ and $W_{j}$, respectively. The quantum algorithm for preparing Gibbs states will aim at preparing a normalized version of $X\left|\phi_{0}\right\rangle$, for a suitable initial state $\left|\phi_{0}\right\rangle$, using the technique of Sec. II.
+
+### III.1 Algorithm
+
+We set $\epsilon^{\prime}=O(\epsilon\sqrt{{\cal Z}/N})$. Our quantum circuit $\bar{V}$ is defined in two basic steps. The first step regards the preparation of a maximally entangled state
+
+$$
+\left|\phi_{0}\right\rangle=\frac{1}{\sqrt{N}}\sum_{j=0}^{N-1}\left|\psi_{j}\right\rangle\otimes\left|\psi_{j}^{*}\right\rangle_{\rm a_{4}}\otimes\left|0\right\rangle_{\rm a_{1},\rm a_{2},\rm a_{3}} \tag{43}
+$$
+
+where we used an additional ancillary system ${\rm a_{4}}$ of $n$ qubits. $\rm a_{1}$, $\rm a_{2}$, $\rm a_{3}$, and $\rm a_{4}$ build the ancillary register $\bf a$ of Eq. (20). Note that $\left|\phi_{0}\right\rangle$ coincides with the maximally entangled state
+
+$$
+\left|\phi_{0}\right\rangle=\frac{1}{\sqrt{N}}\sum_{\sigma=0}^{N-1}\left|\sigma\right\rangle\left|\sigma\right\rangle_{\rm a_{4}}\otimes\left|0\right\rangle_{\rm a_{1},\rm a_{2},\rm a_{3}}\;, \tag{44}
+$$
+
+where $\left|\sigma\right\rangle$ is a $n$-qubit state in the computational basis, i.e., $\left|\sigma\right\rangle=\left|0\ldots 0\right\rangle,\left|0\ldots 1\right\rangle,\ldots$.
+
+The second step regards the preparation of a normalized version of $X\left|\phi_{0}\right\rangle$. This step uses the algorithm for implementing linear combinations of unitary operations described in Sec. II, which also uses amplitude amplification. The operator $X$ is defined in Eq. (38) and requires a Hamiltonian simulation method for implementing $W_{j}$.
+
+### III.2 Validity and complexity
+
+As described, our quantum algorithm prepares the normalized state
+
+$$
+\frac{X\left|\phi_{0}\right\rangle}{\|X\left|\phi_{0}\right\rangle\|}\;, \tag{45}
+$$
+
+with constant probability. We also note that
+
+$$
+\|e^{-\beta H/2}\left|\phi_{0}\right\rangle\|=\sqrt{{\cal Z}/N} \tag{46}
+$$
+
+and Eq. (39) implies
+
+$$
+\left|\|X\left|\phi_{0}\right\rangle\|-\sqrt{{\cal Z}/N}\right|=O(\epsilon\sqrt{{\cal Z}/N}) \tag{47}
+$$
+
+for our choice of $\epsilon^{\prime}$. Then, the prepared state satisfies
+
+$$
+\left\|\frac{X\left|\phi_{0}\right\rangle}{\|X\left|\phi_{0}\right\rangle\|}-\frac{e^{-\beta H/2}\left|\phi_{0}\right\rangle}{\|e^{-\beta H/2}\left|\phi_{0}\right\rangle\|}\right\|\leq\epsilon/2\;. \tag{48}
+$$
+
+We note that
+
+$$
+e^{-\beta H/2}\left|\phi_{0}\right\rangle=
+$$
+$$
+=\frac{1}{\sqrt{N}}\sum_{j=0}^{N-1}e^{-\beta E_{j}/2}\left|\psi_{j}\right\rangle\otimes\left|\psi_{j}^{*}\right\rangle_{\rm a_{4}}\otimes\left|0\right\rangle_{\rm a_{1},\rm a_{2},\rm a_{3}}\;. \tag{49}
+$$
+
+If we disregard the ancillary system $\bf a$, this is the Gibbs state: The probability of obtaining $\left|\psi_{j}\right\rangle$, after measurement, is proportional to $e^{-\beta E_{j}}$. Then, the property of the trace norm being non-increasing under quantum operations and Eq. (48) imply
+
+$$
+\frac{1}{2}\left\|\hat{\rho}-\rho\right\|\leq\epsilon\;, \tag{50}
+$$
+
+where
+
+$$
+\hat{\rho}=\mathrm{Tr}_{\rm a}\left[\frac{X\left|\phi_{0}\right\rangle\!\left\langle\phi_{0}\right|X^{\dagger}}{\|X\left|\phi_{0}\right\rangle\|^{2}}\right]\;; \tag{51}
+$$
+
+see Eq. (20). That is, $\hat{\rho}$ is the state prepared by our algorithm after tracing out the ancillary register $\bf a$.
+
+The number of amplitude amplification steps is $O(1/\|X\left|\phi_{0}\right\rangle\|)$ and Eq. (46) implies that this number is also $O(\sqrt{N/{\cal Z}})$. The gate complexity of each step is the gate complexity of preparing $\left|\phi_{0}\right\rangle$ in addition to the gate complexity of implementing $X$. The former is $O(n)$ as $\left|\phi_{0}\right\rangle$ takes the simple form of Eq. (44) and can be prepared with $O(n)$ controlled operations. $X$ is implemented in three stages as described in Sec. II. The first stage requires the unitary $B$ used in Eq. (16). In this case, the coefficients $\gamma_{l}$ are proportional to $e^{-y_{j}^{2}/2}$. Then, the gate complexity of $B$ is $O(\log(J))$ in this case if we use one of the methods developed in [30, 31]. The second stage regards the implementation of $R$. In this example, $R$ is the unitary that implements $W_{j}$ conditional on the state $\left|j\right\rangle_{\rm a_{3}}$. Since $W_{j}$ corresponds to a Hamiltonian simulation algorithm that approximates evolutions with $\tilde{H}$, the gate complexity of $R$ is dominated by the largest gate complexity of $W_{j}$. In particular, $W_{j}$ approximates $e^{-i\tilde{H}t}$ within precision $\epsilon^{\prime}$ and for maximum $t=O(\sqrt{\beta\log(1/\epsilon^{\prime})})$. Then the gate complexity of $R$ is order $C_{W}(t,\epsilon^{\prime})$.
+
+The overall gate complexity is then
+
+$$
+O\left(\sqrt{\frac{N}{\cal Z}}\left(C_{W}(t,\epsilon^{\prime})+n+\log(J)\right)\right)\;, \tag{52}
+$$
+
+with $t=O(\sqrt{\beta\log(1/\epsilon^{\prime})})$ and $\epsilon^{\prime}=O(\epsilon\sqrt{{\cal Z}/N})$. This proves Thm. 1.
+
+## IV Estimation of Hitting times
+
+We consider a stochastic process that models a Markov chain. The number of different configurations is $N$ and $P$ is the $N\times N$ stochastic matrix. We label each configuration as $\sigma=0,1,\ldots,N-1$ and the entries of $P$ are transition or conditional probabilities $\mathrm{Pr}(\sigma^{\prime}|\sigma)$. We will assume that $P$ is reversible and irreducible, satisfies the so-called detailed balance condition [5], and has nonnegative eigenvalues. The unique fixed point of $P$ is the $N$-dimensional probability vector ${\bf\pi}$. It is useful to use the bra-ket notation, where $\left|\nu\right\rangle$ represents a vector ${\bf\nu}\in\mathbb{C}^{N}$ and $\left\langle v\right|=(\left|v\right\rangle)^{\dagger}$. Then, $P\left|\pi\right\rangle=\left|\pi\right\rangle$,
+
+$$
+\left|\pi\right\rangle=\sum_{\sigma}\pi_{\sigma}\left|\sigma\right\rangle\doteq\begin{pmatrix}\pi_{0}\cr\vdots\cr\pi_{N-1}\end{pmatrix}\;, \tag{53}
+$$
+
+and $\pi_{\sigma}$ is the probability of finding configuration $\sigma$ when sampling from the fixed point of $P$.
+
+The hitting time of a stochastic process is roughly defined as the first time at which the process is encountered in a particular subset of configurations. To define the hitting time in detail, we assume that there is a subset $\mathcal{M}$ of $N_{\mathcal{M}}$ configurations that are “marked” and the remaining $N_{\mathcal{U}}$ configurations constitute the “unmarked” subset $\mathcal{U}$. Here, $N_{\mathcal{M}}+N_{\mathcal{U}}=N$. With no loss of generality, the stochastic matrix $P$ takes the form
+
+$$
+P=\begin{pmatrix}P_{\mathcal{U}\mathcal{U}}&P_{\mathcal{U}\mathcal{M}}\cr P_{\mathcal{M}\mathcal{U}}&P_{\mathcal{M}\mathcal{M}}\end{pmatrix}\;, \tag{54}
+$$
+
+where $P_{\mathcal{U}\mathcal{U}}$ and $P_{\mathcal{M}\mathcal{M}}$ are matrices (blocks) of dimension $N_{\mathcal{U}}\times N_{\mathcal{U}}$ and $N_{\mathcal{M}}\times N_{\mathcal{M}}$, respectively, and $P_{\mathcal{M}\mathcal{U}}$ and $P_{\mathcal{U}\mathcal{M}}$ are rectangular blocks. The entries of the block $P_{\mathcal{S}^{\prime}\mathcal{S}}$ determine the probability of a configuration being in the subset $\mathcal{S}^{\prime}$ given that the previous configuration was in the subset $\mathcal{S}$. Our assumptions imply $\mathcal{U},\mathcal{M}\neq\{\emptyset\}$ and $P_{\mathcal{U}\mathcal{M}},P_{\mathcal{M}\mathcal{U}}\neq 0$. The hitting time is the expected time to find a marked configuration if the initial probability vector is $\left|\pi\right\rangle$. That is, as in [17], we define the hitting time of $P$ via the following classical algorithm:
+
+1. Set $t=0$
+2. Sample $\sigma$ from $\left|\pi\right\rangle$
+3. If $\sigma\in\mathcal{M}$, stop
+4. Otherwise, assign $t\leftarrow t+1$, apply $P$, and go to 3.
+
+The hitting time $t_{h}$ is the expected value of the random variable $t$.
+
+We let $\left|\pi_{\mathcal{U}}\right\rangle$ and $\left|\pi_{\mathcal{M}}\right\rangle$ represent the probability vectors obtained by conditioning $\left|\pi\right\rangle$ on $\mathcal{U}$ and $\mathcal{M}$, respectively. These are
+
+$$
+\left|\pi_{\mathcal{U}}\right\rangle=\frac{\sum_{\sigma\in\mathcal{U}}\pi(\sigma)\left|\sigma\right\rangle}{\pi_{\mathcal{U}}}\;,\;\left|\pi_{\mathcal{M}}\right\rangle=\frac{\sum_{\sigma\in\mathcal{M}}\pi(\sigma)\left|\sigma\right\rangle}{\pi_{\mathcal{M}}}\;, \tag{55}
+$$
+
+with $\pi_{\mathcal{U}}=\sum_{\sigma\in\mathcal{U}}\pi(\sigma)$ and $\pi_{\mathcal{M}}=\sum_{\sigma\in\mathcal{M}}\pi(\sigma)$. It is useful to define the modified Markov chain
+
+$$
+P^{\prime}=\begin{pmatrix}P_{\mathcal{U}\mathcal{U}}&0\cr P_{\mathcal{M}\mathcal{U}}&{\mathchoice{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.5mul}{\rm 1\mskip-5.0mul}}_{N_{\mathcal{M}}}\end{pmatrix}\;, \tag{56}
+$$
+
+which refers to an “absorbing wall” for the subset $\mathcal{M}$. Here, ${\mathchoice{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.5mul}{\rm 1\mskip-5.0mul}}_{N_{\mathcal{M}}}$ is the $N_{\mathcal{M}}\times N_{\mathcal{M}}$ identity matrix. As defined, $P^{\prime}$ does not allow for transitions from the subset $\mathcal{M}$ to the subset $\mathcal{U}$. We will observe below that $P^{\prime}$, and thus $P_{\mathcal{U}\mathcal{U}}$, play an important role in the determination of $t_{h}$.
+
+Our definition of hitting time implies
+
+$$
+t_{h}=\sum_{t=0}^{\infty}t\;\mathrm{Pr}(t)\;, \tag{57}
+$$
+
+where $\mathrm{Pr}(t)$ is the probability of $t$ if we use the previous classical algorithm. In particular, $\mathrm{Pr}(t=0)=\pi_{\mathcal{M}}$. We rewrite
+
+$$
+t_{h}=\sum_{t^{\prime}=0}^{\infty}\mathrm{Pr}(t>t^{\prime}) \tag{58}
+$$
+
+so that we take into account the factor $t$ in Eq. (57), i.e., $\mathrm{Pr}(t>t^{\prime})=\mathrm{Pr}(t^{\prime}+1)+\mathrm{Pr}(t^{\prime}+2)+\ldots$. Note that
+
+$$
+\mathrm{Pr}(t>t^{\prime}) =\pi_{\mathcal{U}}\left\langle 1_{\mathcal{U}}\right|(P^{\prime})^{t^{\prime}}\left|\pi_{\mathcal{U}}\right\rangle
+$$
+$$
+=\pi_{\mathcal{U}}\left\langle 1_{\mathcal{U}}\right|(P_{\mathcal{U}\mathcal{U}})^{t^{\prime}}\left|\pi_{\mathcal{U}}\right\rangle\;, \tag{59}
+$$
+
+where $\left|1_{\mathcal{U}}\right\rangle=\sum_{\sigma\in\mathcal{U}}\left|\sigma\right\rangle$. This is because, conditional on $t>0$, which occurs with probability $\pi_{\mathcal{U}}$, the initial probability vector is proportional to $(P_{\mathcal{U}\mathcal{U}})^{t^{\prime}}\left|\pi_{\mathcal{U}}\right\rangle$. Then, the probability of having $t>t^{\prime}$ is measured by the probability of remaining in $\mathcal{U}$ after $P_{\mathcal{U}\mathcal{U}}$ was applied $t^{\prime}$ times. Equations (58) and (59) imply
+
+$$
+t_{h}=\pi_{\mathcal{U}}\left\langle 1_{\mathcal{U}}\right|({{\mathchoice{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.5mul}{\rm 1\mskip-5.0mul}}_{N_{\mathcal{U}}}-P_{\mathcal{U}\mathcal{U}}})^{-1}\left|\pi_{\mathcal{U}}\right\rangle\;, \tag{60}
+$$
+
+where we used $(1-x)^{-1}=\sum_{t^{\prime}=0}^{\infty}x^{t^{\prime}}$. We note that ${\mathchoice{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.5mul}{\rm 1\mskip-5.0mul}}-P_{\mathcal{U}\mathcal{U}}$ is invertible under our assumptions, since the eigenvalues of $P_{\mathcal{U}\mathcal{U}}$ are strictly smaller than 1 (see below).
+
+The complexity of a method that estimates $t_{h}$ using the previous classical algorithm also depends on the variance of the random variable $t$. This is
+
+$$
+\sigma^{2}=\sum_{t=0}^{\infty}t^{2}\mathrm{Pr}(t)-(t_{h})^{2}\;, \tag{61}
+$$
+
+and after simple calculations, we can rewrite it as
+
+$$
+\sigma^{2}=2\pi_{\mathcal{U}}\left\langle 1_{\mathcal{U}}\right|\sum_{t^{\prime}=0}^{\infty}t^{\prime}(P_{\mathcal{U}\mathcal{U}})^{t^{\prime}}\left|\pi_{\mathcal{U}}\right\rangle+t_{h}-(t_{h})^{2}\;. \tag{62}
+$$
+
+For constant confidence level and precision $\epsilon$ in the estimation of $t_{h}$, Chebyshev’s inequality implies that the previous classical algorithm must be executed $M=O((\sigma/\epsilon)^{2})$ times to obtain $t_{1},\ldots,t_{M}$ and estimate $t_{h}$ as the average of the $t_{i}$. The expected number of applications of $P$ is then $Mt_{h}=O(t_{h}(\sigma/\epsilon)^{2})$.
+
+To bound the classical complexity, we consider the worst case scenario in which $\left|\pi_{\mathcal{U}}\right\rangle$ is an eigenvector of $P_{\mathcal{U}\mathcal{U}}$ corresponding to its largest eigenvalue $1-\Delta<1$. In that case, $t_{h}=\pi_{\mathcal{U}}/\Delta$ and $\sigma^{2}=O(\pi_{\mathcal{U}}/\Delta^{2})$. When $\Delta\ll 1$, the expected number of applications of $P$ is then $O(1/(\Delta^{3}\epsilon^{2}))$ in this case. This determines the average complexity of the classical algorithm that estimates $t_{h}$.
+
+The entries of the symmetric discriminant matrix $S$ of $P$ are
+
+$$
+S_{\sigma\sigma^{\prime}}=\sqrt{\left(P\circ P^{\dagger}\right)_{\sigma\sigma^{\prime}}}\;, \tag{63}
+$$
+
+where $\circ$ is the Hadamard product. The detailed balance condition implies
+
+$$
+\pi(\sigma^{\prime})\mathrm{Pr}(\sigma|\sigma^{\prime})=\mathrm{Pr}(\sigma^{\prime}|\sigma)\pi(\sigma) \tag{64}
+$$
+
+and thus
+
+$$
+\sqrt{\mathrm{Pr}(\sigma|\sigma^{\prime})\mathrm{Pr}(\sigma^{\prime}|\sigma)}=\mathrm{Pr}(\sigma|\sigma^{\prime})\sqrt{\frac{\pi(\sigma^{\prime})}{\pi(\sigma)}}\;. \tag{65}
+$$
+
+Then,
+
+$$
+S=D^{-1}PD\;, \tag{66}
+$$
+
+where $D$ is a diagonal matrix of dimension $N$ with entries given by $\sqrt{\pi(\sigma)}$. The symmetric matrix or Hamiltonian $\bar{H}={\mathchoice{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.5mul}{\rm 1\mskip-5.0mul}}_{N}-S$ is known to be “frustration free” [32] and can be represented as in Eq. (5) using a number of techniques. For example, if $P$ has at most $d$ nonzero entries per row or column (i.e., $P$ is $d$-sparse), the number of terms $K$ in the representation of $\bar{H}$ can be made linear or quadratic in $d$; see Appx. A or [33] for more details.
+
+We now let $\Pi_{\mathcal{U}}$ be the projector into the subset $\mathcal{U}$ and define
+
+$$
+H=\Pi_{\mathcal{U}}\bar{H}\Pi_{\mathcal{U}}\;. \tag{67}
+$$
+
+Note that
+
+$$
+H={\mathchoice{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.0mul}{\rm 1\mskip-4.5mul}{\rm 1\mskip-5.0mul}}_{N_{\mathcal{U}}}-D^{-1}_{\mathcal{U}}P_{\mathcal{U}\mathcal{U}}D_{\mathcal{U}}\;, \tag{68}
+$$
+
+where $D_{\mathcal{U}}$ is the diagonal matrix obtained by projecting $D$ of Eq. (66) into the subspace $\mathcal{U}$. That is, $D_{\mathcal{U}}=\Pi_{\mathcal{U}}D\Pi_{\mathcal{U}}$ and Eq. (68) implies $H>0$. Then, Eqs. (66) and (60) imply
+
+$$
+t_{h}=\pi_{\mathcal{U}}\left\langle\sqrt{\pi_{\mathcal{U}}}\right|(1/H)|\sqrt{\pi_{\mathcal{U}}}\rangle\;, \tag{69}
+$$
+
+where we defined $|\sqrt{\pi_{\mathcal{U}}}\rangle=\sum_{\sigma\in\mathcal{U}}\sqrt{\pi(\sigma)}\left|\sigma\right\rangle/\sqrt{\pi_{\mathcal{U}}}$ so that $|\sqrt{\pi_{\mathcal{U}}}\rangle$ is normalized according to the Euclidean norm. A similar expression for $t_{h}$ was obtained in [17].
+
+In Appx. A we describe how $H$ can be specified as $H=\sum_{k=1}^{K}\alpha_{k}\Pi_{k}$, where $\alpha_{k}>0$ and $\Pi_{k}$ are projectors. Then $H$ is of the form of Eq. (5) and we write $\tilde{H}$ for the associated Hamiltonian according to Eq. (3). $C_{W}(t,\epsilon)$ is the complexity of approximating $\tilde{W}(t)=\exp(-i\tilde{H}t)$, and we roughly describe a method for simulating $\tilde{W}(t)$ below.
+
+A quantum algorithm to obtain $t_{h}$ can be constructed from the relation in Eq. (69). That is, $t_{h}$ coincides with $\pi_{\mathcal{U}}$ times the expected value of the operator $1/H$ in the pure state $\left|\sqrt{\pi_{\mathcal{U}}}\right\rangle$. For our quantum algorithm, we also assume that there is a unitary procedure (oracle) $Q_{\mathcal{U}}$ that allows us to implement the transformation
+
+$$
+Q_{\mathcal{U}}\left|\sigma\right\rangle=-\left|\sigma\right\rangle\ {\rm if}\ \sigma\in\mathcal{U} \tag{70}
+$$
+
+and $Q_{\mathcal{U}}\left|\sigma\right\rangle=\left|\sigma\right\rangle$ otherwise. We also assume access to a unitary $Q_{\sqrt{\pi}}$ such that
+
+$$
+Q_{\sqrt{\pi}}\left|0\right\rangle=\left|\sqrt{\pi}\right\rangle\;. \tag{71}
+$$
+
+We write $C_{\mathcal{U}}$ and $C_{\sqrt{\pi}}$ for the respective gate complexities. The main result of this section is:
+
+**Theorem 2.**
+
+There exists a quantum algorithm to estimate $t_{h}$ within precision $\epsilon$ and constant confidence level that implements a unitary $\bar{V}$ of gate complexity
+
+$$
+O\left(\frac{1}{\epsilon^{\prime}}\left(C_{W}(t,\epsilon^{\prime})+C_{\mathcal{U}}+C_{\sqrt{\pi}}+C_{B}\right)\right)\;, \tag{72}
+$$
+
+where $C_{B}=O(\log(1/(\Delta\epsilon)))$, $\epsilon^{\prime}=O(\epsilon\Delta/\log(1/(\epsilon\Delta))$, and $t=O\left(\log(1/(\epsilon\Delta))/\sqrt{\Delta}\right)$.
+
+In Appx. A we describe a method to simulate the evolution with $\tilde{H}$. To this end, we also assume that there exists a procedure $Q_{P}$ that computes the locations and magnitude of the nonzero entries of the matrix $P$. More specifically, $Q_{P}$ performs the map
+
+$$
+Q_{P}\left|\sigma\right\rangle\rightarrow \left|\sigma\right\rangle\left|\sigma^{\prime}_{1},\ldots,\sigma^{\prime}_{d}\right\rangle\otimes \tag{73}
+$$
+$$
+\otimes\left|\mathrm{Pr}(\sigma|\sigma^{\prime}_{1}),\mathrm{Pr}(\sigma^{\prime}_{1}|\sigma),\ldots,\mathrm{Pr}(\sigma|\sigma^{\prime}_{d}),\mathrm{Pr}(\sigma^{\prime}_{d}|\sigma)\right\rangle\;,
+$$
+
+where $d$ is the sparsity of $P$. The configurations $\sigma^{\prime}_{i}$ are such that $\mathrm{Pr}(\sigma|\sigma^{\prime}_{i}),\mathrm{Pr}(\sigma^{\prime}_{i}|\sigma)\neq 0$. We write $C_{P}$ for the complexity of implementing $Q_{P}$. In Appx. A we describe a decomposition of $\tilde{H}=\sum_{k=1}^{\tilde{K}}\tilde{U}_{k}/2$ in terms of $\tilde{K}=O(d^{2})$ unitaries, so that we can use the results of [24] to simulate $\tilde{W}(t)=\exp(-i\tilde{H}t)$. Each $\tilde{U}_{k}$ can be implemented with $O(1)$ uses of $Q_{\mathcal{U}}$ and $Q_{P}$, and $O(d\log(N))$ additional gates. Using the results of [24] and Sec. II, the complexity for simulating $\tilde{W}(t)$ within precision $\epsilon^{\prime}$, obtained in Eq. (122), is
+
+$$
+C_{W}(t,\epsilon^{\prime})=O\left((d\log(N)+C_{P}+C_{\mathcal{U}})\frac{\tau\log(\tau/\epsilon^{\prime})}{\log\log(\tau/\epsilon^{\prime})}\right)\;, \tag{74}
+$$
+
+where $\tau=|t|d^{2}$. Note that $C_{W}(t,\epsilon^{\prime})$ is almost linear in $|t|$ and polynomial in $d$, and the dependence on $d$ may be improved by using the results in [34]. Then, assuming access to $Q_{P}$, we obtain:
+
+**Corollary 2.**
+
+There exists a quantum algorithm to estimate $t_{h}$ within precision $\epsilon$ and constant confidence level that implements a unitary $\bar{V}$ of gate complexity
+
+$$
+\tilde{O}\left(\frac{1}{\epsilon\Delta}\left(\frac{d^{2}}{\sqrt{\Delta}}(d\log(N)+C_{P}+C_{\mathcal{U}})+C_{\sqrt{\pi}}\right)\right)\;. \tag{75}
+$$
+
+The $\tilde{O}$ notation hides factors that are polylogarithmic in $d/(\epsilon\Delta)$.
+
+The dominant scaling of the complexity in terms of $\Delta$ and $\epsilon$ is then $\tilde{O}(1/(\epsilon\Delta^{3/2}))$, which is a quadratic improvement over the classical complexity obtained above.
+
+Our quantum algorithm uses the three techniques described in Sec. II and uses some other results in [22]. In fact, since $H>0$, we can improve some results in [22] that regard the decomposition of the inverse of a matrix as a linear combination of unitaries. That is, for a positive matrix $H$, we can use the identity
+
+$$
+\frac{1}{H} =\frac{1}{2}\int_{0}^{\infty}d\beta\;e^{-\beta H/2}\;, \tag{76}
+$$
+
+and use the Hubbard-Stratonovich transformation of Eq. (25) to simulate $e^{-\beta H/2}$. Roughly, $1/H$ can be simulated by a linear combination of unitaries, each corresponding to an evolution with $\tilde{H}$ for time $y\sqrt{\beta}$. Since $\beta\in[0,\infty)$ and $y\in(-\infty,\infty)$, we will need to find an approximation by a finite, discrete sum of operators $e^{-iy_{j}\sqrt{\beta_{k}}\tilde{H}}$. We obtain:
+
+**Lemma 2.**
+
+Let
+
+$$
+X^{\prime}=\frac{1}{\sqrt{2\pi}}\sum_{k=0}^{K}{\delta z}\sum_{j=-J}^{J}\delta y\;e^{-y_{j}^{2}/2}e^{-iy_{j}\sqrt{z_{k}}\tilde{H}}\;, \tag{77}
+$$
+
+where $y_{j}=j\delta y$, $z_{k}=k\delta z$, and $\|H\|\geq\Delta>0$. Then, there exists $J=\Theta(\sqrt{1/\Delta}\log^{3/2}(1/(\Delta\epsilon)))$, $K=\Theta((1/\Delta)\log(1/(\Delta\epsilon))/\epsilon)$, $\delta y=\Theta(\sqrt{\Delta}/\log(1/(\Delta\epsilon)))$, and $\delta z=\Theta(\epsilon)$ such that
+
+$$
+\left\|\left(\frac{1}{H}\left|\phi\right\rangle\right)\otimes\left|0\right\rangle_{\rm a_{1}}-X^{\prime}\left|\phi\right\rangle\left|0\right\rangle_{\rm a_{1}}\right\|\leq\epsilon/2 \tag{78}
+$$
+
+for all states $\left|\phi\right\rangle$.
+
+**Proof.**
+
+We first consider the approximation of $1/x$ by a finite sum of $e^{-z_{k}H}$:
+
+$$
+\left|\frac{1}{x}-\delta z\sum_{k=0}^{K-1}e^{-z_{k}x}\right| =\left|\frac{1}{x}-\delta z\frac{1-e^{-z_{K}x}}{1-e^{-\delta zx}}\right| \tag{79}
+$$
+$$
+=\left|\frac{1}{x}O(\delta zx+e^{-z_{K}x})\right| \tag{80}
+$$
+
+Assuming that $1\geq x\geq 1/\kappa$ so that $1/x\leq\kappa$, we can upper bound the above quantity by $\epsilon/4$ if we choose $e^{-z_{K}/\kappa}=\Theta(\epsilon/\kappa)$ and $\delta z=\Theta(\epsilon)$. These imply
+
+$$
+z_{K}=\Theta(\kappa\log(\kappa/\epsilon)) \tag{81}
+$$
+
+and
+
+$$
+K=z_{K}/\delta z=\Theta(\kappa\log(\kappa/\epsilon)/\epsilon)\;. \tag{82}
+$$
+
+In the next step, we invoke the proof of Lemma 1 and approximate each $e^{-z_{k}x}$ as
+
+$$
+g_{k}(x)=\frac{1}{\sqrt{2\pi}}\sum_{j=-J}^{J}\delta y\;e^{-y_{j}^{2}/2}e^{-iy_{j}\sqrt{z_{k}x}}\;, \tag{83}
+$$
+
+and we need to choose $J$ and $\delta y$ so that the approximation error is bounded by $\epsilon/(4z_{K})$. Then,
+
+$$
+\left|\delta z\sum_{k=0}^{K-1}(e^{-z_{k}x}-g_{k}(x))\right| \leq(\delta zK)\frac{\epsilon}{4z_{K}}
+$$
+$$
+\leq\epsilon/4\;. \tag{84}
+$$
+
+Lemma 1 then implies
+
+$$
+\delta y =\Theta\left(\frac{1}{\sqrt{z_{K}\log(z_{K}/\epsilon)}}\right)
+$$
+$$
+=\Theta\left(\frac{1}{\sqrt{\kappa\log(\kappa/\epsilon)\log(\kappa\log(\kappa/\epsilon)/\epsilon)}}\right)
+$$
+$$
+=\Theta\left(\frac{1}{\sqrt{\kappa}\log(\kappa/\epsilon)}\right)\;, \tag{85}
+$$
+
+and
+
+$$
+J =\Theta\left(\sqrt{z_{K}}\log(z_{K}/\epsilon)\right)
+$$
+$$
+=\Theta\left(\sqrt{\kappa}\log^{3/2}(\kappa/\epsilon)\right)\;. \tag{86}
+$$
+
+Thus far, we presented an approximation of $1/x$, for $1\geq x\geq 1/\kappa$, as a doubly weighted sum of terms $\exp(-iy_{j}\sqrt{z_{k}x})$. To obtain the desired result, it suffices to act with $X^{\prime}$ on any eigenstate of $\tilde{H}$ and replace $\sqrt{x}$ by the corresponding eigenvalue, as we did in Lemma 1. Since $H\geq\Delta$, we need to replace $\kappa$ by $1/\Delta$ in the bounds obtained for $\delta z$, $\delta y$, $K$, $J$, $z_{K}$, and $y_{J}$. ∎
+
+In general, we cannot implement the unitaries $e^{-iy_{j}\sqrt{2z_{k}}\tilde{H}}$ exactly but we can do so up to an approximation error. We obtain:
+
+**Corollary 3.**
+
+Let $\epsilon>0$ and $W_{jk}$ be a unitary that satisfies
+
+$$
+\|W_{jk}-e^{-iy_{j}\sqrt{2z_{k}}\tilde{H}}\|\leq\frac{\epsilon}{4z_{K}}\;. \tag{87}
+$$
+
+Let
+
+$$
+X=\frac{1}{\sqrt{2\pi}}\sum_{k=0}^{K}\delta z\sum_{j=-J}^{J}\delta y\;e^{-y_{j}^{2}/2}W_{jk}\;. \tag{88}
+$$
+
+Then,
+
+$$
+\left\|\left(\frac{1}{H}\left|\phi\right\rangle\right)\otimes\left|0\right\rangle_{\rm a_{1}}-X\left|\phi\right\rangle\left|0\right\rangle_{\rm a_{1}}\right\|\leq\epsilon\;. \tag{89}
+$$
+
+**Proof.**
+
+If we replace each $e^{-iy_{j}\sqrt{z_{k}x}}$ by a term that is an $\epsilon/(2z_{K})$ approximation in the definition of $g_{k}(x)$, it yields an approximation of $1/x$ within precision $\epsilon/2$ plus
+
+$$
+\frac{\delta zK}{\sqrt{2\pi}}\sum_{j=-J}^{J}\delta ye^{-y_{j}^{2}/2}(\epsilon/(4z_{K}))=\frac{\epsilon}{4\sqrt{2\pi}}\sum_{j=-J}^{J}\delta ye^{-y_{j}^{2}/2}\;. \tag{90}
+$$
+
+Our choice of parameters in Lemma 2 implies
+
+$$
+\left|1-\frac{1}{\sqrt{2\pi}}\sum_{j=-J}^{J}\delta ye^{-y_{j}^{2}/2}\right|\leq\epsilon/4 \tag{91}
+$$
+
+so that the additional error is bounded by $\epsilon/2$. The proof follows by replacing $\sqrt{x}$ by the corresponding eigenvalue of $\tilde{H}$ and $g_{k}(x)$ by the linear combination of the $W_{jk}$ with weights $\delta ye^{-y_{j}^{2}/2}$. ∎
+
+So far we showed that $1/H$ can be approximated within precision $\epsilon$ by a linear combination of unitaries that correspond to evolutions under $\tilde{H}$ for maximum time $y_{J}\sqrt{z_{K}}=\Theta((1/\sqrt{\Delta})\log(1/(\Delta\epsilon)))$. Each such evolution must be implemented by a method for Hamiltonian simulation that approximates it within precision $\epsilon^{\prime}=O(\epsilon/z_{K})=O(\epsilon\Delta/(\log(1/(\epsilon\Delta))))$.
+
+In Sec. II we described a technique to implement $X=\sum_{l=0}^{L-1}\gamma_{l}V_{l}$. In this case, the coefficients and unitaries are $\delta z\delta ye^{-y_{j}^{2}/2}/\sqrt{2\pi}$ and $W_{jk}$, respectively. From Lemma 2 and Eq. (91), it is simple to show
+
+$$
+\left|z_{K}-\gamma\right| \leq\sum_{k=0}^{K}\delta z\left|1-\frac{1}{\sqrt{2\pi}}\sum_{j=-J}^{J}\delta ye^{-y_{j}^{2}/2}\right|
+$$
+$$
+\leq z_{K}\epsilon/4 \tag{92}
+$$
+
+and thus $\gamma\approx z_{K}$ or $\gamma=\Theta((1/\Delta)\log(1/(\Delta\epsilon)))$.
+
+Last, we define the unitary $T=(T_{2})^{\dagger}T_{1}$ such that
+
+$$
+T_{1}\left|0\right\rangle\left|0\right\rangle_{\rm a}=\sqrt{\pi_{\mathcal{U}}}\frac{X^{\prime}}{\gamma}\left|\sqrt{\pi_{\mathcal{U}}}\right\rangle\left|0\right\rangle_{\rm a}+|\Theta^{\perp}\rangle\;, \tag{93}
+$$
+
+and $|\Theta^{\perp}\rangle$ is supported in the subspace orthogonal to $\left|0\right\rangle_{\rm a}$. The ancillary register $\bf a$ includes the ancillary registers $\rm a_{1},\rm a_{2},\rm a_{3}$ as needed for evolving with $\tilde{H}$ and implementing $X^{\prime}$. That is, $\left|0\right\rangle_{\rm a}=\left|0\right\rangle_{\rm a_{1},\rm a_{2},\rm a_{3}}$. $T_{1}$ can be implemented as follows. It first uses $Q_{\sqrt{\pi}}$ to prepare the quantum state $\left|\sqrt{\pi}\right\rangle$. It then uses $Q_{\mathcal{U}}$ to prepare $\sqrt{\pi_{\mathcal{U}}}\left|\sqrt{\pi_{\mathcal{U}}}\right\rangle\left|0\right\rangle_{\rm a^{\prime}}+\sqrt{\pi_{\mathcal{M}}}\left|\sqrt{\pi_{\mathcal{M}}}\right\rangle\left|1\right\rangle_{\rm a^{\prime}}$, where the ancilla qubit $\rm a^{\prime}$ is part of the register $\bf a$. Then, conditional on $\left|0\right\rangle_{\rm a^{\prime}}$, it implements $X^{\prime}/\gamma$ as discussed in Sec. II. $T_{2}$ is the unitary that prepares $\sqrt{\pi_{\mathcal{U}}}\left|\sqrt{\pi_{\mathcal{U}}}\right\rangle\left|0\right\rangle_{\rm a}+\sqrt{\pi_{\mathcal{M}}}\left|\sqrt{\pi_{\mathcal{M}}}\right\rangle|0^{\perp}\rangle_{\rm a}$, where $|0^{\perp}\rangle_{\rm a}$ is orthogonal to $\left|0\right\rangle_{\rm a}$. Then, if $T=(T_{2})^{\dagger}T_{1}$, we obtain
+
+$$
+\left\langle 0\right|\left\langle 0\right|_{\rm a}T\left|0\right\rangle\left|0\right\rangle_{\rm a}=\frac{\pi_{\mathcal{U}}}{\gamma}\left\langle\sqrt{\pi_{\mathcal{U}}}\right|X^{\prime}\left|\sqrt{\pi_{\mathcal{U}}}\right\rangle\;. \tag{94}
+$$
+
+### IV.1 Algorithm
+
+We set $\epsilon^{\prime}=O(\epsilon\Delta/\log(1/(\epsilon\Delta)))$. The quantum algorithm for estimating the hitting time consists of two basic steps. The first step uses the amplitude estimation algorithm of [18] to provide an estimate of $\left\langle 0\right|\left\langle 0\right|_{\rm a_{3}}T\left|0\right\rangle\left|0\right\rangle_{\rm a_{3}}$ within precision $\epsilon^{\prime}$ and constant confidence level ($c\approx 0.81$). Call that estimate $\tilde{t}_{h}$. The output of the algorithm is $\hat{t}_{h}=z_{K}\tilde{t}_{h}$.
+
+### IV.2 Validity and complexity
+
+As described, our quantum algorithm provides a $O(\epsilon^{\prime}z_{K})$ estimate of $z_{K}\left\langle 0\right|\left\langle 0\right|_{\rm a_{3}}T\left|0\right\rangle\left|0\right\rangle_{\rm a_{3}}$. Using Eqs. (69) and (94), the output is an estimate of $(z_{K}/\gamma)t_{h}$ within precision $O((z_{K}/\gamma)\epsilon+z_{K}\epsilon^{\prime})$. Our choice of $\epsilon^{\prime}$ implies that this is $O((z_{K}/\gamma)\epsilon)$. Also, using Eq. (92), we obtain
+
+$$
+\left|1-\frac{z_{K}}{\gamma}\right|=O(\epsilon). \tag{95}
+$$
+
+Then, our quantum algorithm outputs $\hat{t}_{h}$, an estimate of $t_{h}$ within absolute precision $O(\epsilon)$.
+
+Our quantum algorithm uses $T$, $O(1/\epsilon^{\prime})$ times. Each $T$ uses $Q_{\mathcal{U}}$ and $Q_{\sqrt{\pi}}$ two times, in addition to the unitaries needed to implement $X^{\prime}$. Each such unitary requires evolving with $\tilde{H}$ for maximum time $t=O((1/\sqrt{\Delta})\log(1/(\Delta\epsilon)))$. In addition, each such unitary requires preparing a quantum state proportional to
+
+$$
+\frac{1}{\sqrt{\gamma}}\sum_{j,k}\left(\frac{\delta y\delta ze^{-y_{j}^{2}/2}}{\sqrt{2\pi}}\right)^{1/2}\left|j,k\right\rangle\;. \tag{96}
+$$
+
+The gate complexity for preparing this state using the results in [30, 31] is $C_{B}=O(\log(J)+\log(K))$ and then $C_{B}=O(\log(1/(\Delta\epsilon)))$. The overall gate complexity is
+
+$$
+O\left(\frac{1}{\epsilon^{\prime}}\left(C_{W}(t,\epsilon^{\prime})+C_{\mathcal{U}}+C_{\sqrt{\pi}}+C_{B}\right)\right)\;. \tag{97}
+$$
+
+This proves Thm. 2. Using Eq. (122) and replacing for $\epsilon^{\prime}$ and $t$, and disregarding terms that are polylogarithmic in $d/(\epsilon\Delta)$, the gate complexity is
+
+$$
+\tilde{O}\left(\frac{1}{\epsilon\Delta}\left(\frac{d^{2}}{\sqrt{\Delta}}(d\log(N)+C_{P}+C_{\mathcal{U}})+C_{\sqrt{\pi}}\right)\right)\;. \tag{98}
+$$
+
+## V Conclusions
+
+We provided quantum algorithms for solving two problems of stochastic processes, namely the preparation of a thermal Gibbs state of a quantum system and the estimation of the hitting time of a Markov chain. Our algorithms combine many techniques, including Hamiltonian simulation, spectral gap amplification, and methods for the quantum linear systems algorithm. They provide significant speedups with respect to known classical and quantum algorithms for these problems and are expected to be relevant to research areas in statistical physics and computer science, including optimization and the design of search algorithms.
+
+We first showed that, starting from a completely entangled state, we can prepare a state that is $\epsilon$-close (in trace distance) to a thermal Gibbs state using resources that scale polylogarithmic in $1/\epsilon$. This is an exponential improvement over previously known algorithms that rely on phase estimation and have complexity that depends polynomially in $1/\epsilon$ [8, 9]. Our algorithm circumvents the limitations of phase estimation by approximating the exponential operator as a finite linear combination of unitary operations and using techniques developed in [24] to implement it. We also used techniques developed in the context of spectral gap amplification [23] to improve the complexity dependence on the inverse temperature, from almost linear in $\beta$ to almost linear in $\sqrt{\beta}$.
+
+Next, we presented a quantum algorithm to estimate the hitting time of a Markov chain, initialized in its stationary distribution, with almost quadratically less resources in all parameters than a classical algorithm (in a worst-case scenario). This is done by first expressing the hitting time as the expectation value of the inverse of an operator $H$, which is obtained by a simple transformation of the Markov chain stochastic matrix. We then used results from [22] to apply $1/H$; in this particular case, $H$ is positive and we showed that the implementation of $1/H$ can be done more efficiently than the algorithm in [22], in terms of the condition number of $H$. Such an expected value can be computed using methods for amplitude estimation. For constant confidence level ($c\approx 0.81$), the use of amplitude estimation limits us to a complexity dependence that is $\tilde{O}(1/\epsilon)$, where $\epsilon$ is the absolute precision of our estimate. It is possible to increase the confidence level towards $c$ with an increase in complexity that is $O(\log(|1-c|))$.
+
+## VI Acknowledgements
+
+AC was supported by a Google research award. RS acknowledges support of the LDRD program at LANL and NRO. We thank Sergio Boixo and Ryan Babbush at Google Quantum A.I. Lab Team for discussions.
+
+## References
+
+[1] K. Huang, Statistical Mechanics (John Wiley and Sons, Inc., 1963).
+
+[2] R. Agarwal, Recent Trends in Optimization Theory and Applications (World Scientific, 1995).
+
+[3] D. A. Levin, Y. Peres, and E. L. Wilmer, Markov chains and mixing times, http://pages.uoregon.edu/dlevin/MARKOV/markovmixing.pdf.
+
+[4] R. Portugal, Quantum Walks and Search Algorithms (Springer, New York, 2013).
+
+[5] M. Newman and G. Barkema, Monte Carlo Methods in Statistical Physics (Oxford University Press, 1998).
+
+[6] J. B. Anderson, Quantum Monte Carlo : Origins, Development, Applications: Origins, Development, Applications (Oxford University Press, 2007).
+
+[7] R. D. Somma, S. Boixo, H. Barnum, and E. Knill, Phys. Rev. Lett. 101, 130504 (2008).
+
+[8] D. Poulin and P. Wocjan, Phys. Rev. Lett. 103, 220502 (2009).
+
+[9] C. Chiang and P. Wocjan, in Quantum Cryptography and Computing (2010), pp. 138–147.
+
+[10] E. Bilgin and S. Boixo, Phys. Rev. Lett. 105, 170405 (2010).
+
+[11] K. Temme, T. Osborne, K. Vollbrecht, D. Poulin, and F. Verstraete, Nature 471, 87 (2011).
+
+[12] M. Schwarz, K. Temme, and F. Verstraete, Phys. Rev. Lett. 108, 110502 (2012).
+
+[13] A. Ambainis, J. Kempe, and A. Rivosh, in Proceedings of the 16th ACM-SIAM Symposium on Discrete Algorithms (2005), pp. 1099–1108.
+
+[14] M. Szegedy, in Proceedings of the 45th IEEE Symposium on Foundations of Computer Science (2004), pp. 575–584.
+
+[15] H. Krovi and T. A. Brun, Phys. Rev. A 73, 032341 (2006).
+
+[16] F. Magniez, A. Nayak, J. Roland, and M. Santha, in Proceedings of the 39th ACM Symposium on Theory of Computing (2007), pp. 575–584.
+
+[17] H. Krovi, M. Ozols, and J. Roland, Phys. Rev. A 82, 022333 (2010).
+
+[18] E. Knill, G. Ortiz, and R. D. Somma, Phys. Rev. A 75, 012328 (2007).
+
+[19] A. Montanaro, Proceedings of the Royal Society A 471, 20150301 (2015).
+
+[20] R. D. Somma, G. Ortiz, J. E. Gubernatis, E. Knill, and R. Laflamme, Phys. Rev. A 65, 042323 (2002).
+
+[21] D. W. Berry, A. M. Childs, R. Cleve, R. Kothari, and R. D. Somma, in Proc. of the 46th ACM Symposium on Theory of Computing (2014), pp. 283–292.
+
+[22] A. Childs, R. Kothari, and R. D. Somma, preprint arXiv:1511.02306 (2015).
+
+[23] R. D. Somma and S. Boixo, SIAM J. Comp 42, 593 (2013).
+
+[24] D. W. Berry, A. M. Childs, R. Cleve, R. Kothari, and R. D. Somma, Phys. Rev. Lett. 114, 090502 (2015a).
+
+[25] G. Ortiz, J. E. Gubernatis, E. Knill, and R. Laflamme, Phys. Rev. A 64, 022319 (2001).
+
+[26] A. M. Childs and N. Wiebe, Quantum Information and Computation 12, 901 (2012).
+
+[27] L. K. Grover, in Proceedings of the 28th ACM Symposium on Theory of Computing (1996), pp. 212–219.
+
+[28] C. W. Helstrom, Quantum Detection and Estimation Theory (Academic Press, New York, 1976).
+
+[29] J. Hubbard, Phys. Rev. Lett. 3, 77 (1959).
+
+[30] A. Kitaev and W. A. Webb, preprint arXiv:0801.0342 (2008).
+
+[31] R. D. Somma, preprint arXiv:1503.06319 (2015).
+
+[32] R. D. Somma, C. D. Batista, and G. Ortiz, Phys. Rev. Lett. 99, 030603 (2007).
+
+[33] S. Boixo, G. Ortiz, and R. D. Somma, The European Physical Journal 224, 35 (2015).
+
+[34] D. W. Berry, A. M. Childs, and R. Kothari, in Proceedings of the 56th Symposium on Foundations of Computer Science (2015b), pp. 792–809.
+
+## Appendix A Simulation of $\tilde{H}$
+
+We provide a method to simulate $\tilde{H}$ in time polylogarithmic in $1/\epsilon$, as required by the algorithm for estimating hitting times of Sec. IV. We assume that there exists a procedure $Q_{P}$ that computes the locations and magnitude of the nonzero entries of the matrix $P$. More precisely, $Q_{P}$ performs the map
+
+$$
+Q_{P}\left|\sigma\right\rangle =\left|\sigma\right\rangle\left|\sigma^{\prime}_{1},\ldots,\sigma^{\prime}_{d}\right\rangle\otimes \tag{99}
+$$
+$$
+\otimes\left|\mathrm{Pr}(\sigma|\sigma^{\prime}_{1}),\mathrm{Pr}(\sigma^{\prime}_{1}|\sigma),\ldots,\mathrm{Pr}(\sigma|\sigma^{\prime}_{d}),\mathrm{Pr}(\sigma^{\prime}_{d}|\sigma)\right\rangle\;,
+$$
+
+where $d$ is the sparsity of $P$, i.e., the largest number of nonzero matrix elements per row or column. The transition probabilities are assumed to be exactly represented by a constant number of bits and we disregard any rounding-off errors. We also assume access to the oracle $Q_{\mathcal{U}}$ such that
+
+$$
+Q_{\mathcal{U}}\left|\sigma\right\rangle=-\left|\sigma\right\rangle\ {\rm if}\ \sigma\in\mathcal{U} \tag{100}
+$$
+
+and $Q_{\mathcal{U}}\left|\sigma\right\rangle=\left|\sigma\right\rangle$ otherwise.
+
+The Hamiltonians $\bar{H}$ and $H$ can be constructed as follows. For each pair $(\sigma,\sigma^{\prime})$, such that $\sigma\neq\sigma^{\prime}$ and $\mathrm{Pr}(\sigma|\sigma^{\prime})\neq 0$, we define an unnormalized state
+
+$$
+\left|\mu_{\sigma,\sigma^{\prime}}\right\rangle=\frac{1}{\sqrt{2}}(\sqrt{\mathrm{Pr}(\sigma|\sigma^{\prime})}\left|\sigma^{\prime}\right\rangle-\sqrt{\mathrm{Pr}(\sigma^{\prime}|\sigma)}\left|\sigma\right\rangle)\;. \tag{101}
+$$
+
+Then, if $\sigma_{f}\neq\sigma_{0}$,
+
+$$
+\left\langle\sigma_{f}\right|\sum_{\sigma,\sigma^{\prime}}\left|\mu_{\sigma,\sigma^{\prime}}\right\rangle\left\langle\mu_{\sigma,\sigma^{\prime}}\right|{\sigma_{0}}\rangle=-\sqrt{\mathrm{Pr}(\sigma_{f}|\sigma_{0})\mathrm{Pr}(\sigma_{0}|\sigma_{f})}\;, \tag{102}
+$$
+
+and if $\sigma_{f}=\sigma_{0}$,
+
+$$
+\left\langle\sigma_{0}\right|\sum_{\sigma,\sigma^{\prime}}\left|\mu_{\sigma,\sigma^{\prime}}\right\rangle\left\langle\mu_{\sigma,\sigma^{\prime}}\right|{\sigma_{0}}\rangle =\sum_{\sigma^{\prime}\neq\sigma}\mathrm{Pr}(\sigma^{\prime}|\sigma)
+$$
+$$
+=1-\mathrm{Pr}(\sigma|\sigma)\;. \tag{103}
+$$
+
+These are the same matrix entries of $\bar{H}$ and the implication is that
+
+$$
+\bar{H}=\sum_{\sigma,\sigma^{\prime}}\left|\mu_{\sigma,\sigma^{\prime}}\right\rangle\left\langle\mu_{\sigma,\sigma^{\prime}}\right|\;. \tag{104}
+$$
+
+This is the desired representation of the $\bar{H}$ as a sum of positive operators. In particular, we can normalize the states and define
+
+$$
+\left|\bar{\mu}_{\sigma,\sigma^{\prime}}\right\rangle=\frac{\left|\mu_{\sigma,\sigma^{\prime}}\right\rangle}{\|\left|\mu_{\sigma,\sigma^{\prime}}\right\rangle\|}\;, \tag{105}
+$$
+$$
+\sqrt{\bar{\alpha}_{\sigma,\sigma^{\prime}}}=\|\left|\mu_{\sigma,\sigma^{\prime}}\right\rangle\|=\sqrt{\frac{\mathrm{Pr}(\sigma|\sigma^{\prime})+\mathrm{Pr}(\sigma^{\prime}|\sigma)}{2}}\;. \tag{106}
+$$
+
+Then,
+
+$$
+\bar{H}=\sum_{\sigma,\sigma^{\prime}}\bar{\alpha}_{\sigma,\sigma^{\prime}}\left|\bar{\mu}_{\sigma,\sigma^{\prime}}\right\rangle\left\langle\bar{\mu}_{\sigma,\sigma^{\prime}}\right|\;. \tag{107}
+$$
+
+We let $\Pi_{\mathcal{U}}$ be the projector into the subspace $\mathcal{U}$. The Hamiltonian is $H=\Pi_{\mathcal{U}}\bar{H}\Pi_{\mathcal{U}}$, and using Eq. (104), we obtain
+
+$$
+H= \sum_{\sigma,\sigma^{\prime}\in\mathcal{U}}\bar{\alpha}_{\sigma,\sigma^{\prime}}\left|\bar{\mu}_{\sigma,\sigma^{\prime}}\right\rangle\!\left\langle\bar{\mu}_{\sigma,\sigma^{\prime}}\right|+
+$$
+$$
++\!\!\sum_{\sigma^{\prime}\in\mathcal{U}}\left(\sum_{\sigma\in\mathcal{M}}\!\!\!\mathrm{Pr}(\sigma|\sigma^{\prime})\right)\left|\sigma^{\prime}\right\rangle\!\left\langle\sigma^{\prime}\right|, \tag{108}
+$$
+
+which is the desired decomposition as a linear combination of rank-1 projectors.
+
+To build $\tilde{H}$, we need to take square roots of the projectors. In principle, the dimension $N_{\mathcal{U}}$ is large and we want to avoid a presentation of $\tilde{H}$ as a sum of polynomially many terms in $N_{\mathcal{U}}$. We are also interested in a decomposition of $\tilde{H}$ in terms of simple unitary operations so that we can use the results of [24] to devise a method to simulate $\exp(-i\tilde{H}t)$. We begin with the second term in the right hand side of Eq. (108). Its square root is
+
+$$
+\sum_{\sigma^{\prime}\in\mathcal{U}}\left(\sqrt{\sum_{\sigma\in\mathcal{M}}\mathrm{Pr}(\sigma|\sigma^{\prime})}\right)\left|\sigma^{\prime}\right\rangle\!\left\langle\sigma^{\prime}\right|\;. \tag{109}
+$$
+
+This term can be simply obtained as a sum of two diagonal unitary operations:
+
+$$
+\frac{1}{2}(U_{D}+U_{D}^{\dagger})\;. \tag{110}
+$$
+
+$U_{D}$ applies a phase to the state $\left|\sigma^{\prime}\right\rangle$ as
+
+$$
+U_{D}\left|\sigma^{\prime}\right\rangle=e^{i\theta_{\sigma^{\prime}}}\left|\sigma^{\prime}\right\rangle \tag{111}
+$$
+
+with
+
+$$
+\cos(\theta_{\sigma^{\prime}})=\sqrt{\sum_{\sigma\in\mathcal{M}}\mathrm{Pr}(\sigma|\sigma^{\prime})}\;, \tag{112}
+$$
+
+if $\sigma^{\prime}\in\mathcal{U}$. Otherwise, $U_{D}\left|\sigma^{\prime}\right\rangle=i\left|\sigma^{\prime}\right\rangle$. $U_{D}$ can then be implemented by first using $Q_{\mathcal{U}}$ to detect if $\sigma^{\prime}$ is in $\mathcal{U}$ or not. It next applies $Q_{P}$ and computes $\theta_{\sigma^{\prime}}$ in an additional register. Conditional on the value of $\theta_{\sigma^{\prime}}$, it applies the corresponding phase to $\left|\sigma^{\prime}\right\rangle$. It then applies the inverse of $Q_{P}$ to undo the computation. That is, $U_{D}$ requires $O(1)$ uses of $Q_{\mathcal{U}}$ and $Q_{P}$, and the additional gate complexity is $O(d)$ due to the computation of $\theta_{\sigma^{\prime}}$.
+
+The first term in the right hand side of Eq. (108) can be written as a sum of $K^{\prime}=O(d^{2})$ terms as follows. Using $Q_{P}$ we can implement a coloring of the graph $G$ with vertex set $V(G)=\{\sigma:\sigma\in\mathcal{U}\}$ and edge set $E(G)=\{(\sigma,\sigma^{\prime}):\sigma,\sigma^{\prime}\in U,\mathrm{Pr}(\sigma|\sigma^{\prime})\neq 0\}$. We can use the same coloring as that described in [21], which uses a bipartite graph coloring and was used for Hamiltonian simulation. Each of the $K^{\prime}$ terms corresponds to one color and is then a sum of commuting rank-1 projectors. That is, the first term in the right hand side of Eq. (108) is $\sum_{k=1}^{K^{\prime}}h_{k}$ and
+
+$$
+h_{k}=\sum_{\sigma,\sigma^{\prime}\in c_{k}}\bar{\alpha}_{\sigma,\sigma^{\prime}}\left|\bar{\mu}_{\sigma,\sigma^{\prime}}\right\rangle\left\langle\bar{\mu}_{\sigma,\sigma^{\prime}}\right|\;, \tag{113}
+$$
+
+where $c_{k}$ are those elements of $E(G)$ associated with the $k$-th color. By the definition of coloring, each rank-1 projector in Eq. (113) is orthogonal and commutes with each other, and then
+
+$$
+\sqrt{h_{k}}=\sum_{\sigma,\sigma^{\prime}\in c_{k}}\sqrt{\bar{\alpha}_{\sigma,\sigma^{\prime}}}\left|\bar{\mu}_{\sigma,\sigma^{\prime}}\right\rangle\left\langle\bar{\mu}_{\sigma,\sigma^{\prime}}\right|\;. \tag{114}
+$$
+
+We can write
+
+$$
+\sqrt{h_{k}}=\frac{-iZ_{k}+iZ_{k}^{\dagger}}{2}\;, \tag{115}
+$$
+
+where $Z_{k}$ is the unitary
+
+$$
+Z_{k}=\exp\left(i\sum_{\sigma,\sigma^{\prime}\in c_{k}}\delta_{\sigma,\sigma^{\prime}}\left|\bar{\mu}_{\sigma,\sigma^{\prime}}\right\rangle\left\langle\bar{\mu}_{\sigma,\sigma^{\prime}}\right|\right)\;. \tag{116}
+$$
+
+The coefficients are chosen so that
+
+$$
+\sin(\delta_{\sigma,\sigma^{\prime}})=\sqrt{\bar{\alpha}_{\sigma,\sigma^{\prime}}}\;, \tag{117}
+$$
+
+and $0\leq\bar{\alpha}_{\sigma,\sigma^{\prime}}\leq 1$.
+
+We can simulate each $Z_{k}$ as follows. Note that
+
+$$
+Z_{k}\left|\sigma\right\rangle=\xi_{\sigma,\sigma^{\prime}}\left|\sigma\right\rangle+\xi^{\prime}_{\sigma,\sigma^{\prime}}\left|\sigma^{\prime}\right\rangle \tag{118}
+$$
+
+where $\sigma^{\prime}$ is such that $(\sigma,\sigma^{\prime})\in c_{k}$. The complex coefficients $\xi_{\sigma,\sigma^{\prime}}$ and $\xi^{\prime}_{\sigma,\sigma^{\prime}}$ can be simply obtained from the $\delta_{\sigma,\sigma^{\prime}}$, and depend only on $\mathrm{Pr}(\sigma|\sigma^{\prime})$ and $\mathrm{Pr}(\sigma^{\prime}|\sigma)$. Then, on input $\left|\sigma\right\rangle$, we first use $Q_{\mathcal{U}}$ to decide whether $\left|\sigma\right\rangle\in\mathcal{U}$ or not. We then apply $Q_{P}$ once and look for $\sigma^{\prime}$ such that $(\sigma,\sigma^{\prime})\in c_{k}$. We use an additional register to write a classical description of a quantum circuit that implements the transformation in Eq. (118). We apply the inverse of $Q_{P}$ and $Q_{\mathcal{U}}$ and only keep the last register. This is sufficient information to apply the map in Eq. (118). We can then erase all the additional registers by applying the inverse of the operation that computed the quantum circuit. This works because the quantum circuit is invariant under the permutation of $\sigma$ and $\sigma^{\prime}$. To implement $Z_{k}$ we need to use $Q_{\mathcal{U}}$ and $Q_{P}$, $O(1)$ times. The additional gate complexity is $O(d\log(N))$ for searching for $\sigma^{\prime}$ and describing the quantum circuit.
+
+In summary, we found a decomposition of $\tilde{H}$ as
+
+$$
+\tilde{H}=\frac{1}{2}\sum_{k=1}^{\tilde{K}}\tilde{U}_{k} \tag{119}
+$$
+
+where $\tilde{U}_{k}$ are unitaries. The number of terms is $\tilde{K}=O(d^{2})$. Using Eq. (9) and the results above, each $\tilde{U}_{k}$ can be implemented with $O(1)$ uses of $Q_{\mathcal{U}}$ and $Q_{P}$, and at most $O(d\log(N))$ additional gates.
+
+Using the results of [24] (see Sec. II), the complexity for simulating $\exp(-i\tilde{H}t)$ within precision $\epsilon$ for this case is as follows. The number of uses of $Q_{\mathcal{U}}$ and $Q_{P}$ is
+
+$$
+O\left(\tau\log(\tau/\epsilon)/\log\log(\tau/\epsilon)\right)\;, \tag{120}
+$$
+
+where $\tau=|t|d^{2}$. The additional gate complexity is
+
+$$
+O\left(d\log(N)\tau\log(\tau/\epsilon)/\log\log(\tau/\epsilon)\right)\;. \tag{121}
+$$
+
+If we write $C_{\mathcal{U}}$ and $C_{P}$ for the gate complexities of $Q_{\mathcal{U}}$ and $Q_{P}$, respectively, the overall gate complexity to simulate the evolution under $\tilde{H}$ is
+
+$$
+C_{W}(t,\epsilon)=O\left((d\log(N)+C_{\mathcal{U}}+C_{P})\tau\frac{\log(\tau/\epsilon)}{\log\log(\tau/\epsilon)}\right)\;. \tag{122}
+$$
