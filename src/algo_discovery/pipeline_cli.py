@@ -31,6 +31,11 @@ def read_abstract(args) -> str:
     return args.abstract
 
 
+def describe(exc: ValidationError) -> str:
+    """Field paths and messages only; never echoes input values."""
+    return "; ".join(".".join(map(str, e["loc"])) + ": " + e["msg"] for e in exc.errors()[:5])[:500]
+
+
 def model_failure(summary: dict, stage: str, exc: GenerationError) -> int:
     """Bad model output is a stage result to count, not an error to retry."""
     if not exc.model_output_failure:
@@ -61,7 +66,11 @@ def run(args, settings: Settings, summary: dict) -> int:
     if equations.specification.status not in {"specified", "partial"}:
         summary["stopped_at"] = "equations"
         return 2
+    return run_code_and_simulation(equations_dir, args, settings, summary)
 
+
+def run_code_and_simulation(equations_dir: Path, args, settings: Settings, summary: dict) -> int:
+    """Stages 2-3, shared by the full pipeline and externally supplied specifications."""
     log("[2/3] equations -> Qiskit (Docker validation)")
     instance = json.loads(args.instance_file.read_text()) if args.instance_file else None
     code_request = load_code_request(
@@ -124,6 +133,11 @@ def main() -> int:
     inputs.add_argument("--abstract")
     inputs.add_argument("--stdin", action="store_true")
     parser.add_argument("--scope", help="Optional finite experiment target; not abstract evidence")
+    add_stage_arguments(parser)
+    return execute(run, parser.parse_args())
+
+
+def add_stage_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", help="Override CLAUDE_MODEL for this invocation")
     parser.add_argument("--artifact-dir", type=Path)
     parser.add_argument("--instance-file", type=Path, help="Optional circuit parameters")
@@ -131,7 +145,10 @@ def main() -> int:
     parser.add_argument("--inputs", type=Path, help="JSON list of simulation input cases")
     parser.add_argument("--shots", type=int, default=1024)
     parser.add_argument("--seed", type=int, default=42)
-    args = parser.parse_args()
+
+
+def execute(stages, args) -> int:
+    """Run stages(args, settings, summary); print and save the summary however it ends."""
     summary = {}
     error = None
     try:
@@ -141,11 +158,11 @@ def main() -> int:
             model=args.model or settings.model,
             artifact_dir=args.artifact_dir or settings.artifact_dir,
         )
-        code = run(args, settings, summary)
+        code = stages(args, settings, summary)
     except (ConfigurationError, GenerationError) as exc:
         error = str(exc)
-    except ValidationError:
-        error = "Invalid input: check the abstract length, scope, instance JSON, and source run."
+    except ValidationError as exc:
+        error = "Invalid input: " + describe(exc)
     except (ValueError, SyntaxError, TypeError, KeyError, RecursionError) as exc:
         error = "Pipeline input/static check failed: " + str(exc)[:300]
     except OSError:
