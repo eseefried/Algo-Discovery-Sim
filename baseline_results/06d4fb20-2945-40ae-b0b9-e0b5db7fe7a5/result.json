@@ -1,0 +1,137 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "06d4fb20-2945-40ae-b0b9-e0b5db7fe7a5",
+  "parent_run_id": "f5a049e7-f011-4ec5-bf44-726f80f40de4",
+  "created_at": "2026-10-31T17:48:37.423220+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "44aff293a265304a01a6cbdb7fd4d3dcc2c774f3cda4c3583897c280f48cd7f3",
+  "source_specification_sha256": "6c85a17cd45c3370a6896477d4cadcfa0dd702afd04f4de15658e8cb59139a64",
+  "source_python_sha256": "d7bf853b1364f5721407a3a60976647ded1063b001fe9983e939ffff557947a4",
+  "elapsed_seconds": 69.661,
+  "usage": {
+    "input_tokens": 7370,
+    "output_tokens": 5956,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing the scoped construction: a Grover oracle for an unstructured classical database realised as compute-lookup / compare-with-target / uncompute-lookup, where the quantumly accessible classical memory U_D is a product of multi-controlled-X gates (one per stored 1-bit), followed by the standard Grover diffusion on the address register. build_circuit returns k Grover iterates (oracle then diffusion) or k bare oracle calls; it does not prepare the uniform superposition or measure (the runner supplies inputs). Database, record width, target and iteration count are instance parameters; total qubits n+m are capped at 12.",
+    "source_python": "from __future__ import annotations\n\n'''Grover oracle with a quantumly accessible classical memory (QROM-style XOR lookup).\n\nQubit layout (Qiskit little-endian, qubit 0 = least significant bit):\n  qubits 0 .. n-1        : address register, qubit i holds bit a_i of x = sum_i 2^i a_i\n  qubits n .. n+m-1      : data register, qubit n+j holds bit j of D[x] (expected |0...0> on input)\n\nOperation returned: (Diffusion * O_t)^k on addr (+) data, or O_t^k when oracle_only is true.\nNo state preparation and no measurement are included.\n'''\n\nimport math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _is_int(value):\n    return isinstance(value, int) and not isinstance(value, bool)\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a JSON object (dict)')\n    required = ['n', 'm', 'database', 'target', 'iterations']\n    for key in required:\n        if key not in instance:\n            raise ValueError('missing instance key: ' + key)\n    n = instance['n']\n    m = instance['m']\n    database = instance['database']\n    target = instance['target']\n    iterations = instance['iterations']\n    oracle_only = instance['oracle_only'] if 'oracle_only' in instance else False\n    if not _is_int(n) or n < 1:\n        raise ValueError('n must be a positive integer')\n    if not _is_int(m) or m < 1:\n        raise ValueError('m must be a positive integer')\n    if n + m > MAX_QUBITS:\n        raise ValueError('n + m exceeds the qubit cap of %d' % MAX_QUBITS)\n    if not isinstance(database, list) or len(database) != 2 ** n:\n        raise ValueError('database must be a list of length 2**n')\n    for rec in database:\n        if not _is_int(rec) or rec < 0 or rec >= 2 ** m:\n            raise ValueError('database records must be integers in [0, 2**m)')\n    if not _is_int(target) or target < 0 or target >= 2 ** m:\n        raise ValueError('target must be an integer in [0, 2**m)')\n    if not _is_int(iterations) or iterations < 1:\n        raise ValueError('iterations must be a positive integer')\n    if not isinstance(oracle_only, bool):\n        raise ValueError('oracle_only must be a boolean')\n    return n, m, list(database), target, iterations, oracle_only\n\n\ndef _lookup(qc, addr, data, database, n, m):\n    '''eq_1 / eq_2: U_D |x>|y> = |x>|y XOR D[x]>, realised as a product over stored 1-bits of\n    X on data bit j controlled on the address register being exactly |x>.'''\n    for x in range(len(database)):\n        rec = database[x]\n        if rec == 0:\n            continue\n        zero_lines = [addr[i] for i in range(n) if ((x >> i) & 1) == 0]\n        for q in zero_lines:\n            qc.x(q)\n        controls = [addr[i] for i in range(n)]\n        for j in range(m):\n            if (rec >> j) & 1:\n                qc.mcx(controls, data[j])\n        for q in zero_lines:\n            qc.x(q)\n\n\ndef _phase_flip_on_value(qc, reg, value, size):\n    '''Applies I - 2|value><value| on the register reg of the given size (up to no phase).'''\n    zero_lines = [reg[i] for i in range(size) if ((value >> i) & 1) == 0]\n    for q in zero_lines:\n        qc.x(q)\n    if size == 1:\n        qc.z(reg[0])\n    else:\n        last = reg[size - 1]\n        qc.h(last)\n        qc.mcx([reg[i] for i in range(size - 1)], last)\n        qc.h(last)\n    for q in zero_lines:\n        qc.x(q)\n\n\ndef _oracle(qc, addr, data, database, target, n, m):\n    '''eq_3: O_t = U_D^dagger (I (x) (I - 2|t><t|)) U_D ; U_D is self-inverse.'''\n    _lookup(qc, addr, data, database, n, m)\n    _phase_flip_on_value(qc, data, target, m)\n    _lookup(qc, addr, data, database, n, m)\n\n\ndef _diffusion(qc, addr, n):\n    '''eq_4: 2|s><s| - I = H^n (2|0><0| - I) H^n on the address register (global phase ignored).'''\n    for i in range(n):\n        qc.h(addr[i])\n    _phase_flip_on_value(qc, addr, 0, n)\n    for i in range(n):\n        qc.h(addr[i])\n\n\ndef build_circuit(instance):\n    n, m, database, target, iterations, oracle_only = _validate(instance)\n    addr = QuantumRegister(n, 'addr')\n    data = QuantumRegister(m, 'data')\n    qc = QuantumCircuit(addr, data)\n    for _ in range(iterations):\n        _oracle(qc, addr, data, database, target, n, m)\n        if not oracle_only:\n            _diffusion(qc, addr, n)\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"m\": 1, \"database\": [0, 1, 0, 0], \"target\": 1, \"iterations\": 1, \"oracle_only\": false}",
+    "register_layout": [
+      "qubit 0: addr[0] = a_0 (least significant address bit of x = 2 a_1 + a_0)",
+      "qubit 1: addr[1] = a_1 (most significant address bit)",
+      "qubit 2: data[0] = bit 0 of D[x]; expected |0> on input and returned to |0> after each oracle call",
+      "Total 3 qubits for the example; general layout is addr = qubits 0..n-1 (bit i of x on qubit i), data = qubits n..n+m-1 (bit j of D[x] on qubit n+j); n+m <= 12",
+      "Expected runner input for the example: H on qubits 0 and 1 (uniform |s>), qubit 2 in |0>; output after the circuit is |x=1> = addr bits (a_1,a_0)=(0,1), data |0>"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_lookup (docstring 'eq_1 / eq_2')",
+        "explanation": "XOR semantics of the quantumly accessible classical memory: data bit j is flipped exactly when bit j of D[x] is 1, implemented as mcx gates controlled on the address register being |x>."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_lookup",
+        "explanation": "Product over addresses with stored 1-bits of C^{(x)}X: X gates on address lines where the bit of x is 0, mcx onto the data bit, X gates undone. Generalised to m > 1 by one such gate per set bit j of D[x]."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_oracle and _phase_flip_on_value",
+        "explanation": "Compute lookup, apply I - 2|t><t| on the data register (Z for m=1 and t=1; X-conjugated multi-controlled Z in general), then uncompute with the same lookup sequence since U_D is self-inverse."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_diffusion",
+        "explanation": "Inversion about the mean H^n (2|0><0| - I) H^n on the address register, implemented up to a global phase as H, X-conjugated multi-controlled Z, H. The uniform state |s> preparation part of eq_4 is deliberately NOT included: the runner prepares inputs."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The iteration count k and success probability are analysis results; k is taken as the instance parameter 'iterations' (k=1 for the example N=4, M=1) rather than computed inside the circuit module."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The circuit omits the H^{\\otimes n} preparation of |s> and omits measurement; it returns only the operation (O_t followed by diffusion)^k.",
+        "reason": "Task requires an operation without input-state preparation or measurement; the runner supplies the uniform superposition input."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Address bit ordering is mapped to Qiskit little-endian: bit a_i of x is stored on qubit i (qubit 0 = a_0), whereas the specification listed a_{n-1} as the 'first' qubit.",
+        "reason": "Qiskit qubit index 0 is the least significant computational-basis bit; mapping bit i to qubit i makes the integer value of the address register equal to x."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Diffusion is implemented as H^n (I - 2|0><0|) H^n, i.e. -(2|s><s| - I), differing by a global phase of -1.",
+        "reason": "Multi-controlled Z realises I - 2|0><0| directly; the global phase has no observable effect."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Iteration count k is an explicit instance parameter ('iterations' >= 1) and is not derived from N and M in code; an 'oracle_only' flag allows returning O_t^k without diffusion.",
+        "reason": "Keeps the module a pure operation builder and allows validation of the oracle in isolation."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Generalised from the scoped m=1, t=1 instance to arbitrary m-bit records and target t (multi-controlled Z on the data register conjugated by X on zero bits of t), with n+m capped at 12.",
+        "reason": "Requirement that build_circuit handle varying valid instance parameters."
+      }
+    ],
+    "assumptions": [
+      "The paper's concrete memory architecture is unknown; the memory is modelled as the reversible XOR lookup U_D realised by one multi-controlled-X per stored 1-bit (this is a simple correct realisation, not necessarily the paper's circuit).",
+      "The search predicate is exact equality D[x] = t; the data register is assumed to enter in |0...0> and is uncomputed to |0...0> after each oracle call.",
+      "Multi-controlled X gates (qc.mcx) are treated as available primitives; no ancilla-based decomposition is specified.",
+      "The example instance uses n=2, m=1, D=(0,1,0,0), t=1, k=1, for which a single Grover iterate maps |s>|0> to |x=1>|0> exactly."
+    ],
+    "unresolved_issues": [
+      "The actual oracle circuit, gate counts and memory layout proposed in the paper cannot be reconstructed from the abstract.",
+      "Whether the paper uses additional ancilla or garbage qubits, or handles unknown numbers of matches M, is unknown; the module requires the iteration count to be supplied."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 46,
+    "depth": 31,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,138 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "8151c252-2a50-40da-b138-2e098c353e6a",
+  "parent_run_id": "ac0666bb-03a8-4a20-a164-7e383c117317",
+  "created_at": "2026-10-31T17:15:07.050665+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "01b00bb70e22c9f586975aaa3ab774582a2f204bc9978f04360724075f71f669",
+  "source_specification_sha256": "b1cac2d60acc4bb31ac1b2cfbdf53766f54fcd8a3565243ac48ea2d74d578232",
+  "source_python_sha256": "a1298d242b8d85703b2a84d3a209be14524d5446aa8ff30e20f4d05e53612611",
+  "elapsed_seconds": 74.605,
+  "usage": {
+    "input_tokens": 7007,
+    "output_tokens": 6302,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Gate-model Simon operation for an n-bit black box (n input qubits + n output qubits, n<=6): H on the input register, the standard reversible oracle U_f|x>|y>=|x>|y xor f(x)> for the 'pivot' family f(x)=x xor (x_j * s) (which reproduces the specification's explicit n=2 instance s=11, f(x1,x2)=(0,x1 xor x2) = CNOT_{x2,y2} CNOT_{x1,y2}), then H on the input register again. No state preparation or measurement is included; the runner measures the input register to obtain z with z.s=0 mod 2.",
+    "source_python": "\"\"\"Simon's algorithm (circuit model) as a measurement-free unitary operation.\n\nRegisters: input register x (n qubits) and output register y (n qubits).\nBit convention: the specification writes |x_1 x_2 ... x_n> with x_1 the most\nsignificant bit; Qiskit qubit 0 is the least significant bit, so x_i lives on\nqubit (n - i) of the input register and y_i on qubit (n - i) of the output\nregister.  The hidden string s is given as the string \"s_1 s_2 ... s_n\".\n\nOracle family (eq_2, eq_5): let j be the first index with s_j = 1 (pivot).\n    f(x) = x xor (x_j * s)\nso f(x) = x if x_j = 0 and f(x) = x xor s if x_j = 1.  This satisfies Simon's\npromise (eq_1): f(x) = f(x xor s) and distinct cosets map to distinct values\n(the value is the coset representative with bit j cleared).  For s = 0^n the\noracle is f(x) = x (1-to-1 case).  For n = 2, s = 11 the construction is\nexactly eq_5: f(x1, x2) = (0, x1 xor x2), U_f = CNOT_{x1,y2} CNOT_{x2,y2}.\n\"\"\"\nfrom __future__ import annotations\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _parse_instance(instance):\n    \"\"\"Validate the instance dictionary and return (n, s_bits, include_hadamards).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object / dict\")\n    n = instance.get(\"n\")\n    if isinstance(n, bool) or not isinstance(n, int):\n        raise ValueError(\"'n' must be an integer\")\n    if n < 1:\n        raise ValueError(\"'n' must be at least 1\")\n    if 2 * n > MAX_QUBITS:\n        raise ValueError(\"2*n qubits exceed the cap of %d\" % MAX_QUBITS)\n    s = instance.get(\"s\")\n    if not isinstance(s, str) or len(s) != n:\n        raise ValueError(\"'s' must be a bit string of length n\")\n    for c in s:\n        if c not in (\"0\", \"1\"):\n            raise ValueError(\"'s' must contain only '0' and '1'\")\n    s_bits = [int(c) for c in s]  # s_bits[i] = s_{i+1}, index 0 is the MSB s_1\n    include_h = instance.get(\"include_hadamards\", True)\n    if not isinstance(include_h, bool):\n        raise ValueError(\"'include_hadamards' must be a boolean\")\n    for key in instance:\n        if key not in (\"n\", \"s\", \"include_hadamards\"):\n            raise ValueError(\"unknown instance key: %s\" % str(key))\n    return n, s_bits, include_h\n\n\ndef _apply_oracle(qc, xr, yr, s_bits):\n    \"\"\"Append U_f (eq_2) for f(x) = x xor (x_j * s), eq_5 for n=2, s=11.\n\n    Step A: y_i ^= x_i for all i != j   (copy x into y; the pair of CNOTs\n            x_j -> y_j from the copy and from the mask step cancel and are\n            omitted).\n    Step B: y_i ^= x_j for all i != j with s_i = 1  (adds x_j * s).\n    \"\"\"\n    n = len(s_bits)\n    pivot = None\n    for i in range(n):\n        if s_bits[i] == 1:\n            pivot = i\n            break\n    # Step A\n    for i in range(n):\n        if i != pivot:\n            qc.cx(xr[n - 1 - i], yr[n - 1 - i])\n    # Step B\n    if pivot is not None:\n        for i in range(n):\n            if s_bits[i] == 1 and i != pivot:\n                qc.cx(xr[n - 1 - pivot], yr[n - 1 - i])\n\n\ndef build_circuit(instance):\n    \"\"\"Return the Simon operation (H^n x I) U_f (H^n x I) as a QuantumCircuit (eq_3).\n\n    instance keys:\n      n (int): number of input bits, 1 <= n <= 6.\n      s (str): hidden string \"s_1...s_n\" (s_1 most significant).\n      include_hadamards (bool, optional, default True): if False only U_f is\n          returned.\n    Qubits 0..n-1 form the input register (x_i on qubit n-i), qubits n..2n-1\n    the output register (y_i on qubit n + n - i).\n    \"\"\"\n    n, s_bits, include_h = _parse_instance(instance)\n    xr = QuantumRegister(n, \"x\")\n    yr = QuantumRegister(n, \"y\")\n    qc = QuantumCircuit(xr, yr, name=\"simon_n%d_s%s\" % (n, \"\".join(str(b) for b in s_bits)))\n    # eq_3: first Hadamard layer on the input register\n    if include_h:\n        for q in xr:\n            qc.h(q)\n    # eq_2 / eq_5: oracle\n    _apply_oracle(qc, xr, yr, s_bits)\n    # eq_3: second Hadamard layer on the input register\n    if include_h:\n        for q in xr:\n            qc.h(q)\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"s\": \"11\", \"include_hadamards\": true}",
+    "register_layout": [
+      "qubit 0: input x_2 (least significant input bit), register 'x'",
+      "qubit 1: input x_1 (most significant input bit), register 'x'",
+      "qubit 2: output y_2 (least significant output bit), register 'y'; receives CNOTs from x_2 and x_1 in the example",
+      "qubit 3: output y_1 (most significant output bit), register 'y'; untouched (stays |0>) in the example s=11",
+      "Runner measures qubits 0..1 as z = z_1 z_2 (z_1 on qubit 1); for the example Pr(z=00)=Pr(z=11)=1/2, Pr(01)=Pr(10)=0",
+      "Expected input state: |0000> on all qubits (prepared by the runner)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Simon's promise is a property of the chosen oracle family (argued in the module docstring), not an operation to implement."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_apply_oracle",
+        "explanation": "U_f|x>|y>=|x>|y xor f(x)> realized with CNOTs for f(x)=x xor (x_j*s)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit (Hadamard layers around _apply_oracle)",
+        "explanation": "The returned circuit is (H^n x I) U_f (H^n x I); applied to |0^n>|0^n> by the runner it produces the state of eq_3."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Outcome distribution of the input-register measurement; measurement and sampling are performed by the runner, not in the module."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "_apply_oracle with the example instance n=2, s=\"11\" (pivot j=1 gives CNOT x_2->y_2, CNOT x_1->y_2)",
+        "explanation": "The explicit n=2 instance is exactly reproduced by the general pivot construction."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical GF(2) postprocessing of measured outcomes is not part of the unitary operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The module returns only the unitary (H^n x I) U_f (H^n x I); state preparation |0^n>|0^n> and the computational-basis measurement of the input register are left to the runner.",
+        "reason": "Task requires a measurement-free operation without input-state preparation."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_5"
+        ],
+        "change": "Scope generalized from the single n=2, s=11 instance to the oracle family f(x)=x xor (x_j*s) for any 1<=n<=6 and any s (including s=0^n, giving f(x)=x); the n=2, s=11 member coincides with eq_5.",
+        "reason": "The task asks for an operation that works for varying valid instance parameters; this family is the simplest CNOT-only realization satisfying eq_1 for every s."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The two cancelling CNOTs x_j->y_j (from the copy step and the mask step) are omitted rather than appended.",
+        "reason": "They multiply to the identity; omitting them yields the same unitary with fewer gates and matches the two-CNOT form of eq_5."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Bit/qubit order made explicit: x_i (x_1 most significant) sits on qubit n-i, y_i on qubit 2n-i.",
+        "reason": "Qiskit qubit 0 is the least significant bit while the specification writes x_1 as the leftmost (most significant) bit."
+      }
+    ],
+    "assumptions": [
+      "Hidden string s is given as a bit string 's_1...s_n' with s_1 the most significant bit, matching the specification's |x_1 x_2> ordering.",
+      "The pivot-oracle family is the agent's choice; the paper's 'key representative functions' are unknown and are not claimed to be reproduced beyond the eq_5 instance.",
+      "The one-way (cluster-state) implementation of the paper is assumed logically equivalent to this circuit-model unitary; the cluster graph and measurement pattern are not reconstructed.",
+      "Optional key include_hadamards=false returns only the oracle U_f, for runners that want to test eq_2 in isolation."
+    ],
+    "unresolved_issues": [
+      "The paper's actual five-qubit cluster-state graph, measurement bases, and the list of queried black-box functions are not available; only the logical circuit is implemented.",
+      "No simulation or verification has been performed by the agent; the stated outcome probabilities (eq_4, eq_5) are analytic expectations for the runner to check."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 6,
+    "depth": 4,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

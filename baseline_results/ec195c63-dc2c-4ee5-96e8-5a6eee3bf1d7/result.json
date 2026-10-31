@@ -1,0 +1,144 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "ec195c63-dc2c-4ee5-96e8-5a6eee3bf1d7",
+  "parent_run_id": "1c882199-a71c-423c-8b7e-44a422f3b57e",
+  "created_at": "2026-10-31T16:57:59.200915+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "fb31dd9ae6c059eca3978c5030c7ba4efb484b820de1c7d3150ceef2e8082825",
+  "source_specification_sha256": "acd623058e1ae4cbc4257f9698f5e7f952e4e3528c9998f47c40e7efad83b163",
+  "source_python_sha256": "bc43c1b70e4fd4a0dedcca206b6210d7f08ff1626feb762d002f55162e348c68",
+  "elapsed_seconds": 169.197,
+  "usage": {
+    "input_tokens": 7029,
+    "output_tokens": 13689,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the exact bit-flip oracle U_f (instance f = OR_n, optionally any f given as a truth table) via the diagonalisation U_f = (I x H_y) D_f (I x H_y), D_f|x,y> = (-1)^{y f(x)}|x,y>, with D_f expanded as a product of commuting parity-phase factors exp(i a_S chi_S(z)) obtained from the Walsh transform of pi*y*f(x). Each factor is a parity gate (CNOT fan-in into an ancilla, the Hadamard-conjugate of the fan-out gate), an R_Z rotation on the ancilla, and the uncomputing parity gate; ancillas return to |0>. In the fan-out + R_Z model all 2^(n+1) factors commute and can be applied in parallel (constant depth); the generated Qiskit circuit serialises them over a user-chosen small number of ancillas because of the 12-qubit cap, so Qiskit depth is not constant. This is the agent's chosen standard construction, not the paper's (unavailable) MBQC-derived one.",
+    "source_python": "\"\"\"Exact bit-flip oracle U_f for a classical Boolean function f (instance: OR_n).\n\nScoped construction (eq_1, eq_4; building blocks eq_2, eq_3):\n    U_f = (I (x) H_y) . D_f . (I (x) H_y),   D_f |x,y> = (-1)^{y f(x)} |x,y>.\nWriting g(z) = y*f(x), z = (x, y), the real function pi*g has a Walsh expansion\n    pi*g(z) = sum_S a_S chi_S(z),   chi_S(z) = (-1)^{z . S},\nso D_f = prod_S exp(i a_S chi_S).  Every factor is realised by\n  * a parity gate (CNOT fan-in of the qubits in S into an ancilla); the parity\n    gate is the Hadamard-conjugate of the unbounded fan-out gate F_m of eq_2,\n  * an R_Z rotation diag(e^{i a_S}, e^{-i a_S}) on the ancilla (eq_3),\n  * the uncomputing parity gate (ancilla returned to |0>).\nAll factors commute.  In the fan-out + R_Z depth model they may be applied in\nparallel on 2^(n+1) ancillas (constant depth); here they are serialised in\nbatches over `num_ancilla` ancillas because of the 12-qubit cap, so the Qiskit\ndepth of the returned circuit is NOT constant.\n\nQubit layout: qubits 0..n-1 = input register x (x_j on qubit n-j, so the string\nx_1...x_n reads as the big-endian bitstring of the register), qubit n = target\ny, qubits n+1..n+num_ancilla = ancillas (must be supplied in |0>).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nTOL = 1e-12\n\n\ndef _read_int(instance, key, fallback):\n    if key in instance:\n        value = instance[key]\n        if isinstance(value, bool) or not isinstance(value, int):\n            raise ValueError(key + ' must be an integer')\n        return value\n    return fallback\n\n\ndef _truth_table(instance, n):\n    \"\"\"eq_4: f = OR_n (default) or an explicit truth table of any f.\"\"\"\n    size = 1 << n\n    function = instance['function'] if 'function' in instance else 'or'\n    if function == 'or':\n        # OR_n(x) = 1 - [|x| = 0]: only the all-zero string maps to 0.\n        return [0 if i == 0 else 1 for i in range(size)]\n    if function == 'truth_table':\n        if 'truth_table' not in instance:\n            raise ValueError('truth_table required when function == truth_table')\n        table = instance['truth_table']\n        if not isinstance(table, (list, tuple)) or len(table) != size:\n            raise ValueError('truth_table must have 2**n entries')\n        out = []\n        for v in table:\n            if isinstance(v, bool) or not isinstance(v, int) or v not in (0, 1):\n                raise ValueError('truth_table entries must be 0 or 1')\n            out.append(v)\n        return out\n    raise ValueError('function must be or or truth_table')\n\n\ndef _walsh_coefficients(table, n):\n    \"\"\"Return a_S, S a bitmask over qubits 0..n, with pi*y*f(x) = sum_S a_S chi_S(z).\"\"\"\n    m = n + 1\n    size = 1 << m\n    mask_x = (1 << n) - 1\n    a = [0.0] * size\n    for z in range(size):\n        y = (z >> n) & 1\n        x = z & mask_x\n        a[z] = math.pi * y * table[x]\n    h = 1\n    while h < size:\n        for i in range(0, size, 2 * h):\n            for j in range(i, i + h):\n                u = a[j]\n                v = a[j + h]\n                a[j] = u + v\n                a[j + h] = u - v\n        h *= 2\n    return [c / size for c in a]\n\n\ndef _bits(mask):\n    out = []\n    q = 0\n    while mask:\n        if mask & 1:\n            out.append(q)\n        mask >>= 1\n        q += 1\n    return out\n\n\ndef build_circuit(instance):\n    \"\"\"Build the exact oracle U_f |x>|y>|0..0> = |x>|y xor f(x)>|0..0> (eq_1).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _read_int(instance, 'n', None)\n    if n is None or n < 1:\n        raise ValueError('n must be a positive integer')\n    k = _read_int(instance, 'num_ancilla', 1)\n    if k < 1:\n        raise ValueError('num_ancilla must be >= 1')\n    total = n + 1 + k\n    if total > MAX_QUBITS:\n        raise ValueError('n + 1 + num_ancilla must not exceed 12')\n    table = _truth_table(instance, n)\n    coeffs = _walsh_coefficients(table, n)\n\n    x = QuantumRegister(n, 'x')\n    y = QuantumRegister(1, 'y')\n    anc = QuantumRegister(k, 'a')\n    qc = QuantumCircuit(x, y, anc, name='U_f')\n    data = list(x) + [y[0]]  # qubit index q in a mask S refers to data[q]\n\n    # eq_1: X^{f(x)} on y = H Z^{f(x)} H ; the middle part is the diagonal D_f.\n    qc.h(y[0])\n    # S = empty set: global phase exp(i a_0).\n    qc.global_phase += coeffs[0]\n    terms = [(s, coeffs[s]) for s in range(1, len(coeffs)) if abs(coeffs[s]) > TOL]\n    # Commuting parity-phase factors; batches of size k are the serialised\n    # version of what the fan-out model does in a single parallel layer.\n    for start in range(0, len(terms), k):\n        batch = terms[start:start + k]\n        # eq_2 (parity gate = H-conjugated fan-out): compute z.S into ancilla t.\n        for t, (s, _c) in enumerate(batch):\n            for q in _bits(s):\n                qc.cx(data[q], anc[t])\n        # eq_3: R_Z on the parity ancilla, rz(-2a) = diag(e^{ia}, e^{-ia}) = exp(i a chi_S).\n        for t, (_s, c) in enumerate(batch):\n            qc.rz(-2.0 * c, anc[t])\n        # Uncompute the parity (ancilla back to |0>).\n        for t, (s, _c) in enumerate(batch):\n            for q in reversed(_bits(s)):\n                qc.cx(data[q], anc[t])\n    qc.h(y[0])\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"num_ancilla\": 2, \"function\": \"or\"}",
+    "register_layout": [
+      "qubits 0-2: input register x (n=3); x_j stored on qubit n-j, i.e. x_3 on qubit 0, x_2 on qubit 1, x_1 on qubit 2 (Qiskit bitstring of the register reads x_1 x_2 x_3); for function=truth_table the index i has bit q equal to the value of qubit q",
+      "qubit 3: target y, receives y XOR OR_3(x)",
+      "qubits 4-5: ancillas a (num_ancilla=2), must be supplied in |0>, returned to |0>",
+      "total 6 qubits; Qiskit index 0 is the least significant bit"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (H on y, diagonal D_f via parity-phase factors, H on y); docstring of build_circuit",
+        "explanation": "Bit-flip oracle realised as (I x H_y) D_f (I x H_y) with D_f|x,y> = (-1)^{y f(x)}|x,y>; ancillas are uncomputed so the action on (x,y) is exactly |x>|y xor f(x)>."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit, loop commented 'eq_2 (parity gate = H-conjugated fan-out)'",
+        "explanation": "The parity gate z.S -> ancilla is implemented as a CNOT fan-in from the qubits in S into an ancilla; it is the Hadamard-conjugate of F_m. In Qiskit it is a sequence of CX gates, which is depth |S| rather than the depth-1 elementary fan-out of the abstract's model."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit, qc.rz(-2.0 * c, anc[t])",
+        "explanation": "Arbitrary Z rotation on the parity ancilla; rz(-2a) = diag(e^{ia}, e^{-ia}) implements exp(i a_S chi_S) exactly (phase convention differs from eq_3's diag(1,e^{i theta}) by a global phase, which is tracked exactly)."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_truth_table (function == 'or')",
+        "explanation": "OR_n truth table: 0 only for the all-zero input, 1 otherwise, exactly 1 - [|x| = 0]."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The Hamming-weight phase primitive is not used; the chosen construction uses parity phases chi_S(z) (Walsh expansion) instead of Hamming-weight phases."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The constant-depth claim is the paper's theorem; the chosen construction is constant depth only in the fan-out + R_Z model with 2^(n+1) parallel parity ancillas. The generated Qiskit circuit serialises the commuting factors over num_ancilla ancillas and has non-constant gate depth, so eq_6 is not realised as a depth property of the emitted circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_6"
+        ],
+        "change": "The paper's MBQC-derived constant-depth construction is unavailable; replaced by a standard construction: diagonalise U_f by Hadamards on the target, expand the diagonal (-1)^{y f(x)} into 2^(n+1) commuting parity-phase factors via the Walsh transform of pi*y*f(x), each realised by parity gate + R_Z + uncompute.",
+        "reason": "Only the existence claim is given in the abstract; this construction is exact and is constant depth in the fan-out + R_Z model (all factors commute and can be parallelised on 2^(n+1) ancillas), matching the abstract's model, but it is not claimed to be the paper's method."
+      },
+      {
+        "equation_ids": [
+          "eq_6",
+          "eq_2"
+        ],
+        "change": "Depth is NOT constant in the emitted Qiskit circuit: factors are serialised in batches over num_ancilla (1..11-n) ancillas, and each parity gate is a CX cascade (depth |S|) instead of a depth-1 fan-out/parity gate.",
+        "reason": "12-qubit cap forbids 2^(n+1) parallel ancillas; Qiskit has no depth-1 unbounded fan-out primitive."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_4"
+        ],
+        "change": "Oracle generalised: besides function='or' (the scoped instance), an explicit truth table for any f:{0,1}^n->{0,1} is accepted via function='truth_table'.",
+        "reason": "The same Walsh/parity-phase construction applies verbatim to arbitrary f, covering the abstract's general-f statement at no extra cost; default remains OR_n."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "R_Z realised as qc.rz(-2a) = diag(e^{ia}, e^{-ia}) rather than diag(1, e^{i theta}); the S = empty-set coefficient is applied as qc.global_phase.",
+        "reason": "This makes the product of factors equal exp(i pi y f(x)) exactly (not merely up to global phase)."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Register ordering fixed: qubits 0..n-1 hold x (x_j on qubit n-j), qubit n is y, qubits n+1.. are ancillas; truth-table index uses Qiskit little-endian bit q = qubit q.",
+        "reason": "The specification left the physical qubit order unspecified; the choice makes the register bitstring read as x_1...x_n."
+      }
+    ],
+    "assumptions": [
+      "Ancilla qubits are supplied in |0> by the runner; they are returned to |0> by construction.",
+      "Bit-flip (XOR) oracle convention, as in eq_1.",
+      "Walsh coefficients with |a_S| <= 1e-12 are treated as zero and skipped (for OR_n all 2^(n+1) coefficients are nonzero).",
+      "The parity gate (CX fan-in into an ancilla) is taken as the Hadamard-conjugate of the fan-out gate eq_2, so the construction lives in the abstract's elementary gate set."
+    ],
+    "unresolved_issues": [
+      "The actual MBQC-to-circuit equivalence and the paper's specific pattern/circuit are not reconstructed; the implemented construction only shares the exactness and fan-out-model constant-depth property.",
+      "Gate count is 2^(n+1) parity-phase factors (exponential in n); acceptable for n <= 10 within the 12-qubit cap but not a scalable circuit-model implementation.",
+      "Qiskit depth of the returned circuit grows with n; the constant-depth claim eq_6 can only be checked by counting fan-out-model layers, which the emitted circuit does not expose."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 81,
+    "depth": 48,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

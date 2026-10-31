@@ -1,0 +1,191 @@
+# Abstract to equations
+
+Status: **partial**
+
+Model: `claude-fable-5-1`
+
+Mathematics has not been independently verified.
+
+Given a target single-qubit unitary U (reducible to axial Z-rotations R_z(\theta) by Euler decomposition) and a precision \varepsilon, synthesize a Repeat-Until-Success (RUS) circuit over the Clifford+T gate set acting on one ancilla qubit plus the target qubit, such that on ancilla measurement outcome 0 the target undergoes a unitary within distance \varepsilon of R_z(\theta), and on outcome 1 the target undergoes a known Clifford (ideally the identity) so the attempt can be repeated; the expected T-count should be low (abstract reports on average about 2.5 times below the ancilla-free bound 3\log_2(1/\varepsilon)).
+
+Scope: Scope chosen (no experiment_scope supplied): the RUS primitive for a single axial Z-rotation. We specify (i) the generic RUS block structure and success/failure semantics, (ii) the cyclotomic-integer parametrization z\in\mathbb{Z}[\omega], y\in\mathbb{Z}[\sqrt{2}] with |z|^2+y^2=2^L that makes the success branch an exact Z-rotation and the failure branch the identity, (iii) one explicit two-qubit unitary W over \mathbb{Z}[\omega,1/\sqrt{2}] realizing these blocks (exactly Clifford+T-synthesizable), and (iv) a tiny exact instance z=2+\omega, y=\sqrt{2}-1, L=3 giving R_z(2\arg(2+\omega)) with success probability (5+2\sqrt{2})/8. Outside scope (paper contributions not reconstructible from the abstract): the probabilistically-polynomial-time classical search that finds (z,y,L) achieving precision \varepsilon with small L, the paper's specific two-qubit circuit template and its T-count, the Euler-angle assembly for general U beyond the stated background formula, and all numerical T-count evidence.
+
+## Symbols
+
+- $\omega$: primitive 8th root of unity, \omega = e^{i\pi/4} = (1+i)/\sqrt{2}; domain: \mathbb{C}
+- $\mathbb{Z}[\omega]$: ring of cyclotomic integers a+b\omega+c\omega^2+d\omega^3 with a,b,c,d\in\mathbb{Z}; domain: subring of \mathbb{C}
+- $\mathbb{Z}[\sqrt{2}]$: ring of real elements a+b\sqrt{2}, a,b\in\mathbb{Z} (equals the real subring of \mathbb{Z}[\omega]); domain: subring of \mathbb{R}
+- $\mathbb{Z}[\omega,1/\sqrt{2}]$: ring of entries of exactly Clifford+T-synthesizable unitaries; domain: subring of \mathbb{C}
+- $\theta$: target rotation angle of the axial rotation R_z(\theta); domain: [0,2\pi)
+- $\varepsilon$: target approximation precision; domain: (0,1)
+- $R_z(\theta)$: Z-rotation \mathrm{diag}(e^{-i\theta/2},e^{i\theta/2}); domain: SU(2)
+- $z$: cyclotomic integer whose argument encodes the implemented rotation, implemented angle is 2\arg z; domain: \mathbb{Z}[\omega]\setminus\{0\}
+- $y$: real algebraic integer completing the norm equation; controls the failure branch and success probability; domain: \mathbb{Z}[\sqrt{2}]
+- $L$: exponent in the normalization 2^L of the unitary; sets the denominator (1/\sqrt{2})^L; domain: \mathbb{N}
+- $N$: N = 2^L = |z|^2 + y^2; domain: \mathbb{N}
+- $W$: two-qubit Clifford+T unitary of the RUS circuit acting on ancilla \otimes target; domain: U(4) with entries in \mathbb{Z}[\omega,1/\sqrt{2}]
+- $A, B, C, D$: 2\times 2 blocks of W in the ancilla computational basis: W=\begin{pmatrix}A&B\\C&D\end{pmatrix}; domain: \mathbb{C}^{2\times 2}
+- $p$: success probability of one RUS round (ancilla outcome 0); domain: (0,1]
+- $d(U,V)$: global-phase-invariant distance between single-qubit unitaries; domain: [0,1]
+- $|a\rangle_a, |t\rangle_t$: ancilla and target qubit computational basis states; joint basis index is 2a+t (ancilla is the most significant qubit); domain: a,t\in\{0,1\}
+- $T(W)$: T-count of an exact Clifford+T circuit for W; domain: \mathbb{N}
+
+## eq_rus_structure: RUS block structure and success/failure semantics
+
+$$
+W\,(|0\rangle_a\otimes|\psi\rangle_t)=|0\rangle_a\otimes A|\psi\rangle+|1\rangle_a\otimes C|\psi\rangle,\qquad A=\sqrt{p}\,V,\quad C=\sqrt{1-p}\,C_{\mathrm{fail}},\quad p=\|A|\psi\rangle\|^2,\quad \mathbb{E}[\#\text{rounds}]=1/p
+$$
+
+A two-qubit unitary W on ancilla (prepared in |0>) and target. Measuring the ancilla gives outcome 0 with probability p, applying the unitary V (the desired operation) to the target; outcome 1 applies C_fail, which must be a Clifford (so it can be undone or is the identity) and the circuit is repeated. Because A is proportional to a unitary, p is independent of |psi>, and the number of rounds is geometric with mean 1/p.
+
+Provenance: `standard_background`. Standard definition of Repeat-Until-Success circuits (Paetznick–Svore style); the abstract names RUS circuits with one ancilla and measurement but does not state the relation.
+
+Equation assumptions:
+
+- Ancilla is reset to |0> before each repetition
+- Failure branch is corrected by a Clifford (zero T-count) or is the identity
+
+## eq_distance: Approximation metric for the target rotation
+
+$$
+d(U,V)=\sqrt{\tfrac{1}{2}\left(2-|\mathrm{tr}(U^\dagger V)|\right)}\le\varepsilon,\qquad d\big(R_z(\theta),R_z(\phi)\big)=\sqrt{1-\left|\cos\tfrac{\theta-\phi}{2}\right|}
+$$
+
+Global-phase-invariant distance used to define 'within precision epsilon'; for two Z-rotations it reduces to a function of the angle difference. The abstract requires approximation within precision epsilon but does not fix the metric.
+
+Provenance: `abstract_inferred`. The abstract asserts an epsilon-approximation; this is the metric conventionally used in Clifford+T synthesis literature, but the paper's exact choice is not given in the abstract.
+
+Abstract evidence: approximate any given single-qubit unitary within precision $\varepsilon$
+
+Equation assumptions:
+
+- Metric choice is an assumption; operator-norm distance up to phase would differ by a constant factor
+
+## eq_norm_equation: Cyclotomic parametrization of an RUS Z-rotation
+
+$$
+z\in\mathbb{Z}[\omega],\; y\in\mathbb{Z}[\sqrt{2}],\; |z|^2+y^2=2^L,\qquad V_z=\frac{1}{|z|}\mathrm{diag}(z^*,z)=R_z(2\arg z),\qquad p=\frac{|z|^2}{2^L},\qquad C_{\mathrm{fail}}=I
+$$
+
+The success branch implements an exact Z-rotation by angle 2 arg z, and the failure branch (built from the real element y) is the identity. The approximation requirement becomes d(R_z(theta), R_z(2 arg z)) <= epsilon, i.e. choosing z with argument close to theta/2 (mod pi). The norm equation forces the whole W to have entries in Z[omega,1/sqrt2].
+
+Provenance: `abstract_inferred`. Inferred: a Clifford+T RUS circuit with one ancilla acting as an exact Z-rotation on success must have blocks with entries in Z[omega,1/sqrt2]; diag(z^*,z)/sqrt(2^L) with z in Z[omega] is the natural parametrization used in prior RUS work. The restriction y real (failure = identity) is one simple choice; the paper may allow other Clifford failure branches (e.g., y in omega^k Z[sqrt2]).
+
+Abstract evidence: Our synthesis approach uses the Clifford+$T$ basis, plus one ancilla qubit and measurement.
+
+Equation assumptions:
+
+- Failure branch restricted to the identity (y real)
+- Paper's actual parametrization may differ in detail
+
+## eq_W_construction: Explicit two-qubit unitary realizing the RUS blocks
+
+$$
+W=|0\rangle\langle 0|_t\otimes M_0+|1\rangle\langle 1|_t\otimes M_1,\quad M_1=\frac{1}{\sqrt{2^L}}\begin{pmatrix}z&-y\\y&z^*\end{pmatrix},\quad M_0=M_1^{\,*}=\frac{1}{\sqrt{2^L}}\begin{pmatrix}z^*&-y\\y&z\end{pmatrix}\;\Rightarrow\; A=\frac{\mathrm{diag}(z^*,z)}{\sqrt{2^L}},\; C=\frac{y\,I}{\sqrt{2^L}}
+$$
+
+The target qubit controls which single-qubit unitary (M_0 or M_1, complex conjugates of each other) acts on the ancilla. Direct computation gives the ancilla-0 block A proportional to diag(z^*,z) and the ancilla-1 block C proportional to the identity, as required by eq_rus_structure and eq_norm_equation. Unitarity of M_1 follows exactly from |z|^2+y^2=2^L and y real. W has entries in Z[omega,1/sqrt2], hence is exactly Clifford+T-synthesizable (eq_exact_synthesis).
+
+Provenance: `assumption`. A proposed concrete construction, not stated in the abstract; the paper's own circuit template may differ. It is included so the later circuit stage has a well-defined W.
+
+Equation assumptions:
+
+- Register order: ancilla is qubit 0 (most significant), target is qubit 1; joint basis index 2a+t
+- The paper's two-qubit circuit may have a different (lower T-count) form
+
+## eq_exact_synthesis: Exact Clifford+T synthesizability
+
+$$
+U\in U(2^n),\; U_{jk}\in\mathbb{Z}[\omega,1/\sqrt{2}]\;\forall j,k\;\Longleftrightarrow\; U\text{ is exactly implementable over Clifford+}T\;(\text{for }n\ge 2\text{ possibly with one extra ancilla})
+$$
+
+Characterization of exactly Clifford+T-implementable unitaries: single-qubit case needs no ancilla (Kliuchnikov–Maslov–Mosca); multi-qubit case may need at most one borrowed ancilla (Giles–Selinger). Guarantees W of eq_W_construction has an exact circuit.
+
+Provenance: `standard_background`. Well-known exact-synthesis theorems for the Clifford+T gate set; recalled from knowledge, not from the abstract.
+
+## eq_euler: Reduction of a general single-qubit unitary to axial rotations
+
+$$
+U=e^{i\delta}R_z(\alpha)\,H\,R_z(\beta)\,H\,R_z(\gamma),\qquad d(U,\tilde U)\le\varepsilon_\alpha+\varepsilon_\beta+\varepsilon_\gamma
+$$
+
+Any single-qubit unitary factors (up to global phase) into three Z-rotations interleaved with Hadamards; approximating each Z-rotation by an RUS circuit with error epsilon_i yields total error bounded by the sum (triangle inequality for a unitarily invariant distance). Each RUS block is run to success before the next begins.
+
+Provenance: `standard_background`. Standard Euler-angle decomposition; needed to connect the Z-rotation primitive to 'any given single-qubit unitary' in the abstract.
+
+Equation assumptions:
+
+- Error-additivity holds for the chosen metric up to constant factors
+
+## eq_tcount_claim: Reported expected T-count performance (claim, not derived)
+
+$$
+\mathbb{E}[T_{\mathrm{RUS}}]=\frac{T(W)}{p}\;\;(\text{identity failure branch}),\qquad \text{abstract claim: }\;\overline{\mathbb{E}[T_{\mathrm{RUS}}]}\approx\frac{3\log_2(1/\varepsilon)}{2.5}\text{ on average}
+$$
+
+Expected T-count of an RUS circuit is the per-round T-count divided by the success probability (no T gates needed for correction when the failure branch is a Clifford). The abstract reports numerically that this is on average 2.5 times below the ancilla-free lower bound 3 log2(1/epsilon); this is a reported empirical claim, not a derived relation.
+
+Provenance: `abstract_explicit`. The first equality is the standard geometric-repetition cost; the approximate relation restates the abstract's numerical claim.
+
+Abstract evidence: an expected $T$-count on average $2.5$ times lower than the theoretical lower bound of $3\log_{2}(1/\varepsilon)$ for ancilla-free single-qubit circuit decomposition
+
+Equation assumptions:
+
+- Correction after failure costs no T gates
+
+## eq_toy_instance: Tiny exact instance
+
+$$
+z=2+\omega,\; y=\sqrt{2}-1,\; L=3:\quad |z|^2=5+2\sqrt{2},\; y^2=3-2\sqrt{2},\; |z|^2+y^2=8,\quad p=\frac{5+2\sqrt{2}}{8}\approx 0.9786,\quad V_z=R_z\!\left(2\arctan\frac{\sqrt{2}/2}{2+\sqrt{2}/2}\right)\approx R_z(0.5110)
+$$
+
+A minimal concrete solution of the norm equation. The RUS circuit with M_1 = (1/sqrt8)[[2+omega, 1-sqrt2],[sqrt2-1, 2+omega^{-1}]] implements exactly R_z(2 arg(2+omega)) on success (epsilon = 0 for this target angle) and the identity on failure, with about 1.022 expected rounds.
+
+Provenance: `assumption`. Chosen as the smallest useful explicit instance for the circuit stage; verified by direct algebra (|2+omega|^2 = 4+1+2*2cos(pi/4) = 5+2sqrt2, (sqrt2-1)^2 = 3-2sqrt2).
+
+Equation assumptions:
+
+- This instance illustrates the construction; it is not an instance from the paper
+
+## Registers
+
+- a (ancilla): 1 qubits; RUS ancilla, prepared in |0>, measured in the computational basis after W; qubit 0 (most significant in joint index 2a+t)
+- t (target): 1 qubits; Data qubit carrying |psi> to which R_z(2 arg z) is applied on success; qubit 1
+
+## Initial state
+
+|0\rangle_a\otimes|\psi\rangle_t with |\psi\rangle arbitrary (for a test instance, e.g. |\psi\rangle=|+\rangle=(|0\rangle+|1\rangle)/\sqrt{2} so that the phase 2\arg z is observable).
+
+## Measurement
+
+Single-qubit computational-basis measurement of the ancilla after each application of W. Outcome 0 (probability p = |z|^2/2^L, independent of |psi>) signals success; outcome 1 signals failure with the target left in state C_fail|psi> = |psi> (identity failure branch). The target qubit is not measured by the algorithm (for verification only, one may measure the target in the X/Y basis to estimate the applied phase 2 arg z).
+
+## Classical postprocessing
+
+Feed-forward only: if the ancilla outcome is 1, reset the ancilla and repeat W; stop at the first 0. Track the number of rounds; the expected count is 1/p and the expected T-count is T(W)/p. No other postprocessing.
+
+## Algorithm steps
+
+1. Classical: decompose the target single-qubit unitary U into Z-rotations R_z(alpha), R_z(beta), R_z(gamma) interleaved with Hadamards; allocate precision budget per rotation. (eq_euler, eq_distance)
+2. Classical (paper's core contribution, details missing): for each angle theta, find z in Z[omega], y in Z[sqrt2], L in N with |z|^2 + y^2 = 2^L and d(R_z(theta), R_z(2 arg z)) <= epsilon, preferring small L / high p. For the toy instance use z = 2+omega, y = sqrt2-1, L = 3. (eq_norm_equation, eq_toy_instance, eq_distance)
+3. Classical: form the two-qubit unitary W from (z, y, L) and exactly synthesize it over Clifford+T. (eq_W_construction, eq_exact_synthesis)
+4. Quantum: prepare ancilla in |0>, apply W to ancilla ⊗ target, measure the ancilla in the computational basis. (eq_rus_structure, eq_W_construction)
+5. Classical control: on outcome 0 the target holds V_z|psi> = R_z(2 arg z)|psi> and the block is complete; on outcome 1 the target is unchanged (C_fail = I), reset the ancilla to |0> and repeat from the previous step. Expected rounds 1/p; expected T-count T(W)/p. (eq_rus_structure, eq_norm_equation, eq_tcount_claim)
+6. Repeat the RUS block for each of the three Euler Z-rotations (with Hadamards between them) to realize a general U. (eq_euler)
+
+## Assumptions
+
+- No experiment_scope was supplied; the scope was chosen to be the RUS primitive for a single Z-rotation with the explicit toy instance z=2+omega, y=sqrt2-1, L=3.
+- Register ordering: ancilla first (most significant), target second; joint basis index 2a+t.
+- Failure branch restricted to the identity (y real in Z[sqrt2]); the paper may permit other Clifford failure branches.
+- The two-qubit unitary W in eq_W_construction is a proposed realization, not the paper's circuit template.
+- Approximation metric taken as the global-phase-invariant trace-based distance.
+- Correction after failure costs no T gates; ancilla can be reset between rounds.
+
+## Missing information
+
+- The paper's probabilistically polynomial-time classical algorithm for finding (z, y, L) achieving precision epsilon (how candidate z are enumerated/randomized, how the norm equation 2^L - |z|^2 = y^2 is solved, and what makes the runtime polynomial with high probability).
+- The paper's specific two-qubit Clifford+T circuit template for RUS circuits and its T-count as a function of L.
+- Whether the paper targets Z-rotations only or other axial/general unitaries directly, and how precision is budgeted across Euler angles.
+- The precise distance metric used to define precision epsilon.
+- All numerical evidence (distribution of expected T-counts, the 2.5x average improvement, and the range of epsilon studied).

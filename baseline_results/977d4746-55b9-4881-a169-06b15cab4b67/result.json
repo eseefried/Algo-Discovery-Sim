@@ -1,0 +1,143 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "977d4746-55b9-4881-a169-06b15cab4b67",
+  "parent_run_id": "53b1228a-3c45-4c4c-9671-0ddffb1215ba",
+  "created_at": "2026-10-31T17:13:21.544877+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "a99b0b73ab8b5a77a4d4e2e6ba5c5c28eaca7a8fd7cf1eb46c10ef7d47242fb3",
+  "source_specification_sha256": "c60248bda9d63cba9860a7e67a5b0da9cda2f64abd02a8dbe5334a6e50db936e",
+  "source_python_sha256": "2c99f0f72226492061cb5e65433141f6bebd22e9f55010c1cb27be642ded615b",
+  "elapsed_seconds": 92.979,
+  "usage": {
+    "input_tokens": 7149,
+    "output_tokens": 8076,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing one coined discrete-time quantum walk on a cyclic lattice of 2^n sites with a Hadamard coin, a QFT-based conditional +/-1 shift, and T steps. The phenomenological spin (coin) and spatial (position) dephasing channels are implemented unitarily as Stinespring dilations with fresh ancilla qubits per step (ancillas assumed to start in |0> and to be traced out by the runner). Spin dephasing uses one ancilla per step (Ry then CZ onto the coin); spatial dephasing uses a flag ancilla plus n copy ancillas per step (Ry then Toffoli copies of the position bits). The circuit is measurement-free and unitary; sampling P(x,T) and the variance diagnostic are left to the runner.",
+    "source_python": "\"\"\"Coined discrete-time quantum walk with ancilla-dilated per-step spin and spatial dephasing.\n\nRegisters (Qiskit little-endian, qubit 0 = least significant):\n  pos[0..n-1]  : lattice site x mod 2^n in binary\n  coin[0]      : spin qubit, |0> = up (moves +1), |1> = down (moves -1)\n  env          : fresh environment ancillas per step (assumed |0>), traced out by the runner:\n                 per step: [1 spin ancilla if p_s > 0] + [1 flag + n copy ancillas if p_x > 0]\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\n\nMAX_QUBITS = 12\n\n\ndef _check_int(value, name, minimum):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(f\"{name} must be an integer\")\n    if value < minimum:\n        raise ValueError(f\"{name} must be >= {minimum}\")\n    return value\n\n\ndef _check_prob(value, name):\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(f\"{name} must be a real number in [0, 1]\")\n    v = float(value)\n    if math.isnan(v) or v < 0.0 or v > 1.0:\n        raise ValueError(f\"{name} must be in [0, 1]\")\n    return v\n\n\ndef _apply_coin(qc, coin):\n    # eq_1: Hadamard coin C on the spin qubit.\n    qc.h(coin)\n\n\ndef _apply_shift(qc, pos, coin, n):\n    # eq_2: spin-dependent shift S = |x+1><x| (coin=0) + |x-1><x| (coin=1), mod 2^n.\n    # Implemented as a QFT adder: in the Fourier basis adding a to x multiplies\n    # qubit l by exp(2*pi*i*a*2^l/2^n); a = +1 for coin |0>, a = -1 for coin |1>.\n    pos_idx = [pos[l] for l in range(n)]\n    qc.append(QFTGate(n), pos_idx)\n    for l in range(n):\n        ang = 2.0 * math.pi * float(2 ** l) / float(2 ** n)\n        qc.p(ang, pos[l])  # +1 shift phase (unconditional)\n        qc.cp(-2.0 * ang, coin, pos[l])  # flips to -1 shift when coin is |1>\n    qc.append(QFTGate(n).inverse(), pos_idx)\n\n\ndef _apply_spin_dephasing(qc, coin, anc, p_s):\n    # eq_4: E_s(rho) = (1-p_s) rho + p_s Z rho Z, via Stinespring dilation:\n    # ancilla -> sqrt(1-p_s)|0> + sqrt(p_s)|1>, then CZ(anc, coin); tracing anc gives E_s.\n    theta = 2.0 * math.asin(math.sqrt(p_s))\n    qc.ry(theta, anc)\n    qc.cz(anc, coin)\n\n\ndef _apply_spatial_dephasing(qc, pos, flag, copies, p_x, n):\n    # eq_5: E_x(rho) = (1-p_x) rho + p_x sum_x |x><x| rho |x><x|, via dilation:\n    # flag -> sqrt(1-p_x)|0> + sqrt(p_x)|1>; if flag=1 copy every position bit into a\n    # fresh ancilla (Toffoli). Tracing flag and copies yields E_x exactly.\n    theta = 2.0 * math.asin(math.sqrt(p_x))\n    qc.ry(theta, flag)\n    for l in range(n):\n        qc.ccx(flag, pos[l], copies[l])\n\n\ndef build_circuit(instance):\n    \"\"\"Build the T-step decoherent coined quantum walk as a unitary circuit.\n\n    instance keys: n (position qubits, >=1), T (steps, >=0), p_s (spin dephasing\n    probability per step), p_x (spatial dephasing probability per step).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = _check_int(instance.get(\"n\"), \"n\", 1)\n    steps = _check_int(instance.get(\"T\"), \"T\", 0)\n    p_s = _check_prob(instance.get(\"p_s\", 0.0), \"p_s\")\n    p_x = _check_prob(instance.get(\"p_x\", 0.0), \"p_x\")\n\n    use_s = p_s > 0.0\n    use_x = p_x > 0.0\n    anc_per_step = (1 if use_s else 0) + ((n + 1) if use_x else 0)\n    n_env = steps * anc_per_step\n    total = n + 1 + n_env\n    if total > MAX_QUBITS:\n        raise ValueError(\n            f\"instance needs {total} qubits (> {MAX_QUBITS}); reduce n, T, or disable a channel\"\n        )\n\n    pos = QuantumRegister(n, \"pos\")\n    coin_reg = QuantumRegister(1, \"coin\")\n    if n_env > 0:\n        env = QuantumRegister(n_env, \"env\")\n        qc = QuantumCircuit(pos, coin_reg, env)\n    else:\n        env = None\n        qc = QuantumCircuit(pos, coin_reg)\n    coin = coin_reg[0]\n\n    cursor = 0\n    for _ in range(steps):\n        # eq_3: W = S (1 x C); eq_6: rho -> E_x(E_s(W rho W^dag)) each step.\n        _apply_coin(qc, coin)\n        _apply_shift(qc, pos, coin, n)\n        if use_s:\n            _apply_spin_dephasing(qc, coin, env[cursor], p_s)\n            cursor += 1\n        if use_x:\n            flag = env[cursor]\n            copies = [env[cursor + 1 + l] for l in range(n)]\n            _apply_spatial_dephasing(qc, pos, flag, copies, p_x, n)\n            cursor += n + 1\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"T\": 3, \"p_s\": 0.2, \"p_x\": 0.0}",
+    "register_layout": [
+      "qubits 0-2: pos[0..2], lattice site x mod 8 in binary (qubit 0 least significant); walker starts at |000> = site 0",
+      "qubit 3: coin[0], spin qubit; |0> = up (shift +1), |1> = down (shift -1); start |0>",
+      "qubits 4-6: env[0..2], one fresh spin-dephasing ancilla per step (steps 1,2,3), assumed prepared in |0> and traced out after the circuit",
+      "(general layout) for p_x > 0 each step additionally allocates 1 flag ancilla followed by n copy ancillas after that step's spin ancilla; total qubits = n + 1 + T*([p_s>0] + (n+1)*[p_x>0]) <= 12"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_apply_coin (qc.h on coin)",
+        "explanation": "Hadamard coin applied to the spin qubit at the start of each step."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_apply_shift (QFTGate, p/cp phases, inverse QFTGate)",
+        "explanation": "Conditional +/-1 shift mod 2^n realized as a QFT adder: unconditional +1 phases plus coin-controlled -2 phases give +1 for coin |0> and -1 for coin |1>."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit step loop (comment 'eq_3')",
+        "explanation": "Each step applies the coin then the shift, W = S(1 x C)."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_apply_spin_dephasing (ry on ancilla, cz onto coin)",
+        "explanation": "Stinespring dilation of the coin dephasing channel with a fresh ancilla per step; tracing the ancilla yields (1-p_s)rho + p_s Z rho Z exactly."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "_apply_spatial_dephasing (ry on flag, ccx copies of position bits)",
+        "explanation": "Stinespring dilation of position dephasing: with amplitude sqrt(p_x) the position bits are copied into fresh ancillas; tracing gives (1-p_x)rho + p_x sum_x |x><x| rho |x><x|. Disabled in the example instance (p_x = 0) to respect the 12-qubit cap at n=3, T=3."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "build_circuit step loop (comment 'eq_6'); ordering W, then spin, then spatial dilation",
+        "explanation": "The per-step composition E_x(E_s(W rho W^dag)) is realized unitarily on system+environment; the position distribution P(x,t) is obtained by the runner by measuring/tracing the pos register and ignoring env and coin."
+      },
+      {
+        "equation_id": "eq_7",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Variance diagnostic is classical post-processing of P(x,T); not part of the circuit operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Non-unitary dephasing channels are implemented as unitary Stinespring dilations with fresh environment ancillas per step (1 ancilla per step for spin dephasing; n+1 per step for spatial dephasing). The channel is recovered only after the runner traces out (ignores) the env register; ancillas are assumed to be supplied in |0>.",
+        "reason": "The deliverable must be a measurement-free unitary circuit without reset or dynamic circuits, so Kraus channels cannot be applied directly."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Spatial dephasing is optional (p_x = 0 in the example) and limited by the 12-qubit cap; with n=3, T=3 the spin-only channel fits (7 qubits) while enabling p_x would need 19 qubits. Smaller instances (e.g. n=2, T=2, both channels: 11 qubits) can enable both.",
+        "reason": "Qubit budget; the specification's tiny instance with both channels cannot be dilated within 12 qubits."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Shift implemented via QFT adder (QFTGate, phases 2*pi*2^l/2^n on Fourier-basis qubit l, coin-controlled sign flip, inverse QFTGate) rather than a multi-controlled-X incrementer/decrementer.",
+        "reason": "Equivalent unitary on the cyclic register; uses the recommended QFTGate with Qiskit's little-endian qubit order (qubit l of the Fourier register carries phase weight 2^l)."
+      },
+      {
+        "equation_ids": [
+          "eq_6",
+          "eq_7"
+        ],
+        "change": "Measurement of the position register, histogramming, signed-site reinterpretation, and variance/fit are excluded from the module.",
+        "reason": "The module returns an operation only; experiment steps are the runner's responsibility."
+      }
+    ],
+    "assumptions": [
+      "Environment ancillas (env register) are prepared in |0> by the runner and traced out; otherwise the circuit does not realize the dephasing channels.",
+      "Walker input |x=0>|up> = |000>|0> is prepared by the runner; the operation itself is valid for any input on pos and coin.",
+      "Hadamard coin, Markovian per-step dephasing, and the channel order (W, spin, spatial) follow the math specification's stated choices, not the paper.",
+      "Cyclic lattice of 2^n sites; for T < 2^(n-1) starting from site 0 no wrap-around occurs."
+    ],
+    "unresolved_issues": [
+      "The paper's actual phenomenological decoherence model and its parametrization are unknown; dephasing form is an assumption.",
+      "Quasi-stationary (non-Markovian) spin dephasing, coherence length, and the discrete Wigner-function analysis are not modelled.",
+      "Ancilla cost grows as T*(1 + (n+1)) when both channels are enabled, so only very small instances fit under the 12-qubit cap with spatial dephasing on."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 7,
+    "gate_count": 195,
+    "depth": 141,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

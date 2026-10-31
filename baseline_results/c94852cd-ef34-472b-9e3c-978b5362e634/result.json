@@ -1,0 +1,156 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "c94852cd-ef34-472b-9e3c-978b5362e634",
+  "parent_run_id": "acb5370a-ec56-411a-aa35-5089b1d104ae",
+  "created_at": "2026-10-31T17:07:42.781965+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "028908e4a35aefa9d469241ebca526f2a7c19268d9023998598ca39ad09878ed",
+  "source_specification_sha256": "220f6137483c1e6bc640ee8e20a5d35082fa2856567982bf93a5bbd3fbe67ca6",
+  "source_python_sha256": "264592a7eaadfdaa60c34fdd36c413956adcc544d3a5b8e76c972b2a34a8a721",
+  "elapsed_seconds": 93.414,
+  "usage": {
+    "input_tokens": 8423,
+    "output_tokens": 8241,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Coinless (tessellation / staggered) discrete-time quantum walk on a cycle of N = 2^n sites, encoded on n site qubits with no coin register. One step is U = U_1 U_0 where U_0 = 2 sum_k |alpha_k><alpha_k| - I acts as the same single-qubit reflection R Z R^dagger (R = U(theta,phi,0)) on the least-significant site qubit (polygons {2k,2k+1}), and U_1 is the analogous reflection for the shifted tessellation {2k+1, 2k+2 mod N}, realised as S U_0(theta',phi') S^dagger with S the cyclic increment |x> -> |x+1 mod N> built from QFTGate and phase gates. The circuit applies U^t for t steps; input-state preparation and measurement are left to the runner.",
+    "source_python": "\"\"\"Coinless (tessellation / staggered) discrete-time quantum walk on a cycle.\n\nSites x in Z_N with N = 2**n are encoded as the n-bit integer x on the site\nregister (Qiskit convention: qubit 0 is the least significant bit).  There is\nno coin register (eq_1).  One walk step is U = U_1 U_0 (eq_3) where each U_j is\nthe reflection 2 P_j - I about the span of its two-site polygon states (eq_2).\nbuild_circuit returns the operation U**t only (no state preparation, no\nmeasurement).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\n\nMAX_QUBITS = 12\nMAX_STEPS = 1000\n\n\ndef _as_angle(instance, key):\n    \"\"\"Fetch a finite real angle from the instance dictionary.\"\"\"\n    if key not in instance:\n        raise ValueError(\"instance is missing required key '%s'\" % key)\n    value = instance[key]\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(\"'%s' must be a real number\" % key)\n    value = float(value)\n    if not math.isfinite(value):\n        raise ValueError(\"'%s' must be finite\" % key)\n    return value\n\n\ndef _as_int(instance, key, lower, upper):\n    \"\"\"Fetch an integer in [lower, upper] from the instance dictionary.\"\"\"\n    if key not in instance:\n        raise ValueError(\"instance is missing required key '%s'\" % key)\n    value = instance[key]\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(\"'%s' must be an integer\" % key)\n    if value < lower or value > upper:\n        raise ValueError(\"'%s' must lie in [%d, %d]\" % (key, lower, upper))\n    return value\n\n\ndef _polygon_reflection(qc, qubit, theta, phi):\n    \"\"\"Apply 2|alpha><alpha| - I on one qubit (eq_2, eq_3, eq_7).\n\n    |alpha> = cos(theta/2)|0> + exp(i phi) sin(theta/2)|1> = U(theta,phi,0)|0>,\n    hence 2|alpha><alpha| - I = R Z R^dagger with R = U(theta, phi, 0) and\n    R^dagger = U(-theta, 0, -phi).  Because every tessellation-0 polygon\n    {2k, 2k+1} differs only in the least significant bit, acting with this\n    single-qubit reflection on qubit 0 implements U_0 = sum_k (2|alpha_k><alpha_k|)\n    - I on all polygons simultaneously; in the relabelled picture of eq_7 this\n    is exactly I_{N/2} (x) C_0 with the LSB playing the role of the coin.\n    \"\"\"\n    qc.u(-theta, 0.0, -phi, qubit)  # R^dagger\n    qc.z(qubit)                     # 2|0><0| - I\n    qc.u(theta, phi, 0.0, qubit)    # R\n\n\ndef _cyclic_shift(qc, qubits, sign):\n    \"\"\"Apply S^sign, S|x> = |x + 1 mod N>, via QFT, phases, inverse QFT.\n\n    QFTGate maps |x> -> N^{-1/2} sum_k exp(2 pi i x k / N)|k> with qubit 0 as\n    the least significant bit of k, so the phase exp(2 pi i sign * k / N)\n    factorises into p(sign * 2 pi 2^j / N) on qubit j.\n    \"\"\"\n    n = len(qubits)\n    big_n = 2 ** n\n    qc.append(QFTGate(n), qubits)\n    for j, q in enumerate(qubits):\n        qc.p(sign * 2.0 * math.pi * (2 ** j) / big_n, q)\n    qc.append(QFTGate(n).inverse(), qubits)\n\n\ndef _walk_step(qc, qubits, theta, phi, theta_p, phi_p):\n    \"\"\"One coinless step U = U_1 U_0 (eq_3).\n\n    U_0 acts on polygons {2k, 2k+1}: single-qubit reflection on the LSB.\n    U_1 acts on polygons {2k+1, 2k+2 mod N} = S{2k, 2k+1}; since\n    S^dagger|beta_k> = cos(theta'/2)|2k> + exp(i phi') sin(theta'/2)|2k+1>,\n    we have U_1 = S U_0(theta', phi') S^dagger.\n    \"\"\"\n    lsb = qubits[0]\n    # U_0\n    _polygon_reflection(qc, lsb, theta, phi)\n    # U_1 = S U_0' S^dagger  (apply S^dagger, then U_0', then S)\n    _cyclic_shift(qc, qubits, -1.0)\n    _polygon_reflection(qc, lsb, theta_p, phi_p)\n    _cyclic_shift(qc, qubits, 1.0)\n\n\ndef build_circuit(instance):\n    \"\"\"Build the coinless walk operator U**t on a cycle of N = 2**num_qubits sites.\n\n    instance keys:\n      num_qubits  : int, 1..12, site register size (N = 2**num_qubits, eq_1)\n      steps       : int, 0..1000, number of walk steps t (eq_4)\n      theta, phi  : real, polygon-state parameters of tessellation 0 (eq_2)\n      theta_prime, phi_prime : real, parameters of tessellation 1 (eq_2)\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dictionary\")\n    n = _as_int(instance, \"num_qubits\", 1, MAX_QUBITS)\n    steps = _as_int(instance, \"steps\", 0, MAX_STEPS)\n    theta = _as_angle(instance, \"theta\")\n    phi = _as_angle(instance, \"phi\")\n    theta_p = _as_angle(instance, \"theta_prime\")\n    phi_p = _as_angle(instance, \"phi_prime\")\n\n    # eq_1: the whole Hilbert space is the site register, no coin factor.\n    site = QuantumRegister(n, \"site\")\n    qc = QuantumCircuit(site, name=\"coinless_walk\")\n    qubits = list(range(n))\n\n    # eq_4: |psi(t)> = U**t |psi(0)>  (the operator part only)\n    for _ in range(steps):\n        _walk_step(qc, qubits, theta, phi, theta_p, phi_p)\n    return qc",
+    "example_instance_json": "{\"num_qubits\": 2, \"steps\": 1, \"theta\": 1.5707963267948966, \"phi\": 0.0, \"theta_prime\": 1.5707963267948966, \"phi_prime\": 0.0}",
+    "register_layout": [
+      "site[0] = qubit 0: least significant bit of the site index x (parity bit; equals the coin value c in the relabelling of eq_7)",
+      "site[1] = qubit 1: most significant bit of x for the N = 4 example (general: site[j] = qubit j carries bit 2^j of x)",
+      "Site x in Z_N, N = 2^num_qubits, is the integer with binary expansion x = sum_j x_j 2^j over the site qubits; there is no coin register"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: QuantumRegister(n, 'site') with comment 'eq_1: the whole Hilbert space is the site register, no coin factor'",
+        "explanation": "The circuit uses only n = log2(N) site qubits, i.e. the N-dimensional site space, with no coin register."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_polygon_reflection (|alpha> = U(theta,phi,0)|0>) and _walk_step (tessellation-1 polygons obtained from tessellation-0 polygons by the cyclic shift S)",
+        "explanation": "Polygon states for both tessellations are parametrised by (theta,phi) and (theta',phi') exactly as in eq_2; the shifted pairs {2k+1, 2k+2 mod N} are handled by conjugating with S."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_walk_step (U = U_1 U_0), _polygon_reflection (2P-I as R Z R^dagger), _cyclic_shift (S for U_1 = S U_0' S^dagger)",
+        "explanation": "Each reflection 2 sum_k |.><.| - I is realised exactly as a single-qubit reflection on the LSB (optionally conjugated by the increment S); their product is one step."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop 'for _ in range(steps): _walk_step(...)' with comment 'eq_4'",
+        "explanation": "Only the unitary part U^t is implemented; the initial state |0> and the measurement giving p_t(x) are the runner's responsibility per the operation-only contract."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Time-averaged and limiting distributions are classical post-processing of measured p_t(x) (or classical diagonalisation of U); not part of the quantum operation."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Mixing time is a classical quantity derived from eq_5 outputs; not part of the circuit."
+      },
+      {
+        "equation_id": "eq_7",
+        "disposition": "implemented",
+        "code_location": "_polygon_reflection docstring: LSB qubit plays the role of the coin so U_0 = I_{N/2} (x) C_0",
+        "explanation": "The parity relabelling |2k+c> <-> |k>|c> is literally the binary encoding with qubit 0 = c; U_0 is implemented as the coin operation C_0 on that qubit. The shift/coin factorisation of U_1 from the paper is not reconstructed (U_1 is implemented as S C_0' S^dagger instead)."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Cycle size restricted to powers of two, N = 2^num_qubits (N even is automatically satisfied), with num_qubits in 1..12.",
+        "reason": "Sites are encoded as binary integers on qubits; a non-power-of-two cycle would need a modular shift on a padded register, which is outside the minimal construction."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "U_1 implemented as S U_0(theta',phi') S^dagger with S the cyclic increment realised as QFT^dagger . (phase gates) . QFT, instead of directly as parallel 2x2 blocks on pairs {2k+1, 2k+2 mod N}.",
+        "reason": "The shifted tessellation pairs are not aligned with a single qubit, so a basis-shift conjugation is the natural exact gate-level realisation; the resulting operator equals eq_3's U_1 exactly."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Initial-state preparation |psi(0)> = |0> and computational-basis measurement removed from the circuit; only U^t is returned.",
+        "reason": "Required operation-only contract (inputs prepared and measured by the runner)."
+      },
+      {
+        "equation_ids": [
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Time averaging, limiting distribution, and mixing time are not implemented.",
+        "reason": "They are classical post-processing of measurement statistics, not quantum operations."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_7"
+        ],
+        "change": "Site index encoding fixed to Qiskit little-endian convention (qubit 0 = least significant bit) rather than the 'big-endian' wording of the specification.",
+        "reason": "Qiskit's basis-state ordering; this makes the parity/coin bit of eq_7 coincide with qubit 0 and simplifies U_0 to a single-qubit gate."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Reflection 2|alpha><alpha| - I implemented as U(-theta,0,-phi) . Z . U(theta,phi,0) on the polygon qubit.",
+        "reason": "Exact decomposition into standard gates; U(theta,phi,0)|0> = |alpha> so R Z R^dagger = 2|alpha><alpha| - I with no global-phase discrepancy."
+      }
+    ],
+    "assumptions": [
+      "Two tessellations of nearest-neighbour two-site polygons with translation-invariant parameters (theta,phi) and (theta',phi').",
+      "Each tessellation operator has the reflection form 2P - I (standard staggered form); more general operators from the paper are not covered.",
+      "For num_qubits = 1 (N = 2) both tessellations consist of the same pair {0,1}; the construction remains well defined.",
+      "Instance angles are arbitrary finite reals; steps capped at 1000 and qubits at 12 to bound circuit size."
+    ],
+    "unresolved_issues": [
+      "The paper's specific family of evolution operators and its explicit 'extended coined' shift/coin factorisation of U_1 are unknown; only the reflection family of eq_3 with the parity relabelling of eq_7 is implemented.",
+      "Mixing time and limiting-distribution analysis (eq_5, eq_6) require classical post-processing outside this module."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 50,
+    "depth": 40,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

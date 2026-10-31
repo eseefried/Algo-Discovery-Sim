@@ -1,0 +1,135 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "f99a108c-f459-4f89-b26f-1e39c30f82ef",
+  "parent_run_id": "e4be69ff-78d6-4b3e-89a0-c23bcf093578",
+  "created_at": "2026-10-31T17:43:55.078286+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "ad619b62ab487adbf063e38b0087ebae3d0bb23cecaeae1de784b640a8ef43a6",
+  "source_specification_sha256": "4a46687c1aeadfce08c1570d06f1cce731dd3805051184115ad710e92c8b33c9",
+  "source_python_sha256": "1dbf4a31b1a050f1f531d1dd1da799b41c87b7b62a5ce77e3685dfcfa7a1bd38",
+  "elapsed_seconds": 114.808,
+  "usage": {
+    "input_tokens": 8159,
+    "output_tokens": 10094,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit operation U(t) ~ exp(-i H_w t) for the continuous-time quantum walk search Hamiltonian on an n x n periodic honeycomb (graphene) lattice with one marked site whose three bonds are modified by epsilon and which optionally carries an on-site potential mu. Sites are binary-encoded on ceil(log2(2n^2)) qubits; each of the 3n^2 bond terms is applied exactly as a two-level X rotation between two computational basis states (CX-chain conjugated multi-controlled RX) and the on-site term as a multi-controlled phase, combined in a first- or second-order Trotter product. The Dirac-point initial state and the measurement of P_w(t) are left to the runner.",
+    "source_python": "\"\"\"Trotterised continuous-time quantum walk search operator on a periodic honeycomb lattice.\n\nbuild_circuit(instance) returns the unitary U ~ exp(-i H_w t) for\n  H_w = H_0 + epsilon * sum_{j in N(w)} (|w><j| + |j><w|) + mu |w><w|       (eq_3)\n  H_0 = -gamma * sum_{cells} sum_{delta} (|m1,m2,A><m1-d1,m2-d2,B| + h.c.)   (eq_1)\nencoded on a binary site register idx(m1,m2,sigma) = 2(n m1 + m2) + sigma (eq_6).\nNo state preparation and no measurement are included (eq_4 / eq_5 measurement left to runner).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import PhaseGate, RXGate\n\nMAX_QUBITS = 12\nALLOWED_KEYS = (\"n\", \"gamma\", \"epsilon\", \"mu\", \"t\", \"marked_site\", \"trotter_steps\", \"trotter_order\")\n\n\ndef _check_real(value, name):\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(\"parameter '%s' must be a real number\" % name)\n    val = float(value)\n    if not math.isfinite(val):\n        raise ValueError(\"parameter '%s' must be finite\" % name)\n    return val\n\n\ndef _check_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(\"parameter '%s' must be an integer\" % name)\n    return value\n\n\ndef _site_index(n, m1, m2, sigma):\n    # eq_6: idx(m1, m2, sigma) = 2 (n m1 + m2) + sigma, cell coordinates taken mod n\n    return 2 * (n * (m1 % n) + (m2 % n)) + sigma\n\n\ndef _bond_list(n, gamma, epsilon, w):\n    # eq_1 (hopping -gamma on every A-B bond) + bond part of eq_3 (bonds touching w get -gamma + epsilon)\n    bonds = []\n    for m1 in range(n):\n        for m2 in range(n):\n            a = _site_index(n, m1, m2, 0)\n            for d1, d2 in ((0, 0), (1, 0), (0, 1)):\n                b = _site_index(n, m1 - d1, m2 - d2, 1)\n                coeff = -gamma\n                if a == w or b == w:\n                    coeff += epsilon\n                bonds.append((a, b, coeff))\n    return bonds\n\n\ndef _apply_two_level_x(qc, qubits, k, l, angle):\n    \"\"\"Apply exp(-i (angle/2) (|k><l| + |l><k|)) exactly on basis states k != l (RX(angle) on the 2-level subspace).\"\"\"\n    nq = len(qubits)\n    diff = [p for p in range(nq) if ((k >> p) & 1) != ((l >> p) & 1)]\n    p = diff[0]\n    # CX chain maps k -> k', l -> l' with k', l' differing only at bit p (chain is an involution)\n    for q in diff[1:]:\n        qc.cx(qubits[p], qubits[q])\n    kp = (k >> p) & 1\n    controls = []\n    flips = []\n    for q in range(nq):\n        if q == p:\n            continue\n        bit = (k >> q) & 1\n        if q in diff:\n            bit ^= kp\n        controls.append(qubits[q])\n        if bit == 0:\n            flips.append(qubits[q])\n    for f in flips:\n        qc.x(f)\n    qc.append(RXGate(angle).control(nq - 1), controls + [qubits[p]])\n    for f in flips:\n        qc.x(f)\n    for q in reversed(diff[1:]):\n        qc.cx(qubits[p], qubits[q])\n\n\ndef _apply_onsite_phase(qc, qubits, w, angle):\n    \"\"\"Apply exp(i angle |w><w|): a phase on the single computational basis state w (on-site term of eq_3).\"\"\"\n    nq = len(qubits)\n    flips = [qubits[q] for q in range(nq) if ((w >> q) & 1) == 0]\n    for f in flips:\n        qc.x(f)\n    qc.append(PhaseGate(angle).control(nq - 1), [qubits[q] for q in range(nq)])\n    for f in flips:\n        qc.x(f)\n\n\ndef build_circuit(instance):\n    \"\"\"Return the Trotterised evolution U ~ exp(-i H_w t) (eq_5) on the binary site register.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    for key in instance:\n        if key not in ALLOWED_KEYS:\n            raise ValueError(\"unknown parameter '%s'\" % str(key))\n    for key in ALLOWED_KEYS:\n        if key not in instance:\n            raise ValueError(\"missing parameter '%s'\" % key)\n    n = _check_int(instance[\"n\"], \"n\")\n    if n < 3 or n % 3 != 0:\n        raise ValueError(\"n must be a positive multiple of 3 (Dirac points must be allowed momenta)\")\n    gamma = _check_real(instance[\"gamma\"], \"gamma\")\n    if gamma <= 0.0:\n        raise ValueError(\"gamma must be positive\")\n    epsilon = _check_real(instance[\"epsilon\"], \"epsilon\")\n    mu = _check_real(instance[\"mu\"], \"mu\")\n    t = _check_real(instance[\"t\"], \"t\")\n    if t < 0.0:\n        raise ValueError(\"t must be non-negative\")\n    num_sites = 2 * n * n\n    w = _check_int(instance[\"marked_site\"], \"marked_site\")\n    if w < 0 or w >= num_sites:\n        raise ValueError(\"marked_site must lie in [0, 2 n^2)\")\n    steps = _check_int(instance[\"trotter_steps\"], \"trotter_steps\")\n    if steps < 1:\n        raise ValueError(\"trotter_steps must be >= 1\")\n    order = _check_int(instance[\"trotter_order\"], \"trotter_order\")\n    if order not in (1, 2):\n        raise ValueError(\"trotter_order must be 1 or 2\")\n    nq = (num_sites - 1).bit_length()\n    if nq > MAX_QUBITS:\n        raise ValueError(\"instance needs %d qubits, exceeding the cap of %d\" % (nq, MAX_QUBITS))\n\n    reg = QuantumRegister(nq, \"site\")\n    qc = QuantumCircuit(reg, name=\"graphene_ctqw_search\")\n    qubits = list(range(nq))\n    bonds = _bond_list(n, gamma, epsilon, w)\n    dt = t / steps\n    # eq_5: exp(-i H_w t) ~ product of exponentials of the bond terms and the on-site term\n    for _ in range(steps):\n        if order == 1:\n            for a, b, c in bonds:\n                _apply_two_level_x(qc, qubits, a, b, 2.0 * c * dt)\n            if mu != 0.0:\n                _apply_onsite_phase(qc, qubits, w, -mu * dt)\n        else:\n            for a, b, c in bonds:\n                _apply_two_level_x(qc, qubits, a, b, c * dt)\n            if mu != 0.0:\n                _apply_onsite_phase(qc, qubits, w, -mu * dt)\n            for a, b, c in reversed(bonds):\n                _apply_two_level_x(qc, qubits, a, b, c * dt)\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"gamma\": 1.0, \"epsilon\": 0.5, \"mu\": 0.0, \"t\": 1.0, \"marked_site\": 0, \"trotter_steps\": 4, \"trotter_order\": 2}",
+    "register_layout": [
+      "site[0..4] (qubits 0-4): 5-qubit binary site register for N = 2 n^2 = 18 sites; qubit j holds bit j of idx(m1,m2,sigma) = 2(3 m1 + m2) + sigma (qubit 0 = sublattice bit sigma, A=0/B=1; qubits 1-4 = cell index 3 m1 + m2), little-endian",
+      "basis states 18..31 are unused and left strictly decoupled (no gate couples them to states < 18)",
+      "marked site w = idx(0,0,A) = 0 = |00000>; its neighbours are idx(0,0,B)=1, idx(2,0,B)=13, idx(0,2,B)=5"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_bond_list (coefficient -gamma on every A-B bond, neighbour offsets (0,0),(1,0),(0,1) mod n)",
+        "explanation": "Unperturbed honeycomb tight-binding Hamiltonian; each bond is exponentiated exactly in _apply_two_level_x."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Bloch spectrum and Dirac points motivate the constraint n % 3 == 0 enforced in build_circuit but are not themselves implemented."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_bond_list (epsilon added to bonds touching w) and _apply_onsite_phase (mu |w><w| term)",
+        "explanation": "Marked Hamiltonian with bond modification epsilon and on-site potential mu localised at the marked site."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Initial Dirac-point state is prepared by the runner; the module returns only the evolution operator."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit main loop (Trotter product over bond and on-site exponentials)",
+        "explanation": "exp(-i H_w t) is implemented as a first- or second-order Trotter product; P_w(t) estimation and t_opt search are measurement/post-processing steps left to the runner."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "_site_index and the register construction in build_circuit",
+        "explanation": "Binary site encoding idx = 2(n m1 + m2) + sigma on ceil(log2 N) qubits; unused basis states are never acted upon by two-level couplings."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Exact exp(-i H_w t) replaced by a Trotter product (order 1 or 2, trotter_steps user-chosen) of exactly exponentiated bond terms and on-site term.",
+        "reason": "Opaque dense unitaries are disallowed; each bond is a two-level coupling that can be exponentiated exactly with standard gates, so only the product-formula error remains."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Initial-state preparation and computational-basis measurement removed from the module.",
+        "reason": "The deliverable is an operation; the runner prepares inputs and measures."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Marked site is a general parameter marked_site in [0, 2n^2) rather than fixed to idx(0,0,A) = 0; epsilon and mu are free real inputs.",
+        "reason": "Allow the operation to vary over valid instances; the specification treats (epsilon, mu) as scan parameters."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "n is required to be a positive multiple of 3.",
+        "reason": "Follows the symbol domain in the specification (Dirac points are allowed momenta only when 3 divides n); the Hamiltonian itself would be well defined for other n >= 2."
+      }
+    ],
+    "assumptions": [
+      "Periodic boundary conditions, uniform hopping gamma > 0 and zero background on-site energy.",
+      "Two-level bond term exp(-i c dt (|k><l|+|l><k|)) is realised as RX(2 c dt) on the differing qubit after a CX chain aligns k and l to differ in exactly one bit; the chain is self-inverse because all CXs share the same control.",
+      "On-site term exp(-i mu dt |w><w|) realised as a multi-controlled phase gate with angle -mu dt selecting basis state w; it is skipped when mu == 0.",
+      "Qubit count is ceil(log2(2 n^2)) (5 for n = 3); n up to 45 would fit under 12 qubits but circuit depth grows as 3 n^2 multi-controlled rotations per Trotter step."
+    ],
+    "unresolved_issues": [
+      "The paper's exact family of marking perturbations and strengths, its starting state, and its scaling results are unknown; only the generic (epsilon, mu) local perturbation is implemented.",
+      "Trotter error is not controlled analytically here; the runner should choose trotter_steps large enough for the desired t.",
+      "The multi-controlled RX/phase gates are left to the transpiler for decomposition; no gate-count optimisation (e.g. Gray-code ordering of bonds) is performed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 5,
+    "gate_count": 15968,
+    "depth": 10544,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

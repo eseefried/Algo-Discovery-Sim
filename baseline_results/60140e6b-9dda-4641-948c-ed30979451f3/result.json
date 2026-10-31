@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "60140e6b-9dda-4641-948c-ed30979451f3",
+  "parent_run_id": "89a7918c-7790-46c9-b738-18a571e43133",
+  "created_at": "2026-10-31T17:03:34.873147+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "1e4a58715db48a417bb928f4a8bfc9398c90e61e3b0fd861141e2bdde826d437",
+  "source_specification_sha256": "18a586279eb31052991b1f6cb6fe8c52cea45e4c98c280b30fc9bdd02c50cca4",
+  "source_python_sha256": "294025ec890b4dc44e5aae80d068ebcd568803f2cb50ae1cb267631fdfdf586e",
+  "elapsed_seconds": 86.389,
+  "usage": {
+    "input_tokens": 6638,
+    "output_tokens": 7313,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Measurement-free unitary realisation of the two-query algorithm for a completely specified affine Boolean function f(x)=a.x xor b. Qubits 0..n-1 form the input register, qubit n is the phase-kickback ancilla for query 1 (runner prepares it in |1>), and optional qubit n+1 is a fresh |0> ancilla for query 2. Query 1 is the Bernstein-Vazirani circuit (H on all n+1 qubits, bit-flip oracle U_f, H on the input register) which leaves the input register in |a> up to a global phase (-1)^b. Because resets/measurements are disallowed, query 2 is applied coherently at the point x_0 = a now sitting in the input register, with the second ancilla as target, giving |f(a)> = |parity(a) xor b>; the runner recovers b = z xor parity(a) classically. The oracle is built from CX gates (one per nonzero a_i) and an X on the target if b = 1.",
+    "source_python": "\"\"\"Two-query Bernstein-Vazirani identification of an affine Boolean function.\n\nf(x) = a.x xor b  (eq_1), queried through the bit-flip oracle U_f (eq_2).\nQuery 1 (eq_3): (H^n x I) U_f (H^n x I) on |0^n>|-> leaves (-1)^b |a>|->.\nQuery 2 (eq_4, modified): U_f applied with the input register already in |a>\nand a fresh |0> ancilla gives |f(a)> = |parity(a) xor b>, so b = z xor parity(a).\n\nQubit layout: qubits 0..n-1 = input x (qubit i holds x_i, x_0 least significant),\nqubit n = first ancilla (expected in |1>, the circuit applies H to make |->),\nqubit n+1 = second ancilla (expected in |0>), present only if two_query is true.\n\"\"\"\nfrom __future__ import annotations\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    for key in (\"n\", \"a\", \"b\", \"two_query\"):\n        if key not in instance:\n            raise ValueError(\"missing key: \" + key)\n    n = instance[\"n\"]\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1:\n        raise ValueError(\"n must be a positive integer\")\n    a = instance[\"a\"]\n    if not isinstance(a, (list, tuple)) or len(a) != n:\n        raise ValueError(\"a must be a list of exactly n bits\")\n    a_bits = []\n    for v in a:\n        if isinstance(v, bool) or not isinstance(v, int) or v not in (0, 1):\n            raise ValueError(\"entries of a must be 0 or 1\")\n        a_bits.append(int(v))\n    b = instance[\"b\"]\n    if isinstance(b, bool) or not isinstance(b, int) or b not in (0, 1):\n        raise ValueError(\"b must be 0 or 1\")\n    two_query = instance[\"two_query\"]\n    if not isinstance(two_query, bool):\n        raise ValueError(\"two_query must be a boolean\")\n    total = n + 1 + (1 if two_query else 0)\n    if total > MAX_QUBITS:\n        raise ValueError(\"total qubits exceed cap of 12\")\n    return n, a_bits, int(b), two_query\n\n\ndef _apply_oracle(qc, inputs, target, a_bits, b):\n    \"\"\"Bit-flip oracle U_f|x>|y> = |x>|y xor f(x)> for f(x) = a.x xor b (eq_1, eq_2).\"\"\"\n    for i, ai in enumerate(a_bits):\n        if ai == 1:\n            qc.cx(inputs[i], target)\n    if b == 1:\n        qc.x(target)\n\n\ndef build_circuit(instance):\n    \"\"\"Return the (one- or two-query) affine identification circuit (eq_3, eq_4).\"\"\"\n    n, a_bits, b, two_query = _validate(instance)\n    inp = QuantumRegister(n, \"x\")\n    anc1 = QuantumRegister(1, \"y\")\n    regs = [inp, anc1]\n    if two_query:\n        anc2 = QuantumRegister(1, \"z\")\n        regs.append(anc2)\n    qc = QuantumCircuit(*regs, name=\"affine_bv\")\n    # Query 1 (eq_3): H on input register and on the |1> ancilla -> |+>^n |->\n    for q in inp:\n        qc.h(q)\n    qc.h(anc1[0])\n    # phase-kickback oracle call (eq_2)\n    _apply_oracle(qc, inp, anc1[0], a_bits, b)\n    # final Hadamards: input register becomes |a> up to global phase (-1)^b\n    for q in inp:\n        qc.h(q)\n    if two_query:\n        # Query 2 (eq_4, modified): evaluate f at x_0 = a into a fresh |0> ancilla\n        # giving |f(a)> = |parity(a) xor b>; classically b = z xor parity(a).\n        _apply_oracle(qc, inp, anc2[0], a_bits, b)\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"a\": [0, 1], \"b\": 1, \"two_query\": true}",
+    "register_layout": [
+      "qubits 0..n-1 (register x): input register, qubit i holds bit x_i, x_0 least significant; after query 1 holds the coefficient vector a (example: q1=1, q0=0, i.e. a=(a_1,a_0)=(1,0))",
+      "qubit n (register y): first ancilla, runner prepares |1>; the circuit applies H so it is |-> during the kickback query and remains |-> at the output",
+      "qubit n+1 (register z, only if two_query): second ancilla, runner prepares |0>; output is |f(a)> = |parity(a) xor b> (example: parity(a)=1, b=1 -> z=0, so b = z xor parity(a) = 1)",
+      "example total qubits: 4 (n=2 input + 2 ancillas); the global phase (-1)^b is not observable"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_apply_oracle: CX from each input qubit i with a_i = 1 to the target computes a.x; X on target adds b",
+        "explanation": "The affine function f(x) = a.x xor b is encoded reversibly into the oracle target via CX gates and a conditional X."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_apply_oracle (bit-flip oracle) and the H on anc1 in build_circuit producing the |-> ancilla for phase kickback",
+        "explanation": "U_f|x>|y> = |x>|y xor f(x)> is realised by CX/X gates; with the ancilla in |-> this yields the phase (-1)^{f(x)}."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit, 'Query 1' block: H on inputs and ancilla, _apply_oracle to anc1, H on inputs",
+        "explanation": "The Bernstein-Vazirani one-query unitary; on |0^n>|1> it outputs (-1)^b |a>|->."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit, 'Query 2' block: _apply_oracle to anc2 with the input register in |a>",
+        "explanation": "Implemented in the general form b = f(x_0) xor a.x_0 with x_0 = a (the state already present after query 1) instead of x_0 = 0^n, because resets/measurements between queries are not permitted."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The bounded-error analysis for incompletely defined functions requires the paper's function classes and algorithm modifications, which are not available."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The second query point was changed from x_0 = 0^n (with the input register reset) to x_0 = a, the state the input register deterministically occupies after query 1, with a fresh second ancilla as the oracle target. Output z = f(a) = parity(a) xor b, so b is recovered classically as z xor parity(a) where parity(a) is computed from the measured input register.",
+        "reason": "The deliverable must be a single measurement-free unitary circuit without reset or dynamic operations, so the mid-circuit measurement and re-preparation in the specification cannot be used; the specification itself allows any known query point x_0 with b = f(x_0) xor a.x_0."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The first ancilla is expected to be prepared by the runner in |1>; the circuit applies the Hadamard (not the X) as part of the algorithm. The global phase (-1)^b is left as is.",
+        "reason": "Input-state preparation is reserved for the runner; the Hadamards are part of the Bernstein-Vazirani operation as described in the specification steps."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Scope narrowed to completely specified affine functions; the incompletely defined bounded-error setting is not implemented.",
+        "reason": "Essential definitions (care sets, function classes, modified algorithms) are missing from the abstract."
+      }
+    ],
+    "assumptions": [
+      "Affine Boolean function means f(x) = a.x xor b over GF(2); the instance key 'a' lists a_i for qubit i (a[0] = a_0 is the least significant bit).",
+      "The runner prepares the input register in |0^n>, the first ancilla (qubit n) in |1>, and the optional second ancilla (qubit n+1) in |0>.",
+      "The standard bit-flip oracle model is assumed; the oracle is built transparently from CX and X gates since a and b are instance parameters.",
+      "Both the first and second oracle calls use the identical oracle U_f, so the construction uses exactly two queries.",
+      "If two_query is false the circuit is the plain one-query Bernstein-Vazirani operation on n+1 qubits.",
+      "Qubit cap: n <= 10 when two_query is true (n+2 <= 12), n <= 11 otherwise."
+    ],
+    "unresolved_issues": [
+      "The paper's actual second-query circuit is unknown; the coherent evaluation at x_0 = a is a reconstruction.",
+      "If the runner prepares the first ancilla in |0> instead of |1>, the phase kickback is lost and the input register returns to |0^n>; the expected input state must be honoured.",
+      "The bounded-error algorithms for incompletely defined functions and the 2/3 bound (eq_5) are not reconstructable from the abstract."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 9,
+    "depth": 5,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

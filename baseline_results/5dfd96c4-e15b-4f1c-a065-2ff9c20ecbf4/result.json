@@ -1,0 +1,148 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "5dfd96c4-e15b-4f1c-a065-2ff9c20ecbf4",
+  "parent_run_id": "6184036e-aac4-45e3-83c1-6f6dfc334b83",
+  "created_at": "2026-10-31T16:43:33.304086+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "4e673d0d41d76df6bebfe99f84d6395d14d3dd6f3c1443258700f2d21d80017e",
+  "source_specification_sha256": "cac29b2f55a00f867b8410892ef42138833c0077740d9e636e406309a602d16b",
+  "source_python_sha256": "a575baa89ab8f5819ce8c0c793b7dd5809f4f61b0b5541c39c1101d1a3465d4e",
+  "elapsed_seconds": 109.486,
+  "usage": {
+    "input_tokens": 8299,
+    "output_tokens": 9808,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the scoped dual-rail Bose-Hubbard quantum-walk gate set as a Qiskit operation. Each graph vertex is one qubit (hard-core truncation, occupation <= 1); logical qubit k occupies physical qubits 2k (rail 0) and 2k+1 (rail 1). Three piecewise-constant Hamiltonian segments are exponentiated exactly: intra-pair tunneling -J(a0^dag a1 + h.c.) -> RXX(-Jt) RYY(-Jt) (eq_3, logical R_X(-2Jt)); on-site bias (eps/2)(n0 - n1) -> P(-eps t/2) on rail 0 and P(+eps t/2) on rail 1 (eq_4, logical R_Z(eps t)); and the collisional controlled phase, realized as its net effect cp(-U tau) between the two rail-1 vertices (eq_5). The number of logical qubits is 1..6 (<= 12 physical qubits); measurement (eq_6) is excluded because the module returns an operation only.",
+    "source_python": "\"\"\"Scoped Qiskit reconstruction: dual-rail position-encoded qubits on a Bose-Hubbard graph.\n\nEach graph vertex is one physical qubit (hard-core truncation: occupation 0 or 1).\nLogical qubit k uses physical qubits 2k (rail 0, vertex v_0^(k)) and 2k+1 (rail 1, vertex v_1^(k)).\n|0_L>_k  <->  boson on rail 0  <->  q[2k]=1, q[2k+1]=0\n|1_L>_k  <->  boson on rail 1  <->  q[2k]=0, q[2k+1]=1\nAll gates are exact exponentials exp(-i H t) of piecewise-constant Bose-Hubbard segments (eq_1)\nrestricted to the hard-core subspace. hbar = 1.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_PHYSICAL_QUBITS = 12\nMAX_LOGICAL_QUBITS = 6\n\n\ndef _check_number(value, name):\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError('parameter ' + name + ' must be a real number')\n    out = float(value)\n    if not math.isfinite(out):\n        raise ValueError('parameter ' + name + ' must be finite')\n    return out\n\n\ndef _check_logical_index(value, num_logical, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError('parameter ' + name + ' must be an integer logical qubit index')\n    if value < 0 or value >= num_logical:\n        raise ValueError('logical qubit index ' + name + ' out of range')\n    return value\n\n\ndef _rails(k):\n    # eq_2: dual-rail position encoding; vertex v_0^(k) -> qubit 2k, vertex v_1^(k) -> qubit 2k+1\n    return 2 * k, 2 * k + 1\n\n\ndef _apply_tunnel(qc, k, hop_j, time_t):\n    # eq_3 (segment of eq_1 with only the intra-pair edge active):\n    # H_X = -J (a0^dag a1 + a1^dag a0). For hard-core bosons a0^dag a1 + h.c. = (X0 X1 + Y0 Y1)/2,\n    # so exp(-i H_X t) = exp(+i J t X0X1 / 2) exp(+i J t Y0Y1 / 2) = RXX(-J t) RYY(-J t)\n    # (XX and YY commute). On span{|01>,|10>} this is exp(i J t X) = R_X(theta), theta = -2 J t.\n    v0, v1 = _rails(k)\n    angle = -hop_j * time_t\n    qc.rxx(angle, v0, v1)\n    qc.ryy(angle, v0, v1)\n\n\ndef _apply_bias(qc, k, eps, time_t):\n    # eq_4 (segment of eq_1 with all edges off):\n    # H_Z = (eps/2)(n_v0 - n_v1); exp(-i H_Z t) = P(-eps t/2) on rail 0 and P(+eps t/2) on rail 1,\n    # which equals R_Z(theta) with theta = eps t on the logical dual-rail subspace.\n    v0, v1 = _rails(k)\n    qc.p(-0.5 * eps * time_t, v0)\n    qc.p(0.5 * eps * time_t, v1)\n\n\ndef _apply_collide(qc, k, l, int_u, tau):\n    # eq_5: collisional controlled phase. Net effect of transfer T, on-site wait tau (phase -U tau on the\n    # doubly occupied vertex) and inverse transfer: CPHASE(phi) with phi = -U tau on |1_L 1_L>, i.e. a\n    # conditional phase when both walkers sit on their rail-1 vertices. Implemented directly as\n    # cp(-U tau) between the two rail-1 qubits (see specification_changes: transfer T and double\n    # occupancy are not modelled in the hard-core truncation).\n    _, v1_k = _rails(k)\n    _, v1_l = _rails(l)\n    qc.cp(-int_u * tau, v1_k, v1_l)\n\n\ndef build_circuit(instance):\n    \"\"\"Build the dual-rail Bose-Hubbard gate sequence as a unitary QuantumCircuit.\n\n    instance = {\n      'num_logical_qubits': n (1..6),\n      'operations': [\n        {'type': 'tunnel',  'qubit': k, 'J': J, 't': t},            # eq_3, logical R_X(-2 J t)\n        {'type': 'bias',    'qubit': k, 'epsilon': eps, 't': t},    # eq_4, logical R_Z(eps t)\n        {'type': 'collide', 'qubit_a': k, 'qubit_b': l, 'U': U, 'tau': tau}  # eq_5, CPHASE(-U tau)\n      ]\n    }\n    Physical qubit 2k is rail 0 (v_0^(k)), qubit 2k+1 is rail 1 (v_1^(k)) of logical qubit k.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    if 'num_logical_qubits' not in instance:\n        raise ValueError('instance must contain num_logical_qubits')\n    num_logical = instance['num_logical_qubits']\n    if isinstance(num_logical, bool) or not isinstance(num_logical, int):\n        raise ValueError('num_logical_qubits must be an integer')\n    if num_logical < 1 or num_logical > MAX_LOGICAL_QUBITS:\n        raise ValueError('num_logical_qubits must be between 1 and ' + str(MAX_LOGICAL_QUBITS))\n    num_physical = 2 * num_logical\n    if num_physical > MAX_PHYSICAL_QUBITS:\n        raise ValueError('too many physical qubits')\n    if 'operations' not in instance:\n        raise ValueError('instance must contain operations')\n    operations = instance['operations']\n    if not isinstance(operations, list):\n        raise ValueError('operations must be a list')\n\n    vertices = QuantumRegister(num_physical, 'v')\n    qc = QuantumCircuit(vertices, name='bose_hubbard_dual_rail')\n\n    for idx, op in enumerate(operations):\n        tag = 'operations[' + str(idx) + ']'\n        if not isinstance(op, dict) or 'type' not in op:\n            raise ValueError(tag + ' must be a dict with a type field')\n        kind = op['type']\n        if kind == 'tunnel':\n            for key in ('qubit', 'J', 't'):\n                if key not in op:\n                    raise ValueError(tag + ' missing ' + key)\n            k = _check_logical_index(op['qubit'], num_logical, tag + '.qubit')\n            hop_j = _check_number(op['J'], tag + '.J')\n            time_t = _check_number(op['t'], tag + '.t')\n            if time_t < 0.0:\n                raise ValueError(tag + '.t must be non-negative')\n            _apply_tunnel(qc, k, hop_j, time_t)\n        elif kind == 'bias':\n            for key in ('qubit', 'epsilon', 't'):\n                if key not in op:\n                    raise ValueError(tag + ' missing ' + key)\n            k = _check_logical_index(op['qubit'], num_logical, tag + '.qubit')\n            eps = _check_number(op['epsilon'], tag + '.epsilon')\n            time_t = _check_number(op['t'], tag + '.t')\n            if time_t < 0.0:\n                raise ValueError(tag + '.t must be non-negative')\n            _apply_bias(qc, k, eps, time_t)\n        elif kind == 'collide':\n            for key in ('qubit_a', 'qubit_b', 'U', 'tau'):\n                if key not in op:\n                    raise ValueError(tag + ' missing ' + key)\n            k = _check_logical_index(op['qubit_a'], num_logical, tag + '.qubit_a')\n            l = _check_logical_index(op['qubit_b'], num_logical, tag + '.qubit_b')\n            if k == l:\n                raise ValueError(tag + ' qubit_a and qubit_b must differ')\n            int_u = _check_number(op['U'], tag + '.U')\n            tau = _check_number(op['tau'], tag + '.tau')\n            if tau < 0.0:\n                raise ValueError(tag + '.tau must be non-negative')\n            _apply_collide(qc, k, l, int_u, tau)\n        else:\n            raise ValueError(tag + ' has unknown type ' + str(kind))\n\n    return qc",
+    "example_instance_json": "{\"num_logical_qubits\": 2, \"operations\": [{\"type\": \"tunnel\", \"qubit\": 0, \"J\": 1.0, \"t\": 0.7853981633974483}, {\"type\": \"bias\", \"qubit\": 0, \"epsilon\": 1.0, \"t\": 1.5707963267948966}, {\"type\": \"collide\", \"qubit_a\": 0, \"qubit_b\": 1, \"U\": 1.0, \"tau\": 3.141592653589793}]}",
+    "register_layout": [
+      "v[0] (qubit index 0, least significant): graph vertex v_0^(1), rail 0 of logical qubit 1; occupied (|1>) encodes |0_L>_1",
+      "v[1] (qubit index 1): graph vertex v_1^(1), rail 1 of logical qubit 1; occupied (|1>) encodes |1_L>_1",
+      "v[2] (qubit index 2): graph vertex v_0^(2), rail 0 of logical qubit 2; occupied (|1>) encodes |0_L>_2",
+      "v[3] (qubit index 3): graph vertex v_1^(2), rail 1 of logical qubit 2; occupied (|1>) encodes |1_L>_2",
+      "General rule: logical qubit k (0-indexed) uses physical qubits 2k (rail 0) and 2k+1 (rail 1); the code subspace has exactly one of each pair set to |1>",
+      "Specification initial state |0_L>_1 |0_L>_2 corresponds to physical basis state with v[0]=1, v[1]=0, v[2]=1, v[3]=0 (bitstring '0101' in Qiskit little-endian order); the runner prepares inputs"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_apply_tunnel, _apply_bias, _apply_collide (module docstring): each gate is exp(-i H t) of a piecewise-constant Bose-Hubbard segment restricted to the hard-core (occupation <= 1) subspace",
+        "explanation": "The hopping term is mapped to (XX+YY)/2 per active edge, on-site energies to phase gates, and the interaction term to its effective conditional phase; only the segments needed for the gate set are instantiated, not the full 2D lattice."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_rails and module docstring",
+        "explanation": "Dual-rail position encoding: vertex v_0^(k) -> physical qubit 2k, vertex v_1^(k) -> physical qubit 2k+1; a boson on a vertex is the qubit value |1>."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_apply_tunnel",
+        "explanation": "exp(-i H_X t) with H_X = -J(a0^dag a1 + h.c.) = -J(XX+YY)/2 realized as RXX(-Jt) RYY(-Jt); equals R_X(theta), theta = -2Jt on the single-boson subspace and identity on |00>,|11>."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_apply_bias",
+        "explanation": "exp(-i H_Z t) with H_Z = (eps/2)(n_v0 - n_v1) realized as P(-eps t/2) on rail 0 and P(+eps t/2) on rail 1, equal to R_Z(eps t) on the logical subspace."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "_apply_collide",
+        "explanation": "The net CPHASE(phi), phi = -U tau, on |1_L 1_L> is implemented as cp(-U tau) between the two rail-1 vertex qubits; the transfer T / double-occupancy intermediate is not modelled (see specification_changes)."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Occupation-number readout is a measurement; the module must return a measurement-free operation, so readout is left to the runner (measure each rail qubit; occupied rail index is the logical bit)."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Fock space truncated to occupation <= 1 per vertex (hard-core bosons, one qubit per vertex) instead of the specification's occupation <= 2.",
+        "reason": "Double occupancy appears only transiently in the unspecified transfer step of the cphase; the hard-core truncation makes the hopping term an exact (XX+YY)/2 qubit Hamiltonian and keeps the circuit within 12 qubits for up to 6 logical qubits."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The collisional controlled phase is implemented by its net effect, a direct cp(-U tau) between the rail-1 vertices of the two logical qubits, rather than by an explicit transfer T, on-site wait, and inverse transfer with sqrt(2) bosonic enhancement.",
+        "reason": "The transfer pulse schedule is listed as missing information in the specification and double occupancy is excluded by the hard-core truncation; the implemented unitary equals the specified CPHASE(phi = -U tau) on the code subspace (it corresponds physically to an interaction U n_{v1^(1)} n_{v1^(2)} for duration tau). Compensating single-particle Z rotations are therefore not needed."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Only intra-pair tunneling edges, per-pair on-site biases, and the pairwise rail-1 conditional phase are instantiated; the general 2D piecewise-constant graph, swap gate, and the full Bose-Hubbard lattice evolution are not built.",
+        "reason": "Scope narrowing to the gate set reconstructed in the math stage; the explicit graph geometry is missing information."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Generalized from exactly two logical qubits to 1..6 logical qubits (2..12 physical qubits) with an arbitrary user-supplied sequence of tunnel/bias/collide segments.",
+        "reason": "Required to implement the operation for varying valid instance parameters; the two-qubit example instance matches the specification's steps."
+      },
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "Measurement and the classical post-processing (leakage flagging for pairs with occupation != 1) are omitted from the module.",
+        "reason": "The module must return a measurement-free unitary operation; readout belongs to the runner."
+      }
+    ],
+    "assumptions": [
+      "hbar = 1; gate parameters are the physical quantities J, epsilon, U and durations t, tau; angles are theta_X = -2 J t, theta_Z = epsilon t, phi = -U tau as in the specification.",
+      "Qubit index 2k is rail 0 and 2k+1 is rail 1 of logical qubit k; the input state supplied by the runner has exactly one of each pair in |1> (code subspace). Outside the code subspace the tunneling gate acts as identity on |00> and |11> and the bias gate contributes only phases.",
+      "Hard-core bosonic mapping a_v^dag a_w + h.c. -> (X_v X_w + Y_v Y_w)/2 is used for the single active edge; no Jordan-Wigner string is needed because bosons commute and only one edge is active per segment.",
+      "Durations t and tau are required to be non-negative; J, epsilon, U may have either sign.",
+      "Global phases are ignored, consistent with the specification."
+    ],
+    "unresolved_issues": [
+      "The paper's actual pulse sequences (including the swap gate and the transfer step with bosonic sqrt(2) enhancement) are unknown; only the effective gates on the code subspace are reproduced.",
+      "The explicit piecewise-constant 2D graph layout achieving linear vertex count is not represented; the circuit only encodes per-qubit vertex pairs and the pairwise interaction edge.",
+      "Leakage out of the one-boson-per-pair subspace (loss, double occupancy) is not modelled; the hard-core truncation forbids double occupancy by construction."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 21,
+    "depth": 16,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

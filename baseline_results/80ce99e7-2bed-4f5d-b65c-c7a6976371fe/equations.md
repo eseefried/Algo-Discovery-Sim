@@ -1,0 +1,145 @@
+# Abstract to equations
+
+Status: **partial**
+
+Model: `claude-fable-5-1`
+
+Mathematics has not been independently verified.
+
+Approximate a single-qubit z-rotation R_z(\theta) to precision \varepsilon by a Pauli+V circuit (gates V_1,V_2,V_3, their inverses, and Paulis) of small V-count, adapting the Ross–Selinger deterministic-search technique (lattice-point enumeration in an \varepsilon-region followed by a number-theoretic solvability test) from the Clifford+T / \mathbb{Z}[\omega] setting to the Pauli+V / \mathbb{Z}[i] setting.
+
+Scope: One instance of the synthesis problem: a single target rotation R_z(\theta) with \theta=\pi/4 and \varepsilon=0.1 (both chosen here as an assumption, since the abstract gives no instance). The scope covers (i) the algebraic form of Pauli+V unitaries, (ii) the \varepsilon-region criterion, (iii) the search over Gaussian integers a in the scaled region and the two-squares test yielding b, and (iv) delegation of the final gate word to a Pauli+V exact-synthesis routine. Outside scope: the paper's specific geometric lemmas and constants, any proven V-count bound (e.g. as a function of \log(1/\varepsilon)), running-time analysis, the precise enumeration order/grid traversal of the deterministic search, and the exact-synthesis algorithm's internal details.
+
+## Symbols
+
+- $\theta$: Target z-rotation angle; domain: \mathbb{R}, taken modulo 4\pi
+- $\varepsilon$: Required approximation precision (operator-norm distance); domain: (0,1]
+- $X,Y,Z,I$: Pauli matrices and 2x2 identity; domain: U(2)
+- $V_1,V_2,V_3$: The three V gates (Lubotzky–Phillips–Sarnak / Harrow–Recht–Chuang generators); domain: U(2)
+- $k$: Denominator exponent of \sqrt{5}; equals the V-count of the synthesized circuit under the exact-synthesis normalization; domain: \mathbb{Z}_{\ge 0}
+- $a,b$: Gaussian-integer entries of the scaled unitary 5^{k/2}U; domain: \mathbb{Z}[i]
+- $u$: Normalized top-left entry u=a/5^{k/2}; domain: \{z\in\mathbb{C}:|z|\le 1\}
+- $R_\varepsilon$: \varepsilon-region in the unit disk around e^{-i\theta/2}; domain: subset of \mathbb{C}
+- $n$: Residual norm n=5^k-|a|^2 that must be a sum of two integer squares; domain: \mathbb{Z}_{\ge 0}
+- $U$: Synthesized Pauli+V unitary approximating R_z(\theta); domain: U(2)
+
+## eq_1: V gates
+
+$$
+V_1=\tfrac{1}{\sqrt5}(I+2iX),\qquad V_2=\tfrac{1}{\sqrt5}(I+2iY),\qquad V_3=\tfrac{1}{\sqrt5}(I+2iZ)
+$$
+
+Definition of the V gates generating, together with the Pauli group, the Pauli+V gate set; V-count counts occurrences of V_j^{\pm1}.
+
+Provenance: `standard_background`. Standard definition of the V basis used in Pauli+V synthesis literature (Harrow–Recht–Chuang; Bocharov–Gurevich–Svore); the abstract only names the framework.
+
+Equation assumptions:
+
+- Global phases are ignored.
+
+## eq_2: Target z-rotation
+
+$$
+R_z(\theta)=\begin{pmatrix} e^{-i\theta/2} & 0\\ 0 & e^{i\theta/2}\end{pmatrix}
+$$
+
+The single-qubit z-rotation to be approximated.
+
+Provenance: `standard_background`. Standard convention for z-rotations; the abstract states the problem is approximating z-rotations.
+
+Equation assumptions:
+
+- Convention with half-angle; other conventions rescale \theta.
+
+## eq_3: Form of Pauli+V unitaries
+
+$$
+U=5^{-k/2}\begin{pmatrix} a & -\bar b\\ b & \bar a\end{pmatrix},\quad a,b\in\mathbb{Z}[i],\quad |a|^2+|b|^2=5^k
+$$
+
+Up to global phase, every Pauli+V circuit of V-count k yields a unitary of this form; conversely such a matrix with k minimal (5^{k/2}U not further divisible so as to lower k) is exactly synthesizable with V-count k.
+
+Provenance: `standard_background`. Each V_j equals (1/\sqrt5) times a matrix over \mathbb{Z}[i], so products of k V's have this form; the converse (exact synthesis with V-count equal to the minimal denominator exponent) is the Bocharov–Gurevich–Svore exact-synthesis result, recalled from background, not from the abstract.
+
+Equation assumptions:
+
+- Pauli factors and global phases are absorbed; the precise divisibility/normal-form condition for minimality of k is not restated here.
+
+## eq_4: \varepsilon-region criterion
+
+$$
+\|U-R_z(\theta)\|\le\varepsilon \iff u\in R_\varepsilon:=\{z\in\mathbb{C}: |z|\le 1,\ \mathrm{Re}\big(e^{i\theta/2}z\big)\ge 1-\varepsilon^2/2\},\qquad u=a/5^{k/2}
+$$
+
+For U of the form in eq_3, operator-norm closeness to R_z(\theta) depends only on the normalized entry u lying in the thin circular-segment region R_\varepsilon.
+
+Provenance: `standard_background`. This is the \varepsilon-region reduction used by Ross–Selinger for unitaries of the form [[u,-\bar t],[t,\bar u]]; it is independent of the gate set and so carries over to Pauli+V. Recalled as background, not extracted from the paper.
+
+Equation assumptions:
+
+- Distance measured in operator norm with U fixed up to global phase; a different metric changes the constant 1-\varepsilon^2/2.
+
+## eq_5: Lattice search condition (deterministic search)
+
+$$
+a\in\mathbb{Z}[i]\cap 5^{k/2}R_\varepsilon,\qquad\text{enumerated for } k=0,1,2,\dots \text{ until a solution of eq\_6 is found}
+$$
+
+Candidate entries a are the Gaussian-integer lattice points inside the scaled \varepsilon-region (area \approx 5^k\cdot\mathrm{area}(R_\varepsilon)); the search is deterministic: enumerate all lattice points for the current k before incrementing k.
+
+Provenance: `abstract_inferred`. Inference: Ross–Selinger's deterministic search enumerates ring elements in an \varepsilon-region; in Pauli+V the relevant ring is \mathbb{Z}[i], a planar lattice, so the 'simpler geometric methods' plausibly refer to counting/enumerating lattice points of \mathbb{Z}[i] in a planar region rather than the four-dimensional \mathbb{Z}[\omega] embedding. The exact enumeration order and any grid transformation used in the paper are not given by the abstract.
+
+Abstract evidence: We adapt the deterministic-search technique to the case of Pauli+V circuits and prove similar results. Because of the relative simplicity of the Pauli+V framework, we use much simpler geometric methods.
+
+Equation assumptions:
+
+- The paper's search region is (a scaling of) R_\varepsilon or a simply shaped subset of it; the precise shape and traversal are unknown.
+
+## eq_6: Two-squares solvability for b
+
+$$
+n:=5^k-|a|^2\ge 0,\qquad \exists\, b\in\mathbb{Z}[i]:\ |b|^2=n \iff \forall p\ \text{prime},\ p\equiv 3\ (\mathrm{mod}\ 4)\Rightarrow v_p(n)\ \text{even}
+$$
+
+Given a candidate a, the second entry b exists iff the residual n is a sum of two squares; b is then computed by factoring n (or Cornacchia's algorithm). This replaces Ross–Selinger's Diophantine step over \mathbb{Z}[\sqrt2].
+
+Provenance: `standard_background`. Fermat's two-squares theorem (norms from \mathbb{Z}[i]); the role of this step in the Pauli+V adaptation is inferred from eq_3's unitarity constraint.
+
+Equation assumptions:
+
+- Factorization of n (size about 5^k) is feasible for the tiny instance; the paper may instead use a probabilistic or restricted test (e.g. n prime), which the abstract does not specify.
+
+## Registers
+
+- q: 1 qubits; Single data qubit on which the synthesized Pauli+V approximation of R_z(\theta) acts
+
+## Initial state
+
+Not fixed by the problem: the output is a gate sequence U\approx R_z(\theta) to be applied to an arbitrary single-qubit state |\psi\rangle.
+
+## Classical postprocessing
+
+All search steps (lattice enumeration, two-squares test, exact synthesis into a V/Pauli word) are classical preprocessing; no quantum measurement or postprocessing is part of the method itself.
+
+## Algorithm steps
+
+1. Fix the target \theta and precision \varepsilon (toy instance: \theta=\pi/4, \varepsilon=0.1); form the \varepsilon-region R_\varepsilon around e^{-i\theta/2}. (eq_2, eq_4)
+2. For the current denominator exponent k (starting at k=0), deterministically enumerate all Gaussian integers a in the scaled region 5^{k/2}R_\varepsilon. (eq_5)
+3. For each candidate a, compute n=5^k-|a|^2 and test whether n is a sum of two squares; if so, compute b with |b|^2=n and stop. If no candidate succeeds, increment k and return to the previous step. (eq_6)
+4. Assemble the exactly representable unitary U=5^{-k/2}[[a,-\bar b],[b,\bar a]]; it satisfies \|U-R_z(\theta)\|\le\varepsilon by construction. (eq_3, eq_4)
+5. Run a Pauli+V exact-synthesis routine on U to obtain a word in V_1^{\pm1},V_2^{\pm1},V_3^{\pm1} and Paulis of V-count k; apply this word to the data qubit. (eq_1, eq_3)
+
+## Assumptions
+
+- Toy instance \theta=\pi/4, \varepsilon=0.1 chosen by the reconstructor; the abstract gives no instance.
+- Global phases are ignored and Pauli gates are free (not counted) in the V-count.
+- Operator-norm distance with the Ross–Selinger \varepsilon-region reduction is assumed to be the metric used.
+- The Bocharov–Gurevich–Svore exact-synthesis result (V-count equals minimal \sqrt5-denominator exponent) is assumed available as a black box.
+
+## Missing information
+
+- The paper's specific 'simpler geometric methods' (lemmas, constants, shape of the search region, lattice-point counting arguments).
+- Any proven bound on the resulting V-count as a function of \log(1/\varepsilon), and whether it is a worst-case or heuristic/average-case result.
+- The precise deterministic enumeration order and stopping criteria, and whether the two-squares step uses full factorization, a primality restriction, or another test.
+- Exact-synthesis normal form and divisibility conditions guaranteeing V-count exactly k for the found (a,b).
+- Whether the paper also treats non-z rotations or general unitaries, and any numerical results.

@@ -1,0 +1,145 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "a9c3cacb-3e34-4f57-beeb-cb1d835c89e4",
+  "parent_run_id": "4150f22e-1abc-4ba5-9d05-848d0ea0fc09",
+  "created_at": "2026-10-31T16:54:49.344569+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "1ad2a689f275c9132c795449a0f327dbf1726cf0075ef1a3cf6e66524c21d8e4",
+  "source_specification_sha256": "c6d437e0306a5d376880efeea0078b0992d8d1c5bfcc2f9ae9f9da91a724690b",
+  "source_python_sha256": "d6689a4a7cc532d2e4fdc4eb968788da4e67cbecf3c7c5fdd9c83160e5729843",
+  "elapsed_seconds": 106.22,
+  "usage": {
+    "input_tokens": 7963,
+    "output_tokens": 9043,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit implementation of one Durr-Hoyer-style threshold-oracle amplitude-amplification stage of the baseline quantum Viterbi reconstruction for a rate-1/2, memory-1 (Q=2) binary convolutional code with generators (1, 1+D) on a hard-decision BSC. build_circuit(instance) builds: optional H^{⊗N} path superposition (eq_1), then `iterations` Grover iterates, each consisting of the threshold oracle O_T = U_d^† C_{<T} U_d (U_d reversibly computes the Hamming-distance metric d(x) between the received word and the codeword into a little-endian metric register via controlled increments; C_{<T} applies a -1 phase to every metric value below the threshold using multi-controlled Z gates) followed by the reflection about the uniform superposition. All ancillas start and end in |0>. The classical outer loop (measure, update threshold, repeat) is left to the runner.",
+    "source_python": "\"\"\"Baseline quantum Viterbi stage (Durr-Hoyer threshold oracle + Grover iterate)\nfor ML decoding of the rate-1/2, memory-1 convolutional code with generators\n(1, 1+D) over a hard-decision BSC.\n\nRegisters (qubit 0 = least significant):\n  path   : N qubits, path[i] holds information bit x_{i+1} (x_0 = 0 fixed).\n  metric : m = ceil(log2(2N+1)) qubits, little-endian unsigned Hamming metric d(x).\nThe metric register is uncomputed inside every oracle call and returns to |0...0>.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"N\", None)\n    if not isinstance(n, int) or isinstance(n, bool) or n < 1:\n        raise ValueError(\"N must be a positive integer\")\n    received = instance.get(\"received\", None)\n    if not isinstance(received, list) or len(received) != n:\n        raise ValueError(\"received must be a list of N frames\")\n    frames = []\n    for fr in received:\n        if not isinstance(fr, list) or len(fr) != 2:\n            raise ValueError(\"each received frame must be a pair of bits\")\n        for b in fr:\n            if not isinstance(b, int) or isinstance(b, bool) or b not in (0, 1):\n                raise ValueError(\"received bits must be 0 or 1\")\n        frames.append((int(fr[0]), int(fr[1])))\n    threshold = instance.get(\"threshold\", None)\n    if not isinstance(threshold, int) or isinstance(threshold, bool):\n        raise ValueError(\"threshold must be an integer\")\n    if threshold < 0 or threshold > 2 * n + 1:\n        raise ValueError(\"threshold must lie in 0..2N+1\")\n    iterations = instance.get(\"iterations\", None)\n    if not isinstance(iterations, int) or isinstance(iterations, bool) or iterations < 0:\n        raise ValueError(\"iterations must be a non-negative integer\")\n    prepare = instance.get(\"prepare_superposition\", True)\n    if not isinstance(prepare, bool):\n        raise ValueError(\"prepare_superposition must be a bool\")\n    m = max(1, math.ceil(math.log2(2 * n + 1)))\n    if n + m > MAX_QUBITS:\n        raise ValueError(\"instance needs %d qubits, cap is %d\" % (n + m, MAX_QUBITS))\n    return n, m, frames, threshold, iterations, prepare\n\n\ndef _controlled_increment(qc, control, metric):\n    \"\"\"metric <- metric + 1 (mod 2^m) when `control` is |1>; little-endian.\"\"\"\n    m = len(metric)\n    for j in range(m - 1, -1, -1):\n        controls = [control] + [metric[k] for k in range(j)]\n        qc.mcx(controls, metric[j])\n\n\ndef _add_code_bit(qc, code_qubit, metric, y_bit):\n    \"\"\"Add wt(code_bit XOR y_bit) to the metric register (eq_3 summand).\"\"\"\n    if y_bit == 1:\n        qc.x(code_qubit)\n    _controlled_increment(qc, code_qubit, metric)\n    if y_bit == 1:\n        qc.x(code_qubit)\n\n\ndef _metric_circuit(n, m, frames):\n    \"\"\"U_d |x>|0> = |x>|d(x)>  (eq_4 second form) using the encoder eq_2 and\n    the Hamming metric eq_3 for generators (1, 1+D).\"\"\"\n    path = QuantumRegister(n, \"path\")\n    metric = QuantumRegister(m, \"metric\")\n    qc = QuantumCircuit(path, metric)\n    met = [metric[k] for k in range(m)]\n    for i in range(n):\n        y1, y2 = frames[i]\n        # eq_2: c^(1)_t = x_t\n        _add_code_bit(qc, path[i], met, y1)\n        # eq_2: c^(2)_t = x_t XOR x_{t-1}, with x_0 = 0\n        if i == 0:\n            _add_code_bit(qc, path[i], met, y2)\n        else:\n            qc.cx(path[i - 1], path[i])\n            _add_code_bit(qc, path[i], met, y2)\n            qc.cx(path[i - 1], path[i])\n    return qc\n\n\ndef _threshold_phase(qc, metric, threshold):\n    \"\"\"C_{<T}: multiply |d> by -1 for every d < T (eq_5 comparator phase).\"\"\"\n    m = len(metric)\n    for v in range(min(threshold, 2 ** m)):\n        zeros = [metric[k] for k in range(m) if ((v >> k) & 1) == 0]\n        for q in zeros:\n            qc.x(q)\n        if m == 1:\n            qc.z(metric[0])\n        else:\n            qc.mcp(math.pi, [metric[k] for k in range(m - 1)], metric[m - 1])\n        for q in zeros:\n            qc.x(q)\n\n\ndef _diffusion(qc, path):\n    \"\"\"Reflection 2|psi_0><psi_0| - I about the uniform superposition (eq_6).\"\"\"\n    n = len(path)\n    for q in path:\n        qc.h(q)\n    for q in path:\n        qc.x(q)\n    if n == 1:\n        qc.z(path[0])\n    else:\n        qc.mcp(math.pi, [path[k] for k in range(n - 1)], path[n - 1])\n    for q in path:\n        qc.x(q)\n    for q in path:\n        qc.h(q)\n\n\ndef build_circuit(instance):\n    \"\"\"Build H^{N} (optional, eq_1) followed by `iterations` Grover iterates\n    G_T = (2|psi_0><psi_0| - I) U_d^dag C_{<T} U_d (eq_5, eq_6).\"\"\"\n    n, m, frames, threshold, iterations, prepare = _validate(instance)\n    path = QuantumRegister(n, \"path\")\n    metric = QuantumRegister(m, \"metric\")\n    qc = QuantumCircuit(path, metric)\n    path_list = [path[k] for k in range(n)]\n    metric_list = [metric[k] for k in range(m)]\n    if prepare:\n        # eq_1: tensor-product superposition over all legal paths\n        for q in path_list:\n            qc.h(q)\n    u_d = _metric_circuit(n, m, frames)\n    u_d_inv = u_d.inverse()\n    all_qubits = path_list + metric_list\n    for _ in range(iterations):\n        # eq_5: O_T = U_d^dag (I x C_{<T}) U_d\n        qc.compose(u_d, qubits=all_qubits, inplace=True)\n        _threshold_phase(qc, metric_list, threshold)\n        qc.compose(u_d_inv, qubits=all_qubits, inplace=True)\n        # eq_6: Grover iterate completed by the diffusion reflection\n        _diffusion(qc, path_list)\n    return qc",
+    "example_instance_json": "{\"N\": 3, \"received\": [[1, 1], [0, 1], [1, 1]], \"threshold\": 2, \"iterations\": 2, \"prepare_superposition\": true}",
+    "register_layout": [
+      "qubits 0..2 : path register, qubit i holds information bit x_{i+1} (x_1 on qubit 0, x_3 on qubit 2); x_0 = 0 is implicit",
+      "qubits 3..5 : metric register, little-endian unsigned Hamming distance d(x) (qubit 3 = LSB); starts in |0>, returned to |0> after each oracle",
+      "total 6 qubits for the example (N + ceil(log2(2N+1))); cap 12",
+      "input state expected from runner: |0...0>; with prepare_superposition=true the circuit applies H^{3} itself; expected dominant output path for the example is x=(1,0,1) i.e. bitstring '101' read as path[2]path[1]path[0]"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: H on every path qubit when prepare_superposition is true (comment '# eq_1')",
+        "explanation": "Uniform tensor-product superposition over all 2^N input sequences, which are all legal paths for the fanout-2 trellis."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_metric_circuit: c^(1)_t = x_t uses path[i] directly; c^(2)_t = x_t XOR x_{t-1} realised by temporarily CNOTing path[i-1] into path[i] (x_0 = 0 handled by the i == 0 branch)",
+        "explanation": "Memory-1 encoder with generators (1, 1+D)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_add_code_bit and _controlled_increment inside _metric_circuit",
+        "explanation": "Hamming distance accumulated bit by bit: X-conjugation with the received bit computes c XOR y, and a controlled increment adds its weight. The affine log-likelihood relation and argmin are classical facts motivating the minimum search, not circuit elements."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_metric_circuit (U_d), composed and inverted in build_circuit",
+        "explanation": "The reversible metric computation U_d|x>|0> = |x>|d(x)> (second form) is implemented; the paper's unspecified phase function phi is not implemented."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop: compose(u_d) -> _threshold_phase -> compose(u_d_inv); _threshold_phase implements C_{<T}",
+        "explanation": "Threshold oracle applies -1 to every path with d(x) < T; comparator realised by enumerating metric values below T with multi-controlled Z gates and uncomputing U_d."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "_diffusion and the iteration loop in build_circuit",
+        "explanation": "Grover iterate G_T = (2|psi_0><psi_0| - I) O_T repeated `iterations` times; the success-probability formula is analysis only and is not part of the circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The flag/phase-kickback ancilla prepared in |-> has been removed; the comparator phase C_{<T} is applied directly on the metric register as multi-controlled Z gates (one per metric value v < T).",
+        "reason": "Avoids requiring the runner to prepare a non-|0> ancilla and reduces qubit count; the resulting unitary on path+metric is identical to the kickback construction."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "H^{⊗N} path-superposition preparation is included as part of the returned operation (toggle `prepare_superposition`, default true) rather than as an externally prepared input state.",
+        "reason": "Equation eq_1 is the first step of the QVA algorithm and the Grover reflection assumes this basis; with the toggle the runner can also supply its own superposed input."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_6"
+        ],
+        "change": "Only a single threshold T and a fixed number of Grover iterations are compiled; the Durr-Hoyer outer loop (measure, classically compute d(x'), update T, repeat) is not included.",
+        "reason": "The module must return a measurement-free unitary operation; the adaptive loop is classical post-processing left to the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The paper's phase function phi(P(y|x)) is not implemented; only the reversible computed-metric substitute U_d is realised.",
+        "reason": "phi and the specialised amplitude amplification procedure are not described in the abstract."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Code fixed to the rate-1/2, memory-1 generators (1, 1+D) with zero initial state; general Q, fanout and HMM transition structure are out of scope.",
+        "reason": "Scope narrowing chosen in the math stage; the general butterfly-structured legal-path preparation is not reconstructed."
+      }
+    ],
+    "assumptions": [
+      "Hard-decision BSC with 0 < p < 1/2, so minimum Hamming distance equals maximum likelihood.",
+      "Metric register width m = ceil(log2(2N+1)) guarantees no modular wrap-around since 0 <= d(x) <= 2N.",
+      "Path qubit i (0-indexed) stores x_{i+1}; Qiskit's little-endian bitstring therefore reads x_N ... x_1.",
+      "Threshold T is an integer in 0..2N+1 chosen classically by the runner (T = 2N+1 marks every path; T = 0 marks none).",
+      "For the example instance (y = 11,01,11, T = 2, k = 2) the unique marked path is x = 101 with d = 1 and the analytic success probability is sin^2(5*asin(1/sqrt(8))) ~ 0.945; this is not verified here.",
+      "Qubit cap N + m <= 12 (e.g. N <= 7 for this code)."
+    ],
+    "unresolved_issues": [
+      "The paper's specialised amplitude-amplification procedure and phase function phi are unknown; the generic Durr-Hoyer Grover iterate is a stand-in and may differ materially.",
+      "Number of marked paths for a given threshold is generally unknown, so the runner must choose iteration counts (e.g. randomised/exponential schedule) classically.",
+      "Soft-decision metrics, general HMM emission probabilities, large constraint length Q and the efficient butterfly-structured preparation of constrained legal-path superpositions are not implemented.",
+      "Multi-controlled gates (mcx/mcp) are used as logical gates; no ancilla-based decomposition or depth optimisation is attempted."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 1309,
+    "depth": 985,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

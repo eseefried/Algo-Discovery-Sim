@@ -1,0 +1,137 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "75fe1b47-8d67-41d7-b0fb-40b4fd897d76",
+  "parent_run_id": "dd058376-512e-4c22-8a62-717ce9e7dded",
+  "created_at": "2026-10-31T17:17:32.854410+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "2dff802326ca4ff5bed15db8bec46db044152e2a230ad2f27cb96eaf283f5c2f",
+  "source_specification_sha256": "15db49609ee6947f9c8bbf64f2f9bd9f7c16b0b8315e13c0d9927b2ca0ecbb29",
+  "source_python_sha256": "18ec0a5ed82200733d963381986d46cc5f5c5f45b0b574d4fe98ef44ffeda2e0",
+  "elapsed_seconds": 90.175,
+  "usage": {
+    "input_tokens": 6266,
+    "output_tokens": 8048,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing the continuous-time quantum-walk search evolution operator exp(-iHt), H = -gamma*A - |w><w| with A = J - I, on the complete graph K_N with N = 2^n vertices (n <= 12 qubits). Using A = N|s><s| - I the operator is exp(-i*gamma*t) * exp(i t (gamma*N |s><s| + |w><w|)); the two non-commuting rank-one projector phases are realised exactly with (X-conjugated) multi-controlled phase gates (the uniform-superposition projector via Hadamard conjugation) and combined with a symmetric second-order Trotter product with a user-chosen number of steps. Defaults follow the degenerate-perturbation-theory estimate gamma_c = 1/N, t_* = pi*sqrt(N)/2. No state preparation or measurement is included.",
+    "source_python": "\"\"\"Continuous-time quantum-walk search evolution on the complete graph K_N (N = 2**n).\n\nImplements the OPERATION exp(-i H t) with (eq_1, eq_5)\n    H = -gamma * A - |w><w|,      A = J - I  (complete graph adjacency matrix).\nUsing J = N |s><s| (|s> the uniform superposition) one has A = N|s><s| - I, hence\n    exp(-i H t) = exp(-i gamma t) * exp( i t ( gamma*N |s><s| + |w><w| ) ).\nThe walk term (unperturbed H^(0)) and the oracle term (perturbation V) of the\nperturbative split (eq_3) do not commute; their joint exponential is approximated by a\nsymmetric second-order Trotter product.  Each factor is an exact rank-one projector\nphase: exp(i a |b><b|) is a multi-controlled phase on basis state |b>, and\nexp(i a |s><s|) = H^{x n} exp(i a |0><0|) H^{x n}.\n\nQubit layout: qubit i of the register 'vertex' holds bit i of the vertex index v\n(Qiskit little-endian; v = sum_i 2**i * v_i).  No input preparation, no measurement.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nMAX_TROTTER_STEPS = 4096\nALLOWED_KEYS = (\"graph\", \"num_qubits\", \"marked_vertex\", \"gamma\", \"time\", \"trotter_steps\")\n\n\ndef _check_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(f\"{name} must be an integer, got {value!r}\")\n    return value\n\n\ndef _check_real(value, name):\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(f\"{name} must be a real number, got {value!r}\")\n    v = float(value)\n    if not math.isfinite(v):\n        raise ValueError(f\"{name} must be finite, got {value!r}\")\n    return v\n\n\ndef _parse_instance(instance):\n    \"\"\"Validate the instance dictionary and return (n, w, gamma, t, steps).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    for key in instance:\n        if key not in ALLOWED_KEYS:\n            raise ValueError(f\"unknown instance key {key!r}; allowed keys: {ALLOWED_KEYS}\")\n    graph = instance.get(\"graph\", \"complete\")\n    if graph != \"complete\":\n        raise ValueError(\"only the complete graph ('complete') is supported\")\n    if \"num_qubits\" not in instance:\n        raise ValueError(\"instance must contain 'num_qubits'\")\n    n = _check_int(instance[\"num_qubits\"], \"num_qubits\")\n    if n < 1 or n > MAX_QUBITS:\n        raise ValueError(f\"num_qubits must be between 1 and {MAX_QUBITS}, got {n}\")\n    num_vertices = 2 ** n\n    if \"marked_vertex\" not in instance:\n        raise ValueError(\"instance must contain 'marked_vertex'\")\n    w = _check_int(instance[\"marked_vertex\"], \"marked_vertex\")\n    if w < 0 or w >= num_vertices:\n        raise ValueError(f\"marked_vertex must be in [0, {num_vertices - 1}], got {w}\")\n    # eq_5 defaults: critical jumping rate gamma_c = 1/N and runtime t_* = pi*sqrt(N)/2.\n    if \"gamma\" in instance:\n        gamma = _check_real(instance[\"gamma\"], \"gamma\")\n    else:\n        gamma = 1.0 / num_vertices\n    if gamma <= 0.0:\n        raise ValueError(f\"gamma must be positive, got {gamma}\")\n    if \"time\" in instance:\n        t = _check_real(instance[\"time\"], \"time\")\n    else:\n        t = math.pi * math.sqrt(num_vertices) / 2.0\n    if t < 0.0:\n        raise ValueError(f\"time must be non-negative, got {t}\")\n    if \"trotter_steps\" in instance:\n        steps = _check_int(instance[\"trotter_steps\"], \"trotter_steps\")\n    else:\n        steps = 16\n    if steps < 1 or steps > MAX_TROTTER_STEPS:\n        raise ValueError(f\"trotter_steps must be between 1 and {MAX_TROTTER_STEPS}, got {steps}\")\n    return n, w, gamma, t, steps\n\n\ndef _projector_phase(qc, qubits, basis_index, angle):\n    \"\"\"Apply exp(i * angle * |b><b|) for computational basis state b = basis_index.\n\n    Realised as X-conjugation of the zero bits followed by a multi-controlled phase\n    (a single phase gate when there is one qubit).  Exact, no approximation.\n    \"\"\"\n    n = len(qubits)\n    flips = [qubits[i] for i in range(n) if not (basis_index >> i) & 1]\n    for q in flips:\n        qc.x(q)\n    if n == 1:\n        qc.p(angle, qubits[0])\n    else:\n        qc.mcp(angle, qubits[:-1], qubits[-1])\n    for q in flips:\n        qc.x(q)\n\n\ndef _uniform_projector_phase(qc, qubits, angle):\n    \"\"\"Apply exp(i * angle * |s><s|), |s> the uniform superposition (eq_2 state).\n\n    Since |s> = H^{x n}|0...0>, this is H^{x n} exp(i*angle*|0><0|) H^{x n}.\n    \"\"\"\n    for q in qubits:\n        qc.h(q)\n    _projector_phase(qc, qubits, 0, angle)\n    for q in qubits:\n        qc.h(q)\n\n\ndef build_circuit(instance):\n    \"\"\"Return the Trotterised search evolution exp(-i H t) on the complete graph K_{2**n}.\n\n    H = -gamma*A - |w><w| with A = J - I  (eq_1 / eq_5).  Decomposition (eq_3):\n        exp(-iHt) = e^{-i gamma t} [ e^{i (gamma N d/2)|s><s|} e^{i d |w><w|} e^{i (gamma N d/2)|s><s|} ]^r\n    with d = t / r  (second-order Trotter, error O(t^3/r^2)).\n    \"\"\"\n    n, w, gamma, t, steps = _parse_instance(instance)\n    num_vertices = 2 ** n\n    reg = QuantumRegister(n, \"vertex\")\n    qc = QuantumCircuit(reg, name=f\"ctqw_search_K{num_vertices}_w{w}\")\n    qubits = list(range(n))\n    delta = t / steps\n    half_walk_angle = gamma * num_vertices * delta / 2.0  # exp(+i gamma N d/2 |s><s|)\n    oracle_angle = delta                                   # exp(+i d |w><w|)\n    for _ in range(steps):\n        _uniform_projector_phase(qc, qubits, half_walk_angle)\n        _projector_phase(qc, qubits, w, oracle_angle)\n        _uniform_projector_phase(qc, qubits, half_walk_angle)\n    # Constant shift +gamma*I in H = -gamma*N|s><s| + gamma*I - |w><w| gives e^{-i gamma t}.\n    qc.global_phase = (-gamma * t) % (2.0 * math.pi)\n    return qc",
+    "example_instance_json": "{\"graph\": \"complete\", \"num_qubits\": 2, \"marked_vertex\": 3, \"gamma\": 0.25, \"time\": 3.141592653589793, \"trotter_steps\": 16}",
+    "register_layout": [
+      "Register 'vertex' with n = num_qubits qubits (example: 2 qubits, N = 4 vertices of K_4).",
+      "Qubit i (Qiskit index i, little-endian) holds bit i of the vertex index v = sum_i 2^i v_i; qubit 0 is the least significant bit.",
+      "Example: marked vertex w = 3 = |11>; the uniform superposition |s> = H^{x2}|00> is the intended input state (prepared by the runner, not by the module).",
+      "Total qubits = num_qubits <= 12; no ancillas (mcp is used directly)."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit docstring and body (half_walk_angle / oracle_angle); module docstring derivation A = N|s><s| - I",
+        "explanation": "The search Hamiltonian H = -gamma*A - |w><w| for the complete graph is exponentiated: the walk term becomes exp(i gamma N d |s><s|) (via _uniform_projector_phase), the oracle term exp(i d |w><w|) (via _projector_phase) and the constant shift gamma*I a global phase."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Initial uniform superposition is input-state preparation, which the runner performs; the module only uses the identity |s> = H^{x n}|0> inside _uniform_projector_phase to implement the walk term."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop: symmetric Trotter product of _uniform_projector_phase (H^(0) = -gamma*A) and _projector_phase (V = -|w><w|)",
+        "explanation": "The perturbative split into walk term and oracle term is exactly the split used for the second-order Trotter product; the two exponentials are each realised exactly and alternated."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The degenerate-perturbation-theory gap/runtime estimate is an analytical prediction, not an operation; it only motivates the default evolution time through eq_5."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "_parse_instance (defaults gamma = 1/N, time = pi*sqrt(N)/2) and build_circuit (A = J - I via A = N|s><s| - I)",
+        "explanation": "The complete-graph instance (adjacency J - I, critical gamma_c = 1/N, runtime pi*sqrt(N)/2) is the construction implemented; the example instance is K_4 with gamma = 1/4, t = pi."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Success probability requires measurement/sampling of the output state, which is excluded from the returned operation and left to the runner."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "exp(-iHt) is approximated by a symmetric second-order Trotter product with 'trotter_steps' (default 16) steps rather than exact exponentiation; each factor (walk projector phase and oracle projector phase) is exact.",
+        "reason": "The walk and oracle terms do not commute, and opaque dense unitaries are disallowed; Trotterization with standard gates (H, X, mcp, p) is the compliant realisation. Error is O(t^3/r^2) and controllable via trotter_steps."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Vertex count restricted to N = 2^n (n = 1..12) so the complete graph fills the whole computational basis; graphs other than the complete graph are rejected with ValueError.",
+        "reason": "Only the complete-graph instance is specified; a power-of-two vertex count avoids padding states and keeps A = N|s><s| - I exact on the register."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The constant term +gamma*I arising from A = J - I is carried as qc.global_phase = -gamma*t (mod 2 pi) instead of as gates.",
+        "reason": "A multiple of the identity contributes only a global phase; recording it keeps the circuit equal to exp(-iHt) as an operator rather than merely up to phase."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_6"
+        ],
+        "change": "Initial-state preparation and the final measurement are removed from the circuit.",
+        "reason": "The module must return an operation only; the runner prepares inputs and performs measurement/sampling."
+      }
+    ],
+    "assumptions": [
+      "Adjacency-matrix form of the walk Hamiltonian; for the regular complete graph the Laplacian form differs only by a constant shift (global phase).",
+      "Single marked vertex w given as an integer in [0, 2^n - 1].",
+      "Little-endian vertex encoding: qubit i holds bit i of the vertex index.",
+      "Default parameters follow the asymptotic degenerate-perturbation-theory estimates gamma_c = 1/N and t_* = pi*sqrt(N)/2; at small N (e.g. N = 4) the peak success probability is not exactly 1 and the optimal time differs slightly from pi.",
+      "Multi-controlled phase gates (qc.mcp) without ancillas are acceptable as standard library gates for up to 12 qubits."
+    ],
+    "unresolved_issues": [
+      "The paper's diagrammatic weighted-graph-with-self-loops method and its specific graph with growing invariant subspace dimension are not reconstructed; only the standard complete-graph search is implemented.",
+      "Trotter error at the default 16 steps is small for the K_4 example (t = pi, gamma*N = 1) but larger instances/times may require more steps; the runner should choose trotter_steps accordingly.",
+      "Whether the paper uses the adjacency or Laplacian walk is unknown; irrelevant for regular graphs but would matter for the paper's actual example graph."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 496,
+    "depth": 321,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

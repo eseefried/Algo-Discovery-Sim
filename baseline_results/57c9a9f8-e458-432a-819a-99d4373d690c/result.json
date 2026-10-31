@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "57c9a9f8-e458-432a-819a-99d4373d690c",
+  "parent_run_id": "ff873f02-81d3-479e-9791-3e1bf272cf17",
+  "created_at": "2026-10-31T17:02:17.017995+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "81941919862298c858ce8bd2245686cf84653b12073b5365f2f2681323b1d13c",
+  "source_specification_sha256": "442339de9ea70dc6247b09ed9f51a6a3cf3505105601bbe736f1b0314280eb8b",
+  "source_python_sha256": "12e37dc6effa95fc478db8a0a5d660528b9d3b21811b778f8982b4a2c04d2151",
+  "elapsed_seconds": 98.488,
+  "usage": {
+    "input_tokens": 8850,
+    "output_tokens": 8233,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": false,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing the bipartite diagonal random-phase gate U (eq_1) on registers A (x) B for N = 2^n (n = 1 by default, two qubits), using the exact phase-gate decomposition of eq_6 generalized to n qubits per side via a Mobius (inclusion-exclusion) transform of the diagonal phases: global phase, single-qubit P gates, CP gates and multi-controlled phase gates. The Choi-state Bell pairs of eq_5 are NOT prepared inside the circuit (inputs are prepared by the runner); an option allocates idle reference registers A', B' so the runner can prepare |Phi>_{AA'}|Phi>_{BB'} and tomograph rho_{AA'}, whose spectrum equals that of rho = A A^dagger / N^2 (eq_2, eq_4).",
+    "source_python": "\"\"\"Diagonal bipartite random-phase gate U on C^N (x) C^N (N = 2^n) as a Qiskit operation.\n\nImplements eq_1 (diagonal unitary with phases phi_{jk}) via the exact decomposition of\neq_6, generalised from N = 2 to N = 2^n with a Mobius transform of the phase vector:\n    phi_x = sum_{S subset of bits} c_S prod_{q in S} x_q ,\nso that U = e^{i c_0} * prod_{|S|=1} P(c_S) * prod_{|S|=2} CP(c_S) * prod_{|S|>=3} MCP(c_S).\nFor n = 1 this is exactly eq_6:\n    U = e^{i phi_00} (P(phi_10-phi_00)_A (x) P(phi_01-phi_00)_B) CP(phi_11-phi_10-phi_01+phi_00).\n\nQubit layout (index 0 = least significant basis bit):\n    qubits 0 .. n-1      : register B  (least significant, index k)\n    qubits n .. 2n-1     : register A  (most significant, index j)\n    optional 2n .. 3n-1  : register B' (idle reference half, Choi construction eq_5)\n    optional 3n .. 4n-1  : register A' (idle reference half, Choi construction eq_5)\nThe diagonal entry of U on basis state |j>_A |k>_B is e^{i phases[j*N + k]}, i.e. the\nflat phase list is indexed by the Qiskit basis-state integer x = j*N + k, and reshaping\nit row-major into an N x N matrix gives A_{jk} = e^{i phi_{jk}} (eq_2).\n\nThe circuit does NOT prepare Bell pairs or measure: the runner prepares\n|Phi>_{AA'} |Phi>_{BB'} and performs tomography of the reduced state on A A' (eq_5);\nits spectrum equals the eigenvalues of rho = A A^dagger / N^2 and its entropy equals\nthe Schmidt strength K_Sch(U) (eq_3, eq_4).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nimport numpy as np\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nTWO_PI = 2.0 * math.pi\nPHASE_TOL = 1e-12\n\n\ndef _local_qubits(instance):\n    \"\"\"Return (N, n) with N = 2^n the local dimension, validated.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    if \"N\" not in instance:\n        raise ValueError(\"instance must provide the local dimension 'N'\")\n    N = instance[\"N\"]\n    if isinstance(N, bool) or not isinstance(N, int):\n        raise ValueError(\"'N' must be an integer\")\n    if N < 2 or (N & (N - 1)) != 0:\n        raise ValueError(\"'N' must be a power of two >= 2\")\n    n = N.bit_length() - 1\n    return N, n\n\n\ndef _extract_phases(instance, N):\n    \"\"\"Flat real phase vector of length N^2 indexed by x = j*N + k (eq_1 / eq_2).\"\"\"\n    if \"phases\" in instance:\n        raw = instance[\"phases\"]\n        arr = np.asarray(raw, dtype=float)\n        if arr.ndim == 2:\n            if arr.shape != (N, N):\n                raise ValueError(\"nested 'phases' must be an N x N array\")\n            arr = arr.reshape(N * N)\n        elif arr.ndim != 1 or arr.shape[0] != N * N:\n            raise ValueError(\"'phases' must have length N^2 or shape N x N\")\n        if not np.all(np.isfinite(arr)):\n            raise ValueError(\"'phases' must be finite real numbers\")\n        return arr\n    if \"seed\" in instance:\n        seed = instance[\"seed\"]\n        if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:\n            raise ValueError(\"'seed' must be a non-negative integer\")\n        rng = np.random.default_rng(seed)\n        # eq_1: i.i.d. uniform phases on [0, 2 pi)\n        return rng.uniform(0.0, TWO_PI, size=N * N)\n    raise ValueError(\"instance must provide either 'phases' or 'seed'\")\n\n\ndef _mobius_coefficients(phases, m):\n    \"\"\"Inclusion-exclusion transform: c[S] = sum_{T subset S} (-1)^{|S|-|T|} phi[T].\n\n    Afterwards phi[x] = sum_{S subset x} c[S], which is the multilinear expansion\n    used by eq_6 (generalised to m = 2n qubits).\n    \"\"\"\n    c = np.array(phases, dtype=float, copy=True)\n    size = 1 << m\n    for b in range(m):\n        bit = 1 << b\n        for x in range(size):\n            if x & bit:\n                c[x] -= c[x ^ bit]\n    return c\n\n\ndef _wrap(angle):\n    \"\"\"Reduce an angle to (-pi, pi].\"\"\"\n    a = math.fmod(angle, TWO_PI)\n    if a > math.pi:\n        a -= TWO_PI\n    elif a <= -math.pi:\n        a += TWO_PI\n    return a\n\n\ndef build_circuit(instance):\n    \"\"\"Build the diagonal gate U = sum_{j,k} e^{i phi_{jk}} |j><j|_A (x) |k><k|_B (eq_1).\n\n    instance keys:\n      N      : int, local dimension (power of two, >= 2)\n      phases : list of N^2 floats (index j*N + k) or N x N nested list, OR\n      seed   : non-negative int to draw i.i.d. uniform phases (eq_1 ensemble)\n      include_reference_registers : optional bool; if true, idle registers B', A'\n                                    are appended for the Choi construction (eq_5)\n    \"\"\"\n    N, n = _local_qubits(instance)\n    include_ref = bool(instance.get(\"include_reference_registers\", False))\n    total = 4 * n if include_ref else 2 * n\n    if total > MAX_QUBITS:\n        raise ValueError(\"instance requires %d qubits, exceeding the cap of %d\" % (total, MAX_QUBITS))\n\n    phases = _extract_phases(instance, N)\n    m = 2 * n\n\n    qB = QuantumRegister(n, \"B\")\n    qA = QuantumRegister(n, \"A\")\n    if include_ref:\n        qBp = QuantumRegister(n, \"Bp\")\n        qAp = QuantumRegister(n, \"Ap\")\n        qc = QuantumCircuit(qB, qA, qBp, qAp)\n    else:\n        qc = QuantumCircuit(qB, qA)\n\n    # eq_6 (generalised): multilinear phase coefficients over the 2n qubits of A (x) B.\n    coeffs = _mobius_coefficients(phases, m)\n\n    # Global phase e^{i c_0} (= e^{i phi_00} for N = 2).\n    c0 = _wrap(float(coeffs[0]))\n    if abs(c0) > PHASE_TOL:\n        qc.global_phase += c0\n\n    for x in range(1, 1 << m):\n        c = _wrap(float(coeffs[x]))\n        if abs(c) <= PHASE_TOL:\n            continue\n        bits = [q for q in range(m) if (x >> q) & 1]\n        if len(bits) == 1:\n            # local phase gate P(c) on qubit (A or B side)\n            qc.p(c, bits[0])\n        elif len(bits) == 2:\n            # controlled phase CP(c) = diag(1,1,1,e^{ic})\n            qc.cp(c, bits[0], bits[1])\n        else:\n            # multi-controlled phase for higher-order interaction terms (n >= 2)\n            qc.mcp(c, bits[:-1], bits[-1])\n\n    return qc",
+    "example_instance_json": "{\"N\": 2, \"phases\": [0.3, 1.1, 2.4, 0.7], \"include_reference_registers\": false}",
+    "register_layout": [
+      "qubit 0: register B (1 qubit for N=2; least significant basis bit, index k)",
+      "qubit 1: register A (1 qubit for N=2; most significant basis bit, index j)",
+      "diagonal entry on |j>_A|k>_B is exp(i*phases[j*N+k]); for the example: |00> -> e^{0.3i}, |01>(A=0,B=1) -> e^{1.1i}, |10>(A=1,B=0) -> e^{2.4i}, |11> -> e^{0.7i}",
+      "optional (include_reference_registers=true): qubits 2n..3n-1 = B' and 3n..4n-1 = A' idle reference registers for the runner-side Choi construction; total qubits 4n <= 12",
+      "for general N=2^n: qubits 0..n-1 = B, n..2n-1 = A"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (overall diagonal gate) and _extract_phases (explicit phases or i.i.d. uniform sampling via 'seed')",
+        "explanation": "The circuit is exactly the diagonal unitary sum_{jk} e^{i phi_jk} |j><j|_A (x) |k><k|_B with A the most significant register; phases can be supplied or drawn uniformly i.i.d. from a seeded generator."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The reshaped unimodular matrix A and rho = A A^dagger/N^2 are classical reference objects; the module documents that the flat phase list reshaped row-major gives A_{jk}, but rho is not computed in the circuit."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Definition of operator Schmidt coefficients and Schmidt strength; a classical quantity used in post-processing, not part of the operation."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Identity K_Sch(U) = S(rho) for diagonal gates; motivates the construction but is a classical statement verified by the runner's post-processing."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Choi-state protocol: Bell-pair preparation and tomography are input preparation and measurement, which the runner performs; the module only optionally allocates idle reference registers A', B' so the runner can embed U into the Choi circuit."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "_mobius_coefficients and the gate loop in build_circuit (global_phase, qc.p, qc.cp, qc.mcp)",
+        "explanation": "For N=2 the Mobius transform yields exactly c_B = phi_01-phi_00 (P on B), c_A = phi_10-phi_00 (P on A), c_AB = phi_11-phi_10-phi_01+phi_00 (CP on A,B) and global phase phi_00; for N=2^n the same expansion with multi-controlled phases. The Theta(log N) average-scaling statement is an ensemble property estimated by the runner over seeds, not encoded in a single circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Bell-pair preparation (H + CNOT on AA' and BB') is removed from the generated circuit; the circuit is only the operation U. Optionally, idle reference registers B', A' are allocated (include_reference_registers) so the runner can prepare |Phi>|Phi> and apply U on A,B.",
+        "reason": "Implementation rules require an operation without input-state preparation or measurement; inputs are prepared by the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_6"
+        ],
+        "change": "Generalized from the N=2 instance to N=2^n (n<=3 without reference registers, n<=3 with them, capped at 12 qubits) via a Mobius/inclusion-exclusion expansion of the phase vector into P, CP and multi-controlled phase gates.",
+        "reason": "The construction must work for varying valid instance parameters; for n=1 it reduces exactly to eq_6."
+      },
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "The global phase e^{i phi_00} is retained via qc.global_phase rather than omitted.",
+        "reason": "Keeps the circuit exactly equal (not just up to phase) to the specified diagonal unitary; harmless for the entanglement quantities."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Qubit ordering fixed as register B on qubits 0..n-1 (least significant) and A on qubits n..2n-1 (most significant), so that phases[j*N+k] is the entry on Qiskit basis integer x = j*N+k.",
+        "reason": "Resolves the spec's 'A most significant' convention against Qiskit's little-endian qubit indexing."
+      }
+    ],
+    "assumptions": [
+      "Phases are i.i.d. uniform on [0, 2pi) when sampled from a seed; explicit phase lists are accepted as arbitrary finite reals (any diagonal unitary).",
+      "N must be a power of two so that each subsystem is a qubit register; the N=2 example matches the specification's chosen instance.",
+      "The runner performs the Choi-state preparation, tomography of rho_{AA'} and the entropy computation / ensemble averaging; the circuit itself only applies U.",
+      "Natural logarithm for entropies in post-processing (not part of the module)."
+    ],
+    "unresolved_issues": [
+      "The exact mean von Neumann entropy (Borel-triangle result) and the moments of the unimodular ensemble are not reconstructed, so only the qualitative Theta(log N) scaling can be compared by sampling over seeds.",
+      "Multi-controlled phase gates (qc.mcp) for n>=2 are exact but not optimized in gate count.",
+      "Idle reference registers (when requested) contain no gates; some runners may flag unused qubits."
+    ]
+  },
+  "validation": {
+    "status": "failed",
+    "detail": "Generated source was not executed: ValueError: Module constants must be literals or small numeric expressions.",
+    "reference": "none",
+    "worker_image_id": null,
+    "qiskit_version": null,
+    "num_qubits": null,
+    "gate_count": null,
+    "depth": null,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

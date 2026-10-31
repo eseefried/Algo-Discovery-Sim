@@ -1,0 +1,128 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "59f82e7c-b5f2-490d-8ecc-35dde6bc95f5",
+  "parent_run_id": "58a8c4fe-a83e-423c-a419-2fe9a3078fb8",
+  "created_at": "2026-10-31T17:27:09.844365+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "da1b01b4f2151b11f8dc331ee0b4665ba81f8221be66d22d3df1e5b255cb5d69",
+  "source_specification_sha256": "cc3276dadb80bad33ea4b17f575e8b7431930fefb9565074f933fe79c53cbe1b",
+  "source_python_sha256": "4e45cf7bb3da8547c25054d9e3f169bb78fbe52a9e2841ebb4f1acbf83f4a52d",
+  "elapsed_seconds": 88.508,
+  "usage": {
+    "input_tokens": 7509,
+    "output_tokens": 7222,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing the basis-change operation of cyclic-MUB tomography: build_circuit(instance) returns the unitary (U^dagger)^k (or U^k) on an n-qubit data register, where U is the cyclic MUB generator. For n=1 the explicit order-3 generator U_1 = S H of eq_4 is built in (bases Z -> Y -> X). For n>1 (or on request for n=1) the Hadamard/controlled-phase template of eq_3, U = H^{(x)n} D with D a user-supplied CZ edge set and S vertex set, is implemented; the module cannot certify that a user-supplied pattern is cyclic or unbiased, since the paper's explicit multi-qubit patterns are not available. No state preparation, measurement, or classical inversion (eq_6) is included.",
+    "source_python": "\"\"\"Cyclic mutually-unbiased-basis (MUB) generator powers for MUB tomography.\n\nbuild_circuit(instance) -> QuantumCircuit\n\nThe returned circuit is the unitary (U^dagger)^k (default) or U^k acting on an\nn-qubit data register, where U is a cyclic MUB generator (eq_2).  Applying\n(U^dagger)^k before a computational-basis measurement realises a measurement in\nthe k-th basis B_k = {U^k |j>} (eq_5).\n\nGenerators:\n  * n = 1 (default): U_1 = S H, i.e. Hadamard first, then the phase gate S\n    (eq_4).  U_1^3 = exp(i*pi/4) * identity, so k in {0, 1, 2} cycles through\n    the Z, Y and X eigenbases, the complete set of three single-qubit MUBs.\n  * template (n >= 1): U = H^{(x)n} D with D = prod CZ_{ab} prod S_c over a\n    user-supplied edge set 'cz_edges' and vertex set 's_qubits' (eq_3).  The\n    diagonal network D acts first, then the Hadamard layer.  Whether a given\n    pattern is cyclic of order d+1 and produces MUBs is NOT verified here.\n\nInstance keys:\n  n         : int, number of data qubits, 1 <= n <= 12\n  k         : int, basis index / power, 0 <= k <= 2**n\n  inverse   : bool (optional, default True). True -> (U^dagger)^k, False -> U^k\n  cz_edges  : list of [a, b] qubit pairs (required for n > 1, optional for n = 1)\n  s_qubits  : list of qubit indices receiving S (required with cz_edges)\n\nQubit 0 of the register is the least significant bit of the basis label j.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _as_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(f\"'{name}' must be an integer, got {value!r}\")\n    return value\n\n\ndef _as_bool(value, name):\n    if not isinstance(value, bool):\n        raise ValueError(f\"'{name}' must be a boolean, got {value!r}\")\n    return value\n\n\ndef _validate_pattern(n, cz_edges, s_qubits):\n    \"\"\"Validate the eq_3 diagonal network description.\"\"\"\n    if not isinstance(cz_edges, (list, tuple)):\n        raise ValueError(\"'cz_edges' must be a list of [a, b] pairs\")\n    if not isinstance(s_qubits, (list, tuple)):\n        raise ValueError(\"'s_qubits' must be a list of qubit indices\")\n    edges = []\n    for pair in cz_edges:\n        if not isinstance(pair, (list, tuple)) or len(pair) != 2:\n            raise ValueError(f\"edge {pair!r} must be a pair [a, b]\")\n        a = _as_int(pair[0], \"cz_edges entry\")\n        b = _as_int(pair[1], \"cz_edges entry\")\n        if a < 0 or b < 0 or a >= n or b >= n:\n            raise ValueError(f\"edge {pair!r} refers to a qubit outside 0..{n - 1}\")\n        if a == b:\n            raise ValueError(f\"edge {pair!r} must connect two distinct qubits\")\n        edges.append((a, b))\n    verts = []\n    for c in s_qubits:\n        c_int = _as_int(c, \"s_qubits entry\")\n        if c_int < 0 or c_int >= n:\n            raise ValueError(f\"s_qubits entry {c!r} outside 0..{n - 1}\")\n        verts.append(c_int)\n    return edges, verts\n\n\ndef _generator_eq4(n):\n    \"\"\"eq_4: U_1 = S H on a single qubit (H applied first, then S).\"\"\"\n    if n != 1:\n        raise ValueError(\"the built-in generator of eq_4 is defined only for n = 1\")\n    gen = QuantumCircuit(1, name=\"U_SH\")\n    gen.h(0)\n    gen.s(0)\n    return gen\n\n\ndef _generator_eq3(n, edges, verts):\n    \"\"\"eq_3 template: U = H^{(x)n} D, D = prod CZ_ab prod S_c (D acts first).\"\"\"\n    gen = QuantumCircuit(n, name=\"U_HD\")\n    # diagonal network D (all factors commute, so ordering is immaterial)\n    for c in verts:\n        gen.s(c)\n    for (a, b) in edges:\n        gen.cz(a, b)\n    # Hadamard layer\n    for q in range(n):\n        gen.h(q)\n    return gen\n\n\ndef build_circuit(instance):\n    \"\"\"Return the unitary (U^dagger)^k (or U^k) of the cyclic MUB generator.\n\n    eq_2: B_k = {U^k |j>}; the circuit is k repetitions of U (or U^dagger).\n    eq_5: measuring in B_k == applying (U^dagger)^k then a Z-basis measurement.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    if \"n\" not in instance or \"k\" not in instance:\n        raise ValueError(\"instance must contain 'n' and 'k'\")\n    n = _as_int(instance[\"n\"], \"n\")\n    k = _as_int(instance[\"k\"], \"k\")\n    inverse = True\n    if \"inverse\" in instance:\n        inverse = _as_bool(instance[\"inverse\"], \"inverse\")\n\n    if n < 1 or n > MAX_QUBITS:\n        raise ValueError(f\"'n' must satisfy 1 <= n <= {MAX_QUBITS}, got {n}\")\n    d = 2 ** n\n    if k < 0 or k > d:\n        raise ValueError(f\"'k' must satisfy 0 <= k <= d = {d}, got {k}\")\n\n    has_pattern = (\"cz_edges\" in instance) or (\"s_qubits\" in instance)\n    if has_pattern:\n        if \"cz_edges\" not in instance or \"s_qubits\" not in instance:\n            raise ValueError(\"'cz_edges' and 's_qubits' must be supplied together\")\n        edges, verts = _validate_pattern(n, instance[\"cz_edges\"], instance[\"s_qubits\"])\n        gen = _generator_eq3(n, edges, verts)\n    else:\n        if n != 1:\n            raise ValueError(\n                \"for n > 1 the generator pattern ('cz_edges', 's_qubits') must be \"\n                \"supplied; the explicit multi-qubit generator is not fixed by the \"\n                \"specification\"\n            )\n        gen = _generator_eq4(n)\n\n    if inverse:\n        gen = gen.inverse()\n\n    data = QuantumRegister(n, \"data\")\n    qc = QuantumCircuit(data, name=f\"MUB_power_k{k}\")\n    # eq_2 / eq_5: k-fold repetition of the (inverse) generator\n    for _ in range(k):\n        qc.compose(gen, qubits=list(range(n)), inplace=True)\n    return qc",
+    "example_instance_json": "{\"n\": 1, \"k\": 1, \"inverse\": true}",
+    "register_layout": [
+      "data[0] (qubit 0): the single data qubit holding the unknown state; for n>1, data[i] is bit i (little-endian, qubit 0 least significant) of the computational-basis label j",
+      "Example: n=1, k=1, inverse=true -> circuit is U_1^dagger = H S^dagger (S^dagger applied first, then H), rotating the Y-eigenbasis B_1 = {|+i>,|-i>} onto the computational basis"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Unbiasedness condition is a property of the generated bases, not an operation; it is satisfied by the built-in eq_4 generator but not checked in code (no operator construction allowed)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop 'for _ in range(k): qc.compose(gen, ...)' with comment 'eq_2 / eq_5'",
+        "explanation": "The circuit is the k-th power U^k (inverse=false) of the cyclic generator, realising the k-th basis B_k = {U^k|j>}."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_generator_eq3 and _validate_pattern",
+        "explanation": "Hadamard/controlled-phase template U = H^{(x)n} D with D = prod CZ_ab prod S_c for a user-supplied edge set and S-vertex set; the specific pattern that makes U cyclic of order d+1 is not available from the abstract and is therefore not fixed by the code."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_generator_eq4 (gen.h(0); gen.s(0))",
+        "explanation": "Single-qubit order-3 generator U_1 = S H, Hadamard applied first then S; default when n=1 and no pattern is given."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: 'if inverse: gen = gen.inverse()' and the repetition loop",
+        "explanation": "With inverse=true (default) the circuit is (U^dagger)^k, the basis-change operation that maps a measurement in B_k to a computational-basis measurement; the measurement itself and probability estimation are left to the runner."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Linear-inversion reconstruction of rho from the probabilities is classical post-processing, not part of the quantum operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The two equations use opposite operator orderings: eq_4 writes U_1 = S H (H acts first, then S) while eq_3 writes U = H^{(x)n} D (D acts first, then Hadamards). The code implements each as written; the n=1 default follows eq_4, the template follows eq_3. For n=1 the template with s_qubits=[0] therefore yields H S (not S H), which is unitarily equivalent (conjugate by H) and also of order 3 modulo phase.",
+        "reason": "Faithfulness to each stated equation; ordering discrepancy disclosed rather than silently harmonised."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The multi-qubit generator is not fixed: the user must supply 'cz_edges' and 's_qubits'. The module validates indices only and does not certify that the resulting U has order d+1 or produces mutually unbiased bases.",
+        "reason": "The abstract does not specify the explicit two-, three-, four-qubit generators; inventing one would be fabrication, and operator-level verification is disallowed in the module."
+      },
+      {
+        "equation_ids": [
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Scope narrowed to the unitary basis-change operation (U^dagger)^k; state preparation, computational-basis measurement, shot statistics, and the inversion formula are excluded.",
+        "reason": "Task requires a measurement-free unitary operation; the runner handles inputs and measurement."
+      }
+    ],
+    "assumptions": [
+      "n=1 built-in instance uses U_1 = S H as in eq_4; it is a choice of this reconstruction, not the paper's multi-qubit generator.",
+      "'inverse' defaults to true so the returned operation is the measurement rotation (U^dagger)^k of eq_5; inverse=false returns U^k (basis generation direction of eq_2).",
+      "k is allowed in 0..d inclusive (d+1 values, matching the d+1 bases; k=d returns a circuit equal to the identity up to global phase for a genuine cyclic generator, k=0 returns an empty circuit).",
+      "Little-endian qubit ordering: data[0] is the least significant bit of the basis label j.",
+      "For large n and k the circuit contains k*(n+|E|+|V|) gates (up to roughly 4096 repetitions for n=12); no additional depth cap is imposed beyond the 12-qubit limit."
+    ],
+    "unresolved_issues": [
+      "Explicit cyclic generators for n=2,3,4 (edge sets, S placements, number of alternating layers) are unknown; a user-supplied eq_3 pattern is not guaranteed to be cyclic or unbiased.",
+      "The paper's entanglement-structure classification of MUB sets and the corresponding circuits are not implemented.",
+      "Global phase exp(i*phi) of U^{d+1} is not tracked; for the eq_4 instance it is exp(i*pi/4) per the specification."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 1,
+    "gate_count": 2,
+    "depth": 2,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "2d7b4ca6-d685-4e5f-9038-e5ee73203075",
+  "parent_run_id": "6735ecfd-c1fb-44a1-85e8-8819e20b46a4",
+  "created_at": "2026-10-31T16:51:28.654468+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "ae7878a2550b6c570a050ccff03ec13a1657fc97e9a25c8272328dc18eea1f47",
+  "source_specification_sha256": "f10b115259a1698ed11703d55a82bd1f4dc957ee80435730d25988130c702566",
+  "source_python_sha256": "eca612420f3fbefffefa0eef1ae28753cf9852865409f17a4d9a8274d73f8387",
+  "elapsed_seconds": 77.407,
+  "usage": {
+    "input_tokens": 7663,
+    "output_tokens": 7172,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit implementation of the scoped construction: second-order symmetric Trotter (Suzuki) splitting of the single-qubit Lindbladian L = L_1 + L_2 with L_1 the coherent X-rotation term (H = omega X/2) and L_2 amplitude damping at rate gamma. Each of the n steps applies Rx(omega*tau/2) on the system, then the exact one-ancilla Stinespring dilation of the amplitude-damping step (system-controlled Ry(theta) on a fresh ancilla followed by CNOT ancilla->system, theta = 2 arcsin sqrt(1-exp(-gamma*tau))), then Rx(omega*tau/2) again. Because the returned object must be a measurement-free unitary circuit (no reset), one fresh ancilla is allocated per dissipative step instead of resetting a single ancilla; total qubits n+1 <= 12. The channel S_2(t/n)^n(rho_0) is obtained by tracing out all ancillas, which the runner must prepare in |0>.",
+    "source_python": "\"\"\"Second-order product-formula simulation of a single-qubit Markovian channel.\n\nScoped construction (from the math specification):\n  L = L_1 + L_2                                             (eq_3)\n  L_1(rho) = -i[(omega/2) X, rho]                           (coherent piece)\n  L_2(rho) = gamma (s- rho s+ - 1/2 {s+ s-, rho})           (amplitude damping)\n  S_2(tau) = e^{tau L_1/2} e^{tau L_2} e^{tau L_1/2}        (eq_4)\n  T_t ~= S_2(t/n)^n\n\nEach dissipative step e^{tau L_2} is realised exactly by the one-ancilla\nStinespring dilation (eq_5, eq_6):\n  U_AD = CNOT_{A->S} . C_S[Ry(theta)]_A,  theta = 2 arcsin sqrt(p),\n  p = 1 - exp(-gamma tau),\nwith the ancilla prepared in |0> and traced out afterwards.\n\nBecause the returned circuit must be unitary and measurement-free (no reset),\none fresh ancilla qubit is used for each of the n dissipative steps instead of\nresetting a single reused ancilla.\n\nQubit layout: qubit 0 = system S; qubits 1..n = ancillas A_1..A_n where A_k is\nconsumed by the k-th Trotter step (1-indexed). All ancillas must be supplied in\n|0>; the simulated channel on S is obtained by tracing out all ancillas.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _as_real(instance, key):\n    \"\"\"Fetch a finite real number from the instance dict or raise ValueError.\"\"\"\n    if key not in instance:\n        raise ValueError(\"missing required parameter '%s'\" % key)\n    value = instance[key]\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(\"parameter '%s' must be a real number\" % key)\n    value = float(value)\n    if not math.isfinite(value):\n        raise ValueError(\"parameter '%s' must be finite\" % key)\n    return value\n\n\ndef _as_positive_int(instance, key):\n    \"\"\"Fetch a positive integer from the instance dict or raise ValueError.\"\"\"\n    if key not in instance:\n        raise ValueError(\"missing required parameter '%s'\" % key)\n    value = instance[key]\n    if isinstance(value, bool):\n        raise ValueError(\"parameter '%s' must be an integer\" % key)\n    if isinstance(value, float):\n        if not value.is_integer():\n            raise ValueError(\"parameter '%s' must be an integer\" % key)\n        value = int(value)\n    if not isinstance(value, int):\n        raise ValueError(\"parameter '%s' must be an integer\" % key)\n    if value < 1:\n        raise ValueError(\"parameter '%s' must be >= 1\" % key)\n    return value\n\n\ndef _validate(instance):\n    \"\"\"Validate the instance and return (omega, gamma, t, n).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object / dict\")\n    omega = _as_real(instance, \"omega\")\n    gamma = _as_real(instance, \"gamma\")\n    t = _as_real(instance, \"t\")\n    n = _as_positive_int(instance, \"n\")\n    if gamma < 0.0:\n        raise ValueError(\"damping rate gamma must be non-negative\")\n    if t < 0.0:\n        raise ValueError(\"evolution time t must be non-negative\")\n    # One system qubit plus one fresh ancilla per Trotter step.\n    total_qubits = n + 1\n    if total_qubits > MAX_QUBITS:\n        raise ValueError(\n            \"n = %d steps needs %d qubits (1 system + n ancillas), exceeding the cap of %d\"\n            % (n, total_qubits, MAX_QUBITS)\n        )\n    return omega, gamma, t, n\n\n\ndef _damping_angle(gamma, tau):\n    \"\"\"eq_5 / eq_6: p = 1 - exp(-gamma tau), theta = 2 arcsin(sqrt(p)).\"\"\"\n    p = 1.0 - math.exp(-gamma * tau)\n    if p < 0.0:\n        p = 0.0\n    if p > 1.0:\n        p = 1.0\n    return 2.0 * math.asin(math.sqrt(p))\n\n\ndef _coherent_half_step(qc, system, omega, tau):\n    \"\"\"eq_3 (L_1) and eq_4: e^{(tau/2) L_1}(rho) = U rho U^dagger with\n    U = exp(-i (tau/2) (omega/2) X) = Rx(omega * tau / 2).\"\"\"\n    qc.rx(omega * tau / 2.0, system)\n\n\ndef _dissipative_step(qc, system, ancilla, theta):\n    \"\"\"eq_5 / eq_6: one-ancilla Stinespring dilation of e^{tau L_2}.\n\n    U_AD = CNOT_{A->S} . C_S[Ry(theta)]_A acting on |0>_A (x) |psi>_S gives\n    (<0|_A (x) I) U_AD (|0>_A (x) I) = K_0 = |0><0| + sqrt(1-p)|1><1|,\n    (<1|_A (x) I) U_AD (|0>_A (x) I) = K_1 = sqrt(p)|0><1|,\n    with sqrt(p) = sin(theta/2).\n    \"\"\"\n    qc.cry(theta, system, ancilla)\n    qc.cx(ancilla, system)\n\n\ndef build_circuit(instance):\n    \"\"\"Build the unitary dilation of S_2(t/n)^n for the instance generator.\n\n    instance keys:\n      omega : real, coefficient of the Hamiltonian H = (omega/2) X\n      gamma : real >= 0, amplitude-damping rate\n      t     : real >= 0, total evolution time\n      n     : int >= 1, number of second-order Trotter steps (n + 1 <= 12)\n\n    Qubit 0 is the system; qubits 1..n are fresh |0> ancillas, ancilla k being\n    used in Trotter step k. Tracing out the ancillas yields S_2(t/n)^n(rho_0).\n    \"\"\"\n    omega, gamma, t, n = _validate(instance)\n    tau = t / float(n)  # eq_4: tau = t / n\n    theta = _damping_angle(gamma, tau)\n\n    sys_reg = QuantumRegister(1, \"s\")\n    anc_reg = QuantumRegister(n, \"a\")\n    qc = QuantumCircuit(sys_reg, anc_reg, name=\"lindblad_trotter2\")\n    system = sys_reg[0]\n\n    # eq_4: S_2(tau)^n = [ e^{tau L_1/2} e^{tau L_2} e^{tau L_1/2} ]^n\n    for k in range(n):\n        _coherent_half_step(qc, system, omega, tau)\n        _dissipative_step(qc, system, anc_reg[k], theta)\n        _coherent_half_step(qc, system, omega, tau)\n\n    return qc",
+    "example_instance_json": "{\"omega\": 1.0, \"gamma\": 0.5, \"t\": 1.0, \"n\": 2}",
+    "register_layout": [
+      "qubit 0 (register s[0]): system qubit S carrying rho; runner prepares rho_0 (instance choice |+><+|) here",
+      "qubit 1 (register a[0]): ancilla A_1, must be |0> at input; consumed by the dissipative part of Trotter step 1 and traced out afterwards",
+      "qubit 2 (register a[1]): ancilla A_2, must be |0> at input; consumed by the dissipative part of Trotter step 2 and traced out afterwards",
+      "general n: qubits 1..n are ancillas A_1..A_n, one per Trotter step; total qubits n+1 <= 12 so n <= 11",
+      "Qiskit little-endian convention: qubit 0 is the least significant computational-basis bit"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Definition of the target semigroup T_t = e^{tL} in GKSL form; it is the object being approximated, not directly constructed in the circuit."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Induced (1->1) norm used only in the error analysis / choice of n; the module takes n as an input and performs no norm computation."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_coherent_half_step (L_1 as Rx(omega*tau/2)) and _dissipative_step (L_2 via its exact dilation); module docstring",
+        "explanation": "The two-term split L = L_1 + L_2 is realised by alternating the coherent Rx half-steps and the amplitude-damping dilation."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop 'for k in range(n)' with comment '# eq_4', tau = t / n",
+        "explanation": "The symmetric second-order product S_2(tau)^n is built step by step; the error bound and choice of n are not computed in code (n is supplied)."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "_damping_angle (p = 1 - exp(-gamma*tau)) and docstring of _dissipative_step (Kraus operators K_0, K_1)",
+        "explanation": "The Kraus form of the amplitude-damping step determines p and hence the rotation angle theta of the dilation."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "_dissipative_step: qc.cry(theta, system, ancilla); qc.cx(ancilla, system)",
+        "explanation": "One-ancilla Stinespring dilation U_AD = CNOT_{A->S} . C_S[Ry(theta)]_A with theta = 2 arcsin sqrt(p); ancilla starts in |0> and is traced out by the runner."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "Instead of reusing a single ancilla that is reset to |0> before each dissipative step, the circuit allocates n fresh ancilla qubits (one per Trotter step), giving n+1 qubits in total and the constraint n <= 11.",
+        "reason": "The deliverable must be a measurement-free unitary QuantumCircuit without reset or dynamic circuits; using n fresh |0> ancillas is unitarily equivalent (after tracing out all ancillas) to reset-and-reuse of one ancilla."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_2"
+        ],
+        "change": "The number of Trotter steps n is taken as an instance parameter rather than derived from epsilon via the bound n = O((||L|| t)^{3/2}/epsilon^{1/2}).",
+        "reason": "The constant C in the error bound is not available from the abstract, and the module must not perform norm/operator computations; the instance fixes n = 2 as in the specification."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to the specific instance generator (X-rotation plus amplitude damping); arbitrary single-qubit Lindbladians and the paper's general one-ancilla channel approximation are not implemented.",
+        "reason": "The abstract does not specify the general decomposition or the arbitrary-channel approximation method; the specification already restricted to this exactly dilatable instance."
+      }
+    ],
+    "assumptions": [
+      "All ancilla qubits (indices 1..n) are supplied in |0> by the runner; the simulated channel on qubit 0 is obtained by tracing out qubits 1..n.",
+      "The coherent half step uses Rx(omega*tau/2) = exp(-i (tau/2) (omega/2) X), matching H = (omega/2) X.",
+      "The controlled-Ry gate (qc.cry) is considered an O(1) composition of single-qubit and CNOT gates; no further gate-level compilation is performed.",
+      "Parameter validation: omega, gamma, t finite reals with gamma >= 0 and t >= 0; n a positive integer with n + 1 <= 12.",
+      "No simulation or verification has been performed; correctness claims are based on the algebraic derivation in the docstrings."
+    ],
+    "unresolved_issues": [
+      "The paper's general method for approximating arbitrary single-qubit channels with one ancilla is not reconstructed; only the two-Kraus amplitude-damping instance is exactly dilated.",
+      "The error constant C in eq_4 and the resulting formula for n given epsilon are not available, so n must be chosen by the user.",
+      "Whether the original algorithm uses ancilla reset, measurement, or classical randomness between steps is unknown; this implementation substitutes fresh ancillas."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 14,
+    "depth": 12,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

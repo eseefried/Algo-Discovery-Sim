@@ -1,0 +1,144 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "9b7759f7-16ef-4f6e-ae4b-7f9516ff9ea7",
+  "parent_run_id": "0c9041c1-b9d2-4e89-98d5-bcf77914a030",
+  "created_at": "2026-10-31T16:35:34.140000+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "2cd3de60f05cea7990ddcdcf684627c4465721daed80ce82442bb708f739f412",
+  "source_specification_sha256": "784a6465135c1bb9baab15a9098bb94600c60c527adc5069ed0b59e3caabe1b1",
+  "source_python_sha256": "6306b13611f2332d100b40f3f74d21b716c95f87000579582ea05f46203fe279",
+  "elapsed_seconds": 119.564,
+  "usage": {
+    "input_tokens": 6697,
+    "output_tokens": 9858,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing the scoped construction: Shor order finding for N=15 (control register t<=8 qubits, 4-qubit work register) with an explicitly decomposed inverse QFT whose controlled-phase angles are perturbed by a systematic fractional over-rotation epsilon (eq_3) and one seeded realization of i.i.d. Gaussian phase noise of strength sigma (eq_4). Controlled modular multiplications by a^(2^j) mod 15 are built from controlled-SWAP bit rotations and CNOT complements. The circuit is a measurement-free unitary; success-probability evaluation (eq_5) and threshold extraction (eq_6) are left to the runner.",
+    "source_python": "\"\"\"Shor order finding for N = 15 with an imperfect inverse QFT.\n\nbuild_circuit(instance) -> QuantumCircuit\n\ninstance keys:\n  N        : must be 15 (fixed by scope)\n  a        : base in {2, 4, 7, 8, 11, 13, 14}\n  t        : number of control qubits, 1 <= t <= 8\n  epsilon  : systematic fractional over-rotation of every QFT phase gate (eq_3)\n  sigma    : std. dev. of Gaussian random phase error per gate (eq_4)\n  seed     : non-negative integer seed for the random-error realization\n  prepare_work_one (optional, default False): if True, apply X to the work LSB\n             so that an all-zero input yields work register |1>.\n\nQubit layout: control qubits are indices 0..t-1 (index 0 = LSB of x),\nwork qubits are indices t..t+3 (index t = LSB of the work value).\nThe runner must supply control |0...0> and work |0001> (= integer 1),\nunless prepare_work_one is set.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\nimport numpy as np\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n_N_FIXED = 15\n_WORK_QUBITS = 4\n_MAX_QUBITS = 12\n# m -> (cyclic bit shift s, complement flag): m = (+/-) 2^s mod 15\n_MULT_TABLE = {1: (0, False), 2: (1, False), 4: (2, False), 8: (3, False),\n               14: (0, True), 13: (1, True), 11: (2, True), 7: (3, True)}\n\n\ndef _is_int(x):\n    return isinstance(x, int) and not isinstance(x, bool)\n\n\ndef _is_real(x):\n    return (isinstance(x, (int, float)) and not isinstance(x, bool)\n            and math.isfinite(float(x)))\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    N = instance.get(\"N\")\n    if not _is_int(N) or N != _N_FIXED:\n        raise ValueError(\"scope supports only N = 15\")\n    a = instance.get(\"a\")\n    if not _is_int(a) or a not in _MULT_TABLE or a == 1:\n        raise ValueError(\"a must be in {2, 4, 7, 8, 11, 13, 14}\")\n    t = instance.get(\"t\")\n    if not _is_int(t) or t < 1:\n        raise ValueError(\"t must be a positive integer\")\n    if t + _WORK_QUBITS > _MAX_QUBITS:\n        raise ValueError(\"t + 4 must not exceed 12 qubits\")\n    epsilon = instance.get(\"epsilon\")\n    if not _is_real(epsilon):\n        raise ValueError(\"epsilon must be a finite real number\")\n    sigma = instance.get(\"sigma\")\n    if not _is_real(sigma) or float(sigma) < 0.0:\n        raise ValueError(\"sigma must be a finite non-negative real number\")\n    seed = instance.get(\"seed\")\n    if not _is_int(seed) or seed < 0:\n        raise ValueError(\"seed must be a non-negative integer\")\n    prep = instance.get(\"prepare_work_one\", False)\n    if not isinstance(prep, bool):\n        raise ValueError(\"prepare_work_one must be a bool\")\n    return a, t, float(epsilon), float(sigma), seed, prep\n\n\ndef _controlled_mult_mod15(qc, ctrl, w, m):\n    \"\"\"Controlled |y> -> |m*y mod 15> on the 4 work qubits w (w[0] = LSB).\n\n    Multiplication by 2 mod 15 is a cyclic bit rotation (bit i -> i+1);\n    multiplication by -1 mod 15 is bitwise complement. (eq_1 network)\n    \"\"\"\n    s, negate = _MULT_TABLE[m]\n    for _ in range(s):\n        # bit i -> bit i+1 (mod 4)\n        qc.cswap(ctrl, w[2], w[3])\n        qc.cswap(ctrl, w[1], w[2])\n        qc.cswap(ctrl, w[0], w[1])\n    if negate:\n        for q in w:\n            qc.cx(ctrl, q)\n\n\ndef _imperfect_inverse_qft(qc, c, epsilon, sigma, rng):\n    \"\"\"Inverse QFT on qubits c (c[0] = LSB), eq_2, with perturbed R_k gates.\n\n    Ideal angle of each controlled phase: theta = -pi / 2^(j-k).\n    Applied angle: (1 + epsilon) * theta + delta, delta ~ N(0, sigma^2)  (eq_3, eq_4).\n    Hadamards are ideal.\n    \"\"\"\n    t = len(c)\n    for i in range(t // 2):\n        qc.swap(c[i], c[t - 1 - i])\n    for j in range(t):\n        for k in range(j):\n            theta = -math.pi / float(2 ** (j - k))\n            delta = float(rng.normal(0.0, sigma)) if sigma > 0.0 else 0.0\n            qc.cp((1.0 + epsilon) * theta + delta, c[k], c[j])\n        qc.h(c[j])\n\n\ndef build_circuit(instance):\n    a, t, epsilon, sigma, seed, prep = _validate(instance)\n    ctrl = QuantumRegister(t, \"c\")\n    work = QuantumRegister(_WORK_QUBITS, \"w\")\n    qc = QuantumCircuit(ctrl, work)\n    c = [ctrl[i] for i in range(t)]\n    w = [work[i] for i in range(_WORK_QUBITS)]\n    if prep:\n        qc.x(w[0])\n    # eq_1: Hadamards on control, then controlled U^(2^j), U|y> = |a y mod 15>\n    for j in range(t):\n        qc.h(c[j])\n    for j in range(t):\n        m = pow(a, 2 ** j, _N_FIXED)\n        if m != 1:\n            _controlled_mult_mod15(qc, c[j], w, m)\n    # eq_2 with eq_3 / eq_4 perturbations\n    rng = np.random.default_rng(seed)\n    _imperfect_inverse_qft(qc, c, epsilon, sigma, rng)\n    return qc",
+    "example_instance_json": "{\"N\": 15, \"a\": 7, \"t\": 8, \"epsilon\": 0.05, \"sigma\": 0.1, \"seed\": 0, \"prepare_work_one\": false}",
+    "register_layout": [
+      "Qubits 0-7: control register c (t=8), qubit 0 = least significant bit of exponent x / measured outcome y",
+      "Qubits 8-11: work register w (4 qubits), qubit 8 = least significant bit of a^x mod 15",
+      "Expected input: control |00000000>, work |0001> (integer 1), unless prepare_work_one=true in which case an X on qubit 8 is included"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (Hadamard loop and controlled-U^(2^j) loop) and _controlled_mult_mod15",
+        "explanation": "Hadamards on the control register followed by controlled multiplications by a^(2^j) mod 15, realized as controlled cyclic bit rotations (cswap) and controlled complements (cx)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_imperfect_inverse_qft (with epsilon=0, sigma=0 it is the exact inverse QFT)",
+        "explanation": "Explicit H and controlled-phase decomposition of the inverse QFT, with bit-reversal swaps first, matching QFTGate(t).inverse() on qubit 0 = LSB."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_imperfect_inverse_qft: factor (1.0 + epsilon) multiplying theta",
+        "explanation": "Every controlled phase angle is scaled by the same fixed factor (1+epsilon)."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_imperfect_inverse_qft: delta drawn from rng.normal(0, sigma) per gate",
+        "explanation": "One seeded realization of i.i.d. Gaussian phase noise is added to each gate angle; ensemble averaging over seeds is left to the runner."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Success probability requires measurement, continued-fraction post-processing and averaging over error samples, which are experiment-level tasks not part of the unitary operation."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Threshold extraction is a classical sweep over sigma using eq_5 results; not part of the circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "N restricted to 15 and a restricted to {2,4,7,8,11,13,14}; the controlled multiplication uses the permutation 'cyclic bit shift then complement', which equals multiplication mod 15 on the units 1..14 but maps |0> and |15> non-arithmetically.",
+        "reason": "A general modular-exponentiation network does not fit within 12 qubits; for N=15 every unit is +/-2^s so the shift/complement construction is exact on the states actually reached from work input |1>."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Perturbations are applied to the inverse-QFT angles theta = -pi/2^(j-k) (negative sign, controlled-phase form) rather than the forward-QFT angles 2pi/2^k written in eq_2; the systematic factor multiplies the signed angle and the inverse decomposition order (swaps first, then ascending qubits) is fixed to match QFTGate(t).inverse() with qubit 0 as LSB.",
+        "reason": "The algorithm applies the inverse QFT; the symbolic R_k form in eq_2 was for the forward transform and did not fix the physical qubit order."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The circuit contains a single deterministic realization of the random errors selected by the integer seed; averaging over the error ensemble must be done by building circuits with different seeds.",
+        "reason": "A QuantumCircuit must be a fixed bound unitary; the ensemble expectation is not a single operation."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The work-register |1> input is expected from the runner; an optional prepare_work_one flag (default false) adds a single X on the work LSB.",
+        "reason": "Instruction forbids input-state preparation inside the operation; the flag is an opt-in convenience and is disclosed."
+      },
+      {
+        "equation_ids": [
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Not implemented in the module.",
+        "reason": "They are measurement/classical post-processing quantities evaluated by the runner, not unitary operations."
+      }
+    ],
+    "assumptions": [
+      "Hadamards and the controlled modular-multiplication gates are ideal; only the inverse-QFT controlled-phase gates are perturbed.",
+      "Systematic error is a uniform fractional over-rotation (1+epsilon) applied to every controlled-phase angle.",
+      "Random error is i.i.d. Gaussian with zero mean and standard deviation sigma, drawn per gate in a fixed deterministic gate order from numpy default_rng(seed).",
+      "The runner prepares the control register in |0...0> and the work register in |0001> (integer 1), unless prepare_work_one is true.",
+      "t is allowed to vary from 1 to 8 (12-qubit cap); the canonical instance uses t = 8 = 2n."
+    ],
+    "unresolved_issues": [
+      "The paper's actual error model (which gates are perturbed, distributions, 'combined' category) is unknown; the chosen model is a minimal concrete stand-in.",
+      "The success-probability metric and threshold definition (eq_5, eq_6) are inferred and must be evaluated externally by measuring the control register and applying continued fractions.",
+      "Whether the paper also perturbs the modular-exponentiation network is unknown; such errors are not modeled."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 12,
+    "gate_count": 427,
+    "depth": 239,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

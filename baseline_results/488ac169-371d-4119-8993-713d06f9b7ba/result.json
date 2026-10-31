@@ -1,0 +1,135 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "488ac169-371d-4119-8993-713d06f9b7ba",
+  "parent_run_id": "25b5f26d-70f8-44f0-8fa5-8312af191316",
+  "created_at": "2026-10-31T16:53:39.648494+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "c4897a1ea12701357ff9650e8fe0d0eef3594e3b476cb7bb8b4d8ef1c0de0fba",
+  "source_specification_sha256": "b0ea273929f8450301df529e4ae37c59bff745dadd45beea6a9208090d302743",
+  "source_python_sha256": "6b5b72a029f7f13617de4bab6bf104af3540d99242ebf42da93220e63ec44bdd",
+  "elapsed_seconds": 72.717,
+  "usage": {
+    "input_tokens": 7581,
+    "output_tokens": 6532,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the scoped construction: an n-qubit diagonal Hermitian gate D=diag(d_x), d_x in {+1,-1}, is read as a Boolean truth table f (eq_1, eq_2), its GF(2) algebraic-normal-form coefficients a_S are computed classically by the fast Mobius transform (eq_4, eq_5), and one multiple-controlled Z gate C^S Z is appended for every nonempty S with a_S=1 (eq_3, eq_6), with a_empty recorded as circuit global phase. The example instance is the n=2 gate diag(1,-1,-1,-1) = Z_0 Z_1 CZ_01 (eq_7). The module exposes build_circuit(instance) only; the decomposition is exact and all emitted factors are diagonal and commute.",
+    "source_python": "\"\"\"Exact decomposition of a diagonal Hermitian quantum gate into multiple-controlled Z gates.\n\nThe gate D = diag(d_0, ..., d_{2^n - 1}) with every d_j in {+1, -1} is written as\nD = (-1)^{a_empty} * prod_{S nonempty, a_S = 1} C^S Z, where a_S are the GF(2)\nalgebraic-normal-form coefficients of the Boolean sign function f (d_j = (-1)^{f(j)}).\n\nIndex convention (Qiskit little-endian): bit k of the diagonal index j is the value of\nQiskit qubit k (qubit 0 = least significant bit). The specification's qubit i (1-indexed,\nmost significant) therefore corresponds to Qiskit qubit n - i.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import ZGate\n\nMAX_QUBITS = 12\nTOL = 1e-9\n\n\ndef _sign_to_bit(value):\n    \"\"\"eq_1: d_x = (-1)^{f(x)}. Return f(x) in {0, 1} from a diagonal entry +1 / -1.\"\"\"\n    if isinstance(value, bool):\n        raise ValueError(\"diagonal entries must be numeric +1 or -1, not booleans\")\n    if isinstance(value, complex):\n        if abs(value.imag) > TOL:\n            raise ValueError(\"diagonal entries of a Hermitian gate must be real\")\n        value = value.real\n    try:\n        real_value = float(value)\n    except (TypeError, ValueError):\n        raise ValueError(\"diagonal entries must be numeric +1 or -1\")\n    if abs(real_value - 1.0) <= TOL:\n        return 0\n    if abs(real_value + 1.0) <= TOL:\n        return 1\n    raise ValueError(\"diagonal Hermitian gate entries must be exactly +1 or -1\")\n\n\ndef _anf_coefficients(truth_table, n):\n    \"\"\"eq_4 / eq_5: GF(2) Mobius inversion a_S = XOR_{T subset S} f(1_T).\n\n    truth_table is the binary representation b(D) (eq_2) as a list of 0/1 of length 2^n.\n    The returned list a has a[idx] = a_S where S = {k : bit k of idx is 1}; this is the\n    unique expansion of f in the monomial basis {m_S} (eq_4).\n    \"\"\"\n    size = 1 << n\n    a = list(truth_table)\n    for k in range(n):\n        mask = 1 << k\n        for idx in range(size):\n            if idx & mask:\n                a[idx] ^= a[idx ^ mask]\n    return a\n\n\ndef _append_multi_controlled_z(qc, qubits):\n    \"\"\"eq_3: append C^S Z on the given Qiskit qubit indices (set S).\n\n    The gate is symmetric in its qubits, so the last qubit is used as the target.\n    \"\"\"\n    size = len(qubits)\n    if size == 1:\n        qc.z(qubits[0])\n    elif size == 2:\n        qc.cz(qubits[0], qubits[1])\n    else:\n        qc.append(ZGate().control(size - 1), qubits)\n\n\ndef build_circuit(instance):\n    \"\"\"Build the multiple-controlled-Z decomposition of a diagonal Hermitian gate.\n\n    instance: dict with keys\n        \"n\": int, number of qubits (1 <= n <= 12)\n        \"diagonal\": list of 2^n entries, each +1 or -1; entry j is d_j with the\n                    little-endian index convention (bit k of j <-> Qiskit qubit k).\n    Returns a measurement-free unitary QuantumCircuit equal to diag(diagonal), including\n    the global sign (-1)^{a_empty} as the circuit global phase.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    if \"n\" not in instance or \"diagonal\" not in instance:\n        raise ValueError(\"instance must contain 'n' and 'diagonal'\")\n    n = instance[\"n\"]\n    if isinstance(n, bool) or not isinstance(n, int):\n        raise ValueError(\"n must be an integer\")\n    if n < 1 or n > MAX_QUBITS:\n        raise ValueError(\"n must satisfy 1 <= n <= %d\" % MAX_QUBITS)\n    diagonal = instance[\"diagonal\"]\n    if not isinstance(diagonal, (list, tuple)):\n        raise ValueError(\"diagonal must be a list\")\n    size = 1 << n\n    if len(diagonal) != size:\n        raise ValueError(\"diagonal must have exactly 2^n entries\")\n\n    # eq_1 / eq_2: binary representation b(D) = truth table of f.\n    truth_table = [_sign_to_bit(v) for v in diagonal]\n\n    # eq_4 / eq_5: coordinates of b(D) in the monomial (multiple-controlled Z) basis.\n    coeffs = _anf_coefficients(truth_table, n)\n\n    qr = QuantumRegister(n, \"q\")\n    qc = QuantumCircuit(qr, name=\"diag_hermitian_mcz\")\n\n    # eq_6: D = (-1)^{a_empty} prod_{S nonempty, a_S = 1} C^S Z.\n    if coeffs[0] == 1:\n        qc.global_phase = math.pi\n    for idx in range(1, size):\n        if coeffs[idx] == 1:\n            qubits = [k for k in range(n) if (idx >> k) & 1]\n            _append_multi_controlled_z(qc, qubits)\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"diagonal\": [1, -1, -1, -1]}",
+    "register_layout": [
+      "q[0]: Qiskit qubit 0 = least significant bit of the diagonal index j (bit 0 of j); corresponds to the specification's qubit 2 (x_2) for n = 2",
+      "q[1]: Qiskit qubit 1 = most significant bit of the diagonal index j (bit 1 of j); corresponds to the specification's qubit 1 (x_1) for n = 2",
+      "General rule: diagonal entry j multiplies the basis state whose binary expansion has bit k equal to the value of Qiskit qubit k; specification qubit i (1-indexed, MSB-first) maps to Qiskit qubit n - i",
+      "Example gates emitted for diag(1,-1,-1,-1): Z on q[0], Z on q[1], CZ on (q[0], q[1]); global phase 0"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_sign_to_bit (docstring 'eq_1') and the truth_table construction in build_circuit",
+        "explanation": "Each diagonal entry is validated to be +1 or -1 and converted to the Boolean value f(x) with d_x = (-1)^{f(x)}."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: 'truth_table = [...]' (comment 'eq_1 / eq_2')",
+        "explanation": "The binary representation b(D) is realized as the truth table of f indexed by the integer basis index; the XOR homomorphism is used implicitly by the GF(2) linear algebra in _anf_coefficients."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_append_multi_controlled_z",
+        "explanation": "C^S Z is emitted as Z (|S|=1), CZ (|S|=2) or ZGate().control(|S|-1) (|S|>=3) on the Qiskit qubits in S; its binary representation m_S is the monomial basis element indexed by the bitmask of S."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_anf_coefficients (docstring 'eq_4 / eq_5')",
+        "explanation": "The monomial basis expansion f = XOR_S a_S m_S is computed; the basis property guarantees uniqueness of the coefficient list returned."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "_anf_coefficients loop over k and idx",
+        "explanation": "Fast GF(2) Mobius transform: for each bit k, a[idx] ^= a[idx with bit k cleared], yielding a_S = XOR_{T subset S} f(1_T) in O(n 2^n) operations."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "build_circuit: global_phase assignment and the 'for idx in range(1, size)' loop (comment 'eq_6')",
+        "explanation": "One C^S Z is appended for each nonempty S with a_S = 1; a_empty = 1 is realized as circuit global phase pi, so the circuit equals D exactly."
+      },
+      {
+        "equation_id": "eq_7",
+        "disposition": "implemented",
+        "code_location": "example_instance_json {\"n\": 2, \"diagonal\": [1, -1, -1, -1]}; produced by build_circuit",
+        "explanation": "For this instance the Mobius transform gives a_{0}=a_{1}=a_{01}=1, a_empty=0, so the circuit is Z q[0], Z q[1], CZ q[0] q[1], equal to diag(1,-1,-1,-1)."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_7"
+        ],
+        "change": "Index convention changed from the specification's MSB-first labeling (qubit 1 = most significant bit) to Qiskit's little-endian convention: bit k of the diagonal index corresponds to Qiskit qubit k, so specification qubit i maps to Qiskit qubit n - i.",
+        "reason": "Qiskit qubit 0 is the least significant computational-basis bit; the diagonal list supplied in the instance is interpreted directly in Qiskit basis order so that the circuit's unitary matrix equals diag(diagonal). The example diag(1,-1,-1,-1) is symmetric under qubit relabeling, so eq_7 is unaffected."
+      },
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "The global sign (-1)^{a_empty} is realized as the QuantumCircuit global_phase (pi when a_empty = 1) rather than being dropped or emitted as a gate.",
+        "reason": "Keeps the returned operation exactly equal to D (not merely equal up to global phase) while using no additional gates; the specification left the treatment of the empty monomial open."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Multiple-controlled Z gates with |S| >= 3 are emitted as Qiskit controlled ZGate objects (ZGate().control(|S|-1)) and are not further decomposed into the CZ-plus-single-qubit library.",
+        "reason": "The paper's library-level decomposition and cost model are outside the reconstruction scope and not determinable from the abstract."
+      }
+    ],
+    "assumptions": [
+      "The instance diagonal entries are exactly +1 or -1 (tolerance 1e-9); real floats, ints, or complex numbers with negligible imaginary part are accepted, booleans are rejected.",
+      "The binary representation is the truth table of f over GF(2); the paper's exact encoding may differ but any encoding yields the same unique ANF decomposition.",
+      "Gate order is irrelevant because all emitted factors are diagonal; gates are emitted in increasing bitmask order of S.",
+      "The qubit count cap of 12 (4096 diagonal entries) is enforced before any allocation.",
+      "No optimization beyond the unique monomial-basis expansion is performed; the gate count equals the Hamming weight of (a_S)_{S nonempty}."
+    ],
+    "unresolved_issues": [
+      "The paper's exact definition and ordering of the binary representation are unknown; a stated convention is used instead.",
+      "Further decomposition of C^S Z (|S| >= 3) into the CZ-based library, the associated cost model, and the paper's experimental cost comparisons are not reconstructed.",
+      "Whether the paper treats the decomposition exactly or up to global phase is unknown; this implementation is exact via global_phase."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 5,
+    "depth": 4,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,137 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "1dc9d7d1-5d3f-47fe-836a-d7e197bbf7bf",
+  "parent_run_id": "c0fc7471-c935-4366-a8fb-577ef783f42a",
+  "created_at": "2026-10-31T17:15:02.335585+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "65f3e72d8be50a2412e701da88036eba708fd09aae64c85e65271278c4fbf243",
+  "source_specification_sha256": "94c35d0199d10a35464778b346d0bb76017ff66d3377bd76958904997d9d3669",
+  "source_python_sha256": "26065e997143cc6219fa581679a7c3aa4ab59e61d3f27c0183676c6b0d1e689e",
+  "elapsed_seconds": 115.523,
+  "usage": {
+    "input_tokens": 7679,
+    "output_tokens": 11082,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing the refined (ancilla-free) three-qubit Deutsch-Jozsa operation H^{x3} U_f H^{x3}, where the f-controlled phase oracle U_f|x> = (-1)^{f(x)}|x> is built from the algebraic normal form of f as a product of single-qubit Z gates, two-qubit CZ gates and (optionally merged) one-control/two-target CZ gates, exactly as the abstract's gate set prescribes. f is specified either by ANF coefficients or by a truth table (converted by a GF(2) Moebius transform); functions with cubic or higher ANF terms are rejected because they lie outside the Z/CZ/two-target-CZ gate set. Hadamard layers can be switched off to return the bare oracle. The example instance is f = x1 XOR x2 x3 (U_f = Z_1 CZ_23).",
+    "source_python": "\"\"\"Refined three-qubit Deutsch-Jozsa algorithm with f-controlled phase oracle.\n\nThe oracle U_f|x> = (-1)^{f(x)}|x> (eq_1) is decomposed through the algebraic\nnormal form of f (eq_3) into sigma_z, CZ and two-target CZ gates (eq_4, eq_5),\noptionally sandwiched between Hadamard layers (eq_2). Paper qubit i (1-indexed,\nleftmost in |x_1 x_2 x_3>) is Qiskit qubit n - i so that the Qiskit integer\nlabel equals x = 4 x_1 + 2 x_2 + x_3.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nALLOWED_KEYS = (\"n\", \"anf\", \"truth_table\", \"include_hadamards\", \"merge_two_target\", \"enforce_promise\")\n\n\ndef _bit(value, name):\n    if isinstance(value, bool):\n        return int(value)\n    if isinstance(value, int) and value in (0, 1):\n        return value\n    raise ValueError(\"%s must be 0 or 1\" % name)\n\n\ndef _flag(instance, key, fallback):\n    if key not in instance:\n        return fallback\n    value = instance[key]\n    if not isinstance(value, bool):\n        raise ValueError(\"%s must be a boolean\" % key)\n    return value\n\n\ndef _label(i, n):\n    if isinstance(i, bool) or not isinstance(i, int) or i < 1 or i > n:\n        raise ValueError(\"qubit label %r outside 1..%d\" % (i, n))\n    return i\n\n\ndef _anf_from_truth_table(table, n):\n    \"\"\"eq_3: GF(2) Moebius transform of the truth table; index x has bit (n-i) = x_i.\"\"\"\n    size = 1 << n\n    if not isinstance(table, (list, tuple)) or len(table) != size:\n        raise ValueError(\"truth_table must have length 2^n\")\n    coeff = [_bit(v, \"truth_table entry\") for v in table]\n    for b in range(n):\n        for m in range(size):\n            if m & (1 << b):\n                coeff[m] ^= coeff[m ^ (1 << b)]\n    constant = coeff[0]\n    linear = []\n    quadratic = []\n    for m in range(1, size):\n        if coeff[m] == 0:\n            continue\n        labels = [n - b for b in range(n) if m & (1 << b)]\n        if len(labels) == 1:\n            linear.append(labels[0])\n        elif len(labels) == 2:\n            quadratic.append((min(labels), max(labels)))\n        else:\n            raise ValueError(\"f has an ANF monomial of degree >= 3; not realizable with Z, CZ and two-target CZ gates (eq_3)\")\n    return constant, sorted(linear), sorted(quadratic)\n\n\ndef _anf_from_dict(anf, n):\n    \"\"\"eq_3: ANF coefficients given directly (constant a0, linear labels, quadratic pairs).\"\"\"\n    if not isinstance(anf, dict):\n        raise ValueError(\"anf must be a dict\")\n    for key in anf:\n        if key not in (\"constant\", \"linear\", \"quadratic\"):\n            raise ValueError(\"unknown anf key %r\" % key)\n    constant = _bit(anf.get(\"constant\", 0), \"constant\")\n    linear_in = anf.get(\"linear\", [])\n    quadratic_in = anf.get(\"quadratic\", [])\n    if not isinstance(linear_in, (list, tuple)) or not isinstance(quadratic_in, (list, tuple)):\n        raise ValueError(\"linear and quadratic must be lists\")\n    linear = sorted(set(_label(i, n) for i in linear_in))\n    if len(linear) != len(linear_in):\n        raise ValueError(\"duplicate linear terms\")\n    quadratic = []\n    for pair in quadratic_in:\n        if not isinstance(pair, (list, tuple)) or len(pair) != 2:\n            raise ValueError(\"quadratic terms must be pairs of qubit labels\")\n        i, j = _label(pair[0], n), _label(pair[1], n)\n        if i == j:\n            raise ValueError(\"quadratic term needs two distinct qubits\")\n        quadratic.append((min(i, j), max(i, j)))\n    if len(set(quadratic)) != len(quadratic):\n        raise ValueError(\"duplicate quadratic terms\")\n    return constant, linear, sorted(quadratic)\n\n\ndef _check_promise(constant, linear, quadratic, n):\n    \"\"\"eq_2 promise: f must be constant or balanced.\"\"\"\n    ones = 0\n    for x in range(1 << n):\n        bits = [(x >> (n - i)) & 1 for i in range(1, n + 1)]\n        value = constant\n        for i in linear:\n            value ^= bits[i - 1]\n        for i, j in quadratic:\n            value ^= bits[i - 1] & bits[j - 1]\n        ones += value\n    if ones not in (0, 1 << n, 1 << (n - 1)):\n        raise ValueError(\"f is neither constant nor balanced\")\n\n\ndef _two_target_cz_gate():\n    \"\"\"eq_5: CZ_{c;t1 t2} = CZ_{c t1} CZ_{c t2}; gate qubit 0 is the control, 1 and 2 the targets.\"\"\"\n    sub = QuantumCircuit(3, name=\"CZ_c;t1t2\")\n    sub.cz(0, 1)\n    sub.cz(0, 2)\n    return sub.to_gate(label=\"CZ_c;t1t2\")\n\n\ndef _append_oracle(qc, qr, n, constant, linear, quadratic, merge):\n    \"\"\"eq_1 / eq_4: U_f = (-1)^{a0} prod_i Z_i^{a_i} prod_{i<j} CZ_ij^{a_ij} (all factors commute).\"\"\"\n    qc.global_phase += math.pi * constant\n    for i in linear:\n        qc.z(qr[n - i])\n    remaining = list(quadratic)\n    if merge:\n        for c in range(1, n + 1):\n            incident = [p for p in remaining if c in p]\n            while len(incident) >= 2:\n                p1 = incident.pop(0)\n                p2 = incident.pop(0)\n                remaining.remove(p1)\n                remaining.remove(p2)\n                t1 = p1[0] if p1[1] == c else p1[1]\n                t2 = p2[0] if p2[1] == c else p2[1]\n                qc.append(_two_target_cz_gate(), [qr[n - c], qr[n - t1], qr[n - t2]])\n    for i, j in remaining:\n        qc.cz(qr[n - i], qr[n - j])\n\n\ndef build_circuit(instance):\n    \"\"\"Return the refined DJ operation H^{xn} U_f H^{xn} (eq_2) or the bare oracle U_f.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    for key in instance:\n        if key not in ALLOWED_KEYS:\n            raise ValueError(\"unknown instance key %r\" % key)\n    n = instance.get(\"n\", 3)\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > MAX_QUBITS:\n        raise ValueError(\"n must be an integer in 1..%d\" % MAX_QUBITS)\n    if (\"anf\" in instance) == (\"truth_table\" in instance):\n        raise ValueError(\"provide exactly one of anf or truth_table\")\n    if \"anf\" in instance:\n        constant, linear, quadratic = _anf_from_dict(instance[\"anf\"], n)\n    else:\n        constant, linear, quadratic = _anf_from_truth_table(instance[\"truth_table\"], n)\n    include_h = _flag(instance, \"include_hadamards\", True)\n    merge = _flag(instance, \"merge_two_target\", True)\n    if _flag(instance, \"enforce_promise\", False):\n        _check_promise(constant, linear, quadratic, n)\n    qr = QuantumRegister(n, \"q\")\n    qc = QuantumCircuit(qr, name=\"refined_DJ\")\n    if include_h:\n        qc.h(qr)  # eq_2: first Hadamard layer\n    _append_oracle(qc, qr, n, constant, linear, quadratic, merge)\n    if include_h:\n        qc.h(qr)  # eq_2: second Hadamard layer (measurement left to the runner)\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"anf\": {\"constant\": 0, \"linear\": [1], \"quadratic\": [[2, 3]]}, \"include_hadamards\": true, \"merge_two_target\": true, \"enforce_promise\": true}",
+    "register_layout": [
+      "q[2] (Qiskit MSB) = paper qubit 1 carrying x_1",
+      "q[1] = paper qubit 2 carrying x_2",
+      "q[0] (Qiskit LSB) = paper qubit 3 carrying x_3",
+      "Qiskit basis-state integer = 4 x_1 + 2 x_2 + x_3, matching the specification's label x; for the example U_f = Z_1 CZ_23 = diag(1,1,1,-1,-1,-1,-1,1) in this order, and the full circuit maps |000> to a state with zero amplitude on |000>"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_append_oracle (docstring 'eq_1 / eq_4')",
+        "explanation": "The diagonal +/-1 phase oracle is realized as the product of commuting diagonal gates; the global phase (-1)^{a0} is kept via qc.global_phase."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit (comments 'eq_2: first/second Hadamard layer') and _check_promise",
+        "explanation": "Hadamard layers before and after the oracle are appended when include_hadamards is true; measurement and the classical decision rule are left to the runner, and the constant-or-balanced promise is optionally validated."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_anf_from_truth_table and _anf_from_dict",
+        "explanation": "GF(2) Moebius transform computes the ANF from a truth table; any monomial of degree >= 3 raises ValueError since it is outside the Z/CZ/two-target-CZ gate set (balanced 3-bit functions never have one)."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_append_oracle",
+        "explanation": "Z_i for each linear coefficient, CZ_ij for each quadratic coefficient, global phase for a0."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "_two_target_cz_gate and the merge loop in _append_oracle",
+        "explanation": "Two-target controlled-phase gate defined as a named composite gate CZ_{c t1} CZ_{c t2}; pairs of CZs sharing a qubit are greedily merged into it when merge_two_target is true."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "example_instance_json (anf linear=[1], quadratic=[[2,3]])",
+        "explanation": "The tiny instance f = x1 XOR x2 x3 is the provided example; with one quadratic term no merging occurs, so the oracle is Z on q[2] and CZ on q[1],q[0]."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_6"
+        ],
+        "change": "Paper qubit i (leftmost = qubit 1) is mapped to Qiskit qubit n - i (little-endian) so that the Qiskit integer basis label equals x = 4x_1 + 2x_2 + x_3 used in the specification.",
+        "reason": "Qiskit's qubit 0 is the least significant bit; this mapping preserves the diagonal ordering diag(1,1,1,-1,-1,-1,-1,1) stated in eq_6."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The returned object is the unitary H^{xn} U_f H^{xn} only; initial state |000>, measurement and the 000-vs-not decision rule are excluded. Hadamard layers may be disabled to obtain the bare oracle U_f.",
+        "reason": "The deliverable must be a measurement-free operation; preparation and measurement are done by the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The code accepts any n in 1..12 and any ANF of degree <= 2 (not only n = 3 balanced functions); the constant-or-balanced promise is checked only when enforce_promise is true.",
+        "reason": "Allows varying valid instance parameters while keeping the paper's gate set; for n = 3 the balanced functions are exactly covered and the 35-gate enumeration is reproduced by varying the ANF coefficients."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Merging of CZ pairs into two-target gates uses a greedy grouping by shared qubit (smallest-label control first); the two-target gate is a composite gate whose definition is two CZ gates.",
+        "reason": "The paper's specific grouping is unknown; since all factors commute, any grouping gives the same unitary."
+      }
+    ],
+    "assumptions": [
+      "'f-controlled phase gate' is the ancilla-free phase oracle (-1)^{f(x)}; constant functions give identity up to global phase.",
+      "The two-target controlled-phase gate applies Z to both targets when the control is |1>, i.e. equals CZ_{c t1} CZ_{c t2} (eq_5).",
+      "The global phase (-1)^{a0} is physically irrelevant but is retained as qc.global_phase for exactness.",
+      "Ideal gates; no transmon qutrit, cavity or decoherence modeling.",
+      "The example instance f = x1 XOR x2 x3 is our own choice, not taken from the paper."
+    ],
+    "unresolved_issues": [
+      "The paper's explicit list and ordering of the 35 f-controlled phase gates and which CZ pairs it merges into two-target gates are unknown; the implementation enumerates them via ANF coefficients instead.",
+      "The paper's phase convention for the two-target controlled-phase gate is not given; a different convention would change eq_5.",
+      "Physical realization in circuit QED (qutrit level usage, pulse sequences, numerical fidelities) is out of scope and not implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 10,
+    "depth": 5,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

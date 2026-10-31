@@ -1,0 +1,147 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "704b88f7-29eb-4522-96eb-ae6dbfdf6cea",
+  "parent_run_id": "732c7a45-7bad-4535-a262-8627f30fee8b",
+  "created_at": "2026-10-31T17:26:30.095622+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "2b46c9bb74e5bb8579c4c11d2cbde2a5fc8fdccf28bbc02bcd7027317c1ce692",
+  "source_specification_sha256": "fcaa895976ea3cf0617294a23ea9f8a2f286d21c9f86a7f00eae2c59c2d4bd23",
+  "source_python_sha256": "3c456234cb556438464785046d037fb06a1494e3c3a0784e86ed5c4c30241a0f",
+  "elapsed_seconds": 147.829,
+  "usage": {
+    "input_tokens": 10284,
+    "output_tokens": 13327,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the scoped construction from the specification as a single unitary operation: coherent preparation of the product (mean-field) proposal state |psi_Q> on the visible+hidden register (eq_proposal_state), followed by the coherent rejection-sampling rotation that writes sqrt(e^{-E(v,h)}/(kappa' Q(v,h))) as the |1>-amplitude of a flag qubit (eq_rejection_rotation, with the energy of eq_energy evaluated classically per configuration), plus an optional number of amplitude-amplification rounds on flag=1 (the Grover operator underlying eq_postselect). Post-selecting flag=1 leaves the state register in the coherent Gibbs state of the RBM. The b-bit fixed-point ratio register of the specification is replaced by exact per-configuration multi-controlled R_y rotations (no ancilla, no rounding error), which is disclosed as a specification change. Measurement, post-selection, sampling and the classical gradient/update steps are left to the runner and are out of scope.",
+    "source_python": "'''Coherent rejection-sampling preparation of an (unnormalised, flagged) Gibbs state\nfor a small restricted Boltzmann machine (RBM).\n\nThe returned circuit implements the unitary\n    |0>^{n_v+n_h} |0>_f  ->  sum_{v,h} sqrt(Q(v,h)) |v,h> ( sqrt(1-r(v,h)) |0>_f + sqrt(r(v,h)) |1>_f )\nwith r(v,h) = exp(-E(v,h)) / (kappa' Q(v,h)) in [0,1], optionally followed by\nGrover / amplitude-amplification rounds that boost the flag=1 branch.\nPost-selecting flag=1 leaves the state register in the coherent Gibbs state\nsum_{v,h} sqrt(P(v,h)) |v,h> (eq_postselect).\n\nQubit layout (Qiskit index 0 = least significant bit):\n    qubit i            (0 <= i < n_v)        : visible unit v_{i+1}, |1> = on\n    qubit n_v + j      (0 <= j < n_h)        : hidden unit h_{j+1},  |1> = on\n    qubit n_v + n_h                           : rejection-sampling flag f\n'''\nfrom __future__ import annotations\n\nimport math\n\nimport numpy as np\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import RYGate\n\nMAX_QUBITS = 12\nRATIO_TOLERANCE = 1e-9\n\n\ndef _as_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, (int, np.integer)):\n        raise ValueError('%s must be an integer' % name)\n    return int(value)\n\n\ndef _as_float_list(value, length, name):\n    if value is None:\n        raise ValueError('%s is required' % name)\n    try:\n        arr = [float(x) for x in value]\n    except (TypeError, ValueError):\n        raise ValueError('%s must be a sequence of real numbers' % name)\n    if len(arr) != length:\n        raise ValueError('%s must have length %d' % (name, length))\n    for x in arr:\n        if not math.isfinite(x):\n            raise ValueError('%s must contain only finite values' % name)\n    return arr\n\n\ndef _config_bits(index, n):\n    '''Bit k of index is the value of qubit k (little-endian).'''\n    return [(index >> k) & 1 for k in range(n)]\n\n\ndef _energy(v_bits, h_bits, w, a, b):\n    '''eq_energy: E(v,h) = -sum a_i v_i - sum b_j h_j - sum w_ij v_i h_j.'''\n    e = 0.0\n    for i, vi in enumerate(v_bits):\n        e -= a[i] * vi\n    for j, hj in enumerate(h_bits):\n        e -= b[j] * hj\n    for i, vi in enumerate(v_bits):\n        for j, hj in enumerate(h_bits):\n            e -= w[i][j] * vi * hj\n    return e\n\n\ndef _proposal_prob(v_bits, h_bits, mu, nu):\n    '''eq_proposal_state (classical part): product distribution Q(v,h).'''\n    q = 1.0\n    for i, vi in enumerate(v_bits):\n        q *= mu[i] if vi == 1 else (1.0 - mu[i])\n    for j, hj in enumerate(h_bits):\n        q *= nu[j] if hj == 1 else (1.0 - nu[j])\n    return q\n\n\ndef _prepare_proposal(qc, state_qubits, means):\n    '''eq_proposal_state (quantum part): |psi_Q> = prod_k R_y(2 arcsin sqrt(mean_k)) |0>.'''\n    for q, m in zip(state_qubits, means):\n        qc.ry(2.0 * math.asin(math.sqrt(m)), q)\n\n\ndef _rejection_rotation(qc, state_qubits, flag_qubit, ratios):\n    '''eq_rejection_rotation: for every configuration (v,h) rotate the flag by\n    2 arcsin sqrt(r(v,h)) conditioned on the state register being |v,h>.\n    The ratio is evaluated classically and encoded exactly by multi-controlled\n    R_y gates, replacing the b-bit fixed-point ratio register of the spec.'''\n    n = len(state_qubits)\n    for idx in range(2 ** n):\n        bits = _config_bits(idx, n)\n        r = min(1.0, max(0.0, ratios[idx]))\n        theta = 2.0 * math.asin(math.sqrt(r))\n        if theta == 0.0:\n            continue\n        zero_controls = [state_qubits[k] for k in range(n) if bits[k] == 0]\n        for q in zero_controls:\n            qc.x(q)\n        qc.append(RYGate(theta).control(n), list(state_qubits) + [flag_qubit])\n        for q in zero_controls:\n            qc.x(q)\n\n\ndef _reflect_about_zero(qc, qubits):\n    '''Phase -1 on |0...0> over the given qubits (S_0 of amplitude amplification).'''\n    for q in qubits:\n        qc.x(q)\n    if len(qubits) == 1:\n        qc.z(qubits[0])\n    else:\n        qc.h(qubits[-1])\n        qc.mcx(qubits[:-1], qubits[-1])\n        qc.h(qubits[-1])\n    for q in qubits:\n        qc.x(q)\n\n\ndef build_circuit(instance):\n    '''Build the flagged Gibbs-state preparation unitary for an RBM instance.\n\n    instance keys:\n        n_v, n_h   : positive integers (n_v + n_h + 1 <= 12)\n        w          : n_v rows of n_h real weights w_ij\n        a, b       : visible / hidden biases (lengths n_v, n_h)\n        mu, nu     : proposal means in the open interval (0,1) (lengths n_v, n_h)\n        kappa_prime: optional real >= max_{v,h} exp(-E)/Q (default: exact maximum)\n        aa_rounds  : optional non-negative integer number of amplitude-amplification rounds\n    '''\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n_v = _as_int(instance.get('n_v'), 'n_v')\n    n_h = _as_int(instance.get('n_h'), 'n_h')\n    if n_v < 1 or n_h < 1:\n        raise ValueError('n_v and n_h must be >= 1')\n    n = n_v + n_h\n    total = n + 1\n    if total > MAX_QUBITS:\n        raise ValueError('n_v + n_h + 1 = %d exceeds the cap of %d qubits' % (total, MAX_QUBITS))\n\n    w_raw = instance.get('w')\n    if w_raw is None:\n        raise ValueError('w is required')\n    try:\n        rows = list(w_raw)\n    except TypeError:\n        raise ValueError('w must be a sequence of n_v rows')\n    if len(rows) != n_v:\n        raise ValueError('w must have n_v = %d rows' % n_v)\n    w = [_as_float_list(row, n_h, 'w[%d]' % i) for i, row in enumerate(rows)]\n    a = _as_float_list(instance.get('a'), n_v, 'a')\n    b = _as_float_list(instance.get('b'), n_h, 'b')\n    mu = _as_float_list(instance.get('mu'), n_v, 'mu')\n    nu = _as_float_list(instance.get('nu'), n_h, 'nu')\n    for m in mu + nu:\n        if not (0.0 < m < 1.0):\n            raise ValueError('proposal means mu, nu must lie strictly inside (0,1)')\n\n    aa_raw = instance.get('aa_rounds', 0)\n    aa_rounds = _as_int(aa_raw, 'aa_rounds')\n    if aa_rounds < 0:\n        raise ValueError('aa_rounds must be >= 0')\n\n    # Classical preprocessing: unnormalised acceptance ratios exp(-E)/Q (eq_energy, eq_proposal_state).\n    ratios_raw = []\n    for idx in range(2 ** n):\n        bits = _config_bits(idx, n)\n        vb = bits[:n_v]\n        hb = bits[n_v:]\n        q = _proposal_prob(vb, hb, mu, nu)\n        try:\n            val = math.exp(-_energy(vb, hb, w, a, b)) / q\n        except OverflowError:\n            raise ValueError('weights too large: exp(-E) overflows')\n        if not math.isfinite(val):\n            raise ValueError('acceptance ratio is not finite')\n        ratios_raw.append(val)\n    kmax = max(ratios_raw)\n    kappa_prime = instance.get('kappa_prime', None)\n    if kappa_prime is None:\n        kappa_prime = kmax\n    else:\n        try:\n            kappa_prime = float(kappa_prime)\n        except (TypeError, ValueError):\n            raise ValueError('kappa_prime must be a real number')\n        if not math.isfinite(kappa_prime) or kappa_prime <= 0.0:\n            raise ValueError('kappa_prime must be a positive finite number')\n        if kappa_prime < kmax * (1.0 - RATIO_TOLERANCE):\n            raise ValueError('kappa_prime must be >= max_{v,h} exp(-E(v,h))/Q(v,h) = %g' % kmax)\n    ratios = [r / kappa_prime for r in ratios_raw]\n\n    vis = QuantumRegister(n_v, 'v')\n    hid = QuantumRegister(n_h, 'h')\n    flg = QuantumRegister(1, 'f')\n    qc = QuantumCircuit(vis, hid, flg)\n    state_qubits = list(range(n))\n    flag = n\n    all_qubits = list(range(total))\n\n    # A = proposal preparation followed by the coherent rejection rotation.\n    prep = QuantumCircuit(total)\n    _prepare_proposal(prep, state_qubits, mu + nu)\n    _rejection_rotation(prep, state_qubits, flag, ratios)\n    qc.compose(prep, qubits=all_qubits, inplace=True)\n\n    # eq_postselect (optional): amplitude amplification of the flag=1 branch,\n    # Grover operator  A S_0 A^dagger S_f  with S_f = Z on the flag.\n    for _ in range(aa_rounds):\n        qc.z(flag)\n        qc.compose(prep.inverse(), qubits=all_qubits, inplace=True)\n        _reflect_about_zero(qc, all_qubits)\n        qc.compose(prep, qubits=all_qubits, inplace=True)\n    return qc",
+    "example_instance_json": "{\"n_v\": 2, \"n_h\": 1, \"w\": [[1.0], [-1.0]], \"a\": [0.0, 0.0], \"b\": [0.0], \"mu\": [0.5, 0.5], \"nu\": [0.5], \"aa_rounds\": 0}",
+    "register_layout": [
+      "qubit 0 (register v[0]): visible unit v_1, |1> = unit on (least significant bit)",
+      "qubit 1 (register v[1]): visible unit v_2, |1> = unit on",
+      "qubit 2 (register h[0]): hidden unit h_1, |1> = unit on",
+      "qubit 3 (register f[0]): rejection-sampling flag; |1> marks acceptance (most significant bit of a measured bitstring)",
+      "Total 4 qubits for the example; in general n_v + n_h + 1 <= 12, with qubits 0..n_v-1 = v_1..v_{n_v}, qubits n_v..n_v+n_h-1 = h_1..h_{n_h}, qubit n_v+n_h = flag",
+      "For the example, kappa' = 8e is computed exactly by enumeration, so r(v,h) = e^{-E(v,h)-1}; post-selecting flag=1 (probability Z/(8e) ~ 0.40) gives outcome probabilities e^{-E(v,h)}/Z with Z = 6 + e + e^{-1} on qubits 0..2"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_energy",
+        "disposition": "implemented",
+        "code_location": "_energy (classical evaluation of E(v,h) for each configuration inside build_circuit)",
+        "explanation": "The RBM energy is evaluated classically for every basis configuration; its exponential determines the per-configuration rotation angle encoded by _rejection_rotation."
+      },
+      {
+        "equation_id": "eq_gibbs",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The normalised Gibbs distribution and Z define the target output statistics after post-selection, but the circuit only needs the unnormalised weights e^{-E}; Z is never computed (it is absorbed into kappa = kappa'/Z)."
+      },
+      {
+        "equation_id": "eq_gradient",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The log-likelihood gradient is classical post-processing of measured samples (and a classically computed data term); the module returns only the state-preparation operation."
+      },
+      {
+        "equation_id": "eq_proposal_state",
+        "disposition": "implemented",
+        "code_location": "_proposal_prob (Q(v,h)) and _prepare_proposal (R_y(2 arcsin sqrt(mean)) on each state qubit)",
+        "explanation": "The product proposal distribution is computed classically for the ratios and prepared coherently by single-qubit R_y rotations; for means 1/2 this is R_y(pi/2) = H up to phase."
+      },
+      {
+        "equation_id": "eq_rejection_rotation",
+        "disposition": "implemented",
+        "code_location": "_rejection_rotation (multi-controlled RYGate(2 arcsin sqrt(r(v,h))) on the flag for each configuration)",
+        "explanation": "Implemented without the b-bit ratio register: the acceptance ratio exp(-E)/(kappa' Q) is computed classically per configuration and encoded exactly as a controlled R_y amplitude, which equals the specified map after uncomputation of the ratio register in the b -> infinity limit."
+      },
+      {
+        "equation_id": "eq_postselect",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop over aa_rounds with _reflect_about_zero (Grover operator A S_0 A^dagger S_f); post-selection itself is left to the runner",
+        "explanation": "The circuit produces the flagged state whose flag=1 branch is |psi_P>/sqrt(kappa); optional amplitude-amplification rounds are implemented as the Grover operator. The measurement/post-selection and the N_AA formula are not executed in the module (aa_rounds is an instance input)."
+      },
+      {
+        "equation_id": "eq_estimator",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Sample-mean estimation, Hoeffding bound and the gradient-ascent update are classical post-processing of measurement outcomes, which the module does not perform."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_rejection_rotation"
+        ],
+        "change": "The b-qubit fixed-point ratio register and the reversible arithmetic that writes P/(kappa Q) into it are removed; the acceptance ratio is computed classically for every one of the 2^{n_v+n_h} configurations and encoded exactly with one multi-controlled R_y rotation per configuration (X-conjugation for zero-valued controls). Registers are therefore n_v + n_h + 1 qubits only.",
+        "reason": "For the tiny instances allowed under the 12-qubit cap, direct enumeration is exact and avoids the 2^{-b} rounding error and the unspecified arithmetic circuit; the resulting unitary is the b -> infinity ideal of the specified map (with the ratio register already uncomputed). This does not scale to large models and is not the paper's claimed efficient method."
+      },
+      {
+        "equation_ids": [
+          "eq_proposal_state",
+          "eq_rejection_rotation"
+        ],
+        "change": "Physical qubit ordering: v_1 is placed at Qiskit index 0 (least significant bit), followed by v_2..v_{n_v}, then h_1..h_{n_h}, then the flag at the highest index. The specification described v_1 as the first / most significant qubit of |v_1...v_{n_v}>|h_1...h_{n_h}>.",
+        "reason": "Qiskit's little-endian convention; a measured bitstring reads (flag, h_{n_h}..h_1, v_{n_v}..v_1) from most to least significant bit."
+      },
+      {
+        "equation_ids": [
+          "eq_rejection_rotation",
+          "eq_postselect"
+        ],
+        "change": "kappa' defaults to the exact maximum of exp(-E)/Q obtained by enumeration (so max r(v,h) = 1); an instance may supply a larger kappa' but not a smaller one. The number of amplitude-amplification rounds is an instance parameter aa_rounds (default 0) rather than being computed from the N_AA formula, since that formula requires Z (hence kappa = kappa'/Z), which the circuit never computes.",
+        "reason": "Keeps the operation deterministic and exact for the tiny instance; the runner may choose aa_rounds using the known Z for the example."
+      },
+      {
+        "equation_ids": [
+          "eq_postselect",
+          "eq_estimator",
+          "eq_gradient"
+        ],
+        "change": "Scope narrowed to the state-preparation unitary only: measurement of the flag, post-selection, sampling of the state register, the estimator and the gradient update are not part of the module.",
+        "reason": "The required output is a measurement-free unitary operation; sampling and classical post-processing are performed by the runner."
+      }
+    ],
+    "assumptions": [
+      "The scoped construction (quantum rejection sampling from a product proposal to prepare the Gibbs state of an RBM) is a reconstruction choice; the abstract does not describe the algorithm.",
+      "Binary {0,1} units, unit temperature, RBM (bipartite) energy; full-BM intra-layer couplings are not supported by the instance format.",
+      "Proposal means mu_i, nu_j are strictly inside (0,1) so that Q > 0 and the ratio is finite.",
+      "The Grover operator used for amplitude amplification is A S_0 A^dagger S_f with S_f = Z on the flag and S_0 = reflection about |0...0> on all qubits; its global sign is irrelevant.",
+      "Total qubits n_v + n_h + 1 are capped at 12; the per-configuration multi-controlled rotations scale as 2^{n_v+n_h} gates and are intended only for tiny instances."
+    ],
+    "unresolved_issues": [
+      "The actual quantum training algorithm of the paper, its complexity bounds, the treatment of full and multi-layer Boltzmann machines, and the amplitude-estimation variant for exact gradient estimation are not reconstructable from the abstract and are not implemented.",
+      "The exact-enumeration encoding of the acceptance ratio is exponential in the number of units and does not reflect the scalable reversible-arithmetic circuit implied by the specification.",
+      "No public validation contract was supplied; the example instance targets flag=1 post-selected frequencies e^{-E(v,h)}/Z with Z = 6 + e + e^{-1}, but this has not been verified here."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 467,
+    "depth": 331,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

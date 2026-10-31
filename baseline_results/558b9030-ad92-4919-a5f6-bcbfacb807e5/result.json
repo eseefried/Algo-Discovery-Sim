@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "558b9030-ad92-4919-a5f6-bcbfacb807e5",
+  "parent_run_id": "6b1142a8-dc5a-44a3-b58a-348a580be0cb",
+  "created_at": "2026-10-31T16:58:58.425704+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "da41f8c82f7b632c258a1a7e2cbe252cbed1a647a99650792d2f47c6901c67b6",
+  "source_specification_sha256": "8290defac5dff212e8115028aca05581205559c93df7a6ccf566f4326f8c6989",
+  "source_python_sha256": "c7e810966954acafa06a645792de48df52a8b0a6f47b759bcb5ca1d0178dc4a2",
+  "elapsed_seconds": 107.187,
+  "usage": {
+    "input_tokens": 6773,
+    "output_tokens": 8993,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements one scoped construction from the specification: Grover search over a tiny quantum phone book. The circuit acts on an index register I (n qubits), two field work registers A (name) and B (number) of m qubits each, and a query register Q = (selector s, m-bit value q). Each Grover iteration applies the programmable phase oracle O_{s,q} = U_DB^dagger P_{s,q} U_DB (eq_1, eq_2), where U_DB is a table of multi-controlled NOTs loading name_i and num_i, and P_{s,q} flips the sign iff the field selected by s equals q (XOR with q, X, multi-controlled Z including the selector, uncompute), followed by the inversion about the uniform superposition on I (eq_3). An optional leading Hadamard layer on I creates |psi_0>; the iteration count k is an instance parameter (eq_4 is background used only to choose k). The distinguishability analysis for imprecise N (eq_5) is out of scope. Example: N=4 (n=2), m=2, 9 qubits, k=1; with unique names and numbers every basis-state query |s,q> yields M=1 and exact success for N=4.",
+    "source_python": "\"\"\"Programmable-query Grover search over a small quantum phone book.\n\nRegisters (Qiskit qubit 0 = least significant bit):\n  I  index register, n qubits, qubit j of I holds bit j of index i (LSB first)\n  A  name field work register, m qubits (bit b of name_i on A[b])\n  B  number field work register, m qubits (bit b of num_i on B[b])\n  S  selector qubit s (0 = search by name, 1 = search by number)\n  V  query value register, m qubits (bit b of q on V[b])\nThe circuit is an operation: it does not prepare |s,q> on S,V (runner does) and\nhas no measurements. If apply_hadamard_layer is true, H^{x n} is applied to I\nas the first step of Grover's algorithm (eq_3 definition of |psi_0>).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\n\n\ndef _as_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(f\"{name} must be an integer\")\n    return value\n\n\ndef _validate_instance(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = _as_int(instance.get(\"n_index_qubits\"), \"n_index_qubits\")\n    m = _as_int(instance.get(\"field_bits\"), \"field_bits\")\n    k = _as_int(instance.get(\"iterations\"), \"iterations\")\n    hlayer = instance.get(\"apply_hadamard_layer\", True)\n    if not isinstance(hlayer, bool):\n        raise ValueError(\"apply_hadamard_layer must be a bool\")\n    if n < 1:\n        raise ValueError(\"n_index_qubits must be >= 1\")\n    if m < 1:\n        raise ValueError(\"field_bits must be >= 1\")\n    if k < 0:\n        raise ValueError(\"iterations must be >= 0\")\n    total = n + 3 * m + 1\n    if total > MAX_QUBITS:\n        raise ValueError(f\"total qubits {total} exceeds cap {MAX_QUBITS}\")\n    size = 2 ** n\n    names = instance.get(\"names\")\n    numbers = instance.get(\"numbers\")\n    if not isinstance(names, list) or not isinstance(numbers, list):\n        raise ValueError(\"names and numbers must be lists\")\n    if len(names) != size or len(numbers) != size:\n        raise ValueError(f\"names and numbers must each have 2**n = {size} entries\")\n    limit = 2 ** m\n    names = [_as_int(v, \"names entry\") for v in names]\n    numbers = [_as_int(v, \"numbers entry\") for v in numbers]\n    for v in names + numbers:\n        if v < 0 or v >= limit:\n            raise ValueError(f\"field values must lie in [0, {limit})\")\n    return n, m, names, numbers, k, hlayer\n\n\ndef _mcx_on_value(qc, controls, target, value):\n    \"\"\"X on target iff the control register (LSB first) encodes integer value.\"\"\"\n    flips = [controls[j] for j in range(len(controls)) if not (value >> j) & 1]\n    for qb in flips:\n        qc.x(qb)\n    qc.mcx(list(controls), target)\n    for qb in flips:\n        qc.x(qb)\n\n\ndef _mcz(qc, qubits):\n    \"\"\"Multi-controlled Z: phase -1 iff all listed qubits are |1>.\"\"\"\n    if len(qubits) == 1:\n        qc.z(qubits[0])\n    else:\n        qc.mcp(math.pi, list(qubits[:-1]), qubits[-1])\n\n\ndef _apply_database(qc, idx, name_reg, num_reg, names, numbers, m):\n    \"\"\"eq_1: U_DB |i>|0>|0> = |i>|name_i>|num_i> via a table of multi-controlled NOTs.\n    Self-inverse, so it also serves as U_DB^dagger.\"\"\"\n    for i in range(len(names)):\n        for b in range(m):\n            if (names[i] >> b) & 1:\n                _mcx_on_value(qc, idx, name_reg[b], i)\n            if (numbers[i] >> b) & 1:\n                _mcx_on_value(qc, idx, num_reg[b], i)\n\n\ndef _apply_field_compare(qc, field, qval, sel, sel_value):\n    \"\"\"eq_2 (P_{s,q} part): phase -1 iff selector == sel_value and field == q.\"\"\"\n    m = len(field)\n    for b in range(m):\n        qc.cx(qval[b], field[b])\n    for b in range(m):\n        qc.x(field[b])\n    if sel_value == 0:\n        qc.x(sel)\n    _mcz(qc, [sel] + [field[b] for b in range(m)])\n    if sel_value == 0:\n        qc.x(sel)\n    for b in range(m):\n        qc.x(field[b])\n    for b in range(m):\n        qc.cx(qval[b], field[b])\n\n\ndef _apply_programmable_oracle(qc, idx, name_reg, num_reg, sel, qval, names, numbers, m):\n    \"\"\"eq_2: O_{s,q} = U_DB^dagger P_{s,q} U_DB, acting as (-1)^{f_{s,q}(i)} on |i>.\"\"\"\n    _apply_database(qc, idx, name_reg, num_reg, names, numbers, m)\n    _apply_field_compare(qc, name_reg, qval, sel, 0)\n    _apply_field_compare(qc, num_reg, qval, sel, 1)\n    _apply_database(qc, idx, name_reg, num_reg, names, numbers, m)\n\n\ndef _apply_diffusion(qc, idx):\n    \"\"\"eq_3: inversion about |psi_0>, 2|psi_0><psi_0| - I on the index register.\n    H X MCZ X H equals -(2|psi_0><psi_0| - I); the global phase pi is restored.\"\"\"\n    n = len(idx)\n    for j in range(n):\n        qc.h(idx[j])\n    for j in range(n):\n        qc.x(idx[j])\n    _mcz(qc, [idx[j] for j in range(n)])\n    for j in range(n):\n        qc.x(idx[j])\n    for j in range(n):\n        qc.h(idx[j])\n    qc.global_phase = qc.global_phase + math.pi\n\n\ndef build_circuit(instance):\n    \"\"\"Build the programmable-query Grover phone-book search circuit.\n\n    instance keys:\n      n_index_qubits (int >= 1): n, database size N = 2**n\n      field_bits (int >= 1): m, bit width of name and number fields\n      names (list[int]): name_i for i = 0..N-1, each in [0, 2**m)\n      numbers (list[int]): num_i for i = 0..N-1, each in [0, 2**m)\n      iterations (int >= 0): number of Grover iterates k\n      apply_hadamard_layer (bool, optional): apply H on I first (default True)\n    \"\"\"\n    n, m, names, numbers, k, hlayer = _validate_instance(instance)\n    idx = QuantumRegister(n, \"idx\")\n    name_reg = QuantumRegister(m, \"name\")\n    num_reg = QuantumRegister(m, \"num\")\n    sel_reg = QuantumRegister(1, \"sel\")\n    qval = QuantumRegister(m, \"qry\")\n    qc = QuantumCircuit(idx, name_reg, num_reg, sel_reg, qval, name=\"phonebook_grover\")\n    sel = sel_reg[0]\n    if hlayer:\n        # eq_3: |psi_0> = H^{x n}|0>\n        for j in range(n):\n            qc.h(idx[j])\n    for _ in range(k):\n        # eq_3: G_{s,q} = (2|psi_0><psi_0| - I) O_{s,q}\n        _apply_programmable_oracle(qc, idx, name_reg, num_reg, sel, qval, names, numbers, m)\n        _apply_diffusion(qc, idx)\n    return qc",
+    "example_instance_json": "{\"n_index_qubits\": 2, \"field_bits\": 2, \"names\": [0, 1, 2, 3], \"numbers\": [3, 0, 2, 1], \"iterations\": 1, \"apply_hadamard_layer\": true}",
+    "register_layout": [
+      "qubits 0-1: idx (index register I, n=2); qubit 0 = bit 0 (LSB) of index i, qubit 1 = bit 1 (MSB)",
+      "qubits 2-3: name (field register A, m=2); qubit 2+b holds bit b of name_i after U_DB; starts and ends in |0>",
+      "qubits 4-5: num (field register B, m=2); qubit 4+b holds bit b of num_i after U_DB; starts and ends in |0>",
+      "qubit 6: sel (selector s): |0> = search by name, |1> = search by number; prepared by runner, left unchanged",
+      "qubits 7-8: qry (query value q, m=2); qubit 7+b holds bit b of q; prepared by runner, left unchanged",
+      "total 9 qubits; example database: entry i has name i and number [3,0,2,1][i], so every query |s,q> has exactly M=1 match and one iteration succeeds with probability 1 for N=4 (e.g. all-zero input on sel,qry searches for name 0 -> index 0)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_apply_database (table of multi-controlled NOTs via _mcx_on_value; self-inverse so reused as U_DB^dagger)",
+        "explanation": "Loads name_i and num_i into registers A and B conditioned on the index register encoding i."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_apply_programmable_oracle and _apply_field_compare",
+        "explanation": "O_{s,q} = U_DB^dagger P_{s,q} U_DB; P_{s,q} XORs the selected field with q, applies X, a multi-controlled Z including the selector qubit (X-conjugated for s=0), and uncomputes."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit (Hadamard layer and iteration loop) and _apply_diffusion",
+        "explanation": "Uniform superposition H^{x n}|0> and the Grover iterate oracle followed by inversion about |psi_0> (global phase pi of the H X MCZ X H decomposition restored via global_phase)."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Amplitude formula and k_opt are analysis results; the iteration count is supplied in the instance (k=1 for N=4, M=1). Not computed in the circuit."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Unambiguous-discrimination overlap analysis for imprecise N is not a circuit operation and is excluded from the implemented construction."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Index, field and query bit strings are encoded LSB-first on Qiskit qubits (qubit j holds bit j) instead of the specification's MSB-first convention.",
+        "reason": "Qiskit qubit index 0 is the least significant bit; the mapping is disclosed in the register layout."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The selector s and query value q are held in quantum register qubits (sel, qry) that the runner prepares in a computational basis state; the oracle is controlled by these qubits rather than being compiled classically.",
+        "reason": "Implements programmability of the query as a single circuit valid for all basis-state queries; the circuit cannot prepare inputs itself."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The Hadamard layer creating |psi_0> is included in the circuit as the first algorithm step (controllable by apply_hadamard_layer); iterations k is an explicit instance parameter.",
+        "reason": "The runner prepares inputs, so the circuit models Grover's algorithm applied to |0> on the index register with the query basis state supplied externally."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Narrowed scope: the analysis equations are not implemented; eq_4 only informs the example's iteration count and eq_5 is excluded.",
+        "reason": "They are analytical statements, not unitary operations; the second part of the paper cannot be turned into a circuit from the abstract."
+      }
+    ],
+    "assumptions": [
+      "Phone-book entries are classical bit strings loaded by a fixed table of multi-controlled NOTs; the paper's actual encoding is unknown.",
+      "The query (s,q) is a computational basis state on the sel/qry qubits provided by the runner; all-zero input corresponds to searching by name for name 0.",
+      "The number of matches M for a given query is determined by the database; the example uses unique names and numbers so that M=1 for every query and k=1 is optimal for N=4.",
+      "Multi-controlled gates (mcx, mcp) use no ancilla qubits; sizes are small enough (at most n or m+1 controls) for this to be acceptable."
+    ],
+    "unresolved_issues": [
+      "The paper's concrete quantum phone-book model and mechanism of programmable queries are not available from the abstract; this is a minimal plausible construction.",
+      "The imprecise-N distinguishability analysis (eq_5) and its numerical conclusions are not reconstructed or implemented.",
+      "For general databases some queries may have M=0 or M>1 matches, for which the fixed iteration count k is not optimal; no handling of unknown M is included."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 9,
+    "gate_count": 327,
+    "depth": 209,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

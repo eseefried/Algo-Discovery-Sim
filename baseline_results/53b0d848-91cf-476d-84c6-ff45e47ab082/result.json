@@ -1,0 +1,142 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "53b0d848-91cf-476d-84c6-ff45e47ab082",
+  "parent_run_id": "30ebe829-eaae-4f22-adb9-d3016a76a688",
+  "created_at": "2026-10-31T17:04:43.982353+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "b493167a71f62c5caf73e2ef5c98886514a36741f92a884b003a346be208549b",
+  "source_specification_sha256": "94280056be3a2b3ca36c7dad602391e4cbd1d2e2ea84f65119fdc9cc7d0caea7",
+  "source_python_sha256": "59f10d7871d8f026c8b64af24b420e7b2de8a3d4ccaaf677fa7bff14e9a8883e",
+  "elapsed_seconds": 95.697,
+  "usage": {
+    "input_tokens": 8628,
+    "output_tokens": 8018,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the single-ancilla Stinespring dilation circuit U_k (eq_3) for one generalized extreme qubit channel (d = 2, Kraus rank <= 2, eq_2) in the Ruskai-Szarek-Werner canonical form K_0 = diag(cos v0, cos v1), K_1 = sin v1 |0><1| + sin v0 |1><0|, which contains amplitude damping (v0 = 0, sin^2 v1 = gamma) and, as a separate 'unitary' channel type, the Pauli channels such as X.X of the tiny instance eq_6. The circuit is Ry(2 v0) on the ancilla, a controlled-Ry(2(v1 - v0)) from system to ancilla, and a CNOT from ancilla back to system; the ancilla starts in |0> and is to be traced out by the runner. The classical decomposition (eq_1), classical random selection of k (eq_4) and fault-tolerant gate compilation (eq_5) are not part of the returned unitary operation.",
+    "source_python": "\"\"\"Single-ancilla Stinespring dilation circuit for one generalized extreme qubit channel.\n\nImplements eq_3 (dilation U_k with one ancilla) for a channel of Kraus rank <= 2\n(eq_2) on a single system qubit (d = 2).  Canonical Kraus form (eq_2, RSW form):\n    K_0 = diag(cos v0, cos v1),   K_1 = sin v1 |0><1| + sin v0 |1><0|\nso that K_0^dag K_0 + K_1^dag K_1 = 1.  The dilation acts as\n    |0>_S|0>_A -> cos v0 |0>_S|0>_A + sin v0 |1>_S|1>_A\n    |1>_S|0>_A -> cos v1 |1>_S|0>_A + sin v1 |0>_S|1>_A\nand is realised by Ry(2 v0) on A, controlled-Ry(2(v1 - v0)) S->A, CNOT A->S.\nAmplitude damping (eq_6, U_1) is v0 = 0, v1 = arcsin(sqrt(gamma)).\nThe unitary extreme channel X.X (eq_6, U_2) is the 'unitary' channel type.\n\nLayout: qubit 0 = system S (channel input/output), qubit 1 = ancilla A\n(must be supplied in |0> by the runner and traced out afterwards).\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nSUPPORTED_DIMENSION = 2\nPAULI_LABELS = (\"I\", \"X\", \"Y\", \"Z\")\n\n\ndef _as_real(value, name):\n    \"\"\"Validate a finite real number taken from the instance.\"\"\"\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(\"parameter '%s' must be a real number\" % name)\n    out = float(value)\n    if not math.isfinite(out):\n        raise ValueError(\"parameter '%s' must be finite\" % name)\n    return out\n\n\ndef _channel_angles(channel):\n    \"\"\"Return (v0, v1) for a rank-2 extreme channel, or None for a unitary channel.\n\n    eq_2: Kraus operators K_0 = diag(cos v0, cos v1), K_1 = sin v1 |0><1| + sin v0 |1><0|.\n    \"\"\"\n    if not isinstance(channel, dict) or \"type\" not in channel:\n        raise ValueError(\"instance['channel'] must be a dict with a 'type' key\")\n    ctype = channel[\"type\"]\n    if ctype == \"amplitude_damping\":\n        # eq_6: K_0 = |0><0| + sqrt(1-gamma)|1><1|, K_1 = sqrt(gamma)|0><1|\n        if \"gamma\" not in channel:\n            raise ValueError(\"amplitude_damping channel requires 'gamma'\")\n        gamma = _as_real(channel[\"gamma\"], \"gamma\")\n        if gamma < 0.0 or gamma > 1.0:\n            raise ValueError(\"gamma must lie in [0, 1]\")\n        return 0.0, math.asin(math.sqrt(gamma))\n    if ctype == \"extreme\":\n        if \"v0\" not in channel or \"v1\" not in channel:\n            raise ValueError(\"extreme channel requires 'v0' and 'v1'\")\n        return _as_real(channel[\"v0\"], \"v0\"), _as_real(channel[\"v1\"], \"v1\")\n    if ctype == \"unitary\":\n        if \"pauli\" not in channel or channel[\"pauli\"] not in PAULI_LABELS:\n            raise ValueError(\"unitary channel requires 'pauli' in %s\" % (PAULI_LABELS,))\n        return None\n    raise ValueError(\"unknown channel type '%s'\" % str(ctype))\n\n\ndef build_circuit(instance):\n    \"\"\"Build the dilation unitary U_k (eq_3) for one generalized extreme qubit channel.\n\n    instance = {\"d\": 2, \"channel\": {...}} with channel one of\n      {\"type\": \"amplitude_damping\", \"gamma\": g}        (eq_6, U_1)\n      {\"type\": \"extreme\", \"v0\": a, \"v1\": b}            (eq_2 canonical form)\n      {\"type\": \"unitary\", \"pauli\": \"X\"}                (eq_6, U_2)\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    if \"d\" not in instance or isinstance(instance[\"d\"], bool) or not isinstance(instance[\"d\"], int):\n        raise ValueError(\"instance must provide integer 'd'\")\n    d = instance[\"d\"]\n    if d != SUPPORTED_DIMENSION:\n        raise ValueError(\"only qubit channels (d = 2) are supported in this module\")\n    if \"channel\" not in instance:\n        raise ValueError(\"instance must provide 'channel'\")\n    angles = _channel_angles(instance[\"channel\"])\n\n    n_system = 1\n    n_ancilla = 1\n    if n_system + n_ancilla > MAX_QUBITS:\n        raise ValueError(\"qubit budget exceeded\")\n\n    system = QuantumRegister(n_system, \"s\")\n    ancilla = QuantumRegister(n_ancilla, \"a\")\n    qc = QuantumCircuit(system, ancilla, name=\"extreme_channel_dilation\")\n    s = system[0]\n    a = ancilla[0]\n\n    if angles is None:\n        # eq_6 (U_2 = X_S tensor 1_A): unitary (Kraus rank 1) extreme channel, no ancilla action.\n        pauli = instance[\"channel\"][\"pauli\"]\n        if pauli == \"X\":\n            qc.x(s)\n        elif pauli == \"Y\":\n            qc.y(s)\n        elif pauli == \"Z\":\n            qc.z(s)\n        else:\n            qc.id(s)\n        qc.id(a)\n        return qc\n\n    v0, v1 = angles\n    # eq_3: isometry |psi>_S|0>_A -> sum_i (K_i |psi>)_S |i>_A.\n    # Step 1: ancilla rotation conditioned on system basis state:\n    #   S=0 -> Ry(2 v0) on A  (|0>_A -> cos v0 |0> + sin v0 |1>)\n    #   S=1 -> Ry(2 v1) on A  (|0>_A -> cos v1 |0> + sin v1 |1>)\n    if v0 != 0.0:\n        qc.ry(2.0 * v0, a)\n    if v1 - v0 != 0.0:\n        qc.cry(2.0 * (v1 - v0), s, a)\n    # Step 2: K_1 is off-diagonal, so flip the system whenever ancilla records index 1.\n    qc.cx(a, s)\n    return qc",
+    "example_instance_json": "{\"d\": 2, \"channel\": {\"type\": \"amplitude_damping\", \"gamma\": 0.5}}",
+    "register_layout": [
+      "qubit 0 (register s[0]): system qudit S (d = 2); carries the channel input rho and, after tracing out qubit 1, the output E_k(rho)",
+      "qubit 1 (register a[0]): single ancillary qubit A for the Stinespring dilation; must be supplied in |0> by the runner and discarded (traced out) after the circuit; ancilla value |i> labels Kraus index i",
+      "Total qubits: 2. Qiskit little-endian: qubit 0 is the least significant bit, so the combined basis label is |a s> (ancilla bit high, system bit low); the specification's 'S tensor A' ordering corresponds to reading the bitstring reversed.",
+      "Example instance (amplitude damping gamma = 1/2 = U_1 of eq_6): circuit = CRY(pi/2) controlled by s[0] on a[0], then CX(a[0] -> s[0]). The k = 2 term of eq_6 is obtained with {\"d\": 2, \"channel\": {\"type\": \"unitary\", \"pauli\": \"X\"}}."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The classical convex decomposition of E into extreme channels with weights p_k is classical preprocessing whose equations are unavailable; the module takes one already-decomposed extreme channel E_k as input."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_channel_angles (docstring and comments) and the canonical Kraus form in the module docstring",
+        "explanation": "The rank-<=2 Kraus form is realised through the canonical parametrisation K_0 = diag(cos v0, cos v1), K_1 = sin v1 |0><1| + sin v0 |1><0| (plus rank-1 Pauli unitary channels); the trace-preservation condition holds identically for all real v0, v1."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: comments 'eq_3: isometry ...', gates qc.ry, qc.cry(s -> a), qc.cx(a -> s)",
+        "explanation": "The dilation unitary U_k acting on S tensor A with ancilla in |0> is built from a system-controlled ancilla rotation followed by an ancilla-controlled flip of the system, reproducing sum_i (K_i|psi>)_S |i>_A."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Random sampling of k with probability p_k into classical dits and the resulting diamond-norm error budget are classical/statistical procedures; the returned object is the unitary circuit for a single chosen k."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Fault-tolerant Solovay-Kitaev compilation of U_k to a finite gate set with O(d^2 log^c(1/eps)) cost is a transpilation step not performed in this module; the circuit uses exact continuous-angle gates."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "_channel_angles branch 'amplitude_damping' (U_1: v0 = 0, v1 = arcsin(sqrt(gamma))) and build_circuit branch 'angles is None' (U_2 = X_S tensor 1_A); example_instance_json uses gamma = 0.5",
+        "explanation": "Both extreme-channel circuits U_1 and U_2 of the tiny d = 2 instance are constructible; the example instance is U_1 with gamma = 1/2. The mixture weights 3/4, 1/4 belong to the classical sampling (eq_4) and are not encoded in the unitary."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Scope narrowed to qubit channels (d = 2 only); the generic qudit dilation for arbitrary d is rejected with ValueError.",
+        "reason": "For general d the dilation would require synthesising an arbitrary d^2 x d^2 isometry (an opaque dense unitary), and the paper's explicit O(d^2) gate construction is not recoverable from the abstract."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Generalized extreme qubit channels are parametrised by the canonical form K_0 = diag(cos v0, cos v1), K_1 = sin v1 |0><1| + sin v0 |1><0| (two real angles), plus separate rank-1 Pauli unitary channels; arbitrary pre/post local unitaries are not included.",
+        "reason": "This is the standard canonical form of extreme qubit channels up to local unitaries; it is sufficient to express both terms of the tiny instance eq_6 while keeping the construction a transparent gate sequence."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_6"
+        ],
+        "change": "The classical random choice of k (and the weights 3/4, 1/4) is moved outside the circuit: the instance selects a single k and the module returns only U_k.",
+        "reason": "The output must be a measurement-free, deterministic unitary operation without classical registers or randomness."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Register ordering: the specification writes S tensor A (system first); in the Qiskit circuit the system is qubit 0 (least significant) and the ancilla is qubit 1, so basis labels read |a s>.",
+        "reason": "Qiskit little-endian convention; the ancilla is traced out so only the physical assignment of S to qubit 0 matters, which is stated explicitly in the layout."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "No fault-tolerant compilation is performed; exact Ry/CRY/CX gates are emitted.",
+        "reason": "Gate-set compilation is a downstream transpiler concern and its parameters (gate set, exponent) are not specified."
+      }
+    ],
+    "assumptions": [
+      "The runner supplies the ancilla qubit 1 in |0> and traces it out (or measures and discards it) after the circuit; the system input state is on qubit 0.",
+      "'Generalized extreme channel' is interpreted as a channel of Kraus rank at most d, so one ancilla qubit suffices for d = 2.",
+      "Ry(theta)|0> = cos(theta/2)|0> + sin(theta/2)|1>, hence the factor 2 in the rotation angles.",
+      "Angles v0, v1 may be any finite reals (the Kraus form is trace preserving for all of them); gamma must lie in [0, 1]."
+    ],
+    "unresolved_issues": [
+      "The paper's specific nonlinear algebraic equations for the convex decomposition and the parametrisation of generalized extreme qudit channels for d > 2 are unknown, so only the qubit case is implemented.",
+      "The explicit O(d^2)-gate construction of the dilation unitary claimed in the abstract is not reproduced; for d = 2 the three-gate circuit is exact but its relation to the paper's construction cannot be confirmed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 5,
+    "depth": 5,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

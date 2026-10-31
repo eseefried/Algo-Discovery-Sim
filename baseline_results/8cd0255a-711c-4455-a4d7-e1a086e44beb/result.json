@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "8cd0255a-711c-4455-a4d7-e1a086e44beb",
+  "parent_run_id": "290dd413-31b5-4914-8e61-37e47c9e3238",
+  "created_at": "2026-10-31T16:35:03.894737+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "7fdbd7f09a4fd73fb59500954245e8d57f177ff0b13ca68a5935517e7bda3729",
+  "source_specification_sha256": "7aea692c32b14ef69537c250774c7ef1ada28c6d941b034ced023b06de0f6447",
+  "source_python_sha256": "c91fadc9926b84f5229097300755594d8d77b3a42c96c12569a407409972a133",
+  "elapsed_seconds": 81.667,
+  "usage": {
+    "input_tokens": 6976,
+    "output_tokens": 7332,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the circuit-equivalence 'miter' construction from the specification: given two gate-list circuits U and V on the same n qubits, build_circuit returns the difference operator W = U^dagger V (mode 'u_dag_v', decides eq_3: W is a scalar multiple of identity iff U and V are equivalent up to global phase) or W = U V^dagger (mode 'u_v_dag', decides the circuit half of eq_4: W is a diagonal unitary iff U = D V). The example instance is the n=1 pair U = X*Z (Z first, then X) and V = Y from eq_5, for which W = U^dagger V = i*I. The actual decision (checking W against identity/diagonal) is a classical post-processing step on the unitary of W and is not part of the returned operation; state-equivalence notions and the paper's decision-diagram algorithms are out of scope.",
+    "source_python": "\"\"\"Miter circuit for quantum circuit equivalence checking.\n\nGiven two circuits U and V on n qubits (as gate lists), build the difference\noperator\n    W = U^dagger V   (mode 'u_dag_v')  -> eq_3: W = e^{i theta} I  iff  U ~_gp V\n    W = U V^dagger   (mode 'u_v_dag')  -> eq_4 (circuit part): W diagonal iff U = D V\nThe equivalence decision itself is classical post-processing on W and is not\npart of the returned operation.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n_MAX_QUBITS = 12\n_ONE_Q = (\"x\", \"y\", \"z\", \"h\", \"s\", \"sdg\", \"t\", \"tdg\", \"sx\", \"sxdg\", \"id\")\n_ONE_Q_P = (\"rx\", \"ry\", \"rz\", \"p\")\n_TWO_Q = (\"cx\", \"cy\", \"cz\", \"ch\", \"swap\")\n_TWO_Q_P = (\"cp\", \"crx\", \"cry\", \"crz\", \"rxx\", \"rzz\")\n_THREE_Q = (\"ccx\", \"cswap\")\n\n\ndef _validate_gate(gate, n):\n    \"\"\"Validate one gate dictionary and return (name, qubits, params).\"\"\"\n    if not isinstance(gate, dict):\n        raise ValueError(\"each gate must be a dict with keys name, qubits, params\")\n    name = gate.get(\"name\")\n    qubits = gate.get(\"qubits\")\n    params = gate.get(\"params\", [])\n    if not isinstance(name, str):\n        raise ValueError(\"gate name must be a string\")\n    name = name.lower()\n    if not isinstance(qubits, list) or len(qubits) == 0:\n        raise ValueError(\"gate qubits must be a non-empty list\")\n    for q in qubits:\n        if isinstance(q, bool) or not isinstance(q, int) or q < 0 or q >= n:\n            raise ValueError(\"gate qubit index out of range\")\n    if len(set(qubits)) != len(qubits):\n        raise ValueError(\"gate qubit indices must be distinct\")\n    if not isinstance(params, list):\n        raise ValueError(\"gate params must be a list\")\n    fparams = []\n    for p in params:\n        if isinstance(p, bool) or not isinstance(p, (int, float)):\n            raise ValueError(\"gate params must be real numbers\")\n        fp = float(p)\n        if not math.isfinite(fp):\n            raise ValueError(\"gate params must be finite\")\n        fparams.append(fp)\n    if name in _ONE_Q:\n        nq, npar = 1, 0\n    elif name in _ONE_Q_P:\n        nq, npar = 1, 1\n    elif name in _TWO_Q:\n        nq, npar = 2, 0\n    elif name in _TWO_Q_P:\n        nq, npar = 2, 1\n    elif name in _THREE_Q:\n        nq, npar = 3, 0\n    else:\n        raise ValueError(\"unsupported gate name: \" + name)\n    if len(qubits) != nq:\n        raise ValueError(\"gate \" + name + \" expects \" + str(nq) + \" qubits\")\n    if len(fparams) != npar:\n        raise ValueError(\"gate \" + name + \" expects \" + str(npar) + \" params\")\n    return name, qubits, fparams\n\n\ndef _append_gate(qc, name, qubits, params):\n    \"\"\"Append one whitelisted standard gate to qc.\"\"\"\n    if name == \"x\":\n        qc.x(qubits[0])\n    elif name == \"y\":\n        qc.y(qubits[0])\n    elif name == \"z\":\n        qc.z(qubits[0])\n    elif name == \"h\":\n        qc.h(qubits[0])\n    elif name == \"s\":\n        qc.s(qubits[0])\n    elif name == \"sdg\":\n        qc.sdg(qubits[0])\n    elif name == \"t\":\n        qc.t(qubits[0])\n    elif name == \"tdg\":\n        qc.tdg(qubits[0])\n    elif name == \"sx\":\n        qc.sx(qubits[0])\n    elif name == \"sxdg\":\n        qc.sxdg(qubits[0])\n    elif name == \"id\":\n        qc.id(qubits[0])\n    elif name == \"rx\":\n        qc.rx(params[0], qubits[0])\n    elif name == \"ry\":\n        qc.ry(params[0], qubits[0])\n    elif name == \"rz\":\n        qc.rz(params[0], qubits[0])\n    elif name == \"p\":\n        qc.p(params[0], qubits[0])\n    elif name == \"cx\":\n        qc.cx(qubits[0], qubits[1])\n    elif name == \"cy\":\n        qc.cy(qubits[0], qubits[1])\n    elif name == \"cz\":\n        qc.cz(qubits[0], qubits[1])\n    elif name == \"ch\":\n        qc.ch(qubits[0], qubits[1])\n    elif name == \"swap\":\n        qc.swap(qubits[0], qubits[1])\n    elif name == \"cp\":\n        qc.cp(params[0], qubits[0], qubits[1])\n    elif name == \"crx\":\n        qc.crx(params[0], qubits[0], qubits[1])\n    elif name == \"cry\":\n        qc.cry(params[0], qubits[0], qubits[1])\n    elif name == \"crz\":\n        qc.crz(params[0], qubits[0], qubits[1])\n    elif name == \"rxx\":\n        qc.rxx(params[0], qubits[0], qubits[1])\n    elif name == \"rzz\":\n        qc.rzz(params[0], qubits[0], qubits[1])\n    elif name == \"ccx\":\n        qc.ccx(qubits[0], qubits[1], qubits[2])\n    elif name == \"cswap\":\n        qc.cswap(qubits[0], qubits[1], qubits[2])\n    else:\n        raise ValueError(\"unsupported gate name: \" + name)\n\n\ndef _build_sub(n, gates, label):\n    \"\"\"Build one of the compared circuits (U or V) from its gate list.\n\n    Gates are listed in time order (first entry applied first), so the matrix\n    product is read right-to-left, matching the eq_5 convention 'XZ = Z first'.\n    \"\"\"\n    if not isinstance(gates, list):\n        raise ValueError(label + \" must be a list of gate dicts\")\n    qc = QuantumCircuit(QuantumRegister(n, \"system\"), name=label)\n    for gate in gates:\n        name, qubits, params = _validate_gate(gate, n)\n        _append_gate(qc, name, qubits, params)\n    return qc\n\n\ndef build_circuit(instance):\n    \"\"\"Return the miter circuit W for circuit-equivalence checking.\n\n    instance keys:\n      n    : number of qubits (1..12)\n      u, v : gate lists, each entry {\"name\": str, \"qubits\": [int,...], \"params\": [float,...]}\n      mode : 'u_dag_v' -> W = U^dagger V  (eq_3 test: W proportional to identity)\n             'u_v_dag' -> W = U V^dagger  (eq_4 circuit test: W diagonal)\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"n\")\n    if isinstance(n, bool) or not isinstance(n, int):\n        raise ValueError(\"n must be an integer\")\n    if n < 1 or n > _MAX_QUBITS:\n        raise ValueError(\"n must satisfy 1 <= n <= \" + str(_MAX_QUBITS))\n    mode = instance.get(\"mode\", \"u_dag_v\")\n    if mode not in (\"u_dag_v\", \"u_v_dag\"):\n        raise ValueError(\"mode must be 'u_dag_v' or 'u_v_dag'\")\n    if \"u\" not in instance or \"v\" not in instance:\n        raise ValueError(\"instance must contain gate lists 'u' and 'v'\")\n    qc_u = _build_sub(n, instance[\"u\"], \"U\")\n    qc_v = _build_sub(n, instance[\"v\"], \"V\")\n\n    qc = QuantumCircuit(QuantumRegister(n, \"system\"), name=\"miter_\" + mode)\n    if mode == \"u_dag_v\":\n        # eq_3: W = U^dagger V -- apply V first, then U^dagger (time order).\n        qc.compose(qc_v, qubits=range(n), inplace=True)\n        qc.compose(qc_u.inverse(), qubits=range(n), inplace=True)\n    else:\n        # eq_4 (circuit part): W = U V^dagger -- apply V^dagger first, then U.\n        qc.compose(qc_v.inverse(), qubits=range(n), inplace=True)\n        qc.compose(qc_u, qubits=range(n), inplace=True)\n    return qc",
+    "example_instance_json": "{\"n\": 1, \"mode\": \"u_dag_v\", \"u\": [{\"name\": \"z\", \"qubits\": [0], \"params\": []}, {\"name\": \"x\", \"qubits\": [0], \"params\": []}], \"v\": [{\"name\": \"y\", \"qubits\": [0], \"params\": []}]}",
+    "register_layout": [
+      "system[0] = Qiskit qubit 0: the single qubit of the eq_5 instance; U = X*Z (Z applied first, then X), V = Y; returned circuit W = U^dagger V = Z X Y (time order: Y, X, Z) = i*I, i.e. identity up to global phase (eq_3 satisfied, eq_1 fails).",
+      "General instance: system[k] = Qiskit qubit k for k in 0..n-1 (Qiskit little-endian: qubit 0 is the least-significant basis-index bit); gate 'qubits' entries refer directly to these physical indices; total qubits = n <= 12."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Exact entrywise equality is a classical comparison of representations; the miter W = U^dagger V equals the identity exactly iff eq_1 holds for circuits, but the check itself is post-processing on W, not part of the operation."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "State global-phase equivalence requires state vectors / input preparation, which the operation-only contract forbids; not implemented."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit, branch mode == 'u_dag_v' (comment 'eq_3: W = U^dagger V')",
+        "explanation": "Builds W = U^dagger V by applying V then U.inverse(); W is e^{i theta} I (|Tr W| = N) iff U and V are equivalent up to global phase."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit, branch mode == 'u_v_dag' (comment 'eq_4 (circuit part): W = U V^dagger')",
+        "explanation": "Circuit half only: builds W = U V^dagger, which is a diagonal unitary D iff U = D V. The state half (squared-moduli comparison) is a classical state check and is not implemented."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "example_instance_json and _build_sub docstring (time-order convention 'XZ = Z first')",
+        "explanation": "The example instance encodes U = X*Z as gate list [z, x] (Z first) and V = Y; the returned miter is Z X Y = i*I, matching U = e^{-i pi/2} V. The state pair |+>,|-> part of eq_5 is not encoded (state checks out of scope)."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Qubit index convention: the specification treats qubit 0 as the most-significant basis-index bit; the implementation uses Qiskit's native little-endian ordering (qubit 0 least significant). Gate 'qubits' entries are physical Qiskit indices.",
+        "reason": "Required by the Qiskit API; the identity/diagonality properties of the miter W are invariant under any fixed relabeling of basis indices, so the equivalence decisions are unaffected."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to circuit equivalence only: the state-equivalence relations (eq_2 and the state part of eq_4, including the |+>,|-> pair of eq_5) are not implemented.",
+        "reason": "The deliverable must be a measurement-free operation without input-state preparation; state checks are classical comparisons of amplitude vectors."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The equivalence decision (|Tr(W)| = N, or W diagonal) is left to classical post-processing on the unitary of the returned miter circuit W; only W is constructed.",
+        "reason": "Operation-only contract: no operator construction, simulation, or verification may be performed in the module."
+      }
+    ],
+    "assumptions": [
+      "Compared circuits U and V are given as whitelisted standard-gate lists (single-qubit Paulis/Clifford/T/sx, rx/ry/rz/p, cx/cy/cz/ch/swap, cp/crx/cry/crz/rxx/rzz, ccx/cswap) in time order on the same n qubits; gate parameters are finite real floats in radians.",
+      "mode defaults to 'u_dag_v' (global-phase miter) when omitted; params defaults to an empty list when omitted.",
+      "Empty gate lists are accepted and denote the identity circuit.",
+      "The paper's compact decision-diagram algorithms and benchmark circuits are not reconstructable from the abstract and are replaced by this explicit gate-level miter construction."
+    ],
+    "unresolved_issues": [
+      "The paper's actual set of equivalence notions and its scalable (hundreds of qubits) algorithms remain unknown; the miter construction here is a standard dense-unitary-checkable surrogate limited to n <= 12.",
+      "No numerical tolerance is defined for deciding when W is 'identity up to phase' or 'diagonal'; that choice belongs to the classical post-processing stage."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 1,
+    "gate_count": 3,
+    "depth": 3,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

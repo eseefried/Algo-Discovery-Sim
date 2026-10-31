@@ -1,0 +1,149 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "b2b9d7d0-e862-457e-ac77-e9a00b58dd63",
+  "parent_run_id": "b25f31b6-0470-4a3a-a7ff-d42b8f4434c9",
+  "created_at": "2026-10-31T17:13:01.130064+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "66a333f683b6ee90b0908bc1263c2ee4c99e92807833dfd648ba446bebbf81d2",
+  "source_specification_sha256": "d7e098bf09dd8a9cf27375f7196e43acd6ab74a967a9eaea8447337a243ea626",
+  "source_python_sha256": "103b039f8f2431204cd9549d2152677622861ec0c2b92965518340b39b7be835",
+  "elapsed_seconds": 100.846,
+  "usage": {
+    "input_tokens": 8071,
+    "output_tokens": 8750,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing the continuous-time quantum-walk search operator U = e^{-iH(gamma_2)t_2} e^{-iH(gamma_1)t_1} (eq_1, eq_2, eq_5) with H(gamma) = -gamma*A - |w><w| for two exactly-simulable graph families on N = 2^n vertices: the complete graph K_N (A = J - I, with e^{i gamma t J} compiled as Hadamards around a multi-controlled phase on |0...0>) and the n-dimensional hypercube (A = sum_k X_k, compiled as RX rotations). The non-commuting graph and oracle terms are combined with a second-order (Strang) product formula with a user-chosen number of Trotter steps per stage. The oracle e^{i t |w><w|} is an X-conjugated multi-controlled phase gate. Input-state preparation (eq_3) and measurement (eq_4) are left to the runner. The example instance is the assumed K_4 sanity instance of eq_7 (gamma = 1/4, w = 0, t = pi, single stage).",
+    "source_python": "\"\"\"Continuous-time quantum-walk spatial search operator (Trotterized).\n\nImplements the (possibly multi-stage) unitary\n    U = prod_k exp(-i H(gamma_k) t_k),   H(gamma) = -gamma * A - |w><w|\nfor graphs on N = 2**n vertices whose adjacency term is exactly compilable:\n  * 'complete' : K_N with A = J - I, J = N |s><s|, |s> = H^{(x)n}|0...0>\n  * 'hypercube': Q_n with A = sum_k X_k\nThe vertex index is stored in binary on the vertex register, qubit 0 = LSB.\nThe circuit does NOT prepare the uniform superposition nor measure.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n_ALLOWED_GRAPHS = (\"complete\", \"hypercube\")\n_MAX_QUBITS = 12\n\n\ndef _check_real(value, name, strictly_positive):\n    \"\"\"Return value as a finite float, raising ValueError on bad input.\"\"\"\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(\"%s must be a real number\" % name)\n    val = float(value)\n    if not math.isfinite(val):\n        raise ValueError(\"%s must be finite\" % name)\n    if strictly_positive and val <= 0.0:\n        raise ValueError(\"%s must be > 0\" % name)\n    if (not strictly_positive) and val < 0.0:\n        raise ValueError(\"%s must be >= 0\" % name)\n    return val\n\n\ndef _check_int(value, name, minimum, maximum):\n    \"\"\"Return value as an int within [minimum, maximum] or raise ValueError.\"\"\"\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(\"%s must be an integer\" % name)\n    if value < minimum or value > maximum:\n        raise ValueError(\"%s must lie in [%d, %d]\" % (name, minimum, maximum))\n    return int(value)\n\n\ndef _validate(instance):\n    \"\"\"Validate the instance dictionary and return normalized parameters.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    graph = instance.get(\"graph\")\n    if graph not in _ALLOWED_GRAPHS:\n        raise ValueError(\"graph must be one of %s\" % (_ALLOWED_GRAPHS,))\n    n = _check_int(instance.get(\"num_qubits\"), \"num_qubits\", 1, _MAX_QUBITS)\n    num_vertices = 2 ** n\n    marked = _check_int(instance.get(\"marked_vertex\"), \"marked_vertex\", 0, num_vertices - 1)\n    steps = _check_int(instance.get(\"trotter_steps\"), \"trotter_steps\", 1, 100000)\n    stages_raw = instance.get(\"stages\")\n    if not isinstance(stages_raw, list) or len(stages_raw) < 1:\n        raise ValueError(\"stages must be a non-empty list of {gamma, time} dicts\")\n    stages = []\n    for idx, st in enumerate(stages_raw):\n        if not isinstance(st, dict):\n            raise ValueError(\"stage %d must be a dict\" % idx)\n        gamma = _check_real(st.get(\"gamma\"), \"stages[%d].gamma\" % idx, True)\n        time = _check_real(st.get(\"time\"), \"stages[%d].time\" % idx, False)\n        stages.append((gamma, time))\n    return graph, n, marked, steps, stages\n\n\ndef _apply_projector_phase(qc, qubits, basis_index, angle):\n    \"\"\"Apply exp(+i * angle * |b><b|) for computational basis state b.\n\n    Implemented as X on the zero bits of b, a multi-controlled phase on\n    |1...1>, then undoing the X gates.\n    \"\"\"\n    n = len(qubits)\n    flips = [qubits[k] for k in range(n) if not ((basis_index >> k) & 1)]\n    for q in flips:\n        qc.x(q)\n    if n == 1:\n        qc.p(angle, qubits[0])\n    else:\n        qc.mcp(angle, qubits[:-1], qubits[-1])\n    for q in flips:\n        qc.x(q)\n\n\ndef _apply_oracle_term(qc, qubits, marked, dt):\n    \"\"\"eq_2 oracle part: exp(-i * (-|w><w|) * dt) = exp(+i dt |w><w|).\"\"\"\n    _apply_projector_phase(qc, qubits, marked, dt)\n\n\ndef _apply_graph_term(qc, qubits, graph, gamma, dt):\n    \"\"\"eq_2 graph part: exp(-i * (-gamma A) * dt) = exp(+i gamma dt A).\"\"\"\n    n = len(qubits)\n    if graph == \"hypercube\":\n        # A = sum_k X_k ; exp(i gamma dt X) = RX(-2 gamma dt)\n        for q in qubits:\n            qc.rx(-2.0 * gamma * dt, q)\n    else:\n        # complete graph: A = J - I, J = N |s><s|, |s> = H^{(x)n}|0..0>\n        # exp(i gamma dt J) = H^{(x)n} exp(i gamma dt N |0><0|) H^{(x)n}\n        # exp(-i gamma dt I) contributes a global phase of -gamma dt.\n        num_vertices = 2 ** n\n        for q in qubits:\n            qc.h(q)\n        _apply_projector_phase(qc, qubits, 0, gamma * dt * num_vertices)\n        for q in qubits:\n            qc.h(q)\n        qc.global_phase = qc.global_phase - gamma * dt\n\n\ndef _apply_stage(qc, qubits, graph, marked, gamma, time, steps):\n    \"\"\"eq_1: exp(-i H(gamma) time) via second-order (Strang) product formula.\n\n    Each step applies exp(i dt/2 |w><w|) exp(i gamma dt A) exp(i dt/2 |w><w|)\n    with dt = time / steps; the error is O(time * dt^2).\n    \"\"\"\n    if time == 0.0:\n        return\n    dt = time / steps\n    for _ in range(steps):\n        _apply_oracle_term(qc, qubits, marked, 0.5 * dt)\n        _apply_graph_term(qc, qubits, graph, gamma, dt)\n        _apply_oracle_term(qc, qubits, marked, 0.5 * dt)\n\n\ndef build_circuit(instance):\n    \"\"\"Build the multi-stage quantum-walk search unitary (eq_5).\n\n    instance keys:\n      graph         : 'complete' or 'hypercube'\n      num_qubits    : n, vertices N = 2**n (1 <= n <= 12)\n      marked_vertex : integer w in [0, N)\n      stages        : list of {'gamma': float > 0, 'time': float >= 0}\n                      (one entry = single-stage walk, two = two-stage template)\n      trotter_steps : positive integer, Strang steps per stage\n    \"\"\"\n    graph, n, marked, steps, stages = _validate(instance)\n    vertex = QuantumRegister(n, \"vertex\")\n    qc = QuantumCircuit(vertex, name=\"ctqw_search\")\n    qubits = [vertex[k] for k in range(n)]\n    # eq_5: consecutive piecewise-constant stages with rates gamma_k, times t_k\n    for gamma, time in stages:\n        _apply_stage(qc, qubits, graph, marked, gamma, time, steps)\n    return qc",
+    "example_instance_json": "{\"graph\": \"complete\", \"num_qubits\": 2, \"marked_vertex\": 0, \"stages\": [{\"gamma\": 0.25, \"time\": 3.141592653589793}], \"trotter_steps\": 40}",
+    "register_layout": [
+      "vertex[0] -> physical qubit 0: least significant bit of the vertex index v (N = 2^n vertices, n = num_qubits = 2 in the example)",
+      "vertex[1] -> physical qubit 1: most significant bit of the vertex index for the example (K_4, N = 4)",
+      "Vertex v in {0,...,N-1} is the computational basis state |v> with bit k of v on qubit k; marked vertex w = 0 is |00>",
+      "No ancilla qubits are used; total qubits = num_qubits <= 12",
+      "Expected runner input: uniform superposition H^{(x)n}|0...0> (eq_3); success outcome is the bitstring of w after measurement (eq_4), both outside this operation"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_apply_stage (second-order product-formula approximation of exp(-i H(gamma) t))",
+        "explanation": "Each stage applies the Schrodinger propagator exp(-iH t) for a time-independent H, approximated by a Strang-split product formula with trotter_steps steps."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_apply_graph_term (exp(+i gamma dt A) for K_N or hypercube) and _apply_oracle_term (exp(+i dt |w><w|))",
+        "explanation": "H(gamma) = -gamma A - |w><w| is split into the graph term and the oracle term; both are compiled exactly from standard gates (H, X, RX, multi-controlled phase, global phase for the -gamma I part of K_N)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The uniform superposition is the input state prepared by the runner; the returned circuit is the walk operator only and contains no state preparation."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Success probability requires measurement/sampling, which the operation must not include; it is evaluated by the runner."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit stage loop over instance['stages']",
+        "explanation": "Consecutive piecewise-constant stages with rates gamma_k and times t_k are applied in order; two entries realize the two-stage template with a sharp switch of the walking rate."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Asymptotic runtime criterion; it classifies results of experiments across N and is not an operation to compile."
+      },
+      {
+        "equation_id": "eq_7",
+        "disposition": "implemented",
+        "code_location": "example_instance_json and the 'complete' branch of _apply_graph_term",
+        "explanation": "The assumed K_4 sanity instance (gamma = 1/4, w = 0, t = pi, single stage) is encoded as the example instance; the complete-graph adjacency J - I is compiled via H^{(x)n} mcp H^{(x)n} and a global phase."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_5"
+        ],
+        "change": "The propagator exp(-iH t) is approximated by a second-order Strang product formula splitting the graph term and the oracle term, with a user-specified number of steps per stage (error O(t * dt^2)), instead of an exact matrix exponential.",
+        "reason": "Opaque dense unitaries are disallowed; the graph and oracle terms do not commute, but each is exactly compilable from standard gates, so a product formula is the natural gate-level implementation."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_7"
+        ],
+        "change": "Graph families restricted to the complete graph K_N and the n-dimensional hypercube Q_n with N = 2^n vertices; arbitrary edge lists are not supported.",
+        "reason": "The abstract does not define the paper's two example graphs, and these two families have adjacency terms with exact standard-gate compilations (J = N|s><s| and sum_k X_k) without ancillas or operator construction."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Initial-state preparation and computational-basis measurement are removed from the circuit; the module returns only the walk unitary.",
+        "reason": "The task requires an operation without input-state preparation, measurement or sampling; the runner supplies |s> and measures."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The stage list may have any length >= 1 (one entry recovers the single-stage walk; two entries give the two-stage template of the abstract).",
+        "reason": "Generalizing the number of stages costs nothing and lets the single-stage K_4 sanity instance and the two-stage template share one code path."
+      }
+    ],
+    "assumptions": [
+      "Hamiltonian convention H(gamma) = -gamma A - |w><w| with hbar = 1 (adjacency form; Laplacian form differs only by a global phase on the regular graphs supported).",
+      "Single marked vertex w given as an integer index in [0, N).",
+      "Vertex index encoded in binary on the vertex register with qubit 0 as the least significant bit; N = 2^n so Hadamards prepare |s> exactly on the runner side.",
+      "The complete-graph term uses J = N|s><s| with |s> = H^{(x)n}|0...0>, and the +gamma I part of -gamma(J - I) is tracked as a circuit global phase.",
+      "Stage boundaries are sharp switches of gamma (piecewise-constant schedule); the same oracle term is used in every stage.",
+      "Trotter step count is an instance parameter chosen by the user; the example uses 40 Strang steps for t = pi, gamma = 1/4 on K_4.",
+      "The example instance (K_4, gamma = 1/4, w = 0, t = pi) is an agent-chosen sanity instance where the ideal continuous evolution gives success probability 1, not a graph from the paper."
+    ],
+    "unresolved_issues": [
+      "The paper's two example graphs (low-connectivity/fast and high-connectivity/slow) and their adjacency structures are unknown, so they cannot be compiled; only K_N and hypercube families are supported.",
+      "The optimal two-stage parameters (gamma_1, t_1, gamma_2, t_2) are not given by the abstract; the module accepts them as inputs but offers no defaults for the paper's algorithm.",
+      "Product-formula error is not bounded automatically; users must choose trotter_steps large enough for the desired accuracy at the given gamma, t and N (the K_N term has spectral norm gamma*N, so large N or gamma needs more steps).",
+      "Multi-controlled phase gates on up to 12 qubits are left for the transpiler to decompose; no ancilla-assisted decomposition is provided."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 1240,
+    "depth": 801,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

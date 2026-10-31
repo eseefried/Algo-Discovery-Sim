@@ -1,0 +1,138 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "8e3deed9-1210-45bd-ae7d-d52f44b2a5e1",
+  "parent_run_id": "d0ce3296-4aa2-4acf-9547-9b09e21e7c04",
+  "created_at": "2026-10-31T17:23:59.393387+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "9229a717d90e0eb8df4ce689c86991389ccbba14fe74461a9efd522319d1d15a",
+  "source_specification_sha256": "97cd71f4b3186985d2e88e064fb4e8dc479746fa48097f68109767ffecea7e83",
+  "source_python_sha256": "fae6bc977e241d028edcb2c2f1e742528cb6b21c58cc17143286de2404f1fd42",
+  "elapsed_seconds": 116.909,
+  "usage": {
+    "input_tokens": 8415,
+    "output_tokens": 10040,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the two-fermion continuous-time quantum walk unitary U^(2)(t) = exp(-i t (A⊗I + I⊗A)) = exp(-i t A) ⊗ exp(-i t A) acting on two binary vertex registers v1, v2 (eq_3/eq_4). Because the two single-register factors commute and are identical, the operator is built as the same Trotterised circuit on each register; each edge term exp(-i θ(|i><j|+|j><i|)) is realised exactly as a CNOT/X basis change conjugating a multi-controlled RX(2θ). The adjacency matrix is supplied as an edge list in the instance since the explicit G_4/G_5 edge sets are not available; the example uses the 3-regular triangular prism graph (N=6) as a stand-in tiny instance. The classical cospectrality check and the harmonic-oscillator entropy test are not part of the circuit.",
+    "source_python": "\"\"\"Two-fermion continuous-time quantum walk on a graph (Trotterised adjacency Hamiltonian).\n\nImplements the operation\n    U^(2)(t) = exp(-i t (A (x) I + I (x) A)) = exp(-i t A) (x) exp(-i t A)        [eq_4]\non two vertex registers v1, v2 that encode the positions of the two particles in binary\n(qubit 0 of each register = least significant bit).  Because both tensor factors are the\nsame unitary, the antisymmetric (fermionic) subspace spanned by |ij>_- (eq_3) is preserved\nexactly, even after the product-formula approximation used below.\n\nEach single-register factor exp(-i t A) with A = sum_{(i,j) in E} (|i><j| + |j><i|) is\napproximated by a first- or second-order product formula over edge terms.  A single edge\nterm exp(-i theta (|i><j| + |j><i|)) is implemented exactly: CNOT/X gates map |i>, |j> to\n|c,0>, |c,1> on a pivot qubit with all other qubits in state |1>, a multi-controlled\nRX(2 theta) acts as exp(-i theta X) on that pair only, and the basis change is undone.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import RXGate\n\nMAX_TOTAL_QUBITS = 12\n\n\ndef _as_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(f\"{name} must be an integer\")\n    return value\n\n\ndef _validate_instance(instance):\n    \"\"\"Validate the instance dict and return (num_vertices, m, edges, time, steps, order).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object / dict\")\n    for key in (\"num_vertices\", \"edges\", \"time\", \"trotter_steps\", \"trotter_order\"):\n        if key not in instance:\n            raise ValueError(f\"instance is missing required key '{key}'\")\n    num_vertices = _as_int(instance[\"num_vertices\"], \"num_vertices\")\n    if num_vertices < 2:\n        raise ValueError(\"num_vertices must be at least 2\")\n    m = max(1, (num_vertices - 1).bit_length())\n    if 2 * m > MAX_TOTAL_QUBITS:\n        raise ValueError(\n            f\"two vertex registers of {m} qubits each exceed the cap of {MAX_TOTAL_QUBITS} qubits\"\n        )\n    time = instance[\"time\"]\n    if isinstance(time, bool) or not isinstance(time, (int, float)) or not math.isfinite(time):\n        raise ValueError(\"time must be a finite real number\")\n    steps = _as_int(instance[\"trotter_steps\"], \"trotter_steps\")\n    if steps < 1:\n        raise ValueError(\"trotter_steps must be a positive integer\")\n    order = _as_int(instance[\"trotter_order\"], \"trotter_order\")\n    if order not in (1, 2):\n        raise ValueError(\"trotter_order must be 1 or 2\")\n    raw_edges = instance[\"edges\"]\n    if not isinstance(raw_edges, (list, tuple)):\n        raise ValueError(\"edges must be a list of [i, j] pairs\")\n    seen = set()\n    edges = []\n    degree = [0] * num_vertices\n    for edge in raw_edges:\n        if not isinstance(edge, (list, tuple)) or len(edge) != 2:\n            raise ValueError(\"each edge must be a pair [i, j]\")\n        i = _as_int(edge[0], \"edge endpoint\")\n        j = _as_int(edge[1], \"edge endpoint\")\n        if i < 0 or j < 0 or i >= num_vertices or j >= num_vertices:\n            raise ValueError(\"edge endpoints must lie in range(num_vertices)\")\n        if i == j:\n            raise ValueError(\"self-loops are not allowed (simple graph required)\")\n        key = (min(i, j), max(i, j))\n        if key in seen:\n            raise ValueError(f\"duplicate edge {key}\")\n        seen.add(key)\n        edges.append(key)\n        degree[i] += 1\n        degree[j] += 1\n    if not edges:\n        raise ValueError(\"graph must contain at least one edge\")\n    if \"degree\" in instance:\n        k = _as_int(instance[\"degree\"], \"degree\")\n        if any(d != k for d in degree):\n            raise ValueError(f\"graph is not {k}-regular as requested\")\n    return num_vertices, m, edges, float(time), steps, order\n\n\ndef _apply_edge_term(qc, qubits, i, j, theta):\n    \"\"\"Apply exp(-i theta (|i><j| + |j><i|)) exactly on the register `qubits` (qubit 0 = LSB).\n\n    This is one hopping term of the adjacency Hamiltonian A (eq_4).  i != j is required.\n    \"\"\"\n    m = len(qubits)\n    d = i ^ j\n    pivot = 0\n    while not (d >> pivot) & 1:\n        pivot += 1\n    others = [q for q in range(m) if q != pivot]\n    flip = [q for q in others if (d >> q) & 1]\n    # Step 1: CNOTs from the pivot make |i> and |j> agree on every non-pivot bit.\n    for q in flip:\n        qc.cx(qubits[pivot], qubits[q])\n    # Common bit pattern of the two states on the non-pivot qubits after step 1.\n    zeros = []\n    for q in others:\n        bit = (i >> q) & 1\n        if q in flip:\n            bit ^= (i >> pivot) & 1\n        if bit == 0:\n            zeros.append(q)\n    # Step 2: X gates so that the common pattern becomes all ones (controls active).\n    for q in zeros:\n        qc.x(qubits[q])\n    # Step 3: exp(-i theta X) = RX(2 theta) on the pivot, controlled on all other qubits.\n    gate = RXGate(2.0 * theta)\n    if others:\n        qc.append(gate.control(len(others)), [qubits[q] for q in others] + [qubits[pivot]])\n    else:\n        qc.append(gate, [qubits[pivot]])\n    # Step 4: undo the basis change.\n    for q in reversed(zeros):\n        qc.x(qubits[q])\n    for q in reversed(flip):\n        qc.cx(qubits[pivot], qubits[q])\n\n\ndef _apply_single_particle_walk(qc, qubits, edges, time, steps, order):\n    \"\"\"Product-formula approximation of exp(-i time A) on one vertex register (eq_4).\"\"\"\n    dt = time / steps\n    for _ in range(steps):\n        if order == 1:\n            for (i, j) in edges:\n                _apply_edge_term(qc, qubits, i, j, dt)\n        else:\n            for (i, j) in edges:\n                _apply_edge_term(qc, qubits, i, j, 0.5 * dt)\n            for (i, j) in reversed(edges):\n                _apply_edge_term(qc, qubits, i, j, 0.5 * dt)\n\n\ndef build_circuit(instance):\n    \"\"\"Return the two-fermion walk unitary U^(2)(t) (eq_4) on registers v1, v2.\n\n    instance keys:\n      num_vertices  : int N (2 <= N <= 64), vertices labelled 0..N-1\n      edges         : list of [i, j] pairs (simple undirected graph)\n      time          : real walk time t\n      trotter_steps : positive int r\n      trotter_order : 1 (Lie-Trotter) or 2 (Strang)\n      degree        : optional int k; if present the graph must be k-regular\n    Register v1 (qubits 0..m-1) holds particle 1, v2 (qubits m..2m-1) holds particle 2,\n    m = ceil(log2 N), least significant bit first.  The operator is U (x) U with the same\n    U on both registers, so the antisymmetric subspace |ij>_- (eq_3) is preserved.\n    \"\"\"\n    num_vertices, m, edges, time, steps, order = _validate_instance(instance)\n    v1 = QuantumRegister(m, \"v1\")\n    v2 = QuantumRegister(m, \"v2\")\n    qc = QuantumCircuit(v1, v2, name=f\"two_fermion_walk_N{num_vertices}\")\n    # eq_4: exp(-i t (A (x) I + I (x) A)) = exp(-i t A)_v1 * exp(-i t A)_v2 (commuting factors)\n    _apply_single_particle_walk(qc, list(v1), edges, time, steps, order)\n    _apply_single_particle_walk(qc, list(v2), edges, time, steps, order)\n    return qc",
+    "example_instance_json": "{\"num_vertices\": 6, \"degree\": 3, \"edges\": [[0, 1], [1, 2], [0, 2], [3, 4], [4, 5], [3, 5], [0, 3], [1, 4], [2, 5]], \"time\": 0.5, \"trotter_steps\": 2, \"trotter_order\": 2}",
+    "register_layout": [
+      "v1 = qubits 0,1,2: binary position of fermion 1 (vertex index 0..5, qubit 0 = least significant bit; basis states 6,7 are unused and left invariant)",
+      "v2 = qubits 3,4,5: binary position of fermion 2 (vertex index 0..5, qubit 3 = least significant bit; basis states 6,7 are unused and left invariant)",
+      "Total 6 qubits for the example (N=6 triangular prism, m=3 per register); general N uses 2*ceil(log2 N) <= 12 qubits"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Definition of isomorphism via relabeling; it motivates the test but is not a quantum operation. The circuit uses the vertex labels given in the instance."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Cospectrality/non-isomorphism of the pair is a classical property of A and A'; no spectral computation is performed in the module (operator construction is disallowed)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit docstring and the two-register structure (v1, v2); comment 'antisymmetric subspace |ij>_- (eq_3) is preserved'",
+        "explanation": "The two-particle hopping operator A⊗I + I⊗A is realised on two vertex registers; since the same single-particle circuit is applied to both registers, the antisymmetric (fermionic) subspace is exactly invariant. The antisymmetric initial state itself is prepared by the runner, not the module."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit, _apply_single_particle_walk, _apply_edge_term",
+        "explanation": "U^(2)(t)=exp(-itA^(2)) is built as exp(-itA)_v1 ⊗ exp(-itA)_v2, each factor via a first/second-order product formula over exactly-implemented edge terms exp(-iθ(|i><j|+|j><i|)). The pair-occupation distribution p_t and spectrum are not computed (measurement/simulation out of module scope)."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Harmonic-oscillator network ground state is a classical Gaussian-state computation outside the chosen quantum-walk construction."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Entanglement entropy from symplectic eigenvalues is classical post-processing not part of the circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "exp(-i t A) on each register is approximated by a Lie-Trotter (order 1) or Strang (order 2) product formula over edge terms with r steps instead of the exact exponential.",
+        "reason": "Exact exponentiation would require either an opaque dense unitary or classical diagonalisation/operator construction, both disallowed; the product formula uses only standard gates and converges to the exact walk as r grows."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The operator is implemented as U⊗U with the single-particle circuit applied to both registers, using the commutation of A⊗I and I⊗A; the module does not restrict to or project onto the antisymmetric subspace.",
+        "reason": "Exact factorisation; the antisymmetric subspace is preserved automatically because both factors are identical, so an antisymmetric input (prepared by the runner) stays antisymmetric."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "The graphs G_4(n;n+2)/G_5(n;n+2) are replaced by a generic user-supplied edge list; the example instance is the 3-regular triangular prism (N=6), not G_4(1;3).",
+        "reason": "The abstract does not provide the vertex/edge sets of G_4, G_5, T_4, T_5; the operation is implemented for any simple graph with N<=64 so the actual pair can be supplied once known."
+      },
+      {
+        "equation_ids": [
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Oscillator entanglement-entropy test dropped from the implementation.",
+        "reason": "Scope narrowed to one construction (two-fermion walk); the entropy test is classical and its coupling matrix and bipartition are unspecified."
+      }
+    ],
+    "assumptions": [
+      "Two non-interacting particles with Hamiltonian equal to the adjacency matrix (unit hopping, hbar=1); the walk unitary is exp(-i t A^(2)) with A^(2) induced by A⊗I + I⊗A.",
+      "Vertices are labelled 0..N-1 and encoded in binary with m = ceil(log2 N) qubits per register; unused basis states (N <= x < 2^m) are left invariant.",
+      "The antisymmetric initial state |i0 j0>_- is prepared by the runner; the module returns only the walk operation.",
+      "Product-formula error is controlled by the user via trotter_steps/trotter_order; the operation is exact only in the limit of many steps (or exactly when all edge terms commute, e.g. a perfect matching).",
+      "Regularity of the graph is only enforced if an optional 'degree' key is supplied; otherwise any simple graph is accepted."
+    ],
+    "unresolved_issues": [
+      "Explicit construction of G_4(n;n+2), G_5(n;n+2), T_4, T_5 (vertex count as a function of n and edge sets) is unknown, so the true cospectral pair cannot be encoded in the example.",
+      "The paper's criterion for declaring the antisymmetric-basis adjacency matrices 'different' (an invariant beyond the two-particle spectrum, which is identical for cospectral non-interacting pairs) is not specified; comparing circuits for G and G' requires a fixed labelling convention chosen by the user.",
+      "Number of particles and any interaction term in the paper's multiparticle walk are unknown; only the two-particle non-interacting case is implemented.",
+      "Multi-controlled RX gates with up to 5 controls are used; transpilation depth may be large for N near 64."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 1960,
+    "depth": 706,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

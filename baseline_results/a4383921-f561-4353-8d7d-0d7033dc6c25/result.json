@@ -1,0 +1,140 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "a4383921-f561-4353-8d7d-0d7033dc6c25",
+  "parent_run_id": "af71248c-6d19-4e53-ad19-740cf2c2f3ce",
+  "created_at": "2026-10-31T17:15:35.272719+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "8804a37b604bd12d10cbac863074a7cae26193bfd10942acbd31c078980b8b98",
+  "source_specification_sha256": "526e39bd7f3adbfc6cd146bc51e7bf42e25a759967186f12ce3ba3ad78fe01c8",
+  "source_python_sha256": "89d81aaac350e53fee0bb29fdf8b354b52d45e279bc5bc9fb09b8e831e184370",
+  "elapsed_seconds": 83.063,
+  "usage": {
+    "input_tokens": 7551,
+    "output_tokens": 7478,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": false,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the two-axis control-sequence compiler of the specification: a concatenation of alternating Bloch-sphere rotations about axis n_1 = z and axis n_2 = (sin gamma, 0, cos gamma) (eq_1, eq_2, eq_3) is compiled into a single-qubit Qiskit circuit, with the total control time T = sum |theta_k|/omega_{i_k} recorded in circuit metadata. Admissibility of the sequence (alternating axes, allowed rotation senses, angle ranges, optional N<=5 bound of eq_5) is validated. The time-optimal search itself (eq_4, eq_6) is classical optimization outside the circuit operation and is not performed; the example instance is the feasible ZXZ Hadamard sequence of eq_7.",
+    "source_python": "\"\"\"Two-axis SU(2) control-sequence compiler (Qiskit).\n\nCompiles an alternating sequence of rotations about two non-parallel Bloch-sphere\naxes into a single-qubit circuit.\n\nConventions\n-----------\n* eq_1: R_n(theta) = exp(-i theta/2 n.sigma). Qiskit's rz(theta) is exactly\n  exp(-i theta Z/2), so axis 1 = z is implemented by rz.\n* Axis 1 is n_1 = z. Axis 2 is n_2 = (sin gamma, 0, cos gamma), i.e. at angle gamma\n  from z in the xz-plane (azimuth fixed to 0 without loss of generality by the\n  rotational symmetry about n_1). R_{n_2}(theta) = Ry(gamma) Rz(theta) Ry(-gamma),\n  which in circuit (time) order is ry(-gamma), rz(theta), ry(gamma).\n* eq_3: the first segment in the list is applied first (rightmost factor of the\n  operator product). T = sum_k |theta_k| / omega_{i_k} is stored in qc.metadata.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nNUM_QUBITS = 1\nTWO_PI = 2.0 * math.pi\n\n\ndef _as_float(value, name):\n    \"\"\"Convert a JSON number to a finite float or raise ValueError.\"\"\"\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(f\"{name} must be a real number\")\n    out = float(value)\n    if not math.isfinite(out):\n        raise ValueError(f\"{name} must be finite\")\n    return out\n\n\ndef _axis_rotation(qc, qubit, axis_index, theta, gamma):\n    \"\"\"eq_1: append R_{n_axis}(theta) = exp(-i theta/2 n.sigma) to the circuit.\n\n    axis_index 1 -> n_1 = z (single rz).\n    axis_index 2 -> n_2 = (sin gamma, 0, cos gamma) via Ry(gamma) Rz(theta) Ry(-gamma).\n    \"\"\"\n    if axis_index == 1:\n        qc.rz(theta, qubit)\n    else:\n        qc.ry(-gamma, qubit)\n        qc.rz(theta, qubit)\n        qc.ry(gamma, qubit)\n\n\ndef build_circuit(instance):\n    \"\"\"Build the single-qubit circuit for a two-axis control sequence (eq_2, eq_3).\n\n    instance keys\n    -------------\n    gamma : float in (0, pi) -- angle between the two control axes (eq_2).\n    omega : [omega_1, omega_2] -- positive rotation speeds (eq_2).\n    bidirectional : bool -- if True both senses allowed, theta in (-2pi, 2pi);\n        if False only the positive sense, theta in [0, 2pi) (eq_2).\n    segments : list of [axis_index, theta] with axis_index in {1, 2}; consecutive\n        axes must differ and angles must be nonzero (eq_3).\n    enforce_length_bound : bool -- if True and bidirectional, require N <= 5 (eq_5).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a JSON object (dict)\")\n\n    if NUM_QUBITS > MAX_QUBITS:\n        raise ValueError(\"qubit budget exceeded\")\n\n    # --- eq_2: control geometry and speeds -------------------------------------\n    gamma = _as_float(instance.get(\"gamma\", math.pi / 2.0), \"gamma\")\n    if not (0.0 < gamma < math.pi):\n        raise ValueError(\"gamma must lie strictly in (0, pi): axes must be non-parallel\")\n\n    omega = instance.get(\"omega\", [1.0, 1.0])\n    if not isinstance(omega, (list, tuple)) or len(omega) != 2:\n        raise ValueError(\"omega must be a list [omega_1, omega_2]\")\n    omega_1 = _as_float(omega[0], \"omega_1\")\n    omega_2 = _as_float(omega[1], \"omega_2\")\n    if omega_1 <= 0.0 or omega_2 <= 0.0:\n        raise ValueError(\"rotation speeds must be positive\")\n    speeds = (omega_1, omega_2)\n\n    bidirectional = instance.get(\"bidirectional\", True)\n    if not isinstance(bidirectional, bool):\n        raise ValueError(\"bidirectional must be a boolean\")\n    enforce_bound = instance.get(\"enforce_length_bound\", False)\n    if not isinstance(enforce_bound, bool):\n        raise ValueError(\"enforce_length_bound must be a boolean\")\n\n    # --- eq_3: alternating segment sequence --------------------------------------\n    segments = instance.get(\"segments\", None)\n    if not isinstance(segments, (list, tuple)):\n        raise ValueError(\"segments must be a list of [axis_index, theta] pairs\")\n    parsed = []\n    previous_axis = 0\n    for k, seg in enumerate(segments):\n        if not isinstance(seg, (list, tuple)) or len(seg) != 2:\n            raise ValueError(f\"segment {k} must be a pair [axis_index, theta]\")\n        axis_raw = seg[0]\n        if isinstance(axis_raw, bool) or not isinstance(axis_raw, int) or axis_raw not in (1, 2):\n            raise ValueError(f\"segment {k}: axis_index must be 1 or 2\")\n        theta = _as_float(seg[1], f\"segment {k} theta\")\n        if theta == 0.0:\n            raise ValueError(f\"segment {k}: zero-angle segments are not admissible\")\n        if bidirectional:\n            if not (-TWO_PI < theta < TWO_PI):\n                raise ValueError(f\"segment {k}: theta must lie in (-2pi, 2pi)\")\n        else:\n            if not (0.0 < theta < TWO_PI):\n                raise ValueError(f\"segment {k}: clockwise-only case requires theta in (0, 2pi)\")\n        if axis_raw == previous_axis:\n            raise ValueError(f\"segment {k}: consecutive segments must use different axes\")\n        previous_axis = axis_raw\n        parsed.append((axis_raw, theta))\n\n    n_segments = len(parsed)\n    # --- eq_5: optional five-concatenation bound (bidirectional case) ----------\n    if enforce_bound and bidirectional and n_segments > 5:\n        raise ValueError(\"bidirectional time-optimal sequences have at most 5 segments (eq_5)\")\n\n    qr = QuantumRegister(NUM_QUBITS, \"q\")\n    qc = QuantumCircuit(qr, name=\"two_axis_sequence\")\n\n    # eq_3: time-ordered application, first listed segment applied first.\n    total_time = 0.0\n    for axis_index, theta in parsed:\n        _axis_rotation(qc, qr[0], axis_index, theta, gamma)\n        total_time += abs(theta) / speeds[axis_index - 1]\n\n    qc.metadata = {\n        \"total_time\": total_time,\n        \"num_segments\": n_segments,\n        \"gamma\": gamma,\n        \"omega\": [omega_1, omega_2],\n        \"bidirectional\": bidirectional,\n    }\n    return qc",
+    "example_instance_json": "{\"gamma\": 1.5707963267948966, \"omega\": [1.0, 1.0], \"bidirectional\": true, \"enforce_length_bound\": true, \"segments\": [[1, 1.5707963267948966], [2, 1.5707963267948966], [1, 1.5707963267948966]]}",
+    "register_layout": [
+      "q[0] (Qiskit qubit index 0): the single qubit whose SU(2) evolution is synthesized; axis 1 = z (rz), axis 2 = (sin gamma, 0, cos gamma) realized as ry(-gamma) rz(theta) ry(gamma)",
+      "Example: three segments Rz(pi/2), Rx(pi/2), Rz(pi/2) applied in that time order, equal to Hadamard up to global phase, total time T = 3pi/2 (stored in circuit metadata)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_axis_rotation (rz for n_1 = z; ry(-gamma) rz(theta) ry(gamma) for n_2)",
+        "explanation": "R_n(theta) = exp(-i theta/2 n.sigma) matches Qiskit rz for the z axis; the tilted axis is obtained by conjugating rz with ry(gamma)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: validation of gamma in (0,pi), positive omega, bidirectional flag and angle-range checks",
+        "explanation": "Control set geometry (two non-parallel axes at angle gamma), per-axis speeds, and the allowed rotation senses are encoded as instance parameters and admissibility checks."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: segment parsing loop (alternation check) and the time-ordered append loop computing total_time",
+        "explanation": "Alternating segments are appended with the first listed segment applied first (rightmost operator factor); T = sum |theta_k|/omega_{i_k} is computed and stored in qc.metadata."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The minimization over sequences is a classical optimization problem, not a unitary circuit operation; the module compiles a given candidate sequence only."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: enforce_length_bound check (N <= 5 when bidirectional)",
+        "explanation": "Only the five-concatenation necessary condition is implemented as an optional admissibility check; the finite search over N<=5 structures itself is classical and not performed."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The explicit three-angle parametrization is unknown from the abstract, so no reduction of the angle list is imposed; arbitrary admissible angle lists are accepted."
+      },
+      {
+        "equation_id": "eq_7",
+        "disposition": "implemented",
+        "code_location": "example_instance_json (gamma = pi/2, omega = [1,1], segments ZXZ with pi/2 each)",
+        "explanation": "The tiny instance is the module's example: orthogonal axes, equal unit speeds, feasible N=3 Hadamard sequence with T = 3pi/2."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Scope narrowed from time-optimal synthesis to compilation of a user-supplied admissible control sequence; no optimization or search is performed in build_circuit.",
+        "reason": "The circuit stage must return a unitary operation without classical numerical search or operator construction; the optimizer is a classical outer loop outside the module."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Axis n_1 fixed to z and n_2 fixed to (sin gamma, 0, cos gamma) in the xz-plane (azimuth 0).",
+        "reason": "Any pair of axes at angle gamma is related to this pair by a global SU(2) frame change (rotation about n_1), so this is without loss of generality for the control model."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Rotation-sense convention fixed to R_n(theta) = exp(-i theta/2 n.sigma), i.e. Qiskit's rz/ry sign convention.",
+        "reason": "The specification left the sign convention as a choice; Qiskit's native gate convention is adopted."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Zero-angle segments are rejected, and an empty segment list is accepted as the identity (T = 0); the total time T is reported via qc.metadata rather than returned.",
+        "reason": "Zero-length segments contradict the alternating-merged-segment model; build_circuit must return only a QuantumCircuit."
+      }
+    ],
+    "assumptions": [
+      "Controls are bang-bang at fixed per-axis speed so segment duration is |theta|/omega.",
+      "Global phase is irrelevant; the example ZXZ sequence equals Hadamard only up to global phase.",
+      "Bidirectional case angles in (-2pi, 2pi); clockwise-only case angles in (0, 2pi).",
+      "Optimality of the example N=3 sequence is not asserted; it is a feasible candidate (upper bound T = 3pi/2)."
+    ],
+    "unresolved_issues": [
+      "The paper's explicit three-angle parametrization and angle bounds are unknown, so no restriction of the angle search space beyond the basic box is encoded.",
+      "Clockwise-only length scaling laws are not available; in that mode no length bound is enforced.",
+      "Finding T* requires an external classical optimizer that calls build_circuit on candidate sequences and compares them to the target."
+    ]
+  },
+  "validation": {
+    "status": "failed",
+    "detail": "Generated source was not executed: ValueError: Module constants must be literals or small numeric expressions.",
+    "reference": "none",
+    "worker_image_id": null,
+    "qiskit_version": null,
+    "num_qubits": null,
+    "gate_count": null,
+    "depth": null,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

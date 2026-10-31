@@ -1,0 +1,121 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "342f5469-79a1-41a6-9490-b928c8dc5db1",
+  "parent_run_id": "3d6c4009-c0d5-43ea-87a1-852f954954e2",
+  "created_at": "2026-10-31T17:46:08.785696+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "8c17e42c9df3d281f8472bb4b472674a4c4d56e243a89a9d807ef2155bb24a7f",
+  "source_specification_sha256": "1d9abbb5a012cf0208ce3fb02579ecd5887e611d7f3a20edf62a8721dfe22663",
+  "source_python_sha256": "a1149c1633d9eca4ba6a655ca2e862325495f21009a395d60e013a2921e0124f",
+  "elapsed_seconds": 58.422,
+  "usage": {
+    "input_tokens": 7170,
+    "output_tokens": 5322,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module exposing build_circuit(instance) that constructs the pre-measurement operation of one round/basis of the scoped single-qubit robust phase estimation protocol: the gate under test G(theta)=exp(-i theta X/2) (theta = pi/2 + epsilon, realized as rx(theta)) is applied k = 2^j times to the single system qubit, followed optionally by the Y-basis change S^dagger then H so that computational-basis outcome 0 corresponds to the +y eigenstate. State preparation (|0>), measurement, shot repetition, and the classical phase extraction / unwrapping (eq_4, eq_5) are left to the runner and post-processing and are not part of the returned unitary.",
+    "source_python": "\"\"\"Single-qubit robust phase estimation circuits for amplitude-error estimation.\n\nScoped construction: gate under test G(theta) = exp(-i theta X / 2) with\ntheta = pi/2 + epsilon (eq_1), applied k = 2**j times to one qubit, followed by\nan optional Y-basis change (S^dagger, H) so that a computational-basis outcome 0\ncorresponds to the +y eigenstate (eq_3). The Z-basis variant applies no basis\nchange (eq_2). No state preparation or measurement is included.\n\nInstance keys:\n  \"epsilon\" (float): amplitude error, theta = pi/2 + epsilon; or\n  \"theta\"   (float): rotation angle directly (overrides epsilon if both given)\n  \"k\"       (int)  : number of gate repetitions; or\n  \"round\"   (int)  : round index j >= 0, k = 2**j (used if \"k\" is absent)\n  \"basis\"   (str)  : \"Z\" or \"Y\" (measurement basis variant)\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\nMAX_QUBITS = 12\nMAX_REPETITIONS = 4096\nMAX_ROUND = 12\nNUM_SYSTEM_QUBITS = 1\n\n\ndef _as_int(value, name):\n    \"\"\"Return value as a Python int, rejecting bools and non-integers.\"\"\"\n    if isinstance(value, bool):\n        raise ValueError(name + \" must be an integer, not a bool\")\n    if isinstance(value, int):\n        return value\n    if isinstance(value, float) and value.is_integer():\n        return int(value)\n    raise ValueError(name + \" must be an integer\")\n\n\ndef _as_float(value, name):\n    \"\"\"Return value as a finite float.\"\"\"\n    if isinstance(value, bool) or not isinstance(value, (int, float)):\n        raise ValueError(name + \" must be a real number\")\n    out = float(value)\n    if not math.isfinite(out):\n        raise ValueError(name + \" must be finite\")\n    return out\n\n\ndef _resolve_theta(instance):\n    \"\"\"eq_1: theta = pi/2 + epsilon (or theta given directly).\"\"\"\n    if \"theta\" in instance:\n        return _as_float(instance[\"theta\"], \"theta\")\n    if \"epsilon\" in instance:\n        epsilon = _as_float(instance[\"epsilon\"], \"epsilon\")\n        return 0.5 * math.pi + epsilon\n    raise ValueError(\"instance must provide 'theta' or 'epsilon'\")\n\n\ndef _resolve_k(instance):\n    \"\"\"Number of repetitions k; from 'k' directly or k = 2**round.\"\"\"\n    if \"k\" in instance:\n        k = _as_int(instance[\"k\"], \"k\")\n    elif \"round\" in instance:\n        j = _as_int(instance[\"round\"], \"round\")\n        if j < 0 or j > MAX_ROUND:\n            raise ValueError(\"round must satisfy 0 <= round <= \" + str(MAX_ROUND))\n        k = 2 ** j\n    else:\n        raise ValueError(\"instance must provide 'k' or 'round'\")\n    if k < 1 or k > MAX_REPETITIONS:\n        raise ValueError(\"k must satisfy 1 <= k <= \" + str(MAX_REPETITIONS))\n    return k\n\n\ndef _resolve_basis(instance):\n    \"\"\"Measurement-basis variant: 'Z' (eq_2) or 'Y' (eq_3).\"\"\"\n    if \"basis\" not in instance:\n        raise ValueError(\"instance must provide 'basis' ('Z' or 'Y')\")\n    basis = instance[\"basis\"]\n    if not isinstance(basis, str):\n        raise ValueError(\"basis must be a string\")\n    basis = basis.strip().upper()\n    if basis not in (\"Z\", \"Y\"):\n        raise ValueError(\"basis must be 'Z' or 'Y'\")\n    return basis\n\n\ndef build_circuit(instance):\n    \"\"\"Build the unitary part of one robust-phase-estimation circuit.\n\n    Returns a 1-qubit QuantumCircuit implementing G(theta)^k followed by the\n    optional Y-basis change. Input state |0> and measurement are supplied by\n    the runner.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    theta = _resolve_theta(instance)\n    k = _resolve_k(instance)\n    basis = _resolve_basis(instance)\n\n    num_qubits = NUM_SYSTEM_QUBITS\n    if num_qubits < 1 or num_qubits > MAX_QUBITS:\n        raise ValueError(\"qubit count out of range\")\n\n    qr = QuantumRegister(num_qubits, \"q\")\n    qc = QuantumCircuit(qr, name=\"rpe_k%d_%s\" % (k, basis))\n\n    # eq_1: G(theta) = exp(-i theta X / 2) == rx(theta); applied k times.\n    for _ in range(k):\n        qc.rx(theta, qr[0])\n\n    if basis == \"Y\":\n        # eq_3: Y-basis readout. S^dagger then H maps |+y> -> |0>, so the\n        # runner's computational-basis outcome 0 has probability (1 - sin(k theta))/2.\n        qc.sdg(qr[0])\n        qc.h(qr[0])\n    # else: eq_2: Z-basis readout, no basis change; outcome 0 has\n    # probability (1 + cos(k theta))/2 for input |0>.\n\n    return qc",
+    "example_instance_json": "{\"epsilon\": 0.05, \"round\": 2, \"basis\": \"Y\"}",
+    "register_layout": [
+      "q[0] (Qiskit qubit index 0): the single system qubit on which G(theta)=rx(theta) is applied k=2^round times (example: k=4, theta=pi/2+0.05); for basis 'Y' the circuit ends with sdg then h so computational-basis outcome 0 corresponds to the +y eigenstate; for basis 'Z' no basis change is applied. Runner prepares |0> and measures in the computational basis."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop `for _ in range(k): qc.rx(theta, qr[0])` and _resolve_theta (theta = pi/2 + epsilon)",
+        "explanation": "The gate under test G(theta)=exp(-i theta X/2) is exactly Qiskit's rx(theta); it is applied k times in sequence."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: basis == 'Z' branch (comment '# eq_2'), circuit is G(theta)^k with no basis change",
+        "explanation": "The Z-basis circuit variant produces the state whose computational-basis outcome-0 probability is (1+cos(k theta))/2 for input |0>; the measurement itself is done by the runner."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: basis == 'Y' branch, `qc.sdg(qr[0]); qc.h(qr[0])`",
+        "explanation": "S^dagger followed by H maps |+y> to |0>, so the runner's computational-basis measurement of outcome 0 realizes P_k^Y(+y) = (1 - sin(k theta))/2."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical extraction of the wrapped phase from empirical probabilities is post-processing of measurement data, not part of the returned unitary operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Iterative unwrapping across rounds is classical post-processing combining results of several circuits; the module only builds one round/basis circuit (the doubling schedule k=2^round is supported via the 'round' key)."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Heisenberg scaling is a statistical property of the full protocol's estimate and is not a circuit element."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The module implements only the unitary portion of a single (round j, basis b) circuit: G(theta)^k followed by the optional S^dagger H basis change. State preparation, measurement, shot repetition, phase extraction and unwrapping are left to the runner/post-processing.",
+        "reason": "The task requires a measurement-free unitary operation with no input-state preparation; the multi-circuit protocol and classical estimator cannot be expressed as one QuantumCircuit."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Repetition count k is capped at 4096 (round index capped at 12) and must be a positive integer; theta may be supplied directly or via epsilon.",
+        "reason": "Resource cap to keep circuits of bounded size; direct theta input generalizes the instance without altering the model."
+      }
+    ],
+    "assumptions": [
+      "The implemented gate is modeled as an ideal X rotation rx(theta) with theta = pi/2 + epsilon (no detuning), as in the scoped specification.",
+      "Qiskit's rx(theta) = exp(-i theta X/2) matches G(theta) in eq_1 exactly (no sign convention correction needed).",
+      "Y-basis readout convention: computational outcome 0 after sdg, h corresponds to the +y eigenstate (|0>+i|1>)/sqrt2, consistent with eq_3.",
+      "Nonadaptive doubling schedule k_j = 2^j is realized through the 'round' instance key; arbitrary k is also allowed for flexibility.",
+      "The runner prepares |0> on q[0] and performs computational-basis measurement with M shots per circuit; the protocol requires building 2J such circuits (both bases, rounds 0..J-1)."
+    ],
+    "unresolved_issues": [
+      "The paper's exact robustness theorem (tolerated probability error, shot schedule M_j, constants in the Heisenberg bound) is not reconstructed and does not affect the circuit.",
+      "Off-resonance (detuning) error estimation circuits are not implemented in this scoped construction.",
+      "Whether the paper uses adaptive measurement choices or a different candidate-selection rule for unwrapping is unknown; the circuit itself is unaffected."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 1,
+    "gate_count": 6,
+    "depth": 6,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

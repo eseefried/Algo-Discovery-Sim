@@ -1,0 +1,139 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "b4aa5e3d-f06f-450c-9732-75691fcce991",
+  "parent_run_id": "ac26f9e9-c924-4658-9731-db0563c9a985",
+  "created_at": "2026-10-31T17:48:30.331009+00:00",
+  "model": "claude-fable-5-1",
+  "response_model": "claude-fable-5-1",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "160654de810d1cce4aad9bcbfee3be87e9fe3a0a653106c2403fdc02ba7dd095",
+  "source_specification_sha256": "e10d94c2fb32cd1afb0328523f9ce1ec80fd12a0da5a07270b791eaf3e0579c9",
+  "source_python_sha256": "aa0560231a3e6f96b61c24b7d9a3389b61b2990881a91fdc643dc001668cfeeb",
+  "elapsed_seconds": 147.957,
+  "usage": {
+    "input_tokens": 7106,
+    "output_tokens": 12292,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit module implementing t steps of the lackadaisical discrete-time quantum walk search on the complete graph K_N with l self-loops per vertex: phase-flip oracle on the marked vertex (eq_3), Grover coin on the (N-1+l)-dimensional coin space (eq_2), and flip-flop shift with self-loops acting as identity (eq_4), composed as U = S C Q repeated `steps` times (eq_5). The construction is restricted to N and d = N-1+l both powers of two (so that modular arithmetic and the Grover coin are exact with standard gates), with l >= 1. Coin directions are relabeled so that c in {1,...,N-1} points to (v+c) mod N and c = 0 or c >= N are self-loops; the flip-flop shift then becomes v += c mod N, c -> -c mod N, controlled on the high coin bits being zero. The modular adder uses a QFTGate-based Draper adder; negation uses bitwise complement plus an mcx increment cascade. Initial state preparation and measurement are left to the runner.",
+    "source_python": "\"\"\"Lackadaisical quantum walk search on the complete graph K_N.\n\nOne step U = S C Q (eq_5) of the discrete-time coined walk with l self-loops\nper vertex, phase-flip marking of one vertex (eq_3), Grover coin on the\nd = N-1+l dimensional coin space (eq_2) and a flip-flop shift in which\nself-loop directions act as identity (eq_4).\n\nRestriction (disclosed in the artifact): N and d = N-1+l must both be powers\nof two and l >= 1, so that the coin register is exactly d-dimensional and the\nmodular arithmetic of the shift is exact with standard gates.\n\nQubit layout: qubits 0..n_v-1 hold the vertex label v (little-endian),\nqubits n_v..n_v+n_c-1 hold the coin/direction index c (little-endian).\nDirection encoding used here: c in {1,...,N-1} is the edge to (v+c) mod N;\nc = 0 and c in {N,...,d-1} are the l self-loops.\n\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\n\nMAX_QUBITS = 12\n\n\ndef _is_pow2(x):\n    return x >= 1 and (x & (x - 1)) == 0\n\n\ndef _as_int(instance, key):\n    if key not in instance:\n        raise ValueError(\"missing instance key: \" + key)\n    val = instance[key]\n    if isinstance(val, bool) or not isinstance(val, int):\n        raise ValueError(\"instance key must be an integer: \" + key)\n    return val\n\n\ndef _mcx(qc, controls, target):\n    if len(controls) == 0:\n        qc.x(target)\n    else:\n        qc.mcx(list(controls), target)\n\n\ndef _mcp(qc, angle, controls, target):\n    if len(controls) == 0:\n        qc.p(angle, target)\n    elif len(controls) == 1:\n        qc.cp(angle, controls[0], target)\n    else:\n        qc.mcp(angle, list(controls), target)\n\n\ndef _phase_flip(qc, vq, marked):\n    \"\"\"eq_3: Q = (I_N - 2|a><a|) (x) I_d acting on the vertex register.\"\"\"\n    n_v = len(vq)\n    zeros = [vq[i] for i in range(n_v) if ((marked >> i) & 1) == 0]\n    for q in zeros:\n        qc.x(q)\n    _mcp(qc, math.pi, vq[:-1], vq[-1])\n    for q in zeros:\n        qc.x(q)\n\n\ndef _grover_coin(qc, cq):\n    \"\"\"eq_2: C_0 = 2|s_c><s_c| - I_d on the coin register (d = 2**n_c).\n\n    H^n (X^n MCZ X^n) H^n equals -(2|s><s| - I); the global phase pi is\n    recorded on the circuit so the implemented operator is exactly C_0.\n    \"\"\"\n    for q in cq:\n        qc.h(q)\n    for q in cq:\n        qc.x(q)\n    _mcp(qc, math.pi, cq[:-1], cq[-1])\n    for q in cq:\n        qc.x(q)\n    for q in cq:\n        qc.h(q)\n    qc.global_phase = qc.global_phase + math.pi\n\n\ndef _shift(qc, vq, cq):\n    \"\"\"eq_4 (relabelled encoding): flip-flop shift with self-loops.\n\n    For c < N (high coin bits all zero): v -> (v + c) mod N, c -> (-c) mod N.\n    This is the identity on c = 0 (a self-loop) and the flip-flop move for\n    c in {1,...,N-1}. For c >= N (self-loops) nothing happens.\n    \"\"\"\n    n_v = len(vq)\n    low = list(cq[:n_v])\n    high = list(cq[n_v:])\n    # control on high coin bits being zero: flip them so controls are |1>\n    for q in high:\n        qc.x(q)\n    # Draper adder: v += c (mod 2**n_v) using QFTGate on the vertex register\n    qc.append(QFTGate(n_v), vq)\n    for j in range(n_v):\n        for i in range(n_v):\n            if i + j < n_v:\n                angle = 2.0 * math.pi * float(2 ** (i + j)) / float(2 ** n_v)\n                _mcp(qc, angle, high + [low[j]], vq[i])\n    qc.append(QFTGate(n_v).inverse(), vq)\n    # negation c -> -c mod 2**n_v : bitwise complement then increment\n    for j in range(n_v):\n        _mcx(qc, high, low[j])\n    for i in range(n_v - 1, 0, -1):\n        _mcx(qc, high + low[:i], low[i])\n    _mcx(qc, high, low[0])\n    for q in high:\n        qc.x(q)\n\n\ndef build_circuit(instance):\n    \"\"\"Return the unitary U**steps with U = S C Q (eq_5) on vertex+coin qubits.\n\n    instance keys: N (vertices, power of two), l (self-loops, >= 1, with\n    N-1+l a power of two), marked (marked vertex a), steps (walk steps >= 1).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n_vert = _as_int(instance, \"N\")\n    loops = _as_int(instance, \"l\")\n    marked = _as_int(instance, \"marked\")\n    steps = _as_int(instance, \"steps\")\n    if n_vert < 2 or not _is_pow2(n_vert):\n        raise ValueError(\"N must be a power of two >= 2\")\n    if loops < 1:\n        raise ValueError(\"l must be >= 1 (coin value 0 encodes a self-loop)\")\n    d = n_vert - 1 + loops\n    if not _is_pow2(d):\n        raise ValueError(\"d = N-1+l must be a power of two\")\n    if marked < 0 or marked >= n_vert:\n        raise ValueError(\"marked vertex out of range\")\n    if steps < 1:\n        raise ValueError(\"steps must be >= 1\")\n    n_v = int(round(math.log2(n_vert)))\n    n_c = int(round(math.log2(d)))\n    if n_v + n_c > MAX_QUBITS:\n        raise ValueError(\"instance needs more than 12 qubits\")\n    vreg = QuantumRegister(n_v, \"vertex\")\n    creg = QuantumRegister(n_c, \"coin\")\n    qc = QuantumCircuit(vreg, creg)\n    vq = list(vreg)\n    cq = list(creg)\n    for _ in range(steps):\n        _phase_flip(qc, vq, marked)\n        _grover_coin(qc, cq)\n        _shift(qc, vq, cq)\n    return qc",
+    "example_instance_json": "{\"N\": 4, \"l\": 1, \"marked\": 0, \"steps\": 1}",
+    "register_layout": [
+      "qubits 0-1: vertex register |v>, little-endian integer v in {0,1,2,3} (qubit 0 = least significant bit)",
+      "qubits 2-3: coin register |c>, little-endian integer c in {0,1,2,3}; c=1,2,3 is the edge from v to (v+c) mod 4, c=0 is the single self-loop (l=1)",
+      "total 4 qubits; the circuit is U^steps with U = S C Q and carries a global phase of pi per step from the coin construction",
+      "runner should prepare the uniform state H^{\\otimes 4}|0000> (eq_1) and measure qubits 0-1 to estimate p(t)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": "build_circuit: QuantumRegister allocation (vertex n_v qubits, coin n_c qubits) and module docstring",
+        "explanation": "The Hilbert space factorisation and register dimensions follow eq_1 with d = 2^{n_c}; the uniform initial state |psi_0> is not prepared because the module returns an operation only (runner prepares inputs)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_grover_coin",
+        "explanation": "Grover coin 2|s_c><s_c| - I_d realised as H^n (X^n MCZ X^n) H^n with a recorded global phase pi so the implemented operator equals C_0 exactly; requires d to be a power of two."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_phase_flip",
+        "explanation": "Sign flip of all amplitude at the marked vertex a via X-conjugated multi-controlled Z on the vertex register, identity on the coin register."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_shift",
+        "explanation": "Flip-flop shift with self-loops fixed, using a relabelled direction encoding (c in 1..N-1 -> (v+c) mod N; c=0 and c>=N self-loops) so that S = [v += c mod N, c -> -c mod N] controlled on the high coin bits being zero; adder via QFTGate-based Draper circuit, negation via complement plus mcx increment cascade."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit (loop over steps applying _phase_flip, _grover_coin, _shift)",
+        "explanation": "One step U = S C Q is applied `steps` times; the success-probability p(t) is a measurement quantity left to the runner."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Asymptotic peak-success-probability claims (1/2 for l=0, 1 for l=1, decreasing for l>1) are experimental targets to be scanned over t by the runner, not circuit components; moreover l=0 is not supported by the chosen encoding."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Direction encoding relabelled: edge directions are c in {1,...,N-1} pointing to (v+c) mod N (instead of c in {0,...,N-2} pointing to (v+c+1) mod N), and self-loops are c=0 together with c in {N,...,d-1}. Under this encoding the flip-flop reversal is c -> (-c) mod N and the whole shift is the identity on c=0 automatically, so only the high coin bits need to be controlled.",
+        "reason": "Makes the shift an exact permutation implementable with a QFT-based modular adder and a two's-complement negation using standard gates; it is a bijective relabelling of the coin basis and does not change the walk dynamics."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "Restricted to N a power of two and d = N-1+l a power of two (hence l >= 1 and l = 2^k - N + 1 for some k with 2^k >= N), e.g. (N,l) = (2,1), (4,1), (4,5), (8,1), (8,9), (16,1), ..., (64,1).",
+        "reason": "Avoids state-preparation subcircuits for a non-power-of-two uniform coin state and non-power-of-two modular arithmetic; keeps all operations exact with standard gates and QFTGate. The l=0 baseline (d=N-1) is therefore not constructible with this module."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The coin circuit H^n X^n MCZ X^n H^n implements -(2|s><s|-I); a global phase of pi per coin application is added to the circuit's global_phase attribute so that the circuit unitary equals S C Q exactly.",
+        "reason": "Physically irrelevant global phase, recorded so that the returned operator matches the specified unitary without sign ambiguity."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Initial uniform state preparation, measurement of the vertex register, scanning over t and comparison with the 1/2 vs 1 claim are left to the runner; the module returns only U^steps.",
+        "reason": "Required by the implementation contract (operation only, no state preparation or measurement)."
+      }
+    ],
+    "assumptions": [
+      "Grover coin on the enlarged d-dimensional coin space with self-loops weighted equally to ordinary edges.",
+      "Operator ordering U = S C Q (oracle, then coin, then shift), as in the specification.",
+      "Little-endian integer encoding for both registers with the vertex register on the low qubits and the coin register on the high qubits.",
+      "Instance keys are N, l, marked, steps as Python integers; steps >= 1.",
+      "mcx and mcp multi-controlled gates with up to about 11 controls are acceptable standard gates for the transpiler."
+    ],
+    "unresolved_issues": [
+      "The l=0 reference walk (peak success probability 1/2 in the abstract) cannot be built because d = N-1 is not a power of two under this restriction, so the 1/2 -> 1 comparison must be done against an external l=0 implementation.",
+      "The abstract's claimed probabilities are large-N asymptotics; the example instance N=4 will not reproduce them exactly and the optimal step count must be found by scanning.",
+      "Whether the original paper uses exactly this coin weighting and the flip-flop shift is inferred, not confirmed from the abstract."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 61,
+    "depth": 33,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}
