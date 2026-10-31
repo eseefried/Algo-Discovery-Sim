@@ -156,6 +156,37 @@ report and leaves the original generation record unchanged. The reference caps
 full-operator calculations at 2,000 elementary gates. General isolated build checks
 allow up to 12 qubits and 50,000 transpiled elementary gates, with a 30-second worker limit.
 
+Simulate saved code with Qiskit Aer, again without a model call or API key:
+
+```bash
+uv run simulate-qiskit \
+  --run-dir artifacts/CODE_RUN_ID \
+  --reference modular_weighted_sum
+```
+
+The worker builds the circuit in Docker as above; Aer then runs the reconstructed
+elementary circuit on the host, so generated Python is still never imported there.
+Each input case is prepared as a computational basis state and simulated with
+`--shots` (default 1024) and `--seed` (default 42, offset per case). The report,
+`RUN_DIR/simulation.json` by default (or `--report`), records Aer's counts and exact
+pre-measurement probabilities for every case. Bitstrings use Qiskit order: qubit 0
+is the rightmost character.
+
+With `--reference modular_weighted_sum`, the default inputs are every `(x, b)` pair,
+and a case passes only when the reference output has probability 1 and receives
+every shot. Statuses are `simulated` (no reference), `reference_passed`, `failed`,
+and `unavailable`. Basis inputs cannot detect relative-phase errors, so this
+complements rather than replaces `validate-qiskit`. An optional `--inputs` file
+selects cases, with at most 256:
+
+```json
+[{"x": 3, "b": 7}, {"x": 1, "b": 0}]
+```
+
+Without a reference, cases take the form `{"basis_state": 5}` (full-register
+little-endian integer; default `|0...0>`). The simulator sits behind a small
+`SimulationBackend` interface in `simulation.py`, so other backends can be added later.
+
 Each code-stage run saves a new `artifacts/<run_id>/` directory containing:
 
 - `circuit.py`: generated operation (defines the function; does not execute it).
@@ -204,7 +235,8 @@ RUN_DOCKER_TESTS=1 uv run pytest -q
 uv run ruff check src tests
 ```
 
-Quantum dependencies live in the `quantum` group, installed by default. The worker
+Quantum dependencies live in the `quantum` group and Aer in the host-only
+`simulation` group; both are installed by default. The worker
 uses a pinned Python image and hashed requirements exported from `uv.lock`. When
 upgrading quantum dependencies, also update the frozen API guide in `code_prompt.py`,
 regenerate `runtime/requirements.txt`, and rebuild the image:
@@ -218,7 +250,36 @@ docker build -t algo-discovery-qiskit:local runtime
 Circuit APIs follow [QFTGate](https://quantum.cloud.ibm.com/docs/en/api/qiskit/qiskit.circuit.library.QFTGate)
 and [Operator](https://quantum.cloud.ibm.com/docs/en/api/qiskit/qiskit.quantum_info.Operator).
 
-## Data
+## Full pipeline: abstract to simulation
+
+`run-pipeline` chains all three stages in one command: abstract to equations, then
+equations to Qiskit with Docker validation, then Aer simulation. It makes two model
+calls and needs `CLAUDE_HACKATHON_API` and the Docker worker image.
+
+```bash
+# Dataset paper by arXiv ID, checked against the weighted-sum reference:
+uv run run-pipeline --arxiv-id 1411.5949 \
+  --reference modular_weighted_sum \
+  --instance-file artifacts/24065ab1-da09-469b-a5c2-2b64107ddd09/instance.json
+
+# Any abstract, simulated without a correctness reference:
+uv run run-pipeline --abstract-file my_abstract.txt --scope 'At most 6 qubits.'
+```
+
+Input options match `abstract-to-equations` (`--abstract-file`, `--abstract`,
+`--stdin`), plus `--arxiv-id` for `data/circuit_dataset_300_v1/abstracts/`.
+`--scope`, `--model`, and `--artifact-dir` apply to both model stages;
+`--instance-file` and `--reference` go to code generation, and the reference is also
+used for simulation along with `--inputs`, `--shots`, and `--seed`.
+
+Each stage saves its usual artifacts. The equation stage writes to its own run
+directory, and the code-stage directory also receives `simulation.json` and a
+`pipeline.json` summary of both run IDs, each stage's status, and `stopped_at`.
+The pipeline stops at the first unsuccessful stage. It records `equations`
+(the abstract was insufficient), `code`, `validation`, `simulation`, or `error`
+for input/provider failures. Exit codes match the stage CLIs: 0 on success, 1 for
+input or provider errors, and 2 when a stage abstains or fails.
+
 
 `data/circuit_dataset_300_v1/` holds 300 arXiv quantum-algorithm papers (abstracts, full text, extracted equations), Qiskit textbook chapters, and a `manifest.jsonl` catalog. See its [README](data/circuit_dataset_300_v1/README.md).
 

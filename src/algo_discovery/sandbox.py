@@ -79,9 +79,10 @@ def bounded_run(command: list[str], timeout: float = 30, max_bytes: int = 8 * 10
         process.stdout.close()
 
 
-def validate_in_docker(
+def build_in_docker(
     source: str, instance: dict, reference: Reference, *, timeout: float = 30
-) -> tuple[CircuitValidation, str | None]:
+) -> tuple[dict | None, str | None, CircuitValidation | None]:
+    """Return (wire, image_id, None) on success, or (None, image_id, failure report)."""
     try:
         inspect = subprocess.run(
             ["docker", "image", "inspect", WORKER_IMAGE, "--format", "{{.Id}}"],
@@ -94,12 +95,16 @@ def validate_in_docker(
         if not image_id.startswith("sha256:") or len(image_id) != 71:
             raise ValueError("Invalid worker image ID.")
     except (OSError, subprocess.SubprocessError, ValueError):
-        return CircuitValidation(
-            status="unavailable",
-            reference=reference,
-            detail="Docker worker unavailable. Build it with: "
-            "docker build -t algo-discovery-qiskit:local runtime",
-        ), None
+        return (
+            None,
+            None,
+            CircuitValidation(
+                status="unavailable",
+                reference=reference,
+                detail="Docker worker unavailable. Build it with: "
+                "docker build -t algo-discovery-qiskit:local runtime",
+            ),
+        )
     name = "algo-discovery-" + uuid4().hex
     try:
         with tempfile.TemporaryDirectory(prefix="algo-circuit-") as temporary:
@@ -118,22 +123,20 @@ def validate_in_docker(
         if not isinstance(wire, dict):
             raise TypeError("Worker must return a JSON object.")
         if not wire.get("ok"):
-            return CircuitValidation(
-                status="failed",
-                reference=reference,
-                worker_image_id=image_id,
-                detail="Isolated build failed: " + str(wire.get("error", "unknown error"))[:1000],
-            ), None
-        from .verification import assess_wire
-
-        return assess_wire(wire, instance, reference, image_id)
+            return (
+                None,
+                image_id,
+                CircuitValidation(
+                    status="failed",
+                    reference=reference,
+                    worker_image_id=image_id,
+                    detail="Isolated build failed: "
+                    + str(wire.get("error", "unknown error"))[:1000],
+                ),
+            )
+        return wire, image_id, None
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError, TimeoutError):
-        return CircuitValidation(
-            status="failed",
-            reference=reference,
-            worker_image_id=image_id,
-            detail="Worker timed out, exceeded limits, or returned invalid circuit/reference data.",
-        ), None
+        return None, image_id, worker_failure(reference, image_id)
     finally:
         try:
             subprocess.run(
@@ -141,3 +144,26 @@ def validate_in_docker(
             )
         except (OSError, subprocess.SubprocessError):
             pass
+
+
+def worker_failure(reference: Reference, image_id: str | None) -> CircuitValidation:
+    return CircuitValidation(
+        status="failed",
+        reference=reference,
+        worker_image_id=image_id,
+        detail="Worker timed out, exceeded limits, or returned invalid circuit/reference data.",
+    )
+
+
+def validate_in_docker(
+    source: str, instance: dict, reference: Reference, *, timeout: float = 30
+) -> tuple[CircuitValidation, str | None]:
+    wire, image_id, failure = build_in_docker(source, instance, reference, timeout=timeout)
+    if failure:
+        return failure, None
+    from .verification import assess_wire
+
+    try:
+        return assess_wire(wire, instance, reference, image_id)
+    except (ValueError, KeyError, TypeError):
+        return worker_failure(reference, image_id), None
