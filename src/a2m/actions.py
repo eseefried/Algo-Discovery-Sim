@@ -15,6 +15,9 @@ from a2m.workspace import Workspace
 
 def _call(ws: Workspace, llm: LLM, tag: str, prompt: str, schema: dict, meta: dict,
           who: str) -> dict | None:
+    # The tags are the swarm's role names, so the domain profile can say what this role means
+    # in this field before the task itself.
+    prompt = P.role_line(ws.card, tag) + prompt
     try:
         return llm.call(tag, P.render_system(ws.card), prompt, schema, meta)
     except BudgetExhausted:

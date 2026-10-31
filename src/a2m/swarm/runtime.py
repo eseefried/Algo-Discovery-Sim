@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
-from a2m import actions
+from a2m import actions, domains
 from a2m.llm.client import LLM
 from a2m.schema import Candidate
 from a2m.swarm.agent import ROLES, Agent
@@ -63,7 +63,10 @@ class Swarm:
         self.economy = Economy(cfg.economy, survival, treasury, tax)
         self.colony_id = colony_id
         self.respawn_cost, self.upkeep = respawn_cost, upkeep
-        self.role_bias = role_bias or {}
+        # Agents start with the field's role mix (more critics where a wrong answer is
+        # expensive, more implementers where the code is fiddly) unless a colony genome,
+        # which may have mutated away from it, overrides.
+        self.role_bias = role_bias or dict(domains.get(ws.card.domain).role_bias)
         self.inherited_notes = inherited_notes
         self.lineage = Lineage()
         self.agents: dict[str, Agent] = {}

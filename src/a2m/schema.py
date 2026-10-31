@@ -46,14 +46,14 @@ class ClaimCard(BaseModel):
     """Everything a reconstruction system is allowed to see about a task."""
 
     task_id: str
-    domain: Literal["quantum", "chemistry", "materials", "protein"] = "quantum"
+    domain: str = "quantum"            # key into a2m.domains.REGISTRY
     evaluator: str
     abstract: str
     claim: str
     criteria: list[Criterion]
     interface: str
     test_systems: list[TestSystem]
-    qubit_cap: int
+    limits: dict[str, Any] = Field(default_factory=dict)  # domain caps, e.g. qubit_cap
     allowed_imports: list[str]
     curation_status: Literal["curated", "draft"] = "draft"
     notes: str = ""

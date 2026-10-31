@@ -77,8 +77,7 @@ class SealedJudge:
     def _reference(self, task_id: str, card, vault, ref_code: str) -> dict[str, dict]:
         if task_id not in self._ref_cache:
             ev = get_evaluator(card.evaluator)
-            res = {t.name: ev.evaluate(ref_code, t.params, self.sandbox, card.allowed_imports,
-                                       card.qubit_cap)
+            res = {t.name: ev.evaluate(ref_code, t.params, self.sandbox, card)
                    for t in card.test_systems + vault.hidden_test_systems}
             if not meets_claim(card.criteria, res):
                 raise VaultError(f"{task_id}: reference does not meet its own claim: "
@@ -126,8 +125,8 @@ class SealedJudge:
 
         evaluated = []
         for cand in sub.candidates:
-            res = {t.name: ev.evaluate(cand.code, t.params, self.sandbox, card.allowed_imports,
-                                       card.qubit_cap) for t in systems}
+            res = {t.name: ev.evaluate(cand.code, t.params, self.sandbox, card)
+                   for t in systems}
             holes = loopholes(cand, res, card.allowed_imports)
             reproduced = meets_claim(card.criteria, res) and not holes
             mm, rubric, review = self._rubric(cand, vault)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from qiskit.quantum_info import Operator
 
-from a2m.evaluators.base import Evaluator
+from a2m.evaluators.base import CircuitEvaluator
 from a2m.sandbox import circuits as circ
 
 INTERFACE = """\
@@ -20,7 +20,7 @@ The runner computes the circuit's unitary and checks all 4^m inputs.
 """
 
 
-class ModularAdder(Evaluator):
+class ModularAdder(CircuitEvaluator):
     name = "modular_adder"
     interface = INTERFACE
 

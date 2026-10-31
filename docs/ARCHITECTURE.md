@@ -1,82 +1,143 @@
 # Architecture
 
+Abstract2Method turns a paper's abstract into a scored reconstruction attempt. Everything in
+the design follows from one rule: **a candidate proposes, the runner measures.** No number a
+candidate reports about its own work is ever used.
+
+## The whole pipeline
+
+```
+                     VISIBLE SIDE                          SEALED SIDE
+                     ────────────                          ───────────
+  skills/<domain>/SKILL.md
+   roles · role bias · colony genome
+   conventions · libraries · skill list
+            │
+            │ briefs
+            ▼
+  ┌───────────────────────┐   claim card    ┌──────────────────────────┐
+  │ RECONSTRUCTION SYSTEM │◀────────────────│  data/tasks/<id>.json     │
+  │                       │  abstract only  │  abstract, claim,         │
+  │  swarm  ·  colonies   │                 │  criteria, interface,     │
+  │  single agent         │                 │  visible tests, limits    │
+  │  central planner      │                 └──────────────────────────┘
+  └───────────┬───────────┘
+              │ candidate code
+              ▼
+  ┌───────────────────────────────────────────────┐
+  │ TRUSTED RUNNER            (src/a2m/evaluators)│
+  │                                               │
+  │  static pre-filter ─▶ sandboxed subprocess    │
+  │                        skills/<d>/tools/*.py  │
+  │                        shipped as a2m_task    │
+  │                              │                │
+  │  candidate returns an ANSWER │                │
+  │   circuits · coordinates · molecules ·        │
+  │   sequences · paths                           │
+  │                              ▼                │
+  │  runner substitutes the hidden instance,      │
+  │  simulates, and computes every metric         │
+  └───────────────────┬───────────────────────────┘
+                      │ gap to the claim (0 = met)
+                      ▼
+              submission.json
+                      │
+                      ▼
+  ┌───────────────────────────────────┐        ┌──────────────────────────────┐
+  │ SEALED JUDGE   (src/a2m/judge)    │◀───────│ data/vaults/<id>/            │
+  │  reruns on hidden tests           │        │  rubric (from the paper)     │
+  │  checks loopholes                 │        │  hidden tests                │
+  │  two model judges score the rubric│        │  reference.py                │
+  │  compares with the reference      │        │  reported numbers            │
+  └───────────────┬───────────────────┘        └──────────────────────────────┘
+                  │ judge.json
+                  ▼
+      skills/<domain>/learnings/*.md   ← research artifacts, evaluator-side
+      reports/summary.md               ← cross-system comparison
+```
+
 ## Trust boundaries
 
-```
-untrusted                     trusted (parent process)                  sealed
-─────────                     ────────────────────────                  ──────
-LLM output ──▶ candidate.py ─▶ static pre-filter (sandbox/static.py)
-                               sandbox subprocess: harness.py
-                                 build:  build_circuits(spec) ─▶ flattened JSON circuits
-                               circuits.load(): rebuild, substitute real oracle
-                               Aer / Operator simulation (evaluators/)
-                                 post:   postprocess(counts, spec) ─▶ answers
-                               evaluator scores answers ─▶ metrics ─▶ gap
-                                                                         vault/<id>/
-                               sealed judge ◀──────────────────────────  rubric, hidden tests,
-                                                                         reference.py
-```
+| Boundary | Enforced by | What it buys |
+|---|---|---|
+| Candidate code cannot report its own score | evaluators compute every metric from the returned answer | a lying or self-grading candidate gains nothing |
+| Candidate cannot see a hidden instance | quantum: opaque placeholder gate substituted after the build; biology: the oracle never leaves the runner (`sandbox: false`) | query budgets and hidden tests are real |
+| Candidate cannot read the vault | sandbox profile (`bwrap` hides `/home`, `/mnt`, `/srv`, drops the network) plus an AST pre-filter | the rubric and reference stay sealed |
+| Agents cannot read the paper | prompts are built only from the claim card and the runner's diagnostics; no file, web or retrieval tools | the task stays "infer from the claim" |
+| Profiles cannot leak the method | `tests/test_skills.py` greps each rendered profile against a per-domain ban list | cross-domain scores stay comparable |
+| Learnings cannot reach a prompt | only `SKILL.md` is read when briefing; pinned by a test | sealed rubric wording never returns to agents |
 
-- Candidate code runs in a separate process (`sandbox/runner.py`) with a scrubbed environment,
-  a temp working directory, CPU, memory and file-size rlimits, and, where bubblewrap works, no
-  network and no view of `/home`, `/mnt`, or `/srv`.
-- Circuits cross the boundary as JSON lists of standard Qiskit gates. Composite gates are
-  recursively expanded inside the sandbox. `oracle` stays an opaque placeholder; the parent
-  substitutes the real oracle per hidden instance, so a candidate cannot inspect it.
-- Every metric is computed by the parent. A candidate that prints or returns its own score
-  gains nothing.
+## How a candidate is run
 
-## Components
+Two flows share one sandbox:
 
-| Module | Role |
-|---|---|
-| `workspace.py` | candidates, simulation via the evaluator, diagnostics, ranking, event log |
-| `actions.py` | hypothesize, implement, simulate, critique; shared by every system |
-| `swarm/index.py` | open needs (the swarm's only coordination surface) |
-| `swarm/matching.py` | pressure scoring + softmax choice per agent |
-| `swarm/economy.py` | costs, progress payouts, chain credit, bounties, spawning |
-| `swarm/lineage.py` | death, success and stall records; prefer/avoid feedback; role affinities |
-| `swarm/runtime.py` | rounds: choose (sequential) → execute (thread pool) → apply (sequential) → lifecycle |
-| `baselines/` | single agent and central planner on the same actions |
-| `judge/sealed.py` | reference check, hidden tests, loopholes, rubric, structural similarity |
-| `llm/client.py` | Claude Messages API with structured JSON output, effort, refusal fallback, dollar budget |
+**Circuit flow** (quantum, `CircuitEvaluator`). The candidate builds Qiskit circuits that
+contain an opaque `oracle` placeholder. The circuit crosses the process boundary as JSON of
+standard gates — composite gates are recursively expanded inside the sandbox, so nothing
+opaque survives except the placeholder itself. The parent substitutes the real black box per
+hidden instance, simulates, and scores. Resource counts come from unrolling to `{u, cx}` with
+the black box excluded.
 
-## A swarm round
+**Call flow** (everything else, `CallEvaluator`). The parent ships a skill tool's source into
+the sandbox as `a2m_task` and calls one entry function. The *same module* is imported in the
+parent to score, so the objective a candidate optimises and the one it is judged by cannot
+drift apart. Where the oracle must stay hidden (biology), nothing is shipped and the runner
+drives the rounds instead.
 
-1. Keep a `needs_hypothesis` open while there are fewer than `min_families` families.
-2. Each living agent, in random order, samples a need weighted by pressure × its role affinity.
-   Implementation, simulation, and critique needs are exclusive within a round.
-3. All chosen actions run in parallel. LLM calls and sandbox runs are thread-safe.
-4. Outcomes apply in order: charge costs, open follow-up needs, pay progress along the chain,
-   record lineage.
-5. Lifecycle: agents at energy ≤ 0 die; rich agents spawn children; the population is refilled
-   to `n_agents` with agents seeded from lineage.
+## The swarm
 
-## Colonies (collective survival)
-
-`swarm/colonies.py` runs several `Swarm` instances. Each has its own workspace (candidate
-and agent ids are prefixed `k<n>-`), its own index, and its own lineage. All of them share the
-sandbox and the dollar budget. All energy movements go through `Economy._move`, which routes
-them by survival mode:
+Agents hold no assignment. Each round every living agent picks an open need off a shared
+index by pressure:
 
 ```
-individual  cost -> agent        payout -> agent                     agent dies at 0
-collective  cost -> treasury     payout -> treasury                  colony dies at 0
-both        cost -> agent        payout -> agent (70%) + treasury    both can die;
-                                 respawn and upkeep -> treasury      respawn needs funds
+pressure = urgency(need) · (1 + 0.15·age) · (0.3 + promise) / (1 + claimants)
+           · affinity(agent, role)
 ```
 
-Each round, every active colony plays one swarm round (in parallel), then:
+Role affinities start from the field's `role_bias` in `SKILL.md` and drift as the economy pays
+out. Needs cycle `hypothesis → implementation → simulation → critique`, and a critique only
+counts as a break if the runner reproduces it on a stress test the critic proposes.
 
-1. Colonies whose `stop_reason()` is a failure die (treasury exhausted, extinct, stagnated).
-   They leave a `ColonyDeath` record. Without selection, they go dormant instead.
-2. Each death is replaced from the fittest living colony: mutated genome, starting grant, and
-   inherited notes. After a total extinction, the best dead genome is refounded.
-3. Rich colonies pay `found_cost` to found a daughter.
+### Survival pressure, at two levels
 
-At the end, every colony's candidates are merged and ranked together for the submission.
+All energy movement goes through one function (`Economy._move`), so the three modes cannot
+drift apart:
+
+```
+individual   cost → agent      payout → agent                    agent dies at 0
+collective   cost → treasury   payout → treasury                 colony dies at 0
+both         cost → agent      payout → agent (70%) + treasury   both can die
+                               respawn and upkeep → treasury
+```
+
+Payouts come only from measured progress: `4·(parent_gap − gap) + 2·max(0, best_gap − gap)`,
+plus a bonus for surviving critique, split back along the handover chain.
+
+A colony carries a **genome** (role bias, how many method families to keep alive, repair
+attempts, critiques required) seeded from its field's `SKILL.md`. Dead colonies leave a record
+of cause, families tried and best gap; replacements are founded from the fittest survivor with
+a mutated genome and inherited notes. The `swarm_colonies_independent` control runs the same
+colonies with selection switched off, which is what separates selection from simply having
+more parallel attempts.
+
+## Domains and the skill tree
+
+A field is a directory. Adding one needs no change to the swarm:
+
+```
+skills/<domain>/
+  SKILL.md       roles, role bias, colony genome, conventions, libraries, skill list
+  tools/*.py     helper modules; `sandbox: true` ones are shipped to candidates AND
+                 imported by the runner, `sandbox: false` ones stay in the runner
+  learnings/     judged-run artifacts + INDEX.md (evaluator-side)
+```
+
+`a2m/domains/profiles.py` loads these into a `DomainProfile`; `a2m/skills.py` owns the paths
+and the shipping rule. Five domains ship: quantum (the primary target, three tasks), chemistry,
+materials, biology, dynamics.
 
 ## Determinism
 
-Simulator seeds, instance sampling, and the swarm's random choices are seeded per run. Model
-output is not deterministic, so compare systems over several seeds.
+Simulator seeds, instance sampling and the swarm's choices are seeded per run. Model output is
+not deterministic, so systems are compared over several seeds on an equal **dollar** budget
+rather than equal tokens.

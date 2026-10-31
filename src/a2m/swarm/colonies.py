@@ -20,9 +20,9 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
+from a2m import domains
 from a2m.llm.client import LLM
 from a2m.schema import Candidate
-from a2m.swarm.agent import ROLES
 from a2m.swarm.economy import SURVIVAL_MODES
 from a2m.swarm.runtime import Swarm, SwarmConfig
 from a2m.workspace import Workspace, select
@@ -40,9 +40,14 @@ class Genome:
     critiques_required: int
 
     @classmethod
-    def default(cls, cfg: SwarmConfig) -> Genome:
-        return cls({r: 1.0 for r in ROLES}, cfg.min_families, cfg.max_attempts,
-                   cfg.critiques_required)
+    def default(cls, cfg: SwarmConfig, domain: str = "quantum") -> Genome:
+        """Seed a colony from its field's profile; the system config still wins where set."""
+        profile = domains.get(domain)
+        g = profile.colony_genome
+        return cls(dict(profile.role_bias),
+                   int(g.get("min_families", cfg.min_families)),
+                   int(g.get("max_attempts", cfg.max_attempts)),
+                   int(g.get("critiques_required", cfg.critiques_required)))
 
     def mutate(self, rng: random.Random, noise: float) -> Genome:
         def step(v: int, lo: int, hi: int) -> int:
@@ -178,7 +183,8 @@ class Colonies:
         self._k += 1
         cid = f"k{self._k}"
         if genome is None:
-            base = parent.genome if parent else Genome.default(self.cfg.swarm)
+            base = parent.genome if parent else Genome.default(self.cfg.swarm,
+                                                               self.ws.card.domain)
             # the first colony keeps the default genome; the others vary it
             genome = base if (parent is None and self._k == 1) else base.mutate(
                 self.rng, self.c.genome_noise)

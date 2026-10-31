@@ -9,18 +9,22 @@ _STD = get_standard_gate_name_mapping()
 OPAQUE_SHORTCUTS = {"unitary", "isometry", "initialize", "state_preparation", "hamiltonian"}
 
 
-def load(d: dict, oracle: QuantumCircuit | None = None) -> QuantumCircuit:
-    """Rebuild a circuit. If `oracle` is given it replaces every `oracle` placeholder;
-    if not, placeholders are dropped (used for resource counting)."""
+def load(d: dict, oracle=None) -> QuantumCircuit:
+    """Rebuild a circuit, substituting the real black box for every `oracle` placeholder.
+
+    `oracle` is either a QuantumCircuit or a callable taking the placeholder's parameters and
+    returning one, which is how a phase-tunable black box is supplied. With `oracle=None` the
+    placeholders are dropped, which is what resource counting uses."""
     qc = QuantumCircuit(int(d["num_qubits"]), int(d["num_clbits"]))
     for op in d["ops"]:
         name, qs, cs = op["name"], op["qubits"], op["clbits"]
         if name == "oracle":
             if oracle is None:
                 continue
-            if len(qs) != oracle.num_qubits:
-                raise ValueError(f"oracle expects {oracle.num_qubits} qubits, got {len(qs)}")
-            qc.compose(oracle, qubits=qs, inplace=True)
+            sub = oracle(*op.get("params", [])) if callable(oracle) else oracle
+            if len(qs) != sub.num_qubits:
+                raise ValueError(f"oracle expects {sub.num_qubits} qubits, got {len(qs)}")
+            qc.compose(sub, qubits=qs, inplace=True)
         elif name == "measure":
             qc.measure(qs[0], cs[0])
         elif name in _STD:

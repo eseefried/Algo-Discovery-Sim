@@ -78,8 +78,7 @@ class Workspace:
     # --------------------------------------------------------------- simulation
 
     def run_tests(self, code: str, systems) -> dict[str, dict[str, Any]]:
-        return {t.name: self.evaluator.evaluate(code, t.params, self.sandbox,
-                                                self.card.allowed_imports, self.card.qubit_cap)
+        return {t.name: self.evaluator.evaluate(code, t.params, self.sandbox, self.card)
                 for t in systems}
 
     def simulate(self, cand: Candidate) -> float:

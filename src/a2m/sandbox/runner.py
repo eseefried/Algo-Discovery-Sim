@@ -65,14 +65,19 @@ class Sandbox:
         return ["bwrap", *binds, "--unshare-all", "--die-with-parent", "--dev", "/dev",
                 "--proc", "/proc", "--chdir", workdir, *cmd]
 
-    def _limits(self):
+    def _limits(self, timeout_s: int):
         mem = self.memory_mb * 1024 * 1024
         resource.setrlimit(resource.RLIMIT_AS, (mem, mem))
-        resource.setrlimit(resource.RLIMIT_CPU, (self.timeout_s, self.timeout_s + 5))
+        resource.setrlimit(resource.RLIMIT_CPU, (timeout_s, timeout_s + 5))
         resource.setrlimit(resource.RLIMIT_FSIZE, (64 * 1024 * 1024,) * 2)
 
-    def run(self, mode: str, code: str, payload: dict) -> dict:
-        key = hashlib.sha256(json.dumps([mode, code, payload], sort_keys=True).encode()).hexdigest()
+    def run(self, mode: str, code: str, payload: dict, timeout_s: int | None = None) -> dict:
+        """Run `code` in a fresh sandboxed process. `timeout_s` overrides the default for
+        domains whose evaluations legitimately take longer."""
+        timeout_s = int(timeout_s or self.timeout_s)
+        key = hashlib.sha256(
+            json.dumps([mode, code, payload, timeout_s], sort_keys=True, default=str).encode()
+        ).hexdigest()
         with self._lock:
             if key in self._cache:
                 return {**self._cache[key], "cached": True}
@@ -85,11 +90,11 @@ class Sandbox:
             t0 = time.time()
             try:
                 p = subprocess.run(self._command(d, [str(HARNESS), mode, cand, pay, out]), cwd=d,
-                                   env=env, capture_output=True, text=True, timeout=self.timeout_s,
-                                   preexec_fn=self._limits, check=False)
+                                   env=env, capture_output=True, text=True, timeout=timeout_s,
+                                   preexec_fn=lambda: self._limits(timeout_s), check=False)
                 stderr = p.stderr[-1500:]
             except subprocess.TimeoutExpired:
-                stderr = f"timeout after {self.timeout_s}s"
+                stderr = f"timeout after {timeout_s}s"
             dt = time.time() - t0
             if os.path.exists(out):
                 try:

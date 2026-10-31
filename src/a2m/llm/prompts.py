@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import json
 
+from a2m import domains
 from a2m.schema import ClaimCard
 
 SYSTEM = """\
 You are a researcher reconstructing a scientific method from a paper's abstract alone. You have
 not read the paper and cannot look anything up. Work from the abstract, the claim card, and your
-own knowledge. Your code runs in a quantum circuit simulator owned by a trusted runner; the
-runner computes every reported number on test instances you do not control, so only a method
-that actually works will score.
+own knowledge. Your code runs inside a sandbox owned by a trusted runner; the runner measures
+every reported number itself, on test instances you do not control, so only a method that
+actually works will score.
+
+{domain}
 
 <claim_card>
 {card}
@@ -24,12 +27,19 @@ def render_system(card: ClaimCard) -> str:
         "claim": card.claim,
         "success_criteria": [c.model_dump() for c in card.criteria],
         "visible_test_systems": [t.model_dump() for t in card.test_systems],
-        "qubit_cap": card.qubit_cap,
+        "limits": card.limits,
         "allowed_imports": card.allowed_imports,
         "scope_notes": card.notes,
         "interface": card.interface,
     }
-    return SYSTEM.format(card=json.dumps(visible, indent=2))
+    return SYSTEM.format(domain=domains.get(card.domain).prompt_block(),
+                         card=json.dumps(visible, indent=2))
+
+
+def role_line(card: ClaimCard, role: str) -> str:
+    """One line putting the agent's current role in this field's terms."""
+    text = domains.get(card.domain).role_text(role)
+    return f"Your task in this round, as a {card.domain} researcher: {text}.\n\n" if text else ""
 
 
 def _notes_block(notes: str) -> str:

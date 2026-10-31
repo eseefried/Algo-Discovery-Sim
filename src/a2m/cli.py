@@ -35,7 +35,7 @@ def _check_vault(args):
     vault, ref = load_vault(args.task)
     sb = make_sandbox(load_defaults(), None, False)
     ev = get(card.evaluator)
-    res = {t.name: ev.evaluate(ref, t.params, sb, card.allowed_imports, card.qubit_cap)
+    res = {t.name: ev.evaluate(ref, t.params, sb, card)
            for t in card.test_systems + vault.hidden_test_systems}
     for k, v in res.items():
         print(f"{k}: {json.dumps(v.get('metrics') or v.get('error'))}")
@@ -68,8 +68,19 @@ def _judge(args):
     _judge_dirs(args.runs, args.llm)
 
 
+def _learn(args):
+    from a2m.learnings import distill, distill_all
+
+    paths = distill_all(args.runs[0]) if args.all else [distill(d) for d in args.runs]
+    for p in paths:
+        print(f"wrote {p}")
+    if not paths:
+        print("no judged runs found")
+
+
 def _bench(args):
     from a2m.judge.sealed import SealedJudge
+    from a2m.learnings import distill
     from a2m.report import write
     from a2m.run import run
     from a2m.tasks import ready_task_ids
@@ -83,6 +94,7 @@ def _bench(args):
                 d = run(system, task, seed, args.llm, args.budget_usd, not args.quiet,
                         args.sandbox, args.require_isolation)
                 r = judge.judge(d)
+                distill(d)
                 print(f"{task} {system} s{seed}: reproduced={r.claim_reproduced} "
                       f"match={r.method_match:.2f} ${r.usage.get('usd', 0):.4f}")
     print(write(config.runs_dir(), Path(args.out)).read_text())
@@ -135,6 +147,11 @@ def main(argv=None):
     s.add_argument("runs", nargs="+")
     s.add_argument("--llm", choices=["anthropic", "mock"], default="anthropic")
     s.set_defaults(fn=_judge)
+
+    s = sub.add_parser("learn", help="distill judged runs into skills/<domain>/learnings/")
+    s.add_argument("runs", nargs="+", help="run directories, or one runs/ root with --all")
+    s.add_argument("--all", action="store_true", help="walk the directory for judged runs")
+    s.set_defaults(fn=_learn)
 
     s = sub.add_parser("bench", help="systems x tasks x seeds, judged, then reported")
     s.add_argument("--systems", default="swarm,single_agent,central_planner")

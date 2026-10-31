@@ -12,8 +12,7 @@ from a2m.tasks import load_vault
 def _run(card, code, systems=None):
     ev = get(card.evaluator)
     systems = systems or card.test_systems
-    return {t.name: ev.evaluate(code, t.params, _run.sandbox, card.allowed_imports, card.qubit_cap)
-            for t in systems}
+    return {t.name: ev.evaluate(code, t.params, _run.sandbox, card) for t in systems}
 
 
 @pytest.fixture(autouse=True)

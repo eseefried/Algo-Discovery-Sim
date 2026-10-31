@@ -9,7 +9,7 @@ from typing import Any
 from qiskit import QuantumCircuit, transpile
 from qiskit_aer import AerSimulator
 
-from a2m.evaluators.base import Evaluator
+from a2m.evaluators.base import CircuitEvaluator
 from a2m.sandbox import circuits as circ
 
 INTERFACE = """\
@@ -61,7 +61,7 @@ def _parse(answer: Any, n: int) -> tuple[tuple[int, ...], int] | None:
     return (a, b) if len(a) == n else None
 
 
-class AffineBooleanId(Evaluator):
+class AffineBooleanId(CircuitEvaluator):
     name = "affine_boolean_id"
     interface = INTERFACE
 
