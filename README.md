@@ -2,6 +2,26 @@
 
 Hackathon project.
 
+## Two workstreams
+
+This repository holds two systems that attack the same problem from opposite ends, over the
+same 300-paper corpus:
+
+| | Workstream | Entry points | Docs |
+|---|---|---|---|
+| **A** | **Single-agent pipeline** — one agent takes an abstract to equations, to Qiskit, to a simulated result | `abstract-to-equations`, `run-pipeline`, ... | the blocks below |
+| **B** | **Abstract2Method** — a decentralised agent swarm under an economic survival game, scored by a sealed judge against the paper's own method, and benchmarked against single-agent and central-planner baselines | `a2m` | [docs/SWARM.md](docs/SWARM.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+
+Workstream B treats A's question as a benchmark: given only a claim, can agents rebuild a
+correct, testable method? Quantum circuits and algorithms are its primary target (3 tasks);
+chemistry, materials, biology and dynamics each contribute one task to show the design is not
+quantum-specific.
+
+```bash
+uv run a2m tasks                                          # runnable benchmark tasks
+uv run a2m run --system swarm --task arxiv-1409.3305 --llm mock --judge   # offline, no key
+```
+
 ## Block 1: abstract to equations
 
 One Claude Fable 5.1 call converts an abstract into a structured mathematical
