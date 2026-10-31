@@ -7,7 +7,8 @@ Hackathon project.
 One Claude Fable 5.1 call converts an abstract into a structured mathematical
 specification. It records LaTeX equations, symbol definitions, registers, algorithm
 steps, assumptions, missing information, and per-equation provenance. It does not
-generate Qiskit yet. Schema and evidence checks do not establish mathematical correctness.
+generate Qiskit itself; block 2 consumes its output. Schema and evidence checks do not
+establish mathematical correctness.
 
 Install with Python 3.12+ and [uv](https://docs.astral.sh/uv/):
 
@@ -76,6 +77,146 @@ Tests use mocked HTTP responses through the real Anthropic SDK and make no paid
 requests. Model and output integration follow Anthropic's
 [Fable 5.1 model documentation](https://platform.claude.com/docs/en/models/fable-5-1/overview)
 and [structured output documentation](https://platform.claude.com/docs/en/build-with-claude/structured-outputs).
+
+## Block 2: equations to Qiskit
+
+The same Fable model continues with the original abstract request and its saved
+mathematical specification as conversation context. It produces a Python module
+exposing `build_circuit(instance) -> QuantumCircuit`, an equation-to-code mapping,
+an example instance, explicit changes to the specification, and unresolved issues.
+This is a second stage of one reconstruction agent; no specialist agent or paper
+retrieval is introduced. There are no automatic repair calls or model fallbacks yet.
+
+```bash
+uv sync --locked
+
+# Generate source and run static checks; does not execute generated Python:
+uv run equations-to-qiskit \
+  --equations artifacts/7a0e6112-d9e3-4815-935f-eea6b25452e9/result.json
+
+# Inspect the coding prompt and output schema without an API call:
+uv run equations-to-qiskit \
+  --equations artifacts/7a0e6112-d9e3-4815-935f-eea6b25452e9/result.json \
+  --dry-run
+```
+
+Replace the path with a block-one `result.json` from your own run. By default the
+original `request.json` is read from the same directory (`--request` overrides it).
+Hashes bind the supplied abstract and experiment scope to the source run. Early
+block-one artifacts without recorded generation parameters remain readable.
+
+Build the isolated worker once to enable execution checks:
+
+```bash
+docker build -t algo-discovery-qiskit:local runtime
+
+# Validate the scoped weighted-sum task from the demonstrated equation run:
+uv run equations-to-qiskit \
+  --equations artifacts/7a0e6112-d9e3-4815-935f-eea6b25452e9/result.json \
+  --validate --reference modular_weighted_sum
+```
+
+`--validate` alone checks construction and transpilation. Adding the weighted-sum
+reference supplies a public task contract: operation
+`|x>|b> -> |x>|(b + sum_j weights[j]*x[j]) mod 2^n>` for binary `x`, classical
+integer weights, and arbitrary initial accumulator `b`. Data qubits occupy indices
+`0..m-1`; accumulator qubits occupy `m..m+n-1`; both registers are little-endian.
+The circuit performs the operation only, without state preparation or measurement.
+The reference checks all accumulator values as well as all data inputs, including
+wraparound, and compares the full unitary up to a single global phase plus a
+seeded complex superposition. Basis probabilities alone would miss relative phases.
+
+This reference supports 1–4 data qubits and 1–4 target qubits (at most 8 total),
+integer weights of magnitude at most 2^20, and a bound unitary circuit. This is the
+first independent reference, not a universal quantum-algorithm verifier. It must
+only be selected for a compatible declared scope. The reference contract is
+additional task information and should be logged consistently in scored runs.
+No full paper, textbook, or evaluator implementation is provided to Fable.
+
+An optional `--instance-file path/to/instance.json` overrides the generated example.
+For the weighted-sum contract, that file has exactly these fields:
+
+```json
+{"num_target_qubits": 3, "weights": [1, 2]}
+```
+
+Check already-saved code again, or use different instance parameters, without a
+model call or API key:
+
+```bash
+uv run validate-qiskit \
+  --code artifacts/CODE_RUN_ID/circuit.py \
+  --instance-file artifacts/CODE_RUN_ID/instance.json \
+  --reference modular_weighted_sum \
+  --report artifacts/CODE_RUN_ID/revalidation.json
+```
+
+Replace `CODE_RUN_ID` with the code-stage run ID. This writes a separate validation
+report and leaves the original generation record unchanged. The reference caps
+full-operator calculations at 2,000 elementary gates. General isolated build checks
+allow up to 12 qubits and 50,000 transpiled elementary gates, with a 30-second worker limit.
+
+Each code-stage run saves a new `artifacts/<run_id>/` directory containing:
+
+- `circuit.py`: generated operation (defines the function; does not execute it).
+- `instance.json`: parameters actually selected for validation.
+- `implementation.md`: summary, equation mapping, register layout, changes, limitations.
+- `request.json`, `result.json`, `validation.json`: inputs, parent run ID, hashes,
+  model usage/settings, and machine-readable validation results.
+- `compiled.qasm`: elementary circuit reconstructed from worker gate data, when validation succeeds far enough.
+
+Validation statuses: `not_run`, `build_passed`, `reference_passed`, `failed`, and
+`unavailable`. `reference_passed` checks only the declared finite operation and
+instance; it does not verify every equation, the full paper, or a quantum speedup.
+The original `partial` math specification and its assumptions remain in the saved
+request. The CLI exits 0 on successful generation/requested validation, 1 on input
+or provider errors, and 2 for abstention, static failure, or unsuccessful requested
+validation. Failed static/build/reference results retain generated code for review.
+
+Generated Python is imported only in Docker, with no network, credentials, project
+mount, or evaluator files; a read-only root filesystem; an unprivileged user; and
+CPU, memory, process, output, and wall-time limits. Only temporary source, instance,
+and trusted worker files are mounted read-only. Static AST checks are additional
+guardrails, not the execution security boundary. The host receives bounded JSON
+elementary gates and reconstructs the circuit without importing generated source.
+If Docker is absent, validation reports `unavailable`; it never runs on the host.
+
+The API exposes `POST /qiskit` on the existing local server. Its JSON body is:
+
+```json
+{
+  "equation_request": {"abstract": "the original abstract", "experiment_scope": null},
+  "equation_result": {"...": "the complete block-one result.json object"},
+  "validate_circuit": true,
+  "reference": "modular_weighted_sum",
+  "instance": {"num_target_qubits": 3, "weights": [1, 2]}
+}
+```
+
+The `equation_result` placeholder above must be replaced by the complete saved
+object. A successful HTTP response can contain a failed validation report; inspect
+the returned status fields. Requests are synchronous and include model latency.
+
+Extra checks (no paid model requests):
+
+```bash
+RUN_DOCKER_TESTS=1 uv run pytest -q
+uv run ruff check src tests
+```
+
+Quantum dependencies live in the `quantum` group, installed by default. The worker
+uses a pinned Python image and hashed requirements exported from `uv.lock`. When
+upgrading quantum dependencies, also update the frozen API guide in `code_prompt.py`,
+regenerate `runtime/requirements.txt`, and rebuild the image:
+
+```bash
+uv export --only-group quantum --no-emit-project --no-header \
+  --format requirements-txt --output-file runtime/requirements.txt --quiet
+docker build -t algo-discovery-qiskit:local runtime
+```
+
+Circuit APIs follow [QFTGate](https://quantum.cloud.ibm.com/docs/en/api/qiskit/qiskit.circuit.library.QFTGate)
+and [Operator](https://quantum.cloud.ibm.com/docs/en/api/qiskit/qiskit.quantum_info.Operator).
 
 ## Data
 

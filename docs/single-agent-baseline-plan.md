@@ -1,8 +1,10 @@
 # Single-agent baseline: abstract to verified quantum experiment
 
-Implementation status: the abstract-to-equation block is available through the CLI
-and API in `src/algo_discovery/`. Qiskit generation, simulation, and independent
-mathematical evaluation remain pending. The sections below describe the full baseline plan.
+Implementation status: abstract-to-equation and equation-to-Qiskit blocks are available
+through CLI/API in `src/algo_discovery/`. Code execution checks use an isolated Docker
+worker; an independent small modular weighted-sum reference checks full unitary behavior.
+General experiment simulation, broader algorithm references, and paper-fidelity evaluation
+remain pending. The sections below describe the full baseline plan.
 
 ## Objective and scope
 

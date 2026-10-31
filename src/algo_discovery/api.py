@@ -1,12 +1,14 @@
-"""Local API for block one. Do not expose a credential-backed endpoint publicly."""
+"""Local API for the math and code blocks."""
 
 from fastapi import FastAPI, HTTPException
 
+from .code_generation import generate_code
+from .code_schemas import CodeRequest, CodeResult
 from .config import ConfigurationError, Settings
 from .equations import GenerationError, generate_equations
 from .schemas import EquationRequest, EquationResult
 
-app = FastAPI(title="Algo Discovery: Abstract to Equations", version="0.1.0")
+app = FastAPI(title="Algo Discovery: Abstract to Qiskit", version="0.2.0")
 
 
 @app.get("/health")
@@ -24,3 +26,15 @@ def equations(request: EquationRequest):
         raise HTTPException(status_code=502, detail=str(exc)) from None
     except OSError:
         raise HTTPException(status_code=500, detail="Unable to save run artifacts.") from None
+
+
+@app.post("/qiskit", response_model=CodeResult)
+def qiskit_code(request: CodeRequest):
+    try:
+        return generate_code(request, Settings.from_env())
+    except ConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    except GenerationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+    except OSError:
+        raise HTTPException(status_code=500, detail="Unable to save code artifacts.") from None

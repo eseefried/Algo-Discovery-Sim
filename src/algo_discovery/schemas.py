@@ -127,6 +127,7 @@ class EquationResult(StrictModel):
     elapsed_seconds: float
     usage: Usage
     stop_reason: str
-    parameters: GenerationParameters
+    # Early v1 artifacts predate explicit generation settings.
+    parameters: GenerationParameters | None = None
     mathematics_verified: Literal[False] = False
     specification: MathSpecification
