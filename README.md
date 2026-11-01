@@ -34,12 +34,11 @@ Steps 2-4 are identical for every system, so differences in the results come fro
 
 Four systems, 96 papers, scored on the 84 papers all four completed:
 
-| System | Math score | Paper equations recovered | Circuits that ran | Cost |
-|---|---|---|---|---|
-| Single agent, Claude Fable 5.1 | **0.23** | **78 / 320** | 70 / 96 | $77 |
-| Single agent, Claude Sonnet 5.5 | 0.18 | 54 / 320 | 77 / 96 | **$7.50** |
-| Ledger swarm, Sonnet 5.5 | 0.11 | 26 / 320 | 48 / 96 | $14 |
-| Abstract2Method swarm, Sonnet 5.5 | 0.17 | 46 / 320 | **93 / 96** | $62 |
+| System | Math score | Paper equations recovered | Circuits that ran |
+|---|---|---|---|
+| Single agent, Claude Sonnet 5.5 | 0.18 | 54 / 320 | 77 / 96 | 
+| Ledger swarm, Sonnet 5.5 | 0.11 | 26 / 320 | 48 / 96 | 
+| Abstract2Method swarm, Sonnet 5.5 | 0.17 | 46 / 320 | **93 / 96** | 
 
 - **One strong agent recovered the most mathematics.** On the same model, a single Sonnet
   agent matched the best swarm's math score at about an eighth of the cost.
