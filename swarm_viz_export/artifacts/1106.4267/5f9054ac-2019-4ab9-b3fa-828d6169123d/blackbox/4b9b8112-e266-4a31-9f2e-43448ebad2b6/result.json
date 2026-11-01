@@ -1,0 +1,125 @@
+{
+  "backend": "anthropic",
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "4b9b8112-e266-4a31-9f2e-43448ebad2b6",
+  "parent_run_id": "b37933ec-0d59-457a-8a54-96fefab7bc00",
+  "created_at": "2026-11-01T15:44:40.642302+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "179e32283f39a1661c19fd0e8e95fd0306a287374c2fa42d9edbaa7c771e4850",
+  "source_specification_sha256": "5c86d46de793ce108c994ddee419e0ce16167317b4e16729ddfd835c29bb0753",
+  "source_python_sha256": "3c72cffd951d24490a9572d403639a7848f6c34b2008455e43387a3c9b6badfc",
+  "elapsed_seconds": 40.359,
+  "usage": {
+    "input_tokens": 5034,
+    "output_tokens": 5848,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Amplitude-estimation unitary for the mean of an explicit table f:{0..N-1}->[0,1]. The oracle is compiled into multi-controlled RY gates, A = H^n then U_f, and Q = -A S0 A^dagger S_chi. Controlled-Q^(2^j) is controlled by phase qubit j, followed by an inverse QFTGate on the phase register. The circuit has no input preparation and no measurement. The paper's novel, Aharonov-variant and median algorithms are not implemented.",
+    "source_python": "from qiskit import QuantumCircuit\nfrom qiskit.circuit.library import QFTGate, RYGate\nimport math\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    f = instance.get(\"f_values\")\n    t = instance.get(\"t\")\n    if not isinstance(f, (list, tuple)):\n        raise ValueError(\"f_values must be a list\")\n    if isinstance(t, bool) or not isinstance(t, int) or t < 1:\n        raise ValueError(\"t must be a positive integer\")\n    big_n = len(f)\n    if big_n < 2 or (big_n & (big_n - 1)) != 0:\n        raise ValueError(\"len(f_values) must be a power of two >= 2\")\n    n = big_n.bit_length() - 1\n    if t + n + 1 > 12:\n        raise ValueError(\"total qubits t+n+1 must be <= 12\")\n    vals = []\n    for v in f:\n        if isinstance(v, bool) or not isinstance(v, (int, float)):\n            raise ValueError(\"f values must be real numbers\")\n        v = float(v)\n        if (not math.isfinite(v)) or v < 0.0 or v > 1.0:\n            raise ValueError(\"f values must lie in [0,1]\")\n        vals.append(v)\n    return vals, t, n\n\n\ndef _state_prep(vals, n):\n    # eq_1, eq_2: A = U_f (H^n on idx). idx qubits 0..n-1 (little-endian x), ancilla n.\n    qc = QuantumCircuit(n + 1)\n    qc.h(list(range(n)))\n    for x, v in enumerate(vals):\n        angle = 2.0 * math.asin(math.sqrt(v))\n        if angle == 0.0:\n            continue\n        zeros = [i for i in range(n) if not ((x >> i) & 1)]\n        for i in zeros:\n            qc.x(i)\n        qc.append(RYGate(angle).control(n), list(range(n)) + [n])\n        for i in zeros:\n            qc.x(i)\n    return qc\n\n\ndef _grover_gate(a_circ, n):\n    # eq_3: Q' = A S0 A^dagger S_chi (time order: S_chi, A^dagger, S0, A); Q = -Q'.\n    m = n + 1\n    qc = QuantumCircuit(m)\n    qc.z(n)\n    qc.compose(a_circ.inverse(), inplace=True)\n    qc.x(list(range(m)))\n    qc.h(n)\n    qc.mcx(list(range(n)), n)\n    qc.h(n)\n    qc.x(list(range(m)))\n    qc.compose(a_circ, inplace=True)\n    return qc.to_gate(label=\"Qprime\")\n\n\ndef build_circuit(instance):\n    vals, t, n = _parse(instance)\n    qc = QuantumCircuit(t + n + 1)\n    system = list(range(t, t + n + 1))\n    a_circ = _state_prep(vals, n)\n    # eq_4: H on phase register, then A on idx+anc\n    qc.h(list(range(t)))\n    qc.compose(a_circ, qubits=system, inplace=True)\n    cq = _grover_gate(a_circ, n).control(1)\n    # eq_4: controlled-Q^(2^j) from phase qubit j\n    for j in range(t):\n        for _ in range(2 ** j):\n            qc.append(cq, [j] + system)\n        if j == 0:\n            # the -1 in Q = -Q' is a Z on the control for odd power 1\n            qc.z(0)\n    # eq_4: inverse QFT on phase register (little-endian)\n    qc.append(QFTGate(t).inverse(), list(range(t)))\n    return qc",
+    "example_instance_json": "{\"f_values\":[0.1,0.5,0.9,0.3],\"t\":3}",
+    "register_layout": [
+      "qubits 0..t-1: phase register, little-endian (qubit j has weight 2^j and controls Q^(2^j)); t=3 in the example gives qubits 0,1,2",
+      "qubits t..t+n-1: idx register, little-endian x (bit i of x on qubit t+i); example qubits 3,4",
+      "qubit t+n: ancilla flag (ancilla=1 is the good subspace); example qubit 5",
+      "total qubits = t+n+1 <= 12; example uses 6"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_state_prep",
+        "explanation": "For each x the ancilla gets a multi-controlled RY(2*asin(sqrt(f(x)))). X gates select idx=x. Angle-zero entries are skipped."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_state_prep (H on idx plus U_f) and its use in build_circuit",
+        "explanation": "The A circuit prepares the uniform superposition with amplitude flags. Its ancilla=1 probability is the mean of f, but this is not checked in the circuit."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_grover_gate and the z(0) sign correction in build_circuit",
+        "explanation": "Q' = A S0 A^dagger S_chi, with S_chi=Z on the ancilla and S0 built as X-layer, multi-controlled Z, X-layer. The global -1 is applied as Z on the phase control qubit for the j=0 controlled power, and cancels for the even powers at j>=1."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit",
+        "explanation": "H on the phase qubits, A on the system, controlled-Q^(2^j) with j as the control, and QFTGate(t).inverse() on the phase qubits in little-endian order."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Measurement, decoding a_hat = sin^2(pi*y/2^t) and the error bound are classical post-processing outside the unitary."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The global sign -1 of Q is implemented as a Z gate on phase qubit 0, after the single controlled-Q' application for j=0. It is not implemented as a global phase inside the gate.",
+        "reason": "A global phase becomes a relative phase once Q is controlled. Q' is controlled directly and the sign is restored exactly on the control. The sign cancels for even powers."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "The instance is parameterised by f_values (any power-of-two length >=2, entries in [0,1]) and t. The qubit order in the circuit is phase, idx, ancilla with phase on the lowest indices. Total qubits are capped at 12.",
+        "reason": "The spec's tiny N=4, t=3 case was only an assumed example. The generalisation follows the same construction and obeys the qubit cap."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Decoding and error analysis are excluded from the circuit.",
+        "reason": "The task requires a measurement-free unitary operation."
+      }
+    ],
+    "assumptions": [
+      "Standard amplitude estimation is the chosen construction. It does not implement the paper's own algorithms.",
+      "f is an explicit table compiled into gates, so the circuit is not black-box.",
+      "The phase register is little-endian and matches QFTGate's convention, so QFTGate(t).inverse() on qubits 0..t-1 decodes correctly.",
+      "Multi-controlled RY and controlled composite gates are left to Qiskit's standard synthesis."
+    ],
+    "unresolved_issues": [
+      "The paper's asymptotically optimal mean-estimation algorithm, the Aharonov variant and the median algorithm are not specified in the abstract and are not implemented.",
+      "No query complexity is certified because the oracle is compiled from an explicit table.",
+      "The circuit has not been simulated or verified; software checks follow generation."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 13161,
+    "depth": 10218,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

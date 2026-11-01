@@ -1,0 +1,134 @@
+{
+  "backend": "anthropic",
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "53aef46d-7449-4462-9f07-79e274086b26",
+  "parent_run_id": "8ac7c43b-5238-4f4d-a003-4559eaa3edaf",
+  "created_at": "2026-11-01T15:17:13.749734+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "53792a5200d88700c4974b68853a31b095618a9092549f807527962bc9b5f235",
+  "source_specification_sha256": "31bef487f0a16597db0365f4257ebe1fb91a0693fffc02873860a27723df672a",
+  "source_python_sha256": "d1121fdc98b3f9a23eb85ee2be34dadccce2f50453ade1039f96bb980f89b79d",
+  "elapsed_seconds": 63.296,
+  "usage": {
+    "input_tokens": 4414,
+    "output_tokens": 8685,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Scoped to a depth-2 balanced NAND tree (N=4). It builds T steps of a coined discrete-time quantum walk on an 8-vertex heap-indexed tree (tail vertex 0, root 1, internal vertices 2-3, leaves 4-7), with x compiled into which leaf edges exist. One step is U = (I x Grover coin) * (x-dependent flip-flop shift), where the shift is built from transpositions of directed-edge basis states using CX and multi-controlled X gates. There is no measurement, no state preparation, and no readout. No query-complexity claim is made, and the general-formula bound is out of scope.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n\ndef build_circuit(instance):\n    '''Depth-2 balanced NAND-tree coined quantum walk, U^T with x compiled in.\n    Qubits 0-2: pos (vertex heap index, little-endian). Qubits 3-4: coin (direction 0=parent, 1=left child, 2=right child, 3=unused).\n    '''\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    x = instance.get('x')\n    if not isinstance(x, (list, tuple)) or len(x) != 4:\n        raise ValueError('x must be a list of 4 bits')\n    bits = []\n    for v in x:\n        if isinstance(v, bool):\n            v = int(v)\n        if not isinstance(v, int) or v not in (0, 1):\n            raise ValueError('x entries must be 0 or 1')\n        bits.append(v)\n    steps = instance.get('steps', 2)\n    if isinstance(steps, bool) or not isinstance(steps, int) or steps < 1 or steps > 32:\n        raise ValueError('steps must be an integer in 1..32')\n    pos = QuantumRegister(3, 'pos')\n    coin = QuantumRegister(2, 'coin')\n    qc = QuantumCircuit(pos, coin)\n    n = 5\n    # Edge list (u, v, dir_at_u, dir_at_v). Tail-root and internal edges always present.\n    edges = [(0, 1, 1, 0), (1, 2, 1, 0), (1, 3, 2, 0)]\n    # Leaf edge present iff x_i = 1 (O_x compiled from x).\n    for leaf in range(4):\n        if bits[leaf] == 1:\n            edges.append((2 + leaf // 2, 4 + leaf, 1 + leaf % 2, 0))\n\n    def swap_states(s, t):\n        # Exact transposition of computational basis states s and t.\n        diff = [i for i in range(n) if ((s >> i) & 1) != ((t >> i) & 1)]\n        k = diff[0]\n        others = diff[1:]\n        for j in others:\n            qc.cx(k, j)\n        ctrl = []\n        vals = []\n        for i in range(n):\n            if i == k:\n                continue\n            val = (s >> i) & 1\n            if i in others:\n                val ^= (s >> k) & 1\n            ctrl.append(i)\n            vals.append(val)\n        for i, val in zip(ctrl, vals):\n            if val == 0:\n                qc.x(i)\n        qc.mcx(ctrl, k)\n        for i, val in zip(ctrl, vals):\n            if val == 0:\n                qc.x(i)\n        for j in reversed(others):\n            qc.cx(k, j)\n\n    for _ in range(steps):\n        # O_x: flip-flop shift over edges present for this x\n        for (u, v, du, dv) in edges:\n            swap_states(u | (du << 3), v | (dv << 3))\n        # R_graph: Grover diffusion (I - 2|s><s|) on the coin register\n        qc.h(3)\n        qc.h(4)\n        qc.x(3)\n        qc.x(4)\n        qc.cz(3, 4)\n        qc.x(3)\n        qc.x(4)\n        qc.h(3)\n        qc.h(4)\n    return qc",
+    "example_instance_json": "{\"x\":[1,0,1,1],\"steps\":2}",
+    "register_layout": [
+      "q0-q2: pos register, little-endian vertex heap index (0=tail, 1=root, 2,3=internal vertices, 4-7=leaves for x1..x4)",
+      "q3-q4: coin register, little-endian direction (0=parent, 1=left child, 2=right child, 3=unused)",
+      "Suggested root-edge input |r>: pos=0 (tail), coin=1, i.e. basis index 8; the runner prepares it",
+      "Basis index = pos + 8*coin"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The classical NAND formula f(x) is not computed by the circuit. It only motivates the tree topology, and x enters through which leaf edges exist."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: swap_states loop over edges (O_x) followed by the Grover coin gates (R_graph) inside the steps loop",
+        "explanation": "One step is U = R_graph O_x. O_x is the x-dependent flip-flop shift with leaf edges present iff x_i=1, and R_graph is a Grover coin on the coin register. Both are concrete choices because the source does not specify them."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: for _ in range(steps) loop",
+        "explanation": "The unitary U^T is applied with T=steps. Initial state preparation is left to the runner. The default T=2=sqrt(N) is a placeholder and is not certified."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The readout overlap p and the threshold decoding are post-processing and are not part of the unitary operation. The threshold is unspecified."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "R_graph is concretely taken as a Grover diffusion (I-2|s><s|) on a 2-qubit coin that includes an unused fourth direction. O_x is the x-dependent flip-flop shift on directed-edge states, not a phase or marking oracle.",
+        "reason": "The abstract and spec do not give the walk graph, coin, or reflection, so a concrete well-defined unitary walk had to be chosen."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Leaf edges are attached to their parent iff x_i=1. Absent edges act as fixed points of the shift (the walker is not moved).",
+        "reason": "The spec leaves attachment of leaves and the tail unspecified. This is the simplest x-compiled choice, and its correctness for decoding f(x) is unverified."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The initial state is suggested as pos=tail (0) with coin direction 1 (the only physical tail edge), instead of coin |0>.",
+        "reason": "The tail vertex has only one edge, to the root, so direction 1 is the root-edge state."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "No claim of O(sqrt N) query complexity. T is a user parameter (default 2, range 1..32) and x is compiled into gates rather than queried.",
+        "reason": "The source gives no step-count derivation or phase estimation details."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Scope is narrowed to the balanced depth-2, N=4 formula only.",
+        "reason": "The general-formula algorithm and the rebalancing procedure are not specified."
+      }
+    ],
+    "assumptions": [
+      "Heap indexing gives the tree: tail 0, root 1, internal 2-3, leaves 4-7",
+      "Leaf i is connected iff x_i=1",
+      "The unused coin direction 3 is included in the Grover coin",
+      "Basis-state transpositions use CX plus multi-controlled X gates",
+      "Only 5 qubits are used"
+    ],
+    "unresolved_issues": [
+      "It is not established that this walk's root overlap decodes NAND(x) at any threshold or T",
+      "The tail has length 1 and the Grover coin includes a dummy direction, which may distort the spectrum relative to the intended algorithm",
+      "Phase estimation, the energy-near-zero analysis, and the threshold are not implemented",
+      "Arbitrary formulas and rebalancing are out of scope"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 5,
+    "gate_count": 1374,
+    "depth": 1022,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}
