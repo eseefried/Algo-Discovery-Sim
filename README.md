@@ -9,7 +9,7 @@ seeing the paper. We then compare its equations with the ones in the paper.
 We use this to compare one strong AI agent against teams ("swarms") of cooperating agents
 on the same 96 papers.
 
-See [worked examples](EXAMPLES.md) for real abstracts, LaTeX predictions, generated
+See [swarm examples](EXAMPLES.md) for real abstracts, LaTeX predictions, generated
 Qiskit code, simulation outcomes, and scoped functional checks.
 
 ## How it works
