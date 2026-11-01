@@ -1,0 +1,144 @@
+{
+  "backend": "anthropic",
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "9fb8b2ee-1bdc-4159-a38b-4a2d4d5dd69c",
+  "parent_run_id": "676e596d-38fa-41b0-84f9-add9468f6e77",
+  "created_at": "2026-11-01T16:07:19.921893+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "ac7043c0e62bb3a1b2027be20a843916cb3b197dde7eefedf619234cefd0df75",
+  "source_specification_sha256": "503dc4ab9405549ebda2c7a57d86f7d9e598994abaf52520190f37e96c0c64ab",
+  "source_python_sha256": "a3cc79167ccda8ddcde000a281b0e7be296b797312dcb38dd37e5d89dade0cfd",
+  "elapsed_seconds": 24.717,
+  "usage": {
+    "input_tokens": 5180,
+    "output_tokens": 3725,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "build_circuit(instance) applies H to m control qubits and then a CNOT fan-out from the controls to the n-m target qubits. The fan-out follows a GF(2)-linear map f given as a 0/1 matrix. This is the unitary U of eq_2. Acting on a runner-prepared basis input |a>|y>, U gives the Bell-like state of eq_1. The default is n=3, m=2 with f(c1,c2)=c1 xor c2 (eq_4). Only this generic X-type construction is implemented, not the paper's two specific controlled-unitary gates.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _as_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(name + ' must be an integer')\n    return value\n\n\ndef build_circuit(instance):\n    \"\"\"Bell-like basis generator U = CNOT-fanout(f) * (H^{(x)m} (x) I).\n\n    instance keys:\n      n: total qubits (2..12)\n      m: number of Hadamard control qubits (1 <= m <= n-1)\n      f_matrix (optional): (n-m) x m 0/1 matrix; target j is XORed with the\n        parity of controls i having f_matrix[j][i] == 1. Default: every target\n        receives the parity of all controls (eq_4 for n=3, m=2).\n    Layout: qubits 0..m-1 are controls c, qubits m..n-1 are targets t.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _as_int(instance.get('n'), 'n')\n    m = _as_int(instance.get('m'), 'm')\n    if n < 2 or n > 12:\n        raise ValueError('n must be in [2, 12]')\n    if m < 1 or m > n - 1:\n        raise ValueError('m must satisfy 1 <= m <= n-1')\n    k = n - m\n    mat = instance.get('f_matrix')\n    if mat is None:\n        mat = [[1] * m for _ in range(k)]\n    if not isinstance(mat, (list, tuple)) or len(mat) != k:\n        raise ValueError('f_matrix must have n-m rows')\n    clean = []\n    for row in mat:\n        if not isinstance(row, (list, tuple)) or len(row) != m:\n            raise ValueError('each f_matrix row must have m entries')\n        r = []\n        for e in row:\n            e = _as_int(e, 'f_matrix entry')\n            if e not in (0, 1):\n                raise ValueError('f_matrix entries must be 0 or 1')\n            r.append(e)\n        clean.append(r)\n    c = QuantumRegister(m, 'c')\n    t = QuantumRegister(k, 't')\n    qc = QuantumCircuit(c, t)\n    # H on control qubits: H^{(x)m}|a> = 2^{-m/2} sum_c (-1)^{a.c}|c>\n    for i in range(m):\n        qc.h(c[i])\n    # CNOT fan-out implementing |c>|y> -> |c>|y xor f(c)>\n    for j in range(k):\n        for i in range(m):\n            if clean[j][i]:\n                qc.cx(c[i], t[j])\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"m\": 2, \"f_matrix\": [[1, 1]]}",
+    "register_layout": [
+      "qubit 0 = c1 (control, H applied, least significant Qiskit bit)",
+      "qubit 1 = c2 (control, H applied)",
+      "qubit 2 = t (target, CNOT fan-out; t gets c1 xor c2 for the example)",
+      "General: qubits 0..m-1 are controls, qubits m..n-1 are targets",
+      "Input basis |a>|y> is prepared by the runner: a on controls, y on targets, computational-basis encoding with qubit 0 as least significant bit"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (full circuit: H loop followed by CNOT fan-out)",
+        "explanation": "The circuit acting on |a>|y> produces 2^{-m/2} sum_c (-1)^{a.c}|c>|f(c) xor y>. Input preparation is left to the runner."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: 'for i in range(m): qc.h' then the double loop with qc.cx",
+        "explanation": "H on the controls followed by the X-type controlled fan-out onto the targets."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Orthonormality follows because the circuit is unitary. No code is needed, and checking it is left to external verification."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: default f_matrix [[1]*m for _ in range(n-m)], which gives [[1,1]] for n=3, m=2",
+        "explanation": "The default f is the parity of all controls, realized as CNOT c1->t and CNOT c2->t. A general matrix can also be supplied."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The multi-controlled-X form is a schematic, unverified gate definition and is not used in the CNOT fan-out instance. It is not implemented."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "Generalized from the fixed n=3, m=2 instance to a parameterized family. n, m and an optional GF(2) matrix f_matrix are accepted, with n<=12. The default reproduces eq_4.",
+        "reason": "The task requires the operation to work for varying valid instance parameters. The default keeps the specified instance."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Qubit mapping: controls occupy Qiskit qubits 0..m-1 and targets occupy m..n-1, so the first control c1 is qubit 0, the least significant bit. The spec's 'qubit 0 is most significant in the label' is not followed.",
+        "reason": "Qiskit is little-endian. The circuit is defined by the physical register layout, and the runner must map the label x=(a,y) to this layout."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The input-loading X gates in the spec's step 1 are not part of the returned circuit.",
+        "reason": "The runner prepares inputs, and the circuit must be an operation, not an experiment."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The multi-controlled-X projector form is not implemented and no multi-controlled gate is used.",
+        "reason": "The form is schematic and unverified, and the chosen instance uses only CNOTs."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to a generic Hadamard plus CNOT-fan-out Bell-like basis. The paper's two specific controlled-unitary gates, phase-type gates, the qudit extension, and the entanglement and monogamy analyses are not implemented.",
+        "reason": "These details are not available in the abstract-derived specification."
+      }
+    ],
+    "assumptions": [
+      "f is GF(2)-linear and X-type only (CNOT fan-out).",
+      "The controls are the first m qubits in register order.",
+      "If f_matrix is omitted, every target receives the parity of all controls.",
+      "The runner prepares the input |a>|y> on the controls and targets respectively, in little-endian computational-basis encoding."
+    ],
+    "unresolved_issues": [
+      "The paper's actual two multiple-qubit controlled-unitary gates are unknown, so this is not the paper's exact construction.",
+      "With the default f (a single parity target) f is not injective, but the offset y still labels states uniquely, so orthonormality still holds.",
+      "Entanglement and monogamy-score properties are not addressed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 4,
+    "depth": 3,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,143 @@
+{
+  "backend": "anthropic",
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "b4ac2818-c90f-444f-9a18-f9034fde9723",
+  "parent_run_id": "fafc4ab4-3510-4094-9765-ba410649445f",
+  "created_at": "2026-11-01T15:29:33.933179+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "6b9a2adf83abb07e9c3ff5ca13ea7e0446492dbabbd597a9bf0d3bbd2600c688",
+  "source_specification_sha256": "3eb1dc63ddbd36d8ef561279a3f46f3dc1f64c0a68494b4ab8a35d6f44cc5807",
+  "source_python_sha256": "748a7401bc2ce6cf0a0f5891c7d586d724d507266e0269f584e5e365fc025d55",
+  "elapsed_seconds": 30.677,
+  "usage": {
+    "input_tokens": 4801,
+    "output_tokens": 4644,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit operation implementing k Grover iterations G = D·O_w on n=4 qubits (little-endian, marked state w), with an optional second-neighbour ZZ phase layer E_phi after each iteration. The initial Hadamard layer is not included because the runner prepares inputs, so the circuit acts on a prepared |s>. The pulse-level spin-chain model and the Rabi-frequency scan are not implemented.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _as_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(name + ' must be an integer')\n    return value\n\n\ndef _phase_flip_all_ones(qc, n):\n    # CCC..Z on all n qubits: phase -1 on |1...1>\n    qc.mcp(math.pi, list(range(n - 1)), n - 1)\n\n\ndef _oracle(qc, n, w):\n    # eq_2/eq_3: O_w = X^{wbar} CCCZ X^{wbar}; qubit j holds bit j of w\n    zeros = [j for j in range(n) if ((w >> j) & 1) == 0]\n    for j in zeros:\n        qc.x(j)\n    _phase_flip_all_ones(qc, n)\n    for j in zeros:\n        qc.x(j)\n\n\ndef _diffusion(qc, n):\n    # eq_2/eq_3: D = 2|s><s| - I = -(H^n X^n CCCZ X^n H^n); the -1 is restored as global phase\n    for j in range(n):\n        qc.h(j)\n    for j in range(n):\n        qc.x(j)\n    _phase_flip_all_ones(qc, n)\n    for j in range(n):\n        qc.x(j)\n    for j in range(n):\n        qc.h(j)\n    qc.global_phase = qc.global_phase + math.pi\n\n\ndef _zz_layer(qc, n, phi):\n    # eq_5: E_phi = prod_j exp(-i phi Z_j Z_{j+2} / 4) = RZZ(phi/2) on (j, j+2)\n    for j in range(n - 2):\n        qc.rzz(phi / 2.0, j, j + 2)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _as_int(instance.get('n', 4), 'n')\n    if n < 2 or n > 12:\n        raise ValueError('n must be between 2 and 12')\n    w = _as_int(instance.get('w', 5), 'w')\n    if w < 0 or w >= 2 ** n:\n        raise ValueError('w out of range')\n    phi = instance.get('phi', 0.0)\n    if isinstance(phi, bool) or not isinstance(phi, (int, float)) or not math.isfinite(phi):\n        raise ValueError('phi must be a finite real number')\n    phi = float(phi)\n    if 'iterations' in instance and instance['iterations'] is not None:\n        k = _as_int(instance['iterations'], 'iterations')\n    else:\n        # eq_4: k = round(pi/4 sqrt(N) - 1/2)\n        k = int(math.floor(math.pi / 4.0 * math.sqrt(2 ** n) - 0.5 + 0.5))\n    if k < 0 or k > 100:\n        raise ValueError('iterations must be between 0 and 100')\n    qr = QuantumRegister(n, 'q')\n    qc = QuantumCircuit(qr)\n    for _ in range(k):\n        _oracle(qc, n, w)\n        _diffusion(qc, n)\n        if phi != 0.0:\n            _zz_layer(qc, n, phi)\n    return qc",
+    "example_instance_json": "{\"n\": 4, \"w\": 5, \"iterations\": 3, \"phi\": 0.0}",
+    "register_layout": [
+      "q0..q3 = qubit indices 0..3, little-endian: q0 is the least significant bit of x = sum_j x_j 2^j",
+      "Marked state w: bit j of w is the value on qubit j (w=5 -> q0=1, q1=0, q2=1, q3=0)",
+      "No ancilla qubits; the circuit expects the runner to prepare the input, normally |s> = H^4|0000>"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The uniform initial state H^{⊗4}|0000> is input preparation, which the runner performs. The circuit's diffusion step uses the same |s>, but the state itself is not built in the circuit."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_oracle, _diffusion and the loop in build_circuit",
+        "explanation": "Phase oracle O_w and inversion about the mean D are applied in the order G = D·O_w, repeated k times."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_oracle and _diffusion (with _phase_flip_all_ones)",
+        "explanation": "X on the zero bits of w around a multi-controlled Z (mcp with angle pi) gives O_w. H and X layers around a multi-controlled Z give D. A global phase of pi is added so that D is exactly 2|s><s|-I."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "default iteration count in build_circuit",
+        "explanation": "The default k = round(pi/4 sqrt(N) - 1/2), which is 3 for n=4, is used unless 'iterations' is given. The success probability formula is analytic and is not part of the circuit."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "_zz_layer",
+        "explanation": "The optional second-neighbour ZZ phase layer E_phi is built from RZZ(phi/2) on pairs (j, j+2), applied after each iteration when phi != 0. The fidelity F_t is a post-processing quantity computed outside the circuit and is not implemented."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The initial H^{⊗4} layer is excluded from build_circuit, so the circuit is G^k acting on a prepared input.",
+        "reason": "The task requires an operation without input-state preparation. The runner should supply |s>."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "A global phase of pi per iteration is added so that D is exactly 2|s><s|-I rather than -D.",
+        "reason": "H^n X^n CCCZ X^n H^n equals I-2|s><s| = -D, as noted in eq_3. The phase makes the unitary match eq_2 exactly."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The register size n is generalised to a validated parameter (2..12, default 4), and the number of iterations and the marked state w are instance parameters (w default 5, iterations default from eq_4).",
+        "reason": "The operation must be implemented for varying valid instance parameters. The default n=4 matches the specification."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The E_phi pairs are generalised to (j, j+2) for j=0..n-3. exp(-i phi ZZ/4) is implemented as RZZ(phi/2), and phi defaults to 0 so the layer is omitted. Fidelity tracking is not implemented.",
+        "reason": "RZZ(theta)=exp(-i theta ZZ/2), so theta=phi/2 gives the stated factor. Fidelity is a simulation quantity, not a circuit element."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope is narrowed to ideal gate-level Grover with an optional ZZ error layer. The pulse-level nuclear spin chain Hamiltonian, nearest-neighbour couplings, the Rabi-frequency scan and the 2πk condition are not reproduced.",
+        "reason": "The specification marks the Hamiltonian parameters and pulse sequences as missing information."
+      }
+    ],
+    "assumptions": [
+      "The marked state w is an explicit instance parameter, default 5.",
+      "Little-endian encoding: qubit j carries bit j of w.",
+      "The runner prepares the input state, normally the uniform superposition.",
+      "Global phase is tracked in the circuit's global_phase attribute.",
+      "The ZZ error layer is a proposed simplification, not the paper's model."
+    ],
+    "unresolved_issues": [
+      "The actual spin-chain coupling constants, pulse sequences and marked state of the original work are unknown.",
+      "The Rabi-frequency scan and the 2πk-condition maxima cannot be reproduced at this gate level.",
+      "Nearest-neighbour Ising terms are omitted from the optional error model."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 354,
+    "depth": 230,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

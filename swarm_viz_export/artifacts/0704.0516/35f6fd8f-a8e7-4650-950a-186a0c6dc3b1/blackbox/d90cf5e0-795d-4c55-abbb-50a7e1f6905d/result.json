@@ -1,0 +1,145 @@
+{
+  "backend": "anthropic",
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "d90cf5e0-795d-4c55-abbb-50a7e1f6905d",
+  "parent_run_id": "97935d82-71ad-4c35-a585-40537ddb7c48",
+  "created_at": "2026-11-01T15:12:40.445298+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "1715629e919c5bd92b646dafd8f79c609d80351a9d8b5b462c7dac826035a547",
+  "source_specification_sha256": "4a2fbaf71dab9b09eb7fd18521d41b7bcab03467dce18a504903728cba876376",
+  "source_python_sha256": "42bb902dc30d038336d72bdb6e01fc6b50cc05d3c2474a9a541d7f4118cada93",
+  "elapsed_seconds": 56.425,
+  "usage": {
+    "input_tokens": 5373,
+    "output_tokens": 8393,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Order-finding operation for Shor's algorithm with N=15 and a in {2,4,8}. It applies H on t counting qubits and controlled modular multiplications U^(2^k) on a 4-qubit work register, implemented as controlled cyclic bit rotations. It then applies an inverse QFT with explicit controlled-phase gates and swaps. The phase angles are perturbed under an ideal, systematic, random or combined error model. Random offsets are seeded and drawn uniformly with zero mean and variance sigma^2. There is no state preparation, measurement, or threshold analysis.",
+    "source_python": "\"\"\"Shor order finding for N=15 with optionally imperfect inverse-QFT phase gates.\"\"\"\nfrom __future__ import annotations\n\nimport math\n\nimport numpy as np\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n_MODELS = ('ideal', 'systematic', 'random', 'combined')\n\n\ndef _num(instance, key, default_value):\n    v = instance.get(key, default_value)\n    if isinstance(v, bool) or not isinstance(v, (int, float)):\n        raise ValueError(key + ' must be a real number')\n    v = float(v)\n    if not math.isfinite(v):\n        raise ValueError(key + ' must be finite')\n    return v\n\n\ndef _int(instance, key, default_value):\n    v = instance.get(key, default_value)\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError(key + ' must be an integer')\n    return v\n\n\ndef _controlled_rotate_left(qc, ctrl, work, s):\n    # eq_1: multiplication by 2^s mod 15 on y in 0..14 is a left cyclic rotation of 4 bits by s.\n    # Controlled by ctrl via a chain of Fredkin gates; 15 (1111) is also fixed, so U is a permutation.\n    for _ in range(s):\n        for i in (2, 1, 0):\n            qc.cswap(ctrl, work[i], work[i + 1])\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _int(instance, 'N', 15)\n    a = _int(instance, 'a', 2)\n    t = _int(instance, 't', 4)\n    seed = _int(instance, 'seed', 0)\n    model = instance.get('error_model', 'ideal')\n    if n != 15:\n        raise ValueError('only N=15 is supported')\n    if a not in (2, 4, 8):\n        raise ValueError('a must be one of 2, 4, 8')\n    if t < 1 or t > 8:\n        raise ValueError('t must be in 1..8 (total qubits <= 12)')\n    if not isinstance(model, str) or model not in _MODELS:\n        raise ValueError('error_model must be ideal, systematic, random or combined')\n    if seed < 0:\n        raise ValueError('seed must be nonnegative')\n    eps = _num(instance, 'epsilon', 0.0)\n    dl = _num(instance, 'delta', 0.0)\n    sg = _num(instance, 'sigma', 0.0)\n    if sg < 0.0:\n        raise ValueError('sigma must be >= 0')\n    sys_on = model in ('systematic', 'combined')\n    rnd_on = model in ('random', 'combined')\n    e = eps if sys_on else 0.0\n    d = dl if sys_on else 0.0\n    w = sg * math.sqrt(3.0) if rnd_on else 0.0  # uniform on [-w,w] has variance sigma^2\n    rng = np.random.default_rng(seed)\n\n    count = list(range(t))\n    work = list(range(t, t + 4))\n    qc = QuantumCircuit(QuantumRegister(t, 'count'), QuantumRegister(4, 'work'))\n\n    # Step 1: uniform superposition over counting register\n    for q in count:\n        qc.h(q)\n\n    # Step 2 (eq_1): controlled U^(2^k), U^(2^k) = multiplication by a^(2^k) mod 15\n    rot = {1: 0, 2: 1, 4: 2, 8: 3}\n    for k in range(t):\n        m = pow(a, 2 ** k, n)\n        s = rot[m]\n        if s:\n            _controlled_rotate_left(qc, count[k], work, s)\n\n    # Step 3 (eq_6, eq_3, eq_4): inverse QFT, swaps first then ascending H/CP ladder\n    for i in range(t // 2):\n        qc.swap(count[i], count[t - 1 - i])\n    for j in range(t):\n        for k in range(j):\n            mag = math.pi / (2 ** (j - k))\n            off = float(rng.uniform(-w, w)) if rnd_on else 0.0\n            ang = -(mag * (1.0 + e) + d + off)\n            qc.cp(ang, count[k], count[j])\n        qc.h(count[j])\n    return qc",
+    "example_instance_json": "{\"N\":15,\"a\":2,\"t\":4,\"error_model\":\"combined\",\"epsilon\":0.02,\"delta\":0.01,\"sigma\":0.05,\"seed\":7}",
+    "register_layout": [
+      "qubits 0..t-1: counting register 'count', little-endian (qubit k is bit k of x); example t=4 uses qubits 0-3",
+      "qubits t..t+3: work register 'work', little-endian bits of y mod 15; runner should prepare y=1 (qubit t = |1>, others |0>); example uses qubits 4-7",
+      "count register ends holding the phase-estimation outcome x in the computational basis (QFTGate-compatible ordering with swaps)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_controlled_rotate_left and the controlled-exponentiation loop in build_circuit",
+        "explanation": "Controlled U^(2^k) with U^(2^k) = multiplication by a^(2^k) mod 15, implemented as a controlled left bit rotation using cswap chains, for a in {2,4,8}."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Ideal output distribution is the expected result of the ideal circuit and is not coded; the ideal case (error_model='ideal') is meant to reproduce it."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: angle ang = -(mag*(1+e)+d+off) with e, d from epsilon, delta for model 'systematic' or 'combined'",
+        "explanation": "The same relative error epsilon and absolute error delta are applied to every controlled-phase gate of the inverse QFT."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: rng.uniform offset 'off' per cp gate for model 'random' or 'combined'",
+        "explanation": "Independent seeded zero-mean uniform offsets with variance sigma^2 per controlled-phase gate; the combined model adds the fixed errors."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Success probability and the threshold sigma_c are computed from measurement statistics and seed averaging outside the unitary."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "build_circuit: inverse QFT section (swaps, then cp ladder and H)",
+        "explanation": "Inverse QFT built from H, controlled phases of magnitude pi/2^m and bit-reversal swaps, with the perturbed angles per eq_3/eq_4."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Base a is restricted to {2,4,8} and N to 15; the controlled multiplications are implemented as bit rotations instead of general modular arithmetic.",
+        "reason": "For a in {7,11,13} the multiplication needs a bitwise complement which would map y=0 and y=15 differently from the specified action (y>=15 fixed, 0 fixed), so they are excluded to preserve the spec."
+      },
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "The bit-reversal swaps are placed before the controlled-phase and H ladder (as the exact inverse of the forward QFT with swaps at the end), not after.",
+        "reason": "This is the order that makes the ideal circuit equal QFTGate(t).inverse() in Qiskit little-endian order; the spec's wording 'then bit-reversal swaps' would give a different ordering."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Perturbation is applied to the magnitude of the angle: angle = -(theta_m(1+epsilon)+delta+delta_j). Random model uses only delta_j; systematic uses epsilon and delta; combined uses all. The distribution is uniform with variance sigma^2 from a numpy seeded generator.",
+        "reason": "The spec leaves definitions and distributions open; these are explicit assumed choices. The abstract does not define the paper's error models."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_5"
+        ],
+        "change": "Success probability, ideal distribution and the sigma_c threshold are not implemented in the circuit.",
+        "reason": "They are measurement-level analysis, which the operation must not contain."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "The optional small Rz rotations after the controlled multiplications are not included; t is variable up to 8 (default 4) rather than fixed at 4.",
+        "reason": "Only the three phase-gate error models are specified numerically; total qubits t+4 must be <= 12."
+      }
+    ],
+    "assumptions": [
+      "The runner prepares the work register in y=1 (qubit index t set to |1>) and counting qubits in |0>.",
+      "The initial Hadamards on the counting register are part of the operation, as specified in step 1.",
+      "Error models are the assumed definitions from the specification, not the paper's.",
+      "Random offsets are uniform in [-sqrt(3) sigma, sqrt(3) sigma] with a fixed seed so the circuit is deterministic and bound.",
+      "The x register is little-endian and matches QFTGate conventions."
+    ],
+    "unresolved_issues": [
+      "The paper's exact error definitions, distributions and analytic threshold as a function of N are unknown and not reconstructed.",
+      "Only the order-finding unitary for N=15 with a in {2,4,8} is covered; a in {7,11,13} are not implemented.",
+      "Seed averaging and sigma_c extraction must be done by the runner over multiple instances."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 8,
+    "gate_count": 197,
+    "depth": 122,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

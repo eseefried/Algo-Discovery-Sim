@@ -1,0 +1,138 @@
+{
+  "backend": "anthropic",
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "6b782c56-995e-4b0d-a3fa-804ef9652b8b",
+  "parent_run_id": "55847133-1d02-4b7b-a93f-e6c1b64588d3",
+  "created_at": "2026-11-01T15:25:10.923801+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "8d43b7a1825220f94fa614e8d3a3f602df53579d2764584319ee93b39e92ad5d",
+  "source_specification_sha256": "01746995b05b7e488c5574bd7775078d8af41a88d62a67e16161087a8aefa362",
+  "source_python_sha256": "d909698604c57e4ad4dacb54a0761e9cfb4379edcd11e93ab3124512181f7be3",
+  "elapsed_seconds": 81.425,
+  "usage": {
+    "input_tokens": 5204,
+    "output_tokens": 9949,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Single MAJ3 gate. A fixed 2-dimensional read-once span program (target t=(1,0); v1=(1,1), v2=(1,-1), v3=(0,1)) is turned into a weighted bipartite graph whose root is the target-column vertex. Edges for inputs with x_i=0 are omitted. The adjacency matrix A is padded to 8 vertices on 3 qubits. U=exp(iAs) is implemented as a first-order Trotter product of two-level hopping rotations, which are controlled multi-controlled RX gates conjugated by CX gates. Standard phase estimation applies controlled powers of that same Trotter unitary, then an inverse QFT on the phase register. The circuit has no state preparation or measurement. A phase reading near 0 for root input |100> signals a zero eigenvector with root overlap.",
+    "source_python": "\"\"\"MAJ3 span-program graph spectral test (phase estimation on a Trotterized exp(iAs)).\"\"\"\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate, RXGate\n\n# Span program for MAJ3 in R^2: target t=(1,0); v1=(1,1), v2=(1,-1), v3=(0,1).\n# Column 0 is the target t (the root vertex, always present); column i is input i.\n# Each column lists (row, weight) entries of the biadjacency matrix B.\n_COLS = (((0, 1),), ((0, 1), (1, 1)), ((0, 1), (1, -1)), ((1, 1),))\n\n\ndef _check_int(value, lo, hi, name):\n    if isinstance(value, bool) or not isinstance(value, int) or value < lo or value > hi:\n        raise ValueError(name + \" must be an integer in [\" + str(lo) + \", \" + str(hi) + \"]\")\n    return value\n\n\ndef _edges(x):\n    # eq_2/eq_3: graph G(x) keeps only columns of inputs with x_i=1, plus the target column.\n    edges = []\n    for col, entries in enumerate(_COLS):\n        if col == 0 or x[col - 1] == 1:\n            for row, w in entries:\n                edges.append((row, col, w))\n    return edges\n\n\ndef _apply_edge(qc, ctrl, row, col, angle):\n    # Controlled exp(i*theta*(|a><b|+|b><a|)), a=|side0,idx=row>, b=|side1,idx=col>,\n    # implemented as RX(angle), angle=-2*theta, on the side qubit (qubit 2).\n    diff = [k for k in (0, 1) if ((row >> k) & 1) != ((col >> k) & 1)]\n    for k in diff:\n        qc.cx(2, k)\n    state = 1 | (row << 1)  # control order [ctrl, idx0, idx1]: ctrl=1, idx bits = row bits\n    gate = RXGate(angle).control(3, ctrl_state=state)\n    qc.append(gate, [ctrl, 0, 1, 2])\n    for k in reversed(diff):\n        qc.cx(2, k)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    x = instance.get(\"x\")\n    if not isinstance(x, list) or len(x) != 3:\n        raise ValueError(\"x must be a list of 3 bits\")\n    for b in x:\n        _check_int(b, 0, 1, \"x bit\")\n    m = _check_int(instance.get(\"phase_qubits\"), 1, 6, \"phase_qubits\")\n    steps = _check_int(instance.get(\"trotter_steps\"), 1, 4, \"trotter_steps\")\n    t = instance.get(\"time\")\n    if isinstance(t, bool) or not isinstance(t, (int, float)) or not math.isfinite(t) or t <= 0 or t > 1.2:\n        raise ValueError(\"time must be a finite number in (0, 1.2] so that time*||A|| < pi\")\n    edges = _edges(x)\n    vq = QuantumRegister(3, \"v\")\n    pq = QuantumRegister(m, \"p\")\n    qc = QuantumCircuit(vq, pq)\n    for k in range(m):\n        qc.h(3 + k)\n    dt = float(t) / steps\n    for k in range(m):\n        # eq_4: controlled U^(2^k), U = one Trotterized step-product of exp(i A time)\n        for _ in range(steps * (2 ** k)):\n            for row, col, w in edges:\n                _apply_edge(qc, 3 + k, row, col, -2.0 * w * dt)\n    # eq_5 readout: inverse QFT on phase register (outcome 0 = zero-eigenvalue bin)\n    qc.append(QFTGate(m).inverse(), list(range(3, 3 + m)))\n    return qc",
+    "example_instance_json": "{\"x\":[1,0,1],\"phase_qubits\":3,\"time\":0.5,\"trotter_steps\":2}",
+    "register_layout": [
+      "qubit 0: vertex index bit 0 (LSB)",
+      "qubit 1: vertex index bit 1",
+      "qubit 2: side bit (0 = left/row vertices j=0..3, 1 = right/column vertices 0..3); vertex label = 4*side + index",
+      "Left vertices: rows of the span-program space (indices 0,1 used, 2,3 padding)",
+      "Right vertices: index 0 = target column t (ROOT, basis state |side=1,idx=0> = integer 4 on qubits 0-2), indices 1,2,3 = inputs x1,x2,x3 (disconnected if x_i=0)",
+      "qubits 3..3+m-1: phase-estimation register, qubit 3 is the least significant bit and controls U^1; qubit 3+k controls U^(2^k)",
+      "Intended input: vertex register in root |100> (qubit 2 = 1), phase register |0...0>; prepared by the runner"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "MAJ3 definition is the target function. It is not coded directly but is the property the chosen span program in _COLS is designed to satisfy."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_COLS and _edges",
+        "explanation": "The concrete span program (t=(1,0), v1=(1,1), v2=(1,-1), v3=(0,1)) is encoded as biadjacency columns, and only vectors with x_i=1 are included. Any two vectors span R^2, so they span t. No single vector is parallel to t."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_edges and build_circuit",
+        "explanation": "The graph has the target column as root and the input columns gated by x. A zero eigenvector with root overlap exists iff c*t+sum a_i v_i=0 with c!=0. The circuit applies spectral estimation to this graph, but the zero-eigenvector criterion itself is checked externally."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_apply_edge and the controlled-power loop in build_circuit",
+        "explanation": "A=[[0,B],[B^T,0]] is a sum of edge hopping terms w(|a><b|+|b><a|). Each term is exponentiated exactly by a CX-conjugated multi-controlled RX. exp(iAs) is approximated by a first-order Trotter product, and controlled powers are powers of that same Trotter unitary."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The zero-phase probability is a property of the output distribution of the phase register, read by the runner or analysis. The circuit supplies the phase estimation (Hadamards, controlled powers, inverse QFT) but does not compute p_0."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "A specific MAJ3 span program (2-dimensional, read-once) and bipartite graph with the target column as root vertex were fixed. All edge weights are +-1.",
+        "reason": "The abstract gives no span program or graph weights. A concrete choice was needed to produce a circuit."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "exp(iAs) is realized by first-order Trotterization with trotter_steps steps per unit U, not exactly. The 6 real vertices are padded to 8 on 3 qubits, with unused padding vertices isolated. The time s is the instance parameter 'time', restricted to (0,1.2].",
+        "reason": "The edge terms do not commute, and opaque dense unitaries and operator construction are disallowed. ||B||<=sqrt(6)<pi/1.2... the bound time*||A||<pi is enforced via time<=1.2."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to a single depth-1 MAJ3 gate with explicit classical x compiled into gates. There is no recursive formula composition, no optimality claim and no query-complexity claim. Phase-register readout and thresholding are left to the runner.",
+        "reason": "Consistent with the specified reconstruction scope and the measurement-free operation requirement."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "phase_qubits is capped at 6 and trotter_steps at 4.",
+        "reason": "Bound circuit size, since controlled powers cost 2^k*trotter_steps repetitions, and keep the total at or below 12 qubits (max 9 used)."
+      }
+    ],
+    "assumptions": [
+      "Vertex labeling: label = 4*side + idx, root = target column on the right side at idx 0 (integer 4 on the vertex register).",
+      "Phase-estimation convention: U=exp(iAs) has eigenphase lambda*s, read as phi=lambda*s/(2*pi) mod 1, so zero eigenvalue gives outcome 0 and negative eigenvalues wrap near 2^m.",
+      "Trotter error means the eigenvalue-zero bin is only approximately preserved: exact zero eigenvectors of A are generally not exact eigenvectors of the Trotter unitary.",
+      "The runner prepares the root input state and interprets the readout.",
+      "The default weights and time keep the nonzero eigenvalue scale distinguishable from zero only for sufficiently many phase qubits."
+    ],
+    "unresolved_issues": [
+      "The paper's actual MAJ3 span program, graph weights and scaling are not reproduced.",
+      "No gap or precision analysis was done. For small phase_qubits, nonzero eigenvalues may alias into the zero bin.",
+      "Trotter error is uncontrolled in the circuit and is not tuned to the gap.",
+      "The root-overlap threshold and repetition rule are left to external post-processing.",
+      "In the specification_changes entry for eq_4, the reason text contains a malformed inequality fragment ('||B||<=sqrt(6)<pi/1.2...'). The intended statement is that ||A|| is at most about sqrt(6)=2.45 (a Frobenius norm bound), so time<=1.2 gives time*||A||<pi."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 3328,
+    "depth": 2422,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

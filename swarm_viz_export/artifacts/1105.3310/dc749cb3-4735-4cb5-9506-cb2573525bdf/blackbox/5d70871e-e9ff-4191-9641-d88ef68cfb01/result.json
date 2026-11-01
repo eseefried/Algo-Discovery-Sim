@@ -1,0 +1,136 @@
+{
+  "backend": "anthropic",
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "5d70871e-e9ff-4191-9641-d88ef68cfb01",
+  "parent_run_id": "beb848e7-1959-48f9-933c-68eef079097e",
+  "created_at": "2026-11-01T15:32:37.495829+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "9953a6e577810389777c08bb776ef74fc331f088f28729f78068ea4f48488dc6",
+  "source_specification_sha256": "b341dcb04d77e744ae6306a5dfeda500d7bf876a0a5cd787e319d094d4396a6f",
+  "source_python_sha256": "e7d2af8ece3c6a74ecadd6ac3787758a9bb59d443073fae1ff93aafbd189df1e",
+  "elapsed_seconds": 33.928,
+  "usage": {
+    "input_tokens": 5204,
+    "output_tokens": 4801,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the Walsh-transform (Bernstein-Vazirani-style) circuit H^n O_g H^n on an n-qubit register. Here g is either the hard-coded F_2 multilinear polynomial f (direction 0) or its discrete derivative D_a f (direction a != 0). O_f is compiled from Z, CZ and multi-controlled-Z phase gates. The derivative oracle is built as O_f (X^a O_f X^a) using two oracle applications. This is a single parametrized operation. It does not implement the paper's O(n^(d-1)) exact algorithm, the full coefficient recovery, or any query counting.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    d = instance.get('d')\n    mons = instance.get('monomials')\n    a = instance.get('direction')\n    if not _is_int(n) or n < 1 or n > 12:\n        raise ValueError('n must be an integer in [1,12]')\n    if not _is_int(d) or d < 1 or d > n:\n        raise ValueError('d must be an integer in [1,n]')\n    if not isinstance(mons, list):\n        raise ValueError('monomials must be a list of index lists')\n    if not _is_int(a) or a < 0 or a >= 2 ** n:\n        raise ValueError('direction must be an integer mask in [0,2^n)')\n    parity = {}\n    for m in mons:\n        if not isinstance(m, list):\n            raise ValueError('each monomial must be a list of variable indices')\n        for idx in m:\n            if not _is_int(idx) or idx < 0 or idx >= n:\n                raise ValueError('variable index out of range')\n        if len(set(m)) != len(m):\n            raise ValueError('multilinear monomials cannot repeat a variable')\n        if len(m) > d:\n            raise ValueError('monomial degree exceeds d')\n        key = tuple(sorted(m))\n        parity[key] = parity.get(key, 0) ^ 1\n    active = [k for k in parity if parity[k] == 1]\n    active.sort(key=lambda k: (len(k), k))\n    return n, a, active\n\n\ndef _apply_phase_oracle(qc, active):\n    # eq_1 / eq_2: O_f|x> = (-1)^f(x)|x>; each monomial with c_S=1 gives a Z-type phase on the qubits in S\n    for S in active:\n        if len(S) == 0:\n            qc.global_phase = qc.global_phase + math.pi\n        elif len(S) == 1:\n            qc.z(S[0])\n        elif len(S) == 2:\n            qc.cz(S[0], S[1])\n        else:\n            qc.mcp(math.pi, list(S[:-1]), S[-1])\n\n\ndef build_circuit(instance):\n    n, a, active = _parse(instance)\n    qc = QuantumCircuit(QuantumRegister(n, 'x'))\n    # eq_3: first Hadamard layer\n    qc.h(range(n))\n    # eq_2: phase oracle O_f\n    _apply_phase_oracle(qc, active)\n    if a:\n        # eq_5: O_{D_a f} = O_f (X^a O_f X^a)\n        bits = [i for i in range(n) if (a >> i) & 1]\n        for i in bits:\n            qc.x(i)\n        _apply_phase_oracle(qc, active)\n        for i in bits:\n            qc.x(i)\n    # eq_3: final Hadamard layer\n    qc.h(range(n))\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"d\": 2, \"monomials\": [[], [0], [1, 2], [0, 1]], \"direction\": 1}",
+    "register_layout": [
+      "qubit 0 = x1 (variable index 0, least significant bit of the Walsh index s and of direction mask a)",
+      "qubit 1 = x2 (variable index 1)",
+      "qubit 2 = x3 (variable index 2)",
+      "No ancilla qubits. Input state is prepared by the runner (e.g. |000>) and the output is the Walsh-spectrum state sum_s F^(s)|s> of (-1)^g, where g = f if direction=0 and g = D_a f otherwise."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_parse (monomial list with parity reduction, degree and multilinearity validation)",
+        "explanation": "The coefficients c_S in F_2 are given as the list of subsets S with c_S=1. Duplicates are XORed, and |S|<=d and distinct indices (x_i^2=x_i) are enforced."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_apply_phase_oracle",
+        "explanation": "Diagonal phase oracle: empty S gives global phase pi, |S|=1 gives Z, |S|=2 gives CZ, |S|>=3 gives a multi-controlled phase of pi (CCZ for 3). The coefficients are compiled into gates, not queried from a black box."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit (H layer, oracle, H layer)",
+        "explanation": "H^n O_g H^n applied to the runner-provided input gives the Walsh transform. For input |0^n> the state is sum_s F^(s)|s>."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Degree reduction of discrete derivatives is the motivation for using D_a f. It is not computed in the code. The multilinear d=2 case has D_{e_i}f = c_i + sum_{j!=i} c_ij x_j."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit (branch for direction != 0)",
+        "explanation": "Derivative phase oracle O_f X^a O_f X^a, applied as O_f, then X^a, O_f, X^a on the set bits of the direction mask a."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Corrected the description of the derivative for multilinear f: D_{e_i}f(x) = c_i + sum_{j!=i} c_ij x_j. The 'c_ii-type terms' mentioned in the specification do not exist for multilinear f.",
+        "reason": "For x_i*m with m independent of x_i, (x_i+1)m + x_i m = m, so the x_i-dependence cancels and no square terms arise."
+      },
+      {
+        "equation_ids": [
+          "eq_5",
+          "eq_3"
+        ],
+        "change": "Noted that in the derivative circuit the constant term c_0 cancels exactly, since the phase (-1)^{c_0} appears twice. The constant of D_a f (e.g. c_i) is itself a global sign of the derivative's Walsh state.",
+        "reason": "Clarifies the specification's remark about the constant being only a global phase."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to one parametrized operation: H^n O_g H^n with g=f or g=D_a f. The full multi-run decoding, the linear/constant coefficient extraction and the paper's query-efficient exact algorithm are not built. n is generalized from 3 to any n<=12 with d<=n, and q is fixed at 2.",
+        "reason": "The specification states that the paper's algorithm and coefficient recovery are missing. A single measurement-free unitary is required."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Qubit and variable indices are 0-based in code: qubit i corresponds to variable x_{i+1}.",
+        "reason": "Matches the Qiskit convention that qubit 0 is the least significant bit."
+      }
+    ],
+    "assumptions": [
+      "Coefficients are explicit classical parameters of the instance; the oracle is hard-coded for functional simulation, not a black box",
+      "direction=0 means the plain Walsh transform of f; direction a != 0 means the Walsh transform of D_a f",
+      "q=2 and the multilinear form (no repeated variables in a monomial)",
+      "Input state is prepared by the runner, e.g. |0^n>",
+      "The global phase from the constant monomial is tracked via circuit global_phase"
+    ],
+    "unresolved_issues": [
+      "The paper's exact O(n^(d-1))-query algorithm is not reconstructed",
+      "Recovery of the linear and constant coefficients from phase-only outputs is not provided",
+      "Query counting and optimality are out of scope",
+      "No general q or d>n handling"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 22,
+    "depth": 11,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

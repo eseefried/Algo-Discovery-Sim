@@ -1,0 +1,148 @@
+{
+  "backend": "anthropic",
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "6c42ff45-f811-443a-ace0-1d799cec99ef",
+  "parent_run_id": "a605b6e7-34fd-45a1-94d8-e04d1c39dc05",
+  "created_at": "2026-11-01T15:34:37.523467+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "767c5e4863887267eaca38ae14a85a7eb7fa30ce42ec24c93e932a05dfbbe400",
+  "source_specification_sha256": "373b20f9a41f955a89217a80dd8140748a485457e94fa8e58afafc64bcc223c9",
+  "source_python_sha256": "09b1fb3c91c85479a88ff156eda85ab24460e262337142b193de325972217900",
+  "elapsed_seconds": 53.279,
+  "usage": {
+    "input_tokens": 5868,
+    "output_tokens": 7071,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Measurement-free derivative-based Bernstein-Vazirani circuit that exactly encodes all coefficients of a multilinear F_2 polynomial (n<=3, d<=2) into a computational basis state. Each block i uses an ancilla and a register for the other variables, and applies two restricted phase-oracle calls (x_i=1, then x_i=0) between Hadamard layers. A constant block reads c_0. To meet the 12-qubit cap, the z register and the unused x_i qubit in each block were removed, giving n^2+1 qubits (10 for n=3). Not query-optimal.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    d = instance.get('d')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 3:\n        raise ValueError('n must be an integer in 1..3')\n    if isinstance(d, bool) or not isinstance(d, int) or d < 1 or d > 2:\n        raise ValueError('d must be 1 or 2')\n    coeffs = instance.get('coefficients')\n    if not isinstance(coeffs, dict):\n        raise ValueError('coefficients must be a dict')\n    mons = {}\n    for key, val in coeffs.items():\n        if not isinstance(key, str) or key == '':\n            raise ValueError('bad coefficient key')\n        if isinstance(val, bool):\n            val = int(val)\n        if val not in (0, 1) or not isinstance(val, int):\n            raise ValueError('coefficients must be 0 or 1')\n        if key == '0':\n            S = ()\n        else:\n            if not key.isdigit():\n                raise ValueError('bad coefficient key')\n            S = tuple(int(ch) for ch in key)\n            if len(S) > d:\n                if val:\n                    raise ValueError('monomial degree exceeds d')\n            for a, b in zip(S, S[1:]):\n                if a >= b:\n                    raise ValueError('monomial indices must be strictly increasing')\n            if any(j < 1 or j > n for j in S):\n                raise ValueError('variable index out of range')\n        if S in mons:\n            raise ValueError('duplicate key')\n        mons[S] = val\n    return n, d, mons\n\n\ndef _phase(qc, qs):\n    # multi-controlled Z on the listed qubits (phase -1 iff all are 1)\n    k = len(qs)\n    if k == 1:\n        qc.z(qs[0])\n    elif k == 2:\n        qc.cz(qs[0], qs[1])\n    elif k == 3:\n        qc.ccz(qs[0], qs[1], qs[2])\n    else:\n        raise ValueError('unsupported monomial size')\n\n\ndef _restricted_oracle(qc, ctrl, qmap, mons, i, val):\n    # eq_2: controlled phase oracle C-O_f with x_i fixed to val (val in {0,1});\n    # each monomial prod_{j in S} x_j becomes a (multi-)controlled Z.\n    for S, c in mons.items():\n        if not c:\n            continue\n        if i in S:\n            if val == 0:\n                continue\n            rest = [j for j in S if j != i]\n        else:\n            rest = list(S)\n        _phase(qc, [ctrl] + [qmap[j] for j in rest])\n\n\ndef build_circuit(instance):\n    \"\"\"Derivative-BV identification of a multilinear F_2 polynomial (n<=3, d<=2).\n\n    Layout: block i (1..n) occupies qubits (i-1)*n .. i*n-1: first the ancilla a_i,\n    then the variables j != i ascending. Final qubit n*n is a0.\n    \"\"\"\n    n, d, mons = _parse(instance)\n    nq = n * n + 1\n    if nq > 12:\n        raise ValueError('too many qubits')\n    qr = QuantumRegister(nq, 'q')\n    qc = QuantumCircuit(qr)\n    a0 = n * n\n    blocks = []\n    for i in range(1, n + 1):\n        base = (i - 1) * n\n        others = [j for j in range(1, n + 1) if j != i]\n        qmap = {j: base + 1 + others.index(j) for j in others}\n        blocks.append((i, base, qmap))\n    # input layer: H on ancillas and x registers\n    for i, base, qmap in blocks:\n        qc.h(base)\n        for q in qmap.values():\n            qc.h(q)\n    qc.h(a0)\n    # eq_3/eq_4: derivative phase (-1)^{b D_i f(x)} = C-O_f(x_i=1) * C-O_f(x_i=0)\n    for i, base, qmap in blocks:\n        _restricted_oracle(qc, base, qmap, mons, i, 1)\n        _restricted_oracle(qc, base, qmap, mons, i, 0)\n    # eq_5: C-O_f on fixed |0..0> gives phase (-1)^{b c_0} on the control only\n    if mons.get((), 0):\n        qc.z(a0)\n    # output layer\n    for i, base, qmap in blocks:\n        qc.h(base)\n        for q in qmap.values():\n            qc.h(q)\n    qc.h(a0)\n    return qc",
+    "example_instance_json": "{\"n\":3,\"d\":2,\"coefficients\":{\"0\":1,\"1\":0,\"2\":1,\"3\":1,\"12\":1,\"13\":0,\"23\":1}}",
+    "register_layout": [
+      "Single register q of n^2+1 qubits (n=3: 10 qubits); qubit 0 is least significant",
+      "Block i (1..n) starts at base=(i-1)*n: qubit base = ancilla a_i, output c_i",
+      "Block i qubits base+1.. hold the variables j != i in ascending order; output bit is c_ij",
+      "n=3: q0=a1, q1=x1[x_2] (c_12), q2=x1[x_3] (c_13)",
+      "n=3: q3=a2, q4=x2[x_1] (c_12), q5=x2[x_3] (c_23)",
+      "n=3: q6=a3, q7=x3[x_1] (c_13), q8=x3[x_2] (c_23)",
+      "q9 (index n^2)=a0, output c_0",
+      "Encoding: output is a computational basis state with c_i, c_ij as bits; c_ij appears redundantly in blocks i and j",
+      "Input state: all |0>; the circuit prepares the Hadamard inputs itself, as in the spec"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_parse (coefficient dict over monomials S, validation) and monomial loop in _restricted_oracle",
+        "explanation": "Coefficients c_S of the multilinear polynomial are parsed as classical build parameters. Each monomial with c_S=1 is compiled into a phase gate."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_restricted_oracle and _phase",
+        "explanation": "Controlled phase oracle compiled as Z/CZ/CCZ on the control and monomial variables, with x_i fixed to a constant in the derivative blocks."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit derivative loop (two _restricted_oracle calls with val=1 then val=0)",
+        "explanation": "The derivative f(x+e_i)+f(x) is realized as the product of the oracle with x_i=1 and the oracle with x_i=0. Terms without x_i cancel, leaving c_i + sum_j c_ij x_j."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: H layers around the derivative loop",
+        "explanation": "Controlled-derivative BV block per direction i. H, then the phase (-1)^{b D_i f(x)}, then H gives |c_i>|l^(i)>. The x_i qubit is omitted because D_i f does not depend on x_i."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: 'if mons.get((),0): qc.z(a0)' between H on a0",
+        "explanation": "With the z register fixed to |0..0>, the controlled oracle reduces to Z on a0 when c_0=1, and H Z H reads c_0. The z register is elided to save qubits."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Removed the z register (3 qubits). The controlled oracle on |000> is replaced by Z on a0 when c_0=1.",
+        "reason": "The spec's 16 qubits exceed the 12-qubit cap. A controlled oracle acting on a fixed |0...0> register is exactly a phase on the control, so this is the same operation."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Each x_i register has n-1 qubits (variables j != i only), not n. The derivative is compiled as two restricted oracle calls with x_i fixed to 1 and 0, instead of oracle, X_i, oracle, X_i on a full register.",
+        "reason": "D_i f does not depend on x_i, so the x_i qubit is unnecessary. This reduces the qubit count to n^2+1 (10 for n=3), within the cap."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "The builder accepts n in {1,2,3} and d in {1,2} with q=2. Coefficients come from the instance dict (keys '0','1','12',...). Nonzero coefficients above degree d are rejected. The spec fixed n=3, d=2.",
+        "reason": "Parametrization requirement; the 12-qubit cap limits n to at most 3."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Register layout and output decoding change: c_ij is read from the x_i block position of variable j instead of the spec's 1-indexed x_i[j] with an unused diagonal qubit.",
+        "reason": "Consequence of removing the unused x_i qubit."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "No query-complexity claim. The scheme uses naive derivative blocks, not the paper's O(n^(d-1)) exact algorithm.",
+        "reason": "The paper's construction is not given in the abstract; this follows the spec's declared narrow scope."
+      }
+    ],
+    "assumptions": [
+      "q=2, multilinear polynomial of degree at most d<=2, coefficients classical in {0,1}",
+      "Coefficient keys are digit strings of strictly increasing variable indices, with '0' for the constant",
+      "Variable j of the polynomial is x_j for j=1..n",
+      "Missing coefficient keys are treated as 0",
+      "The Hadamard input preparation is part of the operation, as in the spec"
+    ],
+    "unresolved_issues": [
+      "The paper's optimal exact quantum algorithm is not implemented",
+      "No general q or d",
+      "The oracle is compiled from explicit coefficients, so it is not a black-box query model and queries are not certified"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 10,
+    "gate_count": 133,
+    "depth": 35,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

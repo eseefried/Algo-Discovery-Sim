@@ -1,0 +1,109 @@
+{
+  "backend": "anthropic",
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "072ee5cc-cc1d-491d-bee6-8a14f245218b",
+  "parent_run_id": "17e2d022-b9b1-45a6-b5d5-711f63d82316",
+  "created_at": "2026-11-01T15:55:08.259266+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "d8d7bc27c86f9eb509fcfaa3adc86cfef66e73228f38ba489446f0b0ed19a62e",
+  "source_specification_sha256": "1dc8cf9b36e4813583f986fd278ee4f10a4dfb0be126b13c2d7ad4b067fe1037",
+  "source_python_sha256": "2aaa1d9f22f18027b5bfb2c1bd71921a65287a74ac5f44037c0b456998653c12",
+  "elapsed_seconds": 22.334,
+  "usage": {
+    "input_tokens": 4211,
+    "output_tokens": 3378,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Single-qubit circuit for the ideal piecewise-constant singlet-triplet evolution U = prod exp(-i H_k tau_k) with H_k = (J_k/2) Z + (h/2) X. Each segment is compiled exactly as a rotation about the axis (h,0,J)/sqrt(J^2+h^2) using Ry(beta) Rz(theta) Ry(-beta). Segments are appended in time order. The pulses are user-supplied placeholders and are not claimed to cancel errors.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit\n\n\ndef _num(x, name):\n    if isinstance(x, bool) or not isinstance(x, (int, float)):\n        raise ValueError(name + \" must be a real number\")\n    x = float(x)\n    if not math.isfinite(x):\n        raise ValueError(name + \" must be finite\")\n    return x\n\n\ndef build_circuit(instance):\n    \"\"\"Ideal piecewise-constant evolution, H_k=(J_k/2)Z+(h/2)X (eq_1, eq_2).\n\n    instance: {\"h\": float>0, \"J_max\": float>0, \"segments\": [[J_k, tau_k], ...]}\n    with 0<=J_k<=J_max, tau_k>=0, 1..64 segments.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    h = _num(instance.get(\"h\"), \"h\")\n    jmax = _num(instance.get(\"J_max\"), \"J_max\")\n    if h <= 0.0:\n        raise ValueError(\"h must be positive\")\n    if jmax <= 0.0:\n        raise ValueError(\"J_max must be positive\")\n    segs = instance.get(\"segments\")\n    if not isinstance(segs, (list, tuple)) or len(segs) < 1 or len(segs) > 64:\n        raise ValueError(\"segments must be a list of 1..64 pairs\")\n    parsed = []\n    for seg in segs:\n        if not isinstance(seg, (list, tuple)) or len(seg) != 2:\n            raise ValueError(\"each segment must be [J, tau]\")\n        j = _num(seg[0], \"J\")\n        tau = _num(seg[1], \"tau\")\n        if j < 0.0 or j > jmax:\n            raise ValueError(\"J must lie in [0, J_max]\")\n        if tau < 0.0:\n            raise ValueError(\"tau must be nonnegative\")\n        parsed.append((j, tau))\n    qc = QuantumCircuit(1, name=\"st_piecewise\")\n    # eq_2: segments are applied in time order, so later segments multiply on the left\n    for j, tau in parsed:\n        omega = math.hypot(j, h)\n        theta = omega * tau\n        beta = math.atan2(h, j)  # Ry(beta) maps z axis to (h,0,J)/omega\n        # exp(-i H tau) = Ry(beta) Rz(theta) Ry(-beta); H is traceless so no global phase\n        qc.ry(-beta, 0)\n        qc.rz(theta, 0)\n        qc.ry(beta, 0)\n    return qc",
+    "example_instance_json": "{\"h\": 1.0, \"J_max\": 5.0, \"segments\": [[0.0, 3.141592653589793], [2.0, 1.0], [0.5, 0.75]]}",
+    "register_layout": [
+      "qubit 0: singlet-triplet logical qubit; |0> and |1> are the sigma_z eigenstates (Qiskit little-endian, single qubit)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: per-segment omega=hypot(J,h), beta=atan2(h,J) define H_k=(J_k/2)Z+(h/2)X",
+        "explanation": "Each segment Hamiltonian is realized through its axis and angle; sigma_z is Qiskit Z and sigma_x is Qiskit X."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop over segments appending ry(-beta), rz(theta), ry(beta) in time order",
+        "explanation": "Exact exponential of each segment, with the ordered product giving later segments on the left in matrix form."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The first-order error vectors E_h and E_J are classical diagnostics for pulse design and are not part of the circuit. The J'(J) coupling is also undefined in the specification."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Scope narrowed to the ideal noiseless unitary for user-supplied pulses; no pulse search is performed and no pulse values are hardcoded in the module.",
+        "reason": "The abstract gives no explicit sequences or search constraints. The example pulses are placeholders and are not claimed to cancel errors."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Error-vector cancellation is not implemented or checked in the circuit.",
+        "reason": "This is classical post-processing, and J'(J) is not defined."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Added input validation: h>0, J_max>0, 0<=J_k<=J_max, tau_k>=0, and at most 64 segments.",
+        "reason": "These bounds enforce the physical constraints and keep the circuit size bounded."
+      }
+    ],
+    "assumptions": [
+      "Energies and times are in consistent units with hbar=1.",
+      "sigma_z maps to Z and sigma_x to X.",
+      "The first segment is applied first in time.",
+      "The example pulses are placeholders, not an error-cancelling sequence."
+    ],
+    "unresolved_issues": [
+      "Explicit dynamically corrected pulse sequences are not given in the abstract.",
+      "The control-noise coupling J'(J) is undefined.",
+      "Noise spectra and fidelity values are unknown.",
+      "Non-Markovian bath effects and the universal gate set are not implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 1,
+    "gate_count": 9,
+    "depth": 9,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

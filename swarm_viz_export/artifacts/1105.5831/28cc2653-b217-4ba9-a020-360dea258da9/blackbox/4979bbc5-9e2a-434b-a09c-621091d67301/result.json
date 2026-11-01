@@ -1,0 +1,124 @@
+{
+  "backend": "anthropic",
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "4979bbc5-9e2a-434b-a09c-621091d67301",
+  "parent_run_id": "43678126-4368-4799-b3c5-d819f2925e97",
+  "created_at": "2026-11-01T15:42:47.998693+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "793026604c206ee74f6acab50c8d9e6514a3d7ef42a7dda534384e3aca07b9e2",
+  "source_specification_sha256": "b6b71d569742b5df7c410ad032ec83829ed0159f6b699cc6bc06cde886bfa067",
+  "source_python_sha256": "8deeb79089d2480eeec8bcd72198b69ddd6b897f58a079583c27b3fc8314d44d",
+  "elapsed_seconds": 35.128,
+  "usage": {
+    "input_tokens": 5286,
+    "output_tokens": 5209,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "build_circuit(instance) reads an explicit 4-bit permutation pi, runs a classical bucket-based Dijkstra (Dial's algorithm) over S_16 with the 32-gate NOT/CNOT/TOF3/TOF4 library (costs 1/1/5/13) to find a minimum-quantum-cost network, and compiles it to x/cx/ccx/mcx gates on 4 qubits. The circuit is the permutation unitary U_pi: |x> -> |pi(x)>, little-endian, with no ancillas, measurements or state preparation.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _gate_library():\n    # eq_1 (Toffoli maps as permutations) and eq_3 (costs 1/1/5/13)\n    lib = []\n    for t in range(4):\n        others = [i for i in range(4) if i != t]\n        for m in range(8):\n            ctrl = tuple(others[j] for j in range(3) if (m >> j) & 1)\n            cost = {0: 1, 1: 1, 2: 5, 3: 13}[len(ctrl)]\n            perm = tuple((x ^ (1 << t)) if all((x >> c) & 1 for c in ctrl) else x for x in range(16))\n            lib.append((ctrl, t, cost, perm))\n    return lib\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    pi = instance.get('pi')\n    if not isinstance(pi, (list, tuple)) or len(pi) != 16:\n        raise ValueError('pi must be a list of 16 integers')\n    for v in pi:\n        if isinstance(v, bool) or not isinstance(v, int):\n            raise ValueError('pi entries must be integers')\n    if sorted(pi) != list(range(16)):\n        raise ValueError('pi must be a permutation of 0..15')\n    mc = instance.get('max_cost', 13)\n    if isinstance(mc, bool) or not isinstance(mc, int) or mc < 0 or mc > 16:\n        raise ValueError('max_cost must be an integer in 0..16')\n    return tuple(pi), mc\n\n\ndef _search(target, max_cost):\n    # eq_4: Dijkstra from identity with integer edge weights (bucket queue), pruned at max_cost\n    lib = _gate_library()\n    ident = tuple(range(16))\n    dist = {ident: 0}\n    pred = {}\n    buckets = {0: [ident]}\n    settled = set()\n    found = False\n    for c in range(max_cost + 1):\n        for s in buckets.get(c, []):\n            if s in settled or dist[s] != c:\n                continue\n            settled.add(s)\n            if s == target:\n                found = True\n                break\n            for gi in range(len(lib)):\n                gp = lib[gi][3]\n                nc = c + lib[gi][2]\n                if nc > max_cost:\n                    continue\n                ns = tuple(gp[v] for v in s)  # g o sigma\n                if ns not in dist or nc < dist[ns]:\n                    dist[ns] = nc\n                    pred[ns] = (s, gi)\n                    buckets.setdefault(nc, []).append(ns)\n        if found:\n            break\n    if not found:\n        raise ValueError('no network with cost <= max_cost realizes pi')\n    seq = []\n    cur = target\n    while cur != ident:\n        prev, gi = pred[cur]\n        seq.append(lib[gi])\n        cur = prev\n    seq.reverse()  # G_1 first\n    return seq\n\n\ndef build_circuit(instance):\n    \"\"\"Build U_pi = G_k...G_1 (eq_2) from a QC-minimal network found by classical search.\"\"\"\n    pi, max_cost = _parse(instance)\n    seq = _search(pi, max_cost)\n    q = QuantumRegister(4, 'q')\n    qc = QuantumCircuit(q)\n    for ctrl, t, cost, perm in seq:\n        if len(ctrl) == 0:\n            qc.x(q[t])\n        elif len(ctrl) == 1:\n            qc.cx(q[ctrl[0]], q[t])\n        elif len(ctrl) == 2:\n            qc.ccx(q[ctrl[0]], q[ctrl[1]], q[t])\n        else:\n            qc.mcx([q[c] for c in ctrl], q[t])\n    return qc",
+    "example_instance_json": "{\"pi\": [0,1,2,7,4,5,6,3,8,9,10,15,12,13,14,11], \"max_cost\": 8}",
+    "register_layout": [
+      "q0 = bit 0 of x (least significant)",
+      "q1 = bit 1 of x",
+      "q2 = bit 2 of x",
+      "q3 = bit 3 of x (most significant)",
+      "No ancilla qubits; total 4 qubits; basis state |x> maps to |pi(x)> (little-endian)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_gate_library",
+        "explanation": "Each of the 32 NOT/CNOT/TOF3/TOF4 placements is defined as a permutation of {0..15} that flips the target bit when all controls are 1."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit (gate compilation loop, G_1 appended first)",
+        "explanation": "The network found for pi is compiled to x/cx/ccx/mcx in order, giving U_pi = G_k...G_1 with little-endian qubit indexing."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_gate_library (cost field) and _search (edge weights)",
+        "explanation": "Costs 1/1/5/13 are used as Dijkstra edge weights, so the total network cost is additive."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_search",
+        "explanation": "Dial's bucket-queue Dijkstra from the identity with relaxation sigma' = g o sigma, stopping when pi is settled and recovering the network via predecessor links. It is pruned at max_cost."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The saving percentage compares against a baseline network and is classical post-processing that is not part of the circuit. No baseline is accepted."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Added a required-bounded search parameter max_cost (default 13, at most 16). The search is pruned at that cost and raises ValueError if pi is not reachable within it. Dijkstra uses an integer bucket queue (Dial's algorithm) rather than a heap.",
+        "reason": "The full S_16 space is infeasible to enumerate, and heapq is not an allowed import. Costs are small integers, so buckets are exact."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The saving percentage and the optional baseline network input are dropped from the implementation.",
+        "reason": "They are not part of the unitary operation, and the builder must return only a circuit."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The rejected majority-like Toffoli expression is not used. The Toffoli map is c XOR ab (and d XOR abc for TOF4).",
+        "reason": "Consistent with the specification's correction."
+      }
+    ],
+    "assumptions": [
+      "Gate costs are NOT=CNOT=1, TOF3=5, TOF4=13 (convention).",
+      "Little-endian encoding: qubit i holds bit i of x.",
+      "The search is a stand-in for the paper's gate-count-optimal tool.",
+      "Minimality holds only within the 32-gate library and within the max_cost bound.",
+      "The search is classical preprocessing at build time. Larger-cost permutations may be slow because the reachable state count grows quickly, so small max_cost and low-cost pi are intended."
+    ],
+    "unresolved_issues": [
+      "The internals of the paper's optimal synthesis tool and its exact cost model are unknown.",
+      "The paper's benchmarks and the 74% saving claim are not reproduced.",
+      "Runtime of the in-builder search for high-cost permutations is not guaranteed to be small."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 15,
+    "depth": 11,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,124 @@
+{
+  "backend": "anthropic",
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "861d8f33-5b9f-4d0b-b5b2-0f253ab96a73",
+  "parent_run_id": "ac8f08de-82d6-4e5c-9d80-6e7a457cc1a6",
+  "created_at": "2026-11-01T15:56:57.998910+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "cfe6024a7072139e789366eaa1a688761e7c6afe1ef0ae298207b1febcf7ab7b",
+  "source_specification_sha256": "a9c38402c214c179d31c7800ea97fa6d843e83472a7172a858244abbb43c6754",
+  "source_python_sha256": "5b486e8517241bea4d2fa665ea063f0680799d017641b3eabe466d9f5a4e6521",
+  "elapsed_seconds": 38.257,
+  "usage": {
+    "input_tokens": 5234,
+    "output_tokens": 5561,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the unitary product U_{w_T}...U_{w_1} for a coined Hadamard walk on a 4-cycle, with one classical edge mask per step compiled into gates. Each step applies H on the coin, then the reflecting shift S_w as a basis-state permutation built from CX and multi-controlled X gates. This is a single mask-sequence trajectory, not the ensemble channel. Input-state preparation is left to the runner.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _perm(mask):\n    perm = [0] * 8\n    for x in range(4):\n        for c in (0, 1):\n            s = x + 4 * c\n            if c == 1:\n                t = (x + 1) % 4 + 4 if mask[x] else x\n            else:\n                t = (x - 1) % 4 if mask[(x - 1) % 4] else x + 4\n            perm[s] = t\n    return perm\n\n\ndef _swap_states(qc, a, b):\n    diff = a ^ b\n    t = (diff & -diff).bit_length() - 1\n    others = [d for d in range(3) if d != t and (diff >> d) & 1]\n    ap = a\n    for d in others:\n        if (a >> t) & 1:\n            ap ^= (1 << d)\n    controls = [q for q in range(3) if q != t]\n    zeros = [q for q in controls if not (ap >> q) & 1]\n    for d in others:\n        qc.cx(t, d)\n    for q in zeros:\n        qc.x(q)\n    qc.mcx(controls, t)\n    for q in zeros:\n        qc.x(q)\n    for d in reversed(others):\n        qc.cx(t, d)\n\n\ndef _parse_masks(instance):\n    if not isinstance(instance, dict) or 'masks' not in instance:\n        raise ValueError('instance must be a dict with key masks')\n    masks = instance['masks']\n    if not isinstance(masks, (list, tuple)) or len(masks) < 1 or len(masks) > 32:\n        raise ValueError('masks must be a list of 1..32 masks')\n    parsed = []\n    for m in masks:\n        if not isinstance(m, (list, tuple)) or len(m) != 4:\n            raise ValueError('each mask must have 4 entries')\n        row = []\n        for v in m:\n            if isinstance(v, bool):\n                row.append(int(v))\n            elif isinstance(v, int) and v in (0, 1):\n                row.append(v)\n            else:\n                raise ValueError('mask entries must be 0 or 1')\n        parsed.append(row)\n    return parsed\n\n\ndef build_circuit(instance):\n    \"\"\"Qubits: pos0,pos1 (x=x0+2*x1) then coin (0=L,1=R). Per step: H on coin, then shift S_w.\"\"\"\n    parsed = _parse_masks(instance)\n    pos = QuantumRegister(2, 'pos')\n    coin = QuantumRegister(1, 'coin')\n    qc = QuantumCircuit(pos, coin)\n    for mask in parsed:\n        qc.h(2)\n        perm = _perm(mask)\n        seen = [False] * 8\n        for s in range(8):\n            if seen[s]:\n                continue\n            cyc = [s]\n            seen[s] = True\n            n = perm[s]\n            while n != s:\n                cyc.append(n)\n                seen[n] = True\n                n = perm[n]\n            for j in range(1, len(cyc)):\n                _swap_states(qc, cyc[0], cyc[j])\n    return qc",
+    "example_instance_json": "{\"masks\": [[1,1,1,1],[1,0,1,1],[0,1,1,0]]}",
+    "register_layout": [
+      "qubit 0: pos bit 0 (least significant bit of x)",
+      "qubit 1: pos bit 1 (x = q0 + 2*q1)",
+      "qubit 2: coin (0=L, 1=R)",
+      "basis index = x + 4*coin; edge e joins sites e and e+1 mod 4; input state is prepared by the runner"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_perm (permutation for S_w) and _swap_states; coin H applied in build_circuit",
+        "explanation": "Step unitary U_w = S_w (I x H) with reflection at closed edges. The shift permutation is compiled into transpositions of basis states, each built from CX and multi-controlled X gates."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop over masks",
+        "explanation": "The ordered product of step unitaries for the supplied mask sequence. Initial-state preparation |x=0>|+> is excluded because the runner prepares inputs."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The mask-averaged random unitary channel is not a unitary circuit. Only individual trajectories are built, and averaging over masks is classical."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Peripheral-spectrum asymptotics of random unitary channels, recalled background computed classically. It is not implemented in the circuit."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Position distributions and Monte Carlo averaging are measurement and post-processing, which the circuit module excludes."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The coin Hadamard state preparation of |+> is omitted from the circuit. The circuit implements only the unitary product U_{w_T}...U_{w_1}.",
+        "reason": "build_circuit must return an operation with no input preparation. The runner supplies |x=0>|+>."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Mask sequences are passed as instance parameter 'masks' (T = length, 1..32). The mask for each step is fixed classically rather than random.",
+        "reason": "The circuit must be a bound unitary, so it realizes one trajectory."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to a single trajectory. The ensemble channel, attractor analysis and averaging are not part of the circuit.",
+        "reason": "The random unitary channel is non-unitary and cannot be built as a unitary circuit."
+      }
+    ],
+    "assumptions": [
+      "The 4-cycle, Hadamard coin and reflecting closed-edge rule are choices of the reconstruction, as stated in the specification.",
+      "Mask entries are 0/1 or booleans, with 1 meaning the edge is open.",
+      "The 3-qubit permutation is decomposed into basis-state transpositions using CX conjugation and multi-controlled X gates."
+    ],
+    "unresolved_issues": [
+      "The paper's actual shift and coin definitions for chains are unknown.",
+      "The paper's asymptotic formulas and numerical example are not reproduced.",
+      "The 2D Grover-coin lattice results are out of scope."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 368,
+    "depth": 247,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

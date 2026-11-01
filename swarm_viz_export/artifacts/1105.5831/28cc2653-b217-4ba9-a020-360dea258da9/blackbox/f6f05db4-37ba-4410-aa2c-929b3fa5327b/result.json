@@ -1,0 +1,132 @@
+{
+  "backend": "anthropic",
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "f6f05db4-37ba-4410-aa2c-929b3fa5327b",
+  "parent_run_id": "a76f8a93-96db-4c1f-9130-8f0c466693aa",
+  "created_at": "2026-11-01T15:41:44.604738+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "08843b11521fa71f1fb7ba530698b130dc00147bcfee4c02d7a0a149f0773d6a",
+  "source_specification_sha256": "cdf868be876e83da0397e4d804dcb0f08f9407d30787127524628e3ba1257669",
+  "source_python_sha256": "70089be94a2e4b3563c23b278150472baf0eefeb17496f0e0837fe1b4b28a696",
+  "elapsed_seconds": 27.365,
+  "usage": {
+    "input_tokens": 4682,
+    "output_tokens": 4021,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "build_circuit compiles an explicit Toffoli network (NOT, CNOT, TOF3, TOF4) on up to 12 little-endian qubits into a measurement-free circuit of x, cx, ccx and mcx gates. It realizes U_pi = G_k...G_1, and it validates the network and computes its quantum cost with the standard cost table (1, 1, 5, 13). The Dijkstra min-QC search over S_16 is not implemented in the circuit module. It would be a classical offline step, and the network it produces is passed in as the instance.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _gate_cost(num_controls):\n    # eq_3: standard quantum cost qc(g): NOT=1, CNOT=1, TOF3=5, TOF4=13\n    if num_controls == 0 or num_controls == 1:\n        return 1\n    if num_controls == 2:\n        return 5\n    if num_controls == 3:\n        return 13\n    raise ValueError(\"unsupported gate size\")\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef build_circuit(instance):\n    \"\"\"Compile a Toffoli network to a unitary circuit.\n\n    instance: {\"num_qubits\": int in 1..12,\n               \"gates\": [{\"controls\": [ints, at most 3], \"target\": int}, ...],\n               optional \"max_qc\": int}\n    gates[0] is applied first (G_1).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"num_qubits\")\n    if not _is_int(n) or n < 1 or n > 12:\n        raise ValueError(\"num_qubits must be an integer in 1..12\")\n    gates = instance.get(\"gates\")\n    if not isinstance(gates, list) or len(gates) > 500:\n        raise ValueError(\"gates must be a list of at most 500 gates\")\n    parsed = []\n    total_cost = 0\n    for g in gates:\n        if not isinstance(g, dict):\n            raise ValueError(\"each gate must be a dict\")\n        ctrls = g.get(\"controls\")\n        tgt = g.get(\"target\")\n        if not isinstance(ctrls, list) or len(ctrls) > 3:\n            raise ValueError(\"controls must be a list of at most 3 indices\")\n        if not _is_int(tgt):\n            raise ValueError(\"target must be an integer\")\n        idx = list(ctrls) + [tgt]\n        for q in idx:\n            if not _is_int(q) or q < 0 or q >= n:\n                raise ValueError(\"qubit index out of range\")\n        if len(set(idx)) != len(idx):\n            raise ValueError(\"gate qubits must be distinct\")\n        if len(ctrls) == 3 and n < 4:\n            raise ValueError(\"too few qubits\")\n        total_cost += _gate_cost(len(ctrls))\n        parsed.append((list(ctrls), tgt))\n    max_qc = instance.get(\"max_qc\")\n    if max_qc is not None:\n        if not _is_int(max_qc) or max_qc < 0:\n            raise ValueError(\"max_qc must be a non-negative integer\")\n        if total_cost > max_qc:\n            raise ValueError(\"network quantum cost exceeds max_qc\")\n    # eq_1 / eq_2: qubit q_i holds bit i (little-endian); U = G_k ... G_1\n    qc = QuantumCircuit(QuantumRegister(n, \"q\"))\n    for ctrls, tgt in parsed:\n        k = len(ctrls)\n        if k == 0:\n            qc.x(tgt)\n        elif k == 1:\n            qc.cx(ctrls[0], tgt)\n        elif k == 2:\n            qc.ccx(ctrls[0], ctrls[1], tgt)\n        else:\n            qc.mcx(ctrls, tgt)\n    return qc",
+    "example_instance_json": "{\"num_qubits\":4,\"gates\":[{\"controls\":[0],\"target\":1},{\"controls\":[0,1],\"target\":2},{\"controls\":[0,1,2],\"target\":3},{\"controls\":[],\"target\":0}],\"max_qc\":40}",
+    "register_layout": [
+      "q0 = bit 0 (least significant) of x",
+      "q1 = bit 1 of x",
+      "q2 = bit 2 of x",
+      "q3 = bit 3 of x (most significant for the 4-bit example)",
+      "Register q has num_qubits qubits (up to 12), little-endian; no ancillas; computational basis |x> maps to |pi(x)>"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (little-endian register q; comment 'eq_1 / eq_2')",
+        "explanation": "The circuit's unitary is the permutation unitary of the compiled network, with qubit q_i holding bit i. pi is determined by the network and is not given as an explicit table."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit gate-appending loop",
+        "explanation": "Gates are appended in list order, so gates[0] is G_1 and the total unitary is G_k...G_1."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_gate_cost and the total_cost accumulation / max_qc check in build_circuit",
+        "explanation": "Standard costs 1/1/5/13 are summed over the network. The sum is used only to enforce the optional max_qc bound, and it does not change the circuit."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The Dijkstra search over the Cayley graph of S_16 is a classical offline optimization and is not a quantum operation. It is infeasible to run inside a generator that must validate and build quickly, so the minimal network must be supplied as input."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The saving percentage is classical post-processing comparing costs, with no circuit content."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The circuit module takes an explicit gate network as input instead of searching for a min-QC network for a target permutation. The synthesis step is moved out of the module.",
+        "reason": "Exact search over S_16 cannot be run within the module (it is a classical computation and the state space is about 2e13), and the module must be a pure operation builder."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "pi is not given as an input table. It is defined implicitly by the network, and no check is made that the network equals a particular target permutation.",
+        "reason": "Without an in-module synthesis step, the target permutation cannot be enforced, and checking it would require simulation."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The module accepts any number of qubits from 1 to 12, not only 4, and gates have at most 3 controls (NOT, CNOT, TOF3, TOF4).",
+        "reason": "This keeps the 4-bit library semantics and allows varied valid instances within the 12-qubit cap."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "TOF4 is compiled to a single ancilla-free mcx gate, and the quantum cost is the abstract table value, not the cost of the transpiled gates.",
+        "reason": "The cost model is a library-level quantity, not a Qiskit gate count."
+      }
+    ],
+    "assumptions": [
+      "Gate order: gates[0] is applied first.",
+      "Qiskit little-endian ordering: qubit i is bit i of x.",
+      "Standard quantum cost table NOT=CNOT=1, TOF3=5, TOF4=13.",
+      "The example network was chosen as an illustration and is not claimed to be optimal or taken from the paper."
+    ],
+    "unresolved_issues": [
+      "Internals of the paper's gate-count-optimal tool and its benchmark functions are unknown and not reproduced.",
+      "The paper's exact cost model is not known.",
+      "The offline min-QC search and the 74% saving figure are not reproduced."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 48,
+    "depth": 38,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

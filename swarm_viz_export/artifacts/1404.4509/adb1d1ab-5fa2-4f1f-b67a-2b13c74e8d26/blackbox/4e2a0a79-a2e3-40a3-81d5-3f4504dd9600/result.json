@@ -1,0 +1,131 @@
+{
+  "backend": "anthropic",
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "4e2a0a79-a2e3-40a3-81d5-3f4504dd9600",
+  "parent_run_id": "cc74bc6e-ee32-45ba-a736-160f4db2e1ca",
+  "created_at": "2026-11-01T15:58:32.525722+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "d0f632c017d9b5b14825c0cca360440d2c7e16f742014bb09df12a3549a8ce57",
+  "source_specification_sha256": "6062f7555866d787457e0959be269ffbbf3819b748909a078ac6cd8410b8934a",
+  "source_python_sha256": "9b6cd8605a7442756c7d8a6e3716fcbe3ec2bded3039df180235c9f24e039c93",
+  "elapsed_seconds": 43.018,
+  "usage": {
+    "input_tokens": 5904,
+    "output_tokens": 6292,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "build_circuit(instance) returns a 3-qubit unitary circuit for one fixed-mask trajectory of the coined Hadamard walk on a 4-cycle with reflecting closed edges. Each step applies H on the coin qubit and then the shift permutation for that step's classical edge mask. The permutation is compiled into CX and Toffoli gates by cycle decomposition into transpositions. The initial coin Hadamard from eq_3 is optional via the prepare_initial_coin flag. The random-unitary channel, peripheral analysis and Monte Carlo averaging are classical background or out of scope.",
+    "source_python": "from qiskit import QuantumCircuit\n\n_NQ = 3\n_MAX_STEPS = 64\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    masks = instance.get('masks')\n    if not isinstance(masks, (list, tuple)) or len(masks) < 1 or len(masks) > _MAX_STEPS:\n        raise ValueError('masks must be a list of 1..64 edge masks')\n    out = []\n    for m in masks:\n        if not isinstance(m, (list, tuple)) or len(m) != 4:\n            raise ValueError('each mask needs exactly 4 entries')\n        row = []\n        for v in m:\n            if isinstance(v, bool):\n                row.append(int(v))\n            elif isinstance(v, int) and v in (0, 1):\n                row.append(v)\n            else:\n                raise ValueError('mask entries must be 0 or 1')\n        out.append(row)\n    prep = instance.get('prepare_initial_coin', False)\n    if not isinstance(prep, bool):\n        raise ValueError('prepare_initial_coin must be a bool')\n    return out, prep\n\n\ndef _permutation(mask):\n    # eq_1: basis index s = x + 4c, c=0 is L, c=1 is R. Returns pi with S|s> = |pi[s]>.\n    pi = [0] * 8\n    for x in range(4):\n        if mask[x] == 1:\n            pi[x + 4] = ((x + 1) % 4) + 4\n        else:\n            pi[x + 4] = x\n        if mask[(x - 1) % 4] == 1:\n            pi[x] = (x - 1) % 4\n        else:\n            pi[x] = x + 4\n    if sorted(pi) != list(range(8)):\n        raise ValueError('shift is not a bijection')\n    return pi\n\n\ndef _transposition(qc, a, b):\n    # Swap basis states a and b (little-endian indices on 3 qubits).\n    diff = [k for k in range(_NQ) if ((a ^ b) >> k) & 1]\n    t = diff[0]\n    others = diff[1:]\n    a2 = a\n    for d in others:\n        if (a >> t) & 1:\n            a2 ^= (1 << d)\n    for d in others:\n        qc.cx(t, d)\n    ctrls = [k for k in range(_NQ) if k != t]\n    zeros = [k for k in ctrls if ((a2 >> k) & 1) == 0]\n    for k in zeros:\n        qc.x(k)\n    qc.ccx(ctrls[0], ctrls[1], t)\n    for k in zeros:\n        qc.x(k)\n    for d in reversed(others):\n        qc.cx(t, d)\n\n\ndef _apply_permutation(qc, pi):\n    # eq_2: forward map s -> pi[s]. Cycle (s0->s1->...->sk-1->s0) equals\n    # transpositions (s0 s1),(s0 s2),...,(s0 s_{k-1}) applied in that order.\n    seen = [False] * 8\n    for s in range(8):\n        if seen[s] or pi[s] == s:\n            seen[s] = True\n            continue\n        cyc = []\n        cur = s\n        while not seen[cur]:\n            seen[cur] = True\n            cyc.append(cur)\n            cur = pi[cur]\n        for i in range(1, len(cyc)):\n            _transposition(qc, cyc[0], cyc[i])\n\n\ndef build_circuit(instance):\n    masks, prep = _parse(instance)\n    qc = QuantumCircuit(_NQ, name='percolation_walk_trajectory')\n    if prep:\n        qc.h(2)  # eq_3 initial coin Hadamard: |x=0,c=0> -> |x=0,c=+>\n    for mask in masks:\n        qc.h(2)  # coin I_pos (x) H\n        _apply_permutation(qc, _permutation(mask))  # shift S_omega\n    return qc",
+    "example_instance_json": "{\"masks\": [[1,1,1,1],[1,0,1,1],[0,1,1,0]], \"prepare_initial_coin\": true}",
+    "register_layout": [
+      "qubit 0: position bit x0 (least significant)",
+      "qubit 1: position bit x1",
+      "qubit 2: coin c (0=L, 1=R)",
+      "basis index = x + 4*c (little-endian)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_permutation and build_circuit",
+        "explanation": "Coin H on qubit 2 followed by the shift S_omega as a basis permutation with reflection at closed edges, built from the classical mask for each step."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_apply_permutation and _transposition",
+        "explanation": "The circuit maps basis state s to pi(s) in the forward direction. Cycles are decomposed into ordered transpositions, each compiled with CX conjugation and a Toffoli with X-fixed control polarity."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop and the optional prepare_initial_coin branch",
+        "explanation": "The trajectory unitary is U_T...U_1 for the supplied mask sequence. The initial coin Hadamard is emitted only when prepare_initial_coin is true."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The mask-averaged random unitary channel is a classical ensemble over trajectories and is not a unitary circuit. Masks are sampled by the caller."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Peripheral-spectrum asymptotics are classical analysis of the superoperator and not part of the circuit."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Position distributions and Monte Carlo averaging are measurement and post-processing steps, which the circuit does not include."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The initial coin Hadamard is optional (prepare_initial_coin, default false when the key is absent) instead of mandatory.",
+        "reason": "The task states that the circuit is an operation without input-state preparation. Setting the flag to true reproduces eq_3 exactly when the runner starts from |0,0>."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Scope is narrowed to a single trajectory with a classical mask sequence of 1 to 64 steps on a fixed 4-site cycle. Masks are validated and invalid ones raise ValueError.",
+        "reason": "A circuit is unitary and cannot realize the random channel. The fixed size keeps the circuit at 3 qubits, under the 12-qubit cap."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The permutation is compiled by explicit cycle-to-transposition decomposition with CX and CCX gates, not with a dense permutation unitary.",
+        "reason": "Opaque dense unitaries are disallowed."
+      }
+    ],
+    "assumptions": [
+      "Edge e joins sites e and e+1 mod 4.",
+      "Coin value 0 is L and 1 is R.",
+      "H = (1/sqrt2)[[1,1],[1,-1]].",
+      "Closed edges reflect: |x,R> -> |x,L> and |x,L> -> |x,R> when the relevant edge is closed.",
+      "Masks are supplied by the caller as lists of 0 or 1 of length 4."
+    ],
+    "unresolved_issues": [
+      "The paper's own chain shift and coin definitions are not reproduced.",
+      "The paper's asymptotic formulas, numerical example and 2D Grover-coin results are not implemented.",
+      "The circuit has not been checked against the dense matrix of eq_1, because verification is done afterwards by software."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 369,
+    "depth": 248,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

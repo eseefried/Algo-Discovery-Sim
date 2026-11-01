@@ -1,0 +1,127 @@
+{
+  "backend": "anthropic",
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "bdebaac5-bbe1-4dd7-babd-f6056688c242",
+  "parent_run_id": "773c9b8d-1eb7-4d7e-a7ad-024c4b6a1f0a",
+  "created_at": "2026-11-01T15:40:17.610406+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "aa6aeb2a5c0b9156fc67927831676f2832f6ef5f70baddac4405bae20244967d",
+  "source_specification_sha256": "d3f4cecc2c7485aa311409639ce1a231dc3aeb175429fdab29e62886cac335f5",
+  "source_python_sha256": "8c279ba580a279e5b09b8e74ab1b4465198c98e9597b651c42395437745c7d48",
+  "elapsed_seconds": 84.067,
+  "usage": {
+    "input_tokens": 6269,
+    "output_tokens": 12073,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "build_circuit returns a 4-qubit unitary for one of two scoped operations on two qutrits embedded in qubit pairs (0->00, 1->01, 2->10, level 3 acted on by identity). The operations are the controlled shift CX3 (or its inverse, in either orientation) and the ternary SWAP3. The qutrit Fourier gate F is synthesized from standard gates by a numerical Givens decomposition. CZ3 is built from X-conjugated multi-controlled phase gates. CX3 = (I x F^dag) CZ3^(+-1) (I x F), and SWAP3 = N_a CX(a->b) CX(b->a)^-1 CX(a->b), where N is a qubit SWAP of the two qubits of qutrit a.",
+    "source_python": "import math\nimport numpy as np\nfrom qiskit import QuantumCircuit\n\n\ndef _phase_level(qc, level, angle):\n    # phase e^{i angle} on one level (0..2) of a qutrit held in qubits 0,1 of qc\n    if level == 0:\n        zeros = [0, 1]\n    elif level == 1:\n        zeros = [1]\n    else:\n        zeros = [0]\n    for q in zeros:\n        qc.x(q)\n    qc.cp(float(angle), 0, 1)\n    for q in zeros:\n        qc.x(q)\n\n\ndef _ctrl_u(qc, M, ctrl, ctrl_state, tgt):\n    # controlled arbitrary 2x2 unitary M = e^{i alpha} Rz(beta) Ry(gamma) Rz(delta)\n    det = M[0, 0] * M[1, 1] - M[0, 1] * M[1, 0]\n    alpha = np.angle(det) / 2.0\n    V = M * np.exp(-1j * alpha)\n    gamma = 2.0 * math.atan2(abs(V[1, 0]), abs(V[0, 0]))\n    s = -2.0 * np.angle(V[0, 0])\n    d = 2.0 * np.angle(V[1, 0])\n    beta = (s + d) / 2.0\n    delta = (s - d) / 2.0\n    if ctrl_state == 0:\n        qc.x(ctrl)\n    qc.p(float(alpha), ctrl)\n    qc.crz(float(delta), ctrl, tgt)\n    qc.cry(float(gamma), ctrl, tgt)\n    qc.crz(float(beta), ctrl, tgt)\n    if ctrl_state == 0:\n        qc.x(ctrl)\n\n\ndef _two_level(qc, i, j, M):\n    # apply 2x2 unitary M on levels (i,j) of a qutrit in qubits (0,1); other levels fixed\n    if (i, j) == (0, 1):\n        _ctrl_u(qc, M, 1, 0, 0)\n    elif (i, j) == (1, 2):\n        qc.cx(0, 1)\n        M2 = np.array([[M[1, 1], M[1, 0]], [M[0, 1], M[0, 0]]])\n        _ctrl_u(qc, M2, 1, 1, 0)\n        qc.cx(0, 1)\n    else:\n        raise ValueError('unsupported level pair')\n\n\ndef _fourier_circuit():\n    # eq_1: F|j> = 3^-1/2 sum_k w^{jk}|k> on levels 0..2, identity on level 3\n    w = np.exp(2j * np.pi / 3.0)\n    U = np.array([[w ** (j * k) for j in range(3)] for k in range(3)], dtype=complex) / math.sqrt(3.0)\n    gates = []\n    for c in range(2):\n        for r in range(2, c, -1):\n            a = U[r - 1, c]\n            b = U[r, c]\n            if abs(b) < 1e-12:\n                continue\n            n = math.hypot(abs(a), abs(b))\n            G = np.array([[np.conj(a), np.conj(b)], [-b, a]]) / n\n            rows = [r - 1, r]\n            U[rows, :] = G @ U[rows, :]\n            gates.append((r - 1, r, G))\n    diag = np.diag(U)\n    sub = QuantumCircuit(2)\n    for k in range(3):\n        _phase_level(sub, k, float(np.angle(diag[k])))\n    for (i, j, G) in reversed(gates):\n        _two_level(sub, i, j, np.conj(G.T))\n    return sub\n\n\ndef _cz3(qc, sign):\n    # eq_2: CZ3|a,b> = w^{ab}|a,b>; qutrit a on qubits 0,1; qutrit b on qubits 2,3\n    zero_a = {1: 1, 2: 0}\n    zero_b = {1: 3, 2: 2}\n    for a in (1, 2):\n        for b in (1, 2):\n            angle = sign * 2.0 * math.pi / 3.0 * ((a * b) % 3)\n            zs = [zero_a[a], zero_b[b]]\n            for q in zs:\n                qc.x(q)\n            qc.mcp(float(angle), [0, 1, 2], 3)\n            for q in zs:\n                qc.x(q)\n\n\ndef _cx3(qc, target, inverse):\n    # eq_3: CX3 = (I x F^dag) CZ3^(+-1) (I x F) on the target qutrit (CZ3 is symmetric)\n    fc = _fourier_circuit()\n    tq = [0, 1] if target == 0 else [2, 3]\n    qc.compose(fc, qubits=tq, inplace=True)\n    _cz3(qc, -1.0 if inverse else 1.0)\n    qc.compose(fc.inverse(), qubits=tq, inplace=True)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    op = instance.get('operation')\n    if op == 'cx3':\n        allowed = {'operation', 'control', 'inverse'}\n    elif op == 'swap3':\n        allowed = {'operation'}\n    else:\n        raise ValueError('operation must be cx3 or swap3')\n    if not set(instance.keys()) <= allowed:\n        raise ValueError('unknown instance keys')\n    qc = QuantumCircuit(4)\n    if op == 'cx3':\n        control = instance.get('control', 0)\n        inverse = instance.get('inverse', False)\n        if isinstance(control, bool) or control not in (0, 1):\n            raise ValueError('control must be 0 or 1')\n        if not isinstance(inverse, bool):\n            raise ValueError('inverse must be bool')\n        _cx3(qc, 1 - control, inverse)\n    else:\n        # eq_4: SWAP3 = (N x I) CX(a->b) CX(b->a)^-1 CX(a->b); N = F^2 = qubit SWAP on qutrit a\n        _cx3(qc, 1, False)\n        _cx3(qc, 0, True)\n        _cx3(qc, 1, False)\n        qc.swap(0, 1)\n    return qc",
+    "example_instance_json": "{\"operation\": \"swap3\"}",
+    "register_layout": [
+      "qubit 0: qutrit a, LSB of level index (level j = q0 + 2*q1)",
+      "qubit 1: qutrit a, MSB of level index",
+      "qubit 2: qutrit b, LSB of level index",
+      "qubit 3: qutrit b, MSB of level index",
+      "encoding: level 0->00, 1->01, 2->10, level 3 (11) unused and acted on by identity; global index = a + 4*b",
+      "instance options: operation 'cx3' (optional 'control' in {0,1} = control qutrit index, 'inverse' bool) or 'swap3'"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_fourier_circuit (F and F^dagger via Givens decomposition); N=F^2 realised as qc.swap(0,1) in build_circuit",
+        "explanation": "F is synthesized from standard controlled rotations, CX and phase gates by a numerical Givens decomposition of the 3x3 Fourier matrix, with identity on level 3. N=F^2 is realised directly as the qubit SWAP that exchanges levels 1 and 2. The relation F X F^dag = Z is a background identity that justifies eq_3 and is not built as a gate."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_cz3",
+        "explanation": "Diagonal phases w^{ab} (or w^{-ab} for the dagger) on levels a,b in {1,2}, each applied as an X-conjugated multi-controlled phase gate. The phase is 1 elsewhere, including level 3."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_cx3",
+        "explanation": "CX3 = (I x F^dag) CZ3 (I x F) acting on the target qutrit. The inverse uses CZ3^dagger. Orientation is chosen by selecting which qutrit is the target, since CZ3 is symmetric."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit, operation 'swap3' branch",
+        "explanation": "Time order: CX(a->b), CX(b->a)^-1, CX(a->b), then N on qutrit a (qubit SWAP of qubits 0,1)."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "register layout; level-3 identity handled throughout (_phase_level, _two_level, _cz3)",
+        "explanation": "4-qubit embedding with qubit 0 as LSB of qutrit a and global index a+4b. Every sub-gate leaves level 3 untouched."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The one-qutrit F gate is synthesized from standard gates (Givens two-level rotations as controlled Rz/Ry/phase, plus diagonal phases) rather than inserted as a dense 4x4 unitary.",
+        "reason": "Opaque dense unitaries are not allowed. The synthesis computes the same F matrix with identity on level 3."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "SWAP3 includes the final N on qutrit a, as in the specification's correction. N is implemented as a qubit SWAP, equal to F^2 on the embedded levels.",
+        "reason": "The three controlled shifts alone give (a,b)->(-b,a). The specification added N to obtain the exact swap."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to CX3 (either orientation, optional inverse) and SWAP3 in the Weyl-Heisenberg F+CZ3 variant. The Cartan one-qutrit gates, Toffoli and Muthukrishnan-Stroud synthesis, physical implementation, qudit generalization and universality are not implemented.",
+        "reason": "These are outside the single scoped construction in the specification."
+      }
+    ],
+    "assumptions": [
+      "TCZ is taken to be the standard generalized controlled-Z with phase w^{ab}.",
+      "Inputs lie in the span of |a,b> with a,b in {0,1,2}. Level 3 is mapped to itself by every gate.",
+      "Qiskit's little-endian order applies: qubit 0 is the LSB of qutrit a.",
+      "The numerical Givens decomposition is done in numpy at build time with fixed deterministic arithmetic. No Qiskit operators or simulation are used."
+    ],
+    "unresolved_issues": [
+      "The earlier stage reported a status of 'partial', which this schema does not allow. This artifact reports 'generated' for the narrowed scope only.",
+      "Correctness on the 9-dimensional subspace and on the identity sector has not been simulated here. It is left to downstream verification."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 1047,
+    "depth": 680,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

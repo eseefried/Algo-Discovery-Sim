@@ -1,0 +1,159 @@
+{
+  "backend": "anthropic",
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "06c461f8-aaf3-4705-acd1-dc223b36eab9",
+  "parent_run_id": "c3b98cf5-0ddd-4902-9a42-2d32d39280fc",
+  "created_at": "2026-11-01T15:18:57.765101+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "a839cede15af6216021f0ae94a3b1a7c4724dcce03d1623e6958d0ed9776fa57",
+  "source_specification_sha256": "c42e5ee3c032816bcdbea9f0fba6f21ad1ab5e428ea93706a14c3539e7a8d622",
+  "source_python_sha256": "9e8b8ebc5e6ac69de3daea2b1c9886dab721de2f6e18bfcb94940ec4b907f5ef",
+  "elapsed_seconds": 69.074,
+  "usage": {
+    "input_tokens": 5056,
+    "output_tokens": 9686,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Fixed unitary 5-qubit coined quantum walk on the 8-vertex tail+root+2 internal+4 leaf tree for the N=4 balanced NAND formula. The 4 input bits x are compiled into the flip-flop shift: leaf edges exist only where x_i=1, and absent leaf edges act as self-loops (reflecting). Each step is a coin I-2|s><s| (-1 on degree-1 slots) followed by the shift, repeated T times. State preparation, decoding and threshold calibration are left to the runner.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit\n\n\ndef _phase_on(qc, qubits, value):\n    \"\"\"Apply a -1 phase to the basis state `value` of the listed qubits (little-endian).\"\"\"\n    zeros = [q for i, q in enumerate(qubits) if not (value >> i) & 1]\n    for q in zeros:\n        qc.x(q)\n    qc.mcp(math.pi, qubits[:-1], qubits[-1])\n    for q in zeros:\n        qc.x(q)\n\n\ndef _coin3_gate():\n    \"\"\"Coin I - 2|s><s| on slots {0,1,2}, s uniform; identity on slot 3 (eq_2 coin).\"\"\"\n    theta = 2.0 * math.asin(math.sqrt(1.0 / 3.0))\n    w = QuantumCircuit(2)\n    w.ry(theta, 1)\n    w.ch(1, 0, ctrl_state=0)\n    sub = QuantumCircuit(2)\n    sub.compose(w.inverse(), inplace=True)\n    sub.x([0, 1])\n    sub.cz(0, 1)\n    sub.x([0, 1])\n    sub.compose(w, inplace=True)\n    return sub.to_gate(label=\"coin3\")\n\n\ndef _swap_states(qc, a, b):\n    \"\"\"Transposition of 5-qubit basis states a and b (index = slot + 4*vertex).\"\"\"\n    diff = [i for i in range(5) if ((a ^ b) >> i) & 1]\n    k = diff[0]\n    others = diff[1:]\n    for j in others:\n        qc.cx(k, j)\n    ap = a\n    if (a >> k) & 1:\n        for j in others:\n            ap ^= (1 << j)\n    controls = [i for i in range(5) if i != k]\n    cs = 0\n    for idx, c in enumerate(controls):\n        cs |= ((ap >> c) & 1) << idx\n    qc.mcx(controls, k, ctrl_state=cs)\n    for j in reversed(others):\n        qc.cx(k, j)\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    if \"x\" not in instance or \"steps\" not in instance:\n        raise ValueError(\"instance needs keys x and steps\")\n    x = instance[\"x\"]\n    if not isinstance(x, (list, tuple)) or len(x) != 4:\n        raise ValueError(\"x must be a list of 4 bits\")\n    bits = []\n    for v in x:\n        if isinstance(v, bool):\n            v = int(v)\n        if not isinstance(v, int) or v not in (0, 1):\n            raise ValueError(\"x entries must be 0 or 1\")\n        bits.append(v)\n    t = instance[\"steps\"]\n    if isinstance(t, bool) or not isinstance(t, int) or t < 1 or t > 64:\n        raise ValueError(\"steps must be an integer in 1..64\")\n    return bits, t\n\n\ndef _step(qc, x, coin3):\n    \"\"\"One walk step U_x = S_x C_x (eq_2).\"\"\"\n    # coin: degree-1 vertices (tail and present leaves) get -1 on slot 0\n    _phase_on(qc, [0, 1, 2, 3, 4], 0)\n    for i in range(4):\n        if x[i] == 1:\n            _phase_on(qc, [0, 1, 2, 3, 4], 4 * (4 + i))\n    # degree-3 coins at root, a, b\n    for v in (1, 2, 3):\n        qc.append(coin3.control(3, ctrl_state=v), [2, 3, 4, 0, 1])\n    # flip-flop shift: swap |u, slot toward v> <-> |v, slot toward u>\n    edges = [((0, 0), (1, 0), None), ((1, 1), (2, 0), None), ((1, 2), (3, 0), None),\n             ((2, 1), (4, 0), 0), ((2, 2), (5, 0), 1), ((3, 1), (6, 0), 2), ((3, 2), (7, 0), 3)]\n    for (u, su), (v, sv), leaf in edges:\n        if leaf is not None and x[leaf] == 0:\n            continue  # absent edge: self-loop, state fixed\n        _swap_states(qc, su + 4 * u, sv + 4 * v)\n\n\ndef build_circuit(instance):\n    x, t = _parse(instance)\n    qc = QuantumCircuit(5, name=\"nand_walk\")\n    coin3 = _coin3_gate()\n    for _ in range(t):\n        _step(qc, x, coin3)\n    return qc",
+    "example_instance_json": "{\"x\": [1, 1, 0, 0], \"steps\": 3}",
+    "register_layout": [
+      "qubit 0: slot bit 0 (LSB of slot)",
+      "qubit 1: slot bit 1 (slot in 0..2 used; slot 3 unused)",
+      "qubit 2: vertex bit 0",
+      "qubit 3: vertex bit 1",
+      "qubit 4: vertex bit 2",
+      "basis index = slot + 4*vertex; vertices: 0 tail, 1 root, 2 internal a (leaves 4,5), 3 internal b (leaves 6,7), 4-7 leaves for x1..x4",
+      "slots: 0 toward parent/tail; 1,2 toward children (root: 1->a, 2->b; a: 1->leaf4, 2->leaf5; b: 1->leaf6, 2->leaf7)",
+      "input |t,0> = |00000> (runner default, no preparation in the circuit)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Boolean identity defining f(x) for the N=4 instance. It is not a gate; x enters only through which leaf edges are present."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_step, _coin3_gate, _phase_on, _swap_states",
+        "explanation": "U_x = S_x C_x: the coin is -1 on degree-1 slots and I-2|s><s| on degree-3 vertices controlled on the vertex register. The shift is a product of disjoint basis-state transpositions over the x-dependent edge set."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "|t,0> is the all-zero basis state, which the runner prepares. The circuit contains no state preparation."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit (loop over steps calling _step)",
+        "explanation": "U_x^T is built by repeating the step T times, with T given by instance['steps']."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Decoding via the return probability and threshold calibration is classical post-processing/measurement and is excluded from the unitary operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The coin is I-2|s><s| on the used slots (the negated Grover coin), which gives -1 for degree-1 vertices as the spec states. It is identity on unused slot 3.",
+        "reason": "The spec's 'Grover coin' (2|s><s|-I) gives +1 at degree 1, contradicting its stated -1 phase. A single sign convention is needed."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Parent vertices (root, a, b) keep degree 3 and use the full 3-slot coin even when a leaf edge is absent. The absent edge is a self-loop (shift fixes that state), and absent leaves are isolated and never populated.",
+        "reason": "Makes the reflecting-boundary assumption concrete and keeps the coin x-independent except at present leaves."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The flip-flop shift swaps |u, slot at u pointing to v> with |v, slot at v pointing to u>, not the same slot index e on both sides.",
+        "reason": "The spec's 'same e' wording is ambiguous. Slot labels are direction-dependent, so the edge-specific slot pair is the consistent flip-flop."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The initial state is not prepared in the circuit; |t,0> = |00000> is supplied by the runner.",
+        "reason": "The task requires an operation without input-state preparation."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "T is an input parameter (1..64) rather than fixed to O(sqrt N).",
+        "reason": "The spec leaves T to calibration."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The decode statistic and threshold are not implemented.",
+        "reason": "They are measurement/post-processing."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to the explicit-x, compiled, N=4 walk. There is no black-box query claim, and no claim that the walk decodes f(x).",
+        "reason": "The paper's exact construction is unknown and the decode is unvalidated."
+      }
+    ],
+    "assumptions": [
+      "Vertex/slot numbering and edge layout as in register_layout",
+      "x is classical and compiled into the gates",
+      "Absent leaf edges are reflecting self-loops",
+      "steps is an integer in 1..64",
+      "Controlled coin gates are built from standard gates via circuit-to-gate conversion and .control"
+    ],
+    "unresolved_issues": [
+      "No threshold or T is known to separate all 16 inputs; the circuit may be only a walk-dynamics demo",
+      "The paper's actual walk, weights and phase-estimation procedure are not reconstructed",
+      "The decode direction (reflection vs transmission) is unverified",
+      "The general-formula O(N^(1/2+O(1/sqrt(log N)))) algorithm is not implemented"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 5,
+    "gate_count": 13761,
+    "depth": 10519,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}
