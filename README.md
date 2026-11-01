@@ -12,6 +12,12 @@ on the same 96 papers.
 See [swarm examples](EXAMPLES.md) for real abstracts, LaTeX predictions, generated
 Qiskit code, simulation outcomes, and scoped functional checks.
 
+The current native-equation hybrid swarm:
+
+![Qatalyst: three-agent hybrid evolutionary swarm](docs/assets/lobster-swarm-architecture.png)
+
+[Architecture details and implementation notes](docs/architecture.md).
+
 ## How it works
 
 ```
