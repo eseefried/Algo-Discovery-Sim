@@ -1,5 +1,111 @@
 # Local Nemotron swarm
 
+## Native-equation evolutionary swarm
+
+The active implementation is `algo_discovery.native_swarm` with configuration
+`configs/systems/nemotron_native_swarm.yaml`:
+
+```bash
+source ~/.bashrc
+uv run python -u -m algo_discovery.native_swarm \
+  --arxiv-id 1407.6402 --out artifacts/native_swarm \
+  --max-usd 0.50 --max-calls 40 --max-seconds 1200
+```
+
+Three logical agents use the existing a2m shared-index matching, role affinities,
+virtual energy, retries and lineage. Nemotron proposes numbered LaTeX using its
+unchanged training-format prompt. Agents differ in temperature, repetition penalty
+and equation start index. Sonnet/medium proposes method plans, assembles full specs
+and independently reviews the generated code; Sonnet/high remains the code stage.
+The assembler can reject or repair native predictions using background knowledge.
+Its notes, original native outputs and counts of retained/rewritten equations are
+saved separately. This is a **hybrid** system, not an all-Nemotron swarm.
+
+The scheduler settles actions immediately. After two initial method plans, it
+prioritizes implementation, simulation and review before expanding more branches,
+and exits after the first reviewed success. One agent is reserved outside all
+implementation chains so a fresh independent reviewer is always available.
+The coordinator and reviewer use the actual Qiskit worker contract, which compiles
+explicit oracle parameters into ordinary gates. They do not inherit the sealed
+curated-task harness's incompatible opaque-placeholder requirements. This permits
+functional simulation but does not certify black-box query complexity.
+
+Failures and code-stage abstentions receive no progress rewards and open repair
+tasks with actual runner/reviewer diagnostics. Working circuits remain provisional
+until review by an agent outside the implementation chain. Model objections route
+back to revision; they are not counted as passes or verified counterexamples.
+Only reproduced valid-instance execution failures qualify for a critic bounty.
+
+Agents start with 5 virtual energy units. Actions consume energy. Depleted agents
+die, and up to 6 replacements maintain the three-agent population. When measured
+success exists, replacement selects the best earned/spent donor, clones its role
+affinities and native decoding strategy, and mutates exactly one decoding gene.
+Without a successful donor, it explores the initial strategies. Rewards are deferred
+until execution and review succeed. There is no requirement to produce deaths in
+every run; a successful population can survive without replacement.
+
+Local GPU requests are serialized across native clients with a shared file lock,
+before HTTP request timeout begins. A pilot may share the GPU with the baseline;
+such wall times are not a controlled throughput comparison. The implementation is
+a single-host logical swarm, not a multi-host fault-tolerant ledger service.
+
+The per-paper resource limit counts native, coordinating and code calls. The
+separate estimated USD cap covers all Sonnet roles; one in-flight call can exceed
+the cap. Existing rates are estimates, not a billing guarantee. Raw model outputs,
+energy movements, deaths, parentage, genotype changes and candidates are retained
+under `OUT/runs/PAPER/UUID/`. An interrupted paper restarts as a new UUID rather
+than resuming its in-memory population.
+
+Fitness currently means Docker/Aer execution plus independent-agent model review.
+It is **not** a guarantee of algorithmic correctness or complete-paper reproduction.
+Independent functional contracts must be evaluated separately.
+
+## Verified training task: abstract to LaTeX
+
+The transferred training recipe establishes that this adapter was trained to
+produce **numbered display equations**, not Qiskit code or JSON mathematical
+specifications. The earlier JSON-spec swarm pilot is an out-of-format transfer
+test, not an evaluation of the adapter's trained task.
+
+Use the matching plain-text client first:
+
+```bash
+uv run nemotron-equations \
+  --abstract-file data/circuit_dataset_300_v1/abstracts/arxiv-1411.5949.txt \
+  --out artifacts/nemotron-equations-qft --max-blocks 1
+```
+
+The input is the whitespace-normalized abstract plus `Start equation: N`.
+The system prompt matches the data preparation script exactly. Each block requests
+up to eight equations; `<END_EQUATIONS>` signals the final block. The client
+advances only after complete, consecutively numbered output; it does not feed
+gold equations into subsequent requests. Responses, usage, numbering and whether
+the paper is complete are saved separately. Truncated blocks are preserved for
+inspection but are not accepted as equation predictions.
+
+The server accepts omitted `response_format` or `{"type":"text"}` without adding
+JSON instructions or applying JSON token filtering. It uses the training model
+class and checks that all 258 expected LoRA modules attach. Reasoning remains off.
+
+These raw equation predictions are not `MathSpecification` objects. Using them
+for Qiskit generation requires a separate, explicitly evaluated conversion;
+neither register layouts nor provenance claims should be invented by a parser.
+
+The supplied preparation audit identifies 135 training and 15 validation papers,
+all at manifest positions 151–300. Their IDs do not intersect the 96 benchmark IDs.
+The original recipe and sample records are in the transferred, Git-ignored
+`artifacts/nemotron-training-handoff/nemotron-quantum-lora-handoff/` directory.
+
+Initial native-format tests are saved under `artifacts/nemotron-native/`.
+Greedy LoRA returned eight copies of one formula (different tags) for the QFT
+arithmetic abstract in 31 seconds. With `--repetition-penalty 1.12`, the same
+abstract produced one formula and the end marker in 7 seconds. This is a changed
+decoding profile and a single-example format result, not evidence of correct
+reconstruction. The default penalty remains 1 for reproducibility. The CLI records
+the selected penalty and reports repeated content separately from equation tags.
+
+## Earlier JSON-spec experiments
+
 `a2m-spec --backend local` runs the a2m specification agents against an
 OpenAI-compatible **chat completions** server. The server must load the base model
 and LoRA adapter and expose the adapter under the model name passed to `--model`.
