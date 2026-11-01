@@ -1,0 +1,133 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "47556f5d-9a35-4d89-945c-4ab2b3bcbf79",
+  "parent_run_id": "3a307ed2-3602-4038-bdeb-efe4b6d34478",
+  "created_at": "2026-11-01T00:25:10.930194+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "68b8301b8a4afbfcf9c2576961f9f911802b21f28b48e351ef8187107c0a6991",
+  "source_specification_sha256": "5938c1a54c426e2a00904a0e52034357a57a54939ad2a2a92dcb5e0ee0b651da",
+  "source_python_sha256": "465bc7c44c96fcb47a7232600a69b4dfed60777d9a864ed053763f42c6472c20",
+  "elapsed_seconds": 28.808,
+  "usage": {
+    "input_tokens": 5718,
+    "output_tokens": 4695,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "build_circuit(instance) returns one p=1 QAOA layer for a bounded-occurrence Max E3LIN2 instance, U = exp(-i*beta*sum X) * exp(-i*gamma*C), up to a global phase. Each equation (a,b,c,rhs) gets a CX-CX-RZ-CX-CX parity-phase gadget with angle -gamma*s, where s=(-1)^rhs. A mixer RX(2*beta) follows on every qubit. The initial |+>^n preparation, measurement, angle search and expectation evaluation are left to the runner.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _num(x, name):\n    if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):\n        raise ValueError(name + \" must be a finite real number\")\n    return float(x)\n\n\ndef _int(x, name):\n    if isinstance(x, bool) or not isinstance(x, int):\n        raise ValueError(name + \" must be an integer\")\n    return x\n\n\ndef build_circuit(instance):\n    \"\"\"p=1 QAOA operation for Max E3LIN2 (no |+> preparation, no measurement).\n\n    instance: {\"n\": int 3..12, \"equations\": [[a,b,c,rhs],...], \"gamma\": float,\n               \"beta\": float, optional \"D\": int occurrence bound}\n    Qubit i = boolean variable i.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = _int(instance.get(\"n\"), \"n\")\n    if n < 3 or n > 12:\n        raise ValueError(\"n must be between 3 and 12\")\n    eqs = instance.get(\"equations\")\n    if not isinstance(eqs, (list, tuple)) or len(eqs) == 0 or len(eqs) > 200:\n        raise ValueError(\"equations must be a list of 1..200 entries\")\n    gamma = _num(instance.get(\"gamma\"), \"gamma\")\n    beta = _num(instance.get(\"beta\"), \"beta\")\n    parsed = []\n    deg = [0] * n\n    for e in eqs:\n        if not isinstance(e, (list, tuple)) or len(e) != 4:\n            raise ValueError(\"each equation must be [a,b,c,rhs]\")\n        a = _int(e[0], \"a\")\n        b = _int(e[1], \"b\")\n        c = _int(e[2], \"c\")\n        r = _int(e[3], \"rhs\")\n        if min(a, b, c) < 0 or max(a, b, c) >= n:\n            raise ValueError(\"variable index out of range\")\n        if len({a, b, c}) != 3:\n            raise ValueError(\"variables in an equation must be distinct\")\n        if r not in (0, 1):\n            raise ValueError(\"rhs must be 0 or 1\")\n        deg[a] += 1\n        deg[b] += 1\n        deg[c] += 1\n        parsed.append((a, b, c, r))\n    D = instance.get(\"D\")\n    if D is not None:\n        D = _int(D, \"D\")\n        if D < 1 or max(deg) > D:\n            raise ValueError(\"some variable occurs in more than D equations\")\n    qr = QuantumRegister(n, \"q\")\n    qc = QuantumCircuit(qr)\n    # eq_1/eq_3: exp(-i*gamma*C) = global phase * prod_k exp(+i*gamma*s_k*Z_a Z_b Z_c/2)\n    for (a, b, c, r) in parsed:\n        s = 1 - 2 * r\n        qc.cx(a, c)\n        qc.cx(b, c)\n        qc.rz(-gamma * s, c)\n        qc.cx(b, c)\n        qc.cx(a, c)\n    # eq_2: mixer exp(-i*beta*X) = RX(2*beta) on every qubit\n    for i in range(n):\n        qc.rx(2.0 * beta, i)\n    return qc",
+    "example_instance_json": "{\"n\": 5, \"equations\": [[0,1,2,0],[1,2,3,1],[2,3,4,0],[0,3,4,1],[0,1,4,0]], \"gamma\": 0.6, \"beta\": 0.39, \"D\": 4}",
+    "register_layout": [
+      "qubit i (0..n-1) = boolean variable x_i; qubit 0 is the least significant bit",
+      "computational basis: Z=+1 for bit 0, Z=-1 for bit 1",
+      "no ancilla qubits, no classical bits",
+      "example: n=5, qubits 0..4 = x_0..x_4"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: sign s = 1 - 2*rhs and the per-equation phase-separator loop",
+        "explanation": "The cost operator C is implemented as exp(-i*gamma*C) through its ZZZ terms with sign s_k. The constant part of C only contributes a global phase."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: phase-separator loop followed by the RX(2*beta) loop",
+        "explanation": "Implements exp(-i*beta*B) exp(-i*gamma*C) with B = sum of X_j. The initial |+>^n is prepared by the runner, so the H layer is not in the circuit."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: qc.cx(a,c); qc.cx(b,c); qc.rz(-gamma*s,c); qc.cx(b,c); qc.cx(a,c)",
+        "explanation": "Parity gadget for exp(i*gamma*s*ZaZbZc/2). The parity is computed onto qubit c, RZ(-gamma*s) is applied, and the parity is uncomputed."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The objective F = <gamma,beta|C|gamma,beta> and the satisfied fraction are evaluated by the runner or an external evaluator. The circuit does not compute expectations."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "These asymptotic advantage targets are reference values for comparison. They are not part of the circuit, and no reference results are encoded."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The initial Hadamard layer that prepares |+>^n is omitted. build_circuit returns only exp(-i*beta*B) exp(-i*gamma*C).",
+        "reason": "The task says the circuit must be an operation, and the runner prepares input states."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "Global phases are dropped. This includes the constant term m/2 in C and the global phase of the ZZZ gadget.",
+        "reason": "Global phases are unobservable."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "The step that grid-searches (gamma,beta), the measurement and sampling step, and the best-string postprocessing are not included. gamma and beta are fixed instance parameters.",
+        "reason": "Scope is narrowed to the single p=1 circuit construction. The circuit must be measurement-free."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Instances are validated: 3 <= n <= 12, distinct in-range variables per equation, rhs in {0,1}, finite angles, and optionally max occurrence <= D. Violations raise ValueError.",
+        "reason": "The task requires validation and a 12-qubit cap. The abstract's bound on occurrences D is enforced when D is supplied."
+      }
+    ],
+    "assumptions": [
+      "Variable i is qubit i, with Z eigenvalue (-1)^{z_i}.",
+      "s_k = (-1)^{rhs_k}, and the equation is satisfied when the parity of its three bits equals rhs_k.",
+      "The angle convention is Qiskit rz(theta) = exp(-i*theta*Z/2) and rx(2*beta) = exp(-i*beta*X). A sign flip of gamma is covered by the runner's angle sweep.",
+      "The runner prepares |+>^n as the input state.",
+      "The example instance is arbitrary and illustrative, not taken from the paper."
+    ],
+    "unresolved_issues": [
+      "The paper's analytic light-cone formula for <ZZZ> is not available from the abstract, so it is not implemented.",
+      "The paper's rule for choosing gamma and beta in the proofs is unknown. The example angles are only plausible starting values.",
+      "No public validation contract was supplied, and no concrete instance was given."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 5,
+    "gate_count": 30,
+    "depth": 24,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

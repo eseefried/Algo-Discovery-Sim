@@ -1,0 +1,133 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "7d819f8f-ca6c-4f07-a95d-164821a50bc0",
+  "parent_run_id": "d1fb08e7-1d1c-4d0a-8d5e-b57e5c5ae687",
+  "created_at": "2026-11-01T00:21:16.050517+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "9465ad91b65f06fb9786a1f501eeebb08778929c883fb26cf5ada8c72ccf1ec0",
+  "source_specification_sha256": "62f9f9505046843b75acfeea4278725e1348df5741adc3e601c37327797f15ae",
+  "source_python_sha256": "7fd5034b0b2257732cbe6fd9de8a73b00ee1e403248e5f1256df1c1b4e46e354",
+  "elapsed_seconds": 28.969,
+  "usage": {
+    "input_tokens": 5754,
+    "output_tokens": 4204,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Grover block for min-plus witness search over one (u,v) pair: k repetitions of the threshold phase oracle O_tau (compiled from a classical cost table as X-conjugated multi-controlled-Z gates on the marked indices) followed by the diffusion operator 2|s><s|-I on the q-qubit index register. The runner prepares the uniform superposition and does measurement and threshold updates. Max 3 qubits.",
+    "source_python": "from __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    costs = instance.get('costs')\n    if not isinstance(costs, (list, tuple)):\n        raise ValueError('costs must be a list')\n    n = len(costs)\n    if n < 2 or n > 8:\n        raise ValueError('number of candidates n must satisfy 2<=n<=8')\n    for c in costs:\n        if isinstance(c, bool) or not isinstance(c, int) or c < 0:\n            raise ValueError('costs must be nonnegative integers')\n    tau = instance.get('threshold')\n    if isinstance(tau, bool) or not isinstance(tau, int) or tau < 0:\n        raise ValueError('threshold must be a nonnegative integer')\n    k = instance.get('iterations')\n    if isinstance(k, bool) or not isinstance(k, int) or k < 0 or k > 64:\n        raise ValueError('iterations must be an integer in 0..64')\n    return [int(c) for c in costs], int(tau), int(k)\n\n\ndef _mcz(qc, idx):\n    # Z on the all-ones basis state of the index register.\n    if len(idx) == 1:\n        qc.z(idx[0])\n    else:\n        qc.mcp(math.pi, list(idx[:-1]), idx[-1])\n\n\ndef _oracle(qc, idx, marked):\n    # eq_2: O_tau|w> = (-1)^[c(w)<tau]|w>, compiled from the table.\n    q = len(idx)\n    for w in marked:\n        zeros = [i for i in range(q) if not (w >> i) & 1]\n        for i in zeros:\n            qc.x(idx[i])\n        _mcz(qc, idx)\n        for i in zeros:\n            qc.x(idx[i])\n\n\ndef _diffusion(qc, idx):\n    # eq_3: 2|s><s| - I = -(H X MCZ X H); the -1 is restored as global phase.\n    for i in range(len(idx)):\n        qc.h(idx[i])\n    for i in range(len(idx)):\n        qc.x(idx[i])\n    _mcz(qc, idx)\n    for i in range(len(idx)):\n        qc.x(idx[i])\n    for i in range(len(idx)):\n        qc.h(idx[i])\n    qc.global_phase += math.pi\n\n\ndef build_circuit(instance):\n    costs, tau, k = _validate(instance)\n    n = len(costs)\n    q = max(1, math.ceil(math.log2(n)))\n    if q > 12:\n        raise ValueError('too many qubits')\n    marked = [w for w in range(n) if costs[w] < tau]\n    idx = QuantumRegister(q, 'idx')\n    qc = QuantumCircuit(idx)\n    for _ in range(k):\n        _oracle(qc, idx, marked)\n        _diffusion(qc, idx)\n    return qc",
+    "example_instance_json": "{\"costs\": [5, 3, 8, 2, 7, 4, 6, 9], \"threshold\": 5, \"iterations\": 1}",
+    "register_layout": [
+      "Qubits 0..q-1 = register idx, q=ceil(log2 n), n=len(costs) in 2..8 (so q in 1..3)",
+      "Qubit i holds bit i of witness index w (little-endian, qubit 0 is least significant)",
+      "Example: n=8, q=3, qubits 0,1,2 = bits 0,1,2 of w",
+      "No ancilla, value or flag qubits; the oracle is compiled from the classical table",
+      "Input state expected from runner: uniform superposition H^q|0> (or any state); no measurement in the circuit"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Definition of the target minimum d'(u,v). The caller supplies the candidate costs c(w)=D[u,w]+W[w,v] as the 'costs' list; the circuit does not evaluate the minimum."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_oracle (called from build_circuit)",
+        "explanation": "Phase oracle for the marked set S_tau={w<n: costs[w]<threshold}, built as X-conjugated multi-controlled-Z gates on each marked basis state. Indices w>=n are never marked."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_diffusion and the loop in build_circuit",
+        "explanation": "Grover iterate G=(2|s><s|-I)O_tau applied k times. The diffusion is H X MCZ X H with a global phase of pi to match 2|s><s|-I exactly. The success probability formula P_k is analysis only and is not coded."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The Durr-Hoyer loop (measure, classical verify, threshold update, random k schedule) is classical post-processing across many circuits. Each circuit takes the threshold and k as instance parameters."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Asymptotic complexity statement; there is no circuit content."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "build_circuit returns only the operation (G)^k on the idx register. It has no initial H^q state preparation, no measurement and no classical creg.",
+        "reason": "The task requires an operation with inputs prepared by the runner and no measurements. The runner should apply H^q to |0> to obtain |s>."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The oracle is compiled from the classical cost table and threshold into multi-controlled-Z gates. There are no val or flag ancillas, no adder, and no QRAM lookup.",
+        "reason": "This is the tiny-instance option explicitly allowed in the specification. No hidden black box is supplied."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The diffusion operator is implemented as H X MCZ X H plus an explicit global phase of pi, so it equals 2|s><s|-I exactly rather than only up to a sign.",
+        "reason": "The product H X MCZ X H equals I-2|s><s|, which is the negative of the stated reflection."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_1",
+          "eq_5"
+        ],
+        "change": "Scope is narrowed to one Grover round with fixed threshold and iteration count. The Durr-Hoyer loop, the minimum finding, and the complexity claims are not circuit-implemented.",
+        "reason": "Threshold updating depends on measurement outcomes and is classical. Dynamic circuits are disallowed."
+      }
+    ],
+    "assumptions": [
+      "instance keys: 'costs' (list of 2..8 nonnegative ints, c(w)=D[u,w]+W[w,v]), 'threshold' (nonnegative int tau), 'iterations' (int 0..64, Grover repetitions k)",
+      "Marking is strict: w is marked iff costs[w] < threshold",
+      "q = max(1, ceil(log2 n)); indices w in [n, 2^q) are not marked but are included in the uniform superposition if the runner prepares it",
+      "If no witness is marked (m=0) the oracle is the identity and only diffusion is applied",
+      "With n=2 the multi-controlled Z reduces to a single Z"
+    ],
+    "unresolved_issues": [
+      "Choice of the iteration count k (about floor(pi/(4 theta)) with sin^2 theta = m/N) and of the random schedule is left to the caller",
+      "When N=2^q > n and m is large (e.g. m=N/2) Grover rotation can be degenerate, which is inherent in the specified iterate",
+      "The paper's subcubic algorithms (small integer weights, geometric weights, earliest arrivals) are not reconstructed because the abstract gives no construction"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 72,
+    "depth": 53,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

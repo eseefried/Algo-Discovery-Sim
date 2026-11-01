@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "ce1a363f-7fc2-4dfb-86fb-0167720bf028",
+  "parent_run_id": "95b12169-4a43-45d5-b6ee-e79c67989562",
+  "created_at": "2026-10-31T22:25:29.402311+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "55d8381da362ce142bae374e6763b60984497e53d59d8c09ca8c6fbda27b2090",
+  "source_specification_sha256": "93bf803f82c27609d93e6be0475b47bd0bba96ae4d4f0b0510237b4a556dba1c",
+  "source_python_sha256": "7abc4771785f6c984229fe0aaeae3221a281a8ed0fee2e47fb1be03646106730",
+  "elapsed_seconds": 34.647,
+  "usage": {
+    "input_tokens": 4523,
+    "output_tokens": 4777,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds T steps of a coined quantum-walk search operator U = S(marked coin) on a cycle of n = 2^p nodes with one coin qubit. The coin is the d=2 Grover coin (equal to X) on unmarked nodes and -I on the marked node. The shift is a coin-controlled increment/decrement mod n. State preparation and measurement are left to the runner.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import XGate, ZGate\n\n\ndef _int_param(instance, key, lo, hi):\n    v = instance.get(key)\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError(key + \" must be an integer\")\n    if v < lo or v > hi:\n        raise ValueError(key + \" out of range\")\n    return v\n\n\ndef _marked_coin(qc, pos, coin, p, m):\n    # eq_2: Grover coin for d=2, C = 2|+><+| - I = X, applied at every node\n    qc.x(coin[0])\n    # eq_3: at the marked node the coin is -I; undo X there, then add phase -1\n    qc.append(XGate().control(p, ctrl_state=m), list(pos) + [coin[0]])\n    zero_bits = [pos[k] for k in range(p) if not ((m >> k) & 1)]\n    for q in zero_bits:\n        qc.x(q)\n    qc.append(ZGate().control(p - 1), list(pos))\n    for q in zero_bits:\n        qc.x(q)\n\n\ndef _shift(qc, pos, coin, p):\n    # eq_3: S|x,0> = |x+1,0>, S|x,1> = |x-1,1> (mod 2^p)\n    for i in range(p - 1, -1, -1):\n        # increment bit i if coin==0 and all lower bits are 1\n        cs_inc = ((1 << i) - 1) << 1\n        qc.append(XGate().control(i + 1, ctrl_state=cs_inc), [coin[0]] + [pos[k] for k in range(i)] + [pos[i]])\n        # decrement bit i if coin==1 and all lower bits are 0\n        qc.append(XGate().control(i + 1, ctrl_state=1), [coin[0]] + [pos[k] for k in range(i)] + [pos[i]])\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    p = _int_param(instance, \"position_qubits\", 2, 11)\n    n = 1 << p\n    m = _int_param(instance, \"marked_node\", 0, n - 1)\n    t = _int_param(instance, \"steps\", 0, 1000)\n    pos = QuantumRegister(p, \"pos\")\n    coin = QuantumRegister(1, \"coin\")\n    qc = QuantumCircuit(pos, coin)\n    for _ in range(t):\n        _marked_coin(qc, pos, coin, p, m)\n        _shift(qc, pos, coin, p)\n    return qc",
+    "example_instance_json": "{\"position_qubits\": 2, \"marked_node\": 1, \"steps\": 2}",
+    "register_layout": [
+      "Qubits 0..p-1: pos register, node index x in binary, qubit 0 least significant",
+      "Qubit p: coin register (1 qubit); coin |0> = step +1, coin |1> = step -1",
+      "Example (p=2): qubits 0,1 = pos; qubit 2 = coin; total 3 qubits",
+      "Input state is prepared by the runner; the circuit applies U^T only"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Asymptotic gate-count claim for the twisted toroid family. It is not implemented here, and the circuit does not claim this scaling."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_marked_coin (qc.x on coin)",
+        "explanation": "For d=2 the Grover coin 2|s><s|-I equals Pauli X, so it is applied as an X gate on the coin qubit."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_marked_coin and _shift, repeated in build_circuit",
+        "explanation": "The marked-node coin -I is obtained by cancelling X with an X controlled on pos==m and applying a -1 phase on pos==m. The shift is a coin-controlled increment/decrement built from multi-controlled X gates. One U is the coin step followed by the shift."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The uniform initial state is prepared by the runner, so the module contains no state preparation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": "build_circuit loop over steps",
+        "explanation": "The circuit applies U^T with T = steps. The success probability p_T is a measurement-side quantity and is not computed in the module."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Narrowed the scope to a cycle with n=2^p nodes, p between 2 and 11, and d=2 with one coin qubit, rather than the generic d-regular graph. The example uses the 4-cycle (p=2).",
+        "reason": "The shift must be an explicit efficient circuit. The cycle is the only graph the specification suggested, and the qubit cap is 12."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The Grover coin for d=2 reduces to X.",
+        "reason": "2|s_2><s_2|-I = X exactly. This coin makes the walk a poor search algorithm in general, so no amplification claim is made."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Removed the Hadamard state preparation and the measurement steps from the module.",
+        "reason": "The task requires an operation only, with input preparation and measurement handled by the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Gate-count claim not implemented.",
+        "reason": "The specification gives no construction for it, and it concerns a different graph family."
+      }
+    ],
+    "assumptions": [
+      "Node x is stored in binary on the pos qubits with qubit 0 as the least significant bit.",
+      "Coin |0> moves the walker to x+1 and coin |1> moves it to x-1, modulo n.",
+      "The marked node's coin is -I, as in eq_3, and U applies the marked coin first and then the shift.",
+      "The coin operator is applied to all nodes as X, with the marked node's X cancelled and a -1 phase added."
+    ],
+    "unresolved_issues": [
+      "The paper's graph families, twisted toroid, explicit circuits and optimal step count are not available, so this is only a generic background construction.",
+      "The number of steps is a user parameter, and no optimal T is derived.",
+      "Only power-of-two cycle sizes are supported."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 122,
+    "depth": 88,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

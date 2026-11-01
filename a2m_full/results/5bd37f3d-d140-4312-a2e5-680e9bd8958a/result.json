@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "5bd37f3d-d140-4312-a2e5-680e9bd8958a",
+  "parent_run_id": "c33fe7cb-839b-4360-a849-da04e4d1f040",
+  "created_at": "2026-11-01T00:31:02.098812+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "cc2b047e2174a2d2a1f6d3c3728788a782a168d920b111bcc9131139ac6d4c72",
+  "source_specification_sha256": "ae7b3db2f918e387d070c6b1812376a331d9699543f3c649efa20c011fd25432",
+  "source_python_sha256": "aca288b6c4a83a1a188809e18d424224476ee1583c4fbd8f95c57188b9eed2d0",
+  "elapsed_seconds": 30.323,
+  "usage": {
+    "input_tokens": 5091,
+    "output_tokens": 4513,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "build_circuit(instance) returns R iterations of the Grover operator G = (reflection about uniform state on the index register) · O. O is a compute/mark/uncompute oracle: an address-controlled-X QRAM load of a classical database, a phase-kickback comparison against target w onto a flag qubit, then a second load to clean the data register. Input preparation (H on index, |-> on flag, data in |0>) is left to the runner.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef _load(qc, index, data, db, n, m):\n    # eq_1: U_D = product over addresses i and set bits j of C^n_i X_j (self-inverse)\n    idx = list(index)\n    for i, word in enumerate(db):\n        if word == 0:\n            continue\n        zeros = [idx[k] for k in range(n) if not ((i >> k) & 1)]\n        for q in zeros:\n            qc.x(q)\n        for j in range(m):\n            if (word >> j) & 1:\n                qc.mcx(idx, data[j])\n        for q in zeros:\n            qc.x(q)\n\n\ndef _mark(qc, data, flag, target, m):\n    # eq_2: compare data register to w via X conjugation, MCX onto flag (phase kickback if flag is |->)\n    zeros = [data[j] for j in range(m) if not ((target >> j) & 1)]\n    for q in zeros:\n        qc.x(q)\n    qc.mcx(list(data), flag[0])\n    for q in zeros:\n        qc.x(q)\n\n\ndef _oracle(qc, index, data, flag, db, target, n, m):\n    # eq_3: O = U_D Mark_w U_D\n    _load(qc, index, data, db, n, m)\n    _mark(qc, data, flag, target, m)\n    _load(qc, index, data, db, n, m)\n\n\ndef _diffusion(qc, index, n):\n    # eq_4: H^n X^n C^{n-1}Z X^n H^n = -(2|s><s| - I); global phase pi restores the sign\n    idx = list(index)\n    for q in idx:\n        qc.h(q)\n    for q in idx:\n        qc.x(q)\n    if n == 1:\n        qc.z(idx[0])\n    else:\n        qc.h(idx[-1])\n        qc.mcx(idx[:-1], idx[-1])\n        qc.h(idx[-1])\n    for q in idx:\n        qc.x(q)\n    for q in idx:\n        qc.h(q)\n    qc.global_phase += math.pi\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    m = instance.get('m')\n    db = instance.get('database')\n    target = instance.get('target')\n    if not _is_int(n) or not _is_int(m) or n < 1 or m < 1:\n        raise ValueError('n and m must be positive integers')\n    if n + m + 1 > 12:\n        raise ValueError('total qubits n+m+1 must be at most 12')\n    N = 1 << n\n    if not isinstance(db, list) or len(db) != N:\n        raise ValueError('database must be a list of length 2^n')\n    for word in db:\n        if not _is_int(word) or word < 0 or word >= (1 << m):\n            raise ValueError('database words must be integers in [0, 2^m)')\n    if not _is_int(target) or target < 0 or target >= (1 << m):\n        raise ValueError('target must be an integer in [0, 2^m)')\n    M = sum(1 for word in db if word == target)\n    if M < 1 or M >= N:\n        raise ValueError('number of matching addresses must satisfy 1 <= M < N')\n    R = instance.get('iterations')\n    if R is None:\n        # eq_5: R = floor(pi/4 sqrt(N/M))\n        R = int(math.floor(math.pi / 4.0 * math.sqrt(N / M)))\n    if not _is_int(R) or R < 0 or R > 1000:\n        raise ValueError('iterations must be an integer in [0, 1000]')\n    index = QuantumRegister(n, 'index')\n    data = QuantumRegister(m, 'data')\n    flag = QuantumRegister(1, 'flag')\n    qc = QuantumCircuit(index, data, flag)\n    for _ in range(R):\n        _oracle(qc, index, data, flag, db, target, n, m)\n        _diffusion(qc, index, n)\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"m\": 2, \"database\": [1, 3, 2, 0], \"target\": 2, \"iterations\": 1}",
+    "register_layout": [
+      "qubits 0..n-1: index register (address, little-endian, qubit k = bit k of address)",
+      "qubits n..n+m-1: data register (QRAM output word, little-endian; returned to |0> after each oracle)",
+      "qubit n+m: flag qubit (expected input |->); example n=2,m=2: index=0,1; data=2,3; flag=4"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_load",
+        "explanation": "Address-controlled X gates onto data bits where D[i] has a 1, using X conjugation on index qubits for zero address bits and mcx."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_mark",
+        "explanation": "X on data bits where w is 0, mcx from the data register to the flag, then undo the X gates."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_oracle",
+        "explanation": "Compute (load), mark, uncompute (load)."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_diffusion and the loop in build_circuit",
+        "explanation": "Reflection about the uniform state via H X C^{n-1}Z X H on the index register, composed with the oracle each iteration. The |s> preparation is not included because the runner prepares inputs."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit (iteration count R computation)",
+        "explanation": "Default R = floor(pi/4 sqrt(N/M)), with M counted from the database; the success probability formula is analysis only and not implemented."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Initial H^n on the index register and flag preparation in |-> are excluded from the circuit; only the Grover iterations are built.",
+        "reason": "The task requires an operation without input-state preparation; the runner prepares the inputs."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The multi-controlled-Z diffusion gives I-2|s><s|, the negative of 2|s><s|-I, so a global phase of pi is added per iteration.",
+        "reason": "To make the circuit match G exactly rather than only up to a global sign."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Generalized from fixed n=2,m=2,M=1 to varying n, m, database, target. M is counted from the database, multiple matches are allowed with 1<=M<N, and iterations may be overridden.",
+        "reason": "The operation must work for varying valid instance parameters. M=N is rejected because the oracle would be a global phase."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "Multi-controlled gates use qc.mcx without a dedicated ancilla qubit.",
+        "reason": "This keeps the layout to n+m+1 qubits, within the 12-qubit cap."
+      }
+    ],
+    "assumptions": [
+      "The runner prepares the index register in the uniform superposition (or other desired state), the data register in |0>, and the flag in |->.",
+      "Database and target are classical build-time data in the instance.",
+      "Qubit order is little-endian; the address bit k is index qubit k and data bit j is data qubit j.",
+      "Gate-level QRAM design is an assumed address-controlled-X realization, not taken from the paper."
+    ],
+    "unresolved_issues": [
+      "The paper's exact QRAM design and any gate-count optimizations are unknown from the abstract.",
+      "Handling of unknown M is not addressed; M is computed classically from the database at build time."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 5,
+    "gate_count": 164,
+    "depth": 105,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

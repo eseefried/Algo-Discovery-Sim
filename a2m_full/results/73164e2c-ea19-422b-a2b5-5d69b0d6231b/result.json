@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "73164e2c-ea19-422b-a2b5-5d69b0d6231b",
+  "parent_run_id": "f0f31957-e85b-47bb-8038-1fb9e00b3791",
+  "created_at": "2026-11-01T00:26:53.090489+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "b2fe086a966aca181a4d2c3cb5aa4f9ddf00a5e1d3996777f0c70af5d65cf6cd",
+  "source_specification_sha256": "23098ad4ac731151344881fe4b0c06ab2f699fb2a56c2823ed0e8e20caa8243c",
+  "source_python_sha256": "83d35f588567257c86f49a3f5580b96a716c157f0378d52f50dfb23f4c629bbd",
+  "elapsed_seconds": 36.318,
+  "usage": {
+    "input_tokens": 5846,
+    "output_tokens": 5480,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the SWAP-routing construction (eq_4) from the specification. A logical Clifford+T circuit on n<=12 qubits is mapped onto a 1-D line of physical qubits from a given initial placement. Each non-adjacent CX is routed by moving the control along the shortest path with SWAPs, each decomposed as CX(a,b) CX(b,a) CX(a,b). The permutation accumulated by routing is left in place by default, or optionally undone with an adjacent-SWAP sort. Scheduling, force-directed scheduling, placement optimisation and ULB sizing are not implemented.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n_ONE = (\"h\", \"s\", \"sdg\", \"t\", \"tdg\", \"x\", \"z\")\n\n\ndef _int(v, lo, hi, name):\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError(name + \" invalid\")\n    return v\n\n\ndef _swap(qc, q, p, occ, loc):\n    # eq_4: SWAP = CX_ab CX_ba CX_ab on adjacent physical qubits p, p+1; tracks permutation\n    a = q[p]\n    b = q[p + 1]\n    qc.cx(a, b)\n    qc.cx(b, a)\n    qc.cx(a, b)\n    la = occ[p]\n    lb = occ[p + 1]\n    occ[p] = lb\n    occ[p + 1] = la\n    loc[la] = p + 1\n    loc[lb] = p\n\n\ndef _single(qc, name, qubit):\n    if name == \"h\":\n        qc.h(qubit)\n    elif name == \"s\":\n        qc.s(qubit)\n    elif name == \"sdg\":\n        qc.sdg(qubit)\n    elif name == \"t\":\n        qc.t(qubit)\n    elif name == \"tdg\":\n        qc.tdg(qubit)\n    elif name == \"x\":\n        qc.x(qubit)\n    elif name == \"z\":\n        qc.z(qubit)\n    else:\n        raise ValueError(\"unknown gate\")\n\n\ndef build_circuit(instance):\n    \"\"\"Route a logical Clifford+T gate list onto a line of n physical qubits.\n\n    instance: {\"n\": int 2..12,\n               \"gates\": [[\"h\", l], [\"t\", l], [\"cx\", control, target], ...] (logical indices),\n               \"placement\": optional permutation, logical i starts at physical placement[i],\n               \"restore_permutation\": optional bool, undo routing permutation at the end}\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be an object\")\n    n = _int(instance.get(\"n\"), 2, 12, \"n\")\n    gates = instance.get(\"gates\")\n    if not isinstance(gates, list) or len(gates) > 500:\n        raise ValueError(\"gates invalid\")\n    placement = instance.get(\"placement\", list(range(n)))\n    if not isinstance(placement, list) or len(placement) != n:\n        raise ValueError(\"placement invalid\")\n    for p in placement:\n        _int(p, 0, n - 1, \"placement entry\")\n    if sorted(placement) != list(range(n)):\n        raise ValueError(\"placement must be a permutation\")\n    restore = instance.get(\"restore_permutation\", False)\n    if not isinstance(restore, bool):\n        raise ValueError(\"restore_permutation must be bool\")\n    parsed = []\n    for g in gates:\n        if not isinstance(g, (list, tuple)) or len(g) < 2 or not isinstance(g[0], str):\n            raise ValueError(\"bad gate\")\n        name = g[0]\n        if name in _ONE:\n            if len(g) != 2:\n                raise ValueError(\"bad gate arity\")\n            parsed.append((name, _int(g[1], 0, n - 1, \"qubit\"), -1))\n        elif name == \"cx\":\n            if len(g) != 3:\n                raise ValueError(\"bad gate arity\")\n            c = _int(g[1], 0, n - 1, \"control\")\n            t = _int(g[2], 0, n - 1, \"target\")\n            if c == t:\n                raise ValueError(\"cx needs distinct qubits\")\n            parsed.append((name, c, t))\n        else:\n            raise ValueError(\"unsupported gate\")\n    q = QuantumRegister(n, \"q\")\n    qc = QuantumCircuit(q)\n    loc = list(placement)\n    occ = [0] * n\n    for l, p in enumerate(placement):\n        occ[p] = l\n    for name, a, b in parsed:\n        if name != \"cx\":\n            _single(qc, name, q[loc[a]])\n            continue\n        # eq_4 routing: move control toward target until physically adjacent\n        while abs(loc[a] - loc[b]) > 1:\n            step = 1 if loc[b] > loc[a] else -1\n            lo = loc[a] if step == 1 else loc[a] - 1\n            _swap(qc, q, lo, occ, loc)\n        qc.cx(q[loc[a]], q[loc[b]])\n    if restore:\n        # bubble sort by home position using adjacent SWAPs\n        for i in range(n):\n            for p in range(n - 1 - i):\n                if placement[occ[p]] > placement[occ[p + 1]]:\n                    _swap(qc, q, p, occ, loc)\n    return qc",
+    "example_instance_json": "{\"n\":4,\"gates\":[[\"h\",0],[\"t\",0],[\"cx\",0,3],[\"t\",3],[\"cx\",1,3],[\"h\",2],[\"cx\",2,0],[\"s\",1],[\"cx\",3,1]],\"placement\":[0,1,2,3],\"restore_permutation\":false}",
+    "register_layout": [
+      "Qubits q[0..n-1] are physical qubits on a 1-D line, with adjacency between q[i] and q[i+1]. Little-endian: q[0] is the least significant bit.",
+      "Logical qubit i initially resides on physical qubit placement[i] (identity by default). The runner prepares inputs on physical qubits.",
+      "With restore_permutation=false, logical qubit i ends at the physical position given by the routing permutation (P_pi). With true, it returns to placement[i].",
+      "No ancillas."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Slack/ASAP/ALAP scheduling is a classical compiler computation with no unitary realization; the chosen construction is only SWAP routing."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Force-directed scheduling is classical background; the paper's modification is unknown, and gate order is taken as given."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Timing-driven placement cost is not optimised in the circuit. The resulting placement is supplied as the 'placement' input, and routing uses its Manhattan distance on the line implicitly."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_swap (CX-CX-CX SWAP decomposition with permutation tracking) and build_circuit (shortest-path routing loop, optional restore)",
+        "explanation": "SWAP = CX_ab CX_ba CX_ab is implemented exactly. The mapped circuit yields P_pi|psi_orig>, with P_pi tracked by loc/occ. The fidelity check F is a classical post-processing criterion left to the runner."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Weighted ULB size argmin is a classical optimisation over given latencies, with no quantum circuit content."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to the routing construction only. No scheduling, force computation, placement search or ULB selection is done in the circuit.",
+        "reason": "These are classical compiler computations that do not define a unitary operation."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Topology fixed to a 1-D line (1xn) with n<=12. Placement is an input permutation, and the control qubit is moved toward the target along the shortest path. The final permutation is kept by default, with an optional adjacent-SWAP sort to undo it.",
+        "reason": "The spec's tiny instance is a 1x4 line. The operation needs a deterministic, testable routing rule, and the permutation criterion in eq_4 is checked externally."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The fidelity criterion F=|<psi_orig|P_pi^dagger|psi_map>|^2 is not placed in the circuit. P_pi is determined by the routing and placement inputs, so the runner must derive it.",
+        "reason": "Circuit generation must be measurement-free and contain no reference or test code."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The supported logical gate set is limited to h, s, sdg, t, tdg, x, z and cx.",
+        "reason": "Clifford+T matches the specified instance. This limit also keeps the implementation compact and the validation simple."
+      }
+    ],
+    "assumptions": [
+      "Logical gate order is the given order, and no reordering by scheduling is applied.",
+      "Adjacent physical qubits on the line are the only coupled pairs.",
+      "The SWAP-moved control stays at its new position afterwards, so the permutation accumulates.",
+      "The input state is prepared by the runner on physical qubits consistent with placement, and logical qubit i starts at physical placement[i].",
+      "Gate list length is capped at 500 for safety."
+    ],
+    "unresolved_issues": [
+      "The paper's QDFG construction, force modification, ULB architecture, and routing congestion model are unknown and not reproduced.",
+      "2-D grid routing is not implemented.",
+      "The 40% latency reduction is not reproduced, and the circuit carries no latency information."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 21,
+    "depth": 17,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

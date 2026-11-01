@@ -1,0 +1,130 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "9e2af87f-d3d7-453e-ab0e-a4a29dfc33ff",
+  "parent_run_id": "46119d5d-77da-4fbe-ac0f-3fd293ca839d",
+  "created_at": "2026-10-31T22:20:14.564287+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "519cd6967cd32cd0c4a959045df7b3c3f2fa2b446f1be31e3f9d842b4b2391b1",
+  "source_specification_sha256": "7c6d2b7af93128af0b816124b492f33569d49e0b2d6e15b5651ac38c1718adeb",
+  "source_python_sha256": "466bff47e314603198f437fb06ffdc79aa81cc808d5ae9c413bd8c25514f6935",
+  "elapsed_seconds": 40.028,
+  "usage": {
+    "input_tokens": 4467,
+    "output_tokens": 5771,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds a baseline amplitude-estimation circuit for the mean of f:{0..2^n-1}->[0,1]. It uses a uniform superposition on x and controlled-RY oracle rotations on a flag qubit to form A. Controlled powers of Q=-A S_0 A^dagger S_chi act on an m-qubit phase register, followed by an inverse QFT. This is only the generic textbook baseline, not the paper's novel optimal or Aharonov-variant algorithms or the median algorithm.",
+    "source_python": "from __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate, RYGate\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    m = instance.get('m')\n    f = instance.get('f_values')\n    if not _is_int(n) or not _is_int(m):\n        raise ValueError('n and m must be integers')\n    if n < 1 or m < 1:\n        raise ValueError('n and m must be >= 1')\n    if n + m + 1 > 12:\n        raise ValueError('total qubits n+m+1 must be <= 12')\n    if not isinstance(f, (list, tuple)) or len(f) != 2 ** n:\n        raise ValueError('f_values must be a list of length 2**n')\n    angles = []\n    for v in f:\n        if isinstance(v, bool) or not isinstance(v, (int, float)):\n            raise ValueError('f values must be real numbers')\n        v = float(v)\n        if not math.isfinite(v) or v < 0.0 or v > 1.0:\n            raise ValueError('f values must lie in [0,1]')\n        angles.append(2.0 * math.asin(math.sqrt(v)))\n    return n, m, angles\n\n\ndef _prep_A(n, angles):\n    # eq_2: A|0>|0> = N^-1/2 sum_x |x>(sqrt(1-f)|0> + sqrt(f)|1>)\n    a = QuantumCircuit(n + 1, name='A')\n    for q in range(n):\n        a.h(q)\n    for x, t in enumerate(angles):\n        if t != 0.0:\n            a.append(RYGate(t).control(n, ctrl_state=x), list(range(n)) + [n])\n    return a\n\n\ndef _grover_gate(n, a_circ):\n    # eq_4: Q' = A S_0 A^dagger S_chi (the overall -1 is applied separately as Z on the control)\n    a_gate = a_circ.to_gate()\n    q = QuantumCircuit(n + 1, name='Qp')\n    allq = list(range(n + 1))\n    q.z(n)  # S_chi: flip sign of flag=1\n    q.append(a_gate.inverse(), allq)\n    for i in allq:\n        q.x(i)\n    q.h(n)\n    q.mcx(list(range(n)), n)\n    q.h(n)\n    for i in allq:\n        q.x(i)  # S_0: flip sign of |0...0>\n    q.append(a_gate, allq)\n    return q.to_gate()\n\n\ndef build_circuit(instance):\n    n, m, angles = _parse(instance)\n    phase = QuantumRegister(m, 'phase')\n    xr = QuantumRegister(n, 'x')\n    flag = QuantumRegister(1, 'flag')\n    qc = QuantumCircuit(phase, xr, flag)\n    xq = list(range(m, m + n))\n    fq = m + n\n    a_circ = _prep_A(n, angles)\n    qc.append(a_circ.to_gate(), xq + [fq])\n    for j in range(m):\n        qc.h(j)\n    cq = _grover_gate(n, a_circ).control(1)\n    for j in range(m):\n        for _ in range(2 ** j):\n            qc.append(cq, [j] + xq + [fq])\n    # Q = -Q': controlled (-1) is Z on the control qubit; (-1)^(2^j) = 1 for j >= 1\n    qc.z(0)\n    qc.append(QFTGate(m).inverse(), list(range(m)))\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"m\": 3, \"f_values\": [0.0, 0.25, 0.5, 1.0]}",
+    "register_layout": [
+      "qubits 0..m-1: phase register (little-endian; qubit j controls Q^(2^j)); after inverse QFT, integer y read little-endian gives estimate sin^2(pi*y/2^m)",
+      "qubits m..m+n-1: x index register (qubit m is least significant bit of x)",
+      "qubit m+n: flag qubit holding sqrt(f(x)) amplitude on |1>",
+      "example: n=2, m=3 -> phase=[0,1,2], x=[3,4], flag=[5]"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Classical definition of the target mean; the circuit encodes it as the flag-1 probability, and no classical sum is computed in the module."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_prep_A",
+        "explanation": "Hadamards on x then multi-controlled RY(2 arcsin sqrt(f(x))) on the flag for each x give A|0>."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Follows from eq_2 by direct computation, so it is not a separate circuit element; the angles in _prep_A rely on it."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_grover_gate and build_circuit",
+        "explanation": "Q = -A S_0 A^dagger S_chi is built from Z on the flag, A^dagger, a sign flip of |0..0>, and A, with the -1 supplied as a Z on the control qubit; controlled powers act on the phase register and an inverse QFTGate follows."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Error bound on the classical estimate after measurement; no measurement or postprocessing is in the operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The oracle is realized as explicit multi-controlled RY rotations from a user-supplied table f_values, with f restricted to [0,1] and N=2^n with n>=1.",
+        "reason": "A concrete bound circuit is needed instead of an abstract black box."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The global -1 of Q is implemented as a Z gate on the phase qubit 0, since controlled Q^(2^j) carries the -1 only for j=0, and Q' = A S_0 A^dagger S_chi is controlled without it.",
+        "reason": "The sign becomes a relative phase under control and must be included to get eigenphases e^{±2i theta}."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The inverse QFT is QFTGate(m).inverse() on the phase qubits in little-endian order, with qubit j controlling Q^(2^j).",
+        "reason": "This matches the specified Qiskit qubit ordering and its bit-reversal convention."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3",
+          "eq_5"
+        ],
+        "change": "Scope is narrowed to the generic amplitude-estimation baseline circuit, with no measurement, sampling or classical postprocessing; the paper's novel optimal algorithm, the Aharonov variant and the median algorithm are not implemented.",
+        "reason": "The abstract gives no details of those algorithms, and the task requires an operation without measurement."
+      }
+    ],
+    "assumptions": [
+      "f values lie in [0,1] and the domain is uniform over 2^n points.",
+      "Total qubits n+m+1 are at most 12.",
+      "The runner prepares the input state (all zeros) and handles measurement and postprocessing."
+    ],
+    "unresolved_issues": [
+      "The paper's actual algorithms (novel optimal mean estimation, Aharonov variant, median) are not reconstructed.",
+      "The paper's oracle and error models are unknown.",
+      "The circuit uses repeated controlled Q applications, so depth grows as 2^m."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 10180,
+    "depth": 7898,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

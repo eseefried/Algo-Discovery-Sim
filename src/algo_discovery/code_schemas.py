@@ -94,6 +94,7 @@ class CircuitValidation(StrictModel):
 
 
 class CodeResult(StrictModel):
+    backend: Literal["anthropic", "local"] = "anthropic"
     schema_version: Literal["1.0"] = "1.0"
     stage: Literal["equations_to_qiskit"] = "equations_to_qiskit"
     run_id: str

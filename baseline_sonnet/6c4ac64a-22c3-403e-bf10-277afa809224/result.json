@@ -1,0 +1,118 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "6c4ac64a-22c3-403e-bf10-277afa809224",
+  "parent_run_id": "f60431d2-e0c0-404a-9d16-9f050a786c68",
+  "created_at": "2026-10-31T22:19:42.428664+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "d7179af54892e608e11dd963c024b84c3131190cda1f1c6d7c968a8a32d2c3a6",
+  "source_specification_sha256": "2a207ae8938447603f582a76c3e026e17ed301d4f479116807aa97922e58ab31",
+  "source_python_sha256": "5ee9956d7cb32743a52589351604c6861451e4490a32c55f476df6d136fe4694",
+  "elapsed_seconds": 42.573,
+  "usage": {
+    "input_tokens": 4697,
+    "output_tokens": 5622,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the two-qutrit ternary controlled-X (TCX: |c,t> -> |c,t+c mod 3>) or controlled-Z (TCZ: |c,t> -> w^(ct)|c,t>) gate on 4 qubits, with each qutrit encoded in 2 qubits (value = q_low + 2*q_high, and the unused value 3 is left fixed). Optional inverse. The Fourier-conjugation relation (eq_4) is not implemented.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import PhaseGate\n\n\ndef _shift(inverse):\n    \"\"\"Qutrit X (eq_1) on 2 qubits: 0->1->2->0, 3 fixed. Value = q0 + 2*q1.\"\"\"\n    s = QuantumCircuit(2, name='X3inv' if inverse else 'X3')\n    if not inverse:\n        s.swap(0, 1)  # |01> <-> |10>  (values 1 <-> 2)\n        s.cx(1, 0, ctrl_state=0)  # |00> <-> |01>  (values 0 <-> 1)\n    else:\n        s.cx(1, 0, ctrl_state=0)\n        s.swap(0, 1)\n    return s\n\n\ndef build_circuit(instance):\n    \"\"\"Build TCX or TCZ on control qubits [0,1] and target qubits [2,3].\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    gate = instance.get('gate', None)\n    if gate not in ('TCX', 'TCZ'):\n        raise ValueError('gate must be TCX or TCZ')\n    inverse = instance.get('inverse', False)\n    if not isinstance(inverse, bool):\n        raise ValueError('inverse must be a bool')\n    ctrl = QuantumRegister(2, 'ctrl')\n    tgt = QuantumRegister(2, 'tgt')\n    qc = QuantumCircuit(ctrl, tgt, name=gate)\n    if gate == 'TCX':\n        # eq_2: control value c applies X^c to target\n        g1 = _shift(inverse).to_gate()\n        g2 = _shift(not inverse).to_gate()  # X^2 = X^-1\n        qc.append(g1.control(2, ctrl_state=1), [0, 1, 2, 3])  # c=1\n        qc.append(g2.control(2, ctrl_state=2), [0, 1, 2, 3])  # c=2\n    else:\n        # eq_3: phase w^(c*t) on basis |c,t>\n        sign = -1.0 if inverse else 1.0\n        for c in (1, 2):\n            for t in (1, 2):\n                k = (c * t) % 3\n                if k == 0:\n                    continue\n                angle = sign * 2.0 * math.pi * k / 3.0\n                bits = [c & 1, (c >> 1) & 1, t & 1, (t >> 1) & 1]\n                tidx = 2 if bits[2] == 1 else 3\n                controls = [i for i in range(4) if i != tidx]\n                cs = 0\n                for j, i in enumerate(controls):\n                    cs |= bits[i] << j\n                qc.append(PhaseGate(angle).control(3, ctrl_state=cs), controls + [tidx])\n    return qc",
+    "example_instance_json": "{\"gate\": \"TCX\", \"inverse\": false}",
+    "register_layout": [
+      "qubit 0: control qutrit low bit (value = q0 + 2*q1)",
+      "qubit 1: control qutrit high bit",
+      "qubit 2: target qutrit low bit (value = q2 + 2*q3)",
+      "qubit 3: target qutrit high bit",
+      "qutrit value 3 (bits 11) is unused and left unchanged by the circuit"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_shift (qutrit X); Z phases appear as omega^(c*t) in the TCZ branch of build_circuit",
+        "explanation": "X is a 3-cycle on encoded values 0,1,2 built from SWAP and a negatively controlled CX. Z is used only through the controlled phases of TCZ."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit, TCX branch",
+        "explanation": "The target is shifted by X for c=1 and by X^2 for c=2, using a 2-qubit controlled gate with ctrl_state selecting the control value."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit, TCZ branch",
+        "explanation": "A multi-controlled phase gate with angle 2*pi*(c*t mod 3)/3 is applied for each basis pair (c,t) with c,t in {1,2}."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The qutrit Fourier gate F has no compact exact standard-gate decomposition in the 2-qubit encoding without an opaque dense unitary, which is disallowed. The TCX/TCZ relation is therefore not built."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Qutrits are encoded in 2 qubits each, with the unused value 3 mapped to itself (identity). The construction acts as the specified gate only on the 3x3 qutrit subspace.",
+        "reason": "A qutrit does not fit in a qubit register, and the circuit must be a unitary on qubits."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The Fourier-conjugation relation between TCX and TCZ is not implemented.",
+        "reason": "The Fourier gate cannot be built without an opaque dense unitary, and the scope is narrowed to a single TCX or TCZ gate."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The instance selects TCX or TCZ with an optional inverse flag. The inverse is an added option that is not in the specification.",
+        "reason": "It provides varying valid parameters while keeping the construction minimal."
+      }
+    ],
+    "assumptions": [
+      "Control register is first (qubits 0,1) and target second (qubits 2,3).",
+      "Little-endian qutrit encoding: value = low bit + 2*high bit.",
+      "TCX applies X^c to the target and TCZ applies Z^c, as assumed in the specification."
+    ],
+    "unresolved_issues": [
+      "The paper's exact TCX/TCZ definitions (for example, control on a single level) are unknown.",
+      "The Fourier relation eq_4 is not realized in the circuit.",
+      "Behavior on the unused encoded value 3 is identity by choice."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 312,
+    "depth": 251,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

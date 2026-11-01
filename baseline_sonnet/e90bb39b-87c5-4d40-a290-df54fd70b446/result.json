@@ -1,0 +1,133 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "e90bb39b-87c5-4d40-a290-df54fd70b446",
+  "parent_run_id": "e50bd805-cc0e-4061-b0a2-9499a03d8d87",
+  "created_at": "2026-10-31T22:24:13.705824+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "6e67d505b246fdcd82799edb5b05cc6a9aeb9ad082e0cfc63bac4556dd829195",
+  "source_specification_sha256": "8255d4783d4f7e7eb811c1dc53d7568231928cf61f291d203714c4ae7ebfc131",
+  "source_python_sha256": "c8dd017cffdcd823d705e41429dea4464c7862bf6d8ec7ed2293857b71242fbf",
+  "elapsed_seconds": 36.009,
+  "usage": {
+    "input_tokens": 4971,
+    "output_tokens": 5199,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit implementation of the Grover-search baseline from eq_5 for triangle finding on a small graph (n<=13 vertices). It builds k iterations of the Grover operator, G = diffusion * oracle, on a register indexing the N=C(n,3) vertex triples. The oracle loads the three queried edge bits of each triple into 3 ancillas by index-controlled X gates, applies a CCZ (the AND of eq_4) and uncomputes. The diffusion is the inversion about the uniform state on the 2^m index space. The circuit has no state preparation, so the runner supplies the uniform superposition. This is NOT the paper's O~(n^{5/4}) algorithm, which is not reconstructed.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _triples(n):\n    out = []\n    for a in range(n):\n        for b in range(a + 1, n):\n            for c in range(b + 1, n):\n                out.append((a, b, c))\n    return out\n\n\ndef _parse_edges(raw, n):\n    if not isinstance(raw, list):\n        raise ValueError('edges must be a list of [u,v] pairs')\n    edges = set()\n    for e in raw:\n        if not isinstance(e, (list, tuple)) or len(e) != 2:\n            raise ValueError('each edge must be a pair')\n        u, v = e\n        if isinstance(u, bool) or isinstance(v, bool) or not isinstance(u, int) or not isinstance(v, int):\n            raise ValueError('edge endpoints must be integers')\n        if u < 0 or v < 0 or u >= n or v >= n or u == v:\n            raise ValueError('invalid edge')\n        edges.add((min(u, v), max(u, v)))\n    return edges\n\n\ndef _oracle_edge_load(qc, m, tri, edges):\n    # eq_4: query x_ab, x_bc, x_ac for each triple index t and write into ancillas m, m+1, m+2\n    ctrls = list(range(m))\n    for t, (a, b, c) in enumerate(tri):\n        pairs = ((a, b), (b, c), (a, c))\n        for j in range(3):\n            if pairs[j] in edges:\n                qc.mcx(ctrls, m + j, ctrl_state=t)\n\n\ndef _diffusion(qc, m):\n    # eq_5: reflection about uniform superposition on the m-qubit index register\n    for q in range(m):\n        qc.h(q)\n        qc.x(q)\n    if m == 1:\n        qc.z(0)\n    else:\n        qc.h(m - 1)\n        qc.mcx(list(range(m - 1)), m - 1)\n        qc.h(m - 1)\n    for q in range(m):\n        qc.x(q)\n        qc.h(q)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 3 or n > 13:\n        raise ValueError('n must be an integer in [3, 13]')\n    k = instance.get('iterations')\n    if isinstance(k, bool) or not isinstance(k, int) or k < 0 or k > 64:\n        raise ValueError('iterations must be an integer in [0, 64]')\n    edges = _parse_edges(instance.get('edges'), n)\n    num_tri = n * (n - 1) * (n - 2) // 6\n    m = max(1, (num_tri - 1).bit_length())\n    if m + 3 > 12:\n        raise ValueError('too many qubits')\n    tri = _triples(n)\n    treg = QuantumRegister(m, 'triple')\n    ereg = QuantumRegister(3, 'edge')\n    qc = QuantumCircuit(treg, ereg)\n    for _ in range(k):\n        _oracle_edge_load(qc, m, tri, edges)\n        qc.ccz(m, m + 1, m + 2)\n        _oracle_edge_load(qc, m, tri, edges)\n        _diffusion(qc, m)\n    return qc",
+    "example_instance_json": "{\"n\": 4, \"edges\": [[0,1],[1,2],[0,2],[2,3]], \"iterations\": 1}",
+    "register_layout": [
+      "qubits 0..m-1: 'triple' register, binary index t of the lexicographically ordered vertex triple (a<b<c), qubit 0 is LSB, m = max(1, ceil(log2 C(n,3)))",
+      "qubit m: edge ancilla for edge (a,b) of the triple, input and output |0>",
+      "qubit m+1: edge ancilla for edge (b,c), input and output |0>",
+      "qubit m+2: edge ancilla for edge (a,c), input and output |0>",
+      "Example n=4: m=2, triple qubits 0-1 (indices 0..3 = triples {0,1,2},{0,1,3},{0,2,3},{1,2,3}), edge ancillas 2,3,4; 5 qubits total",
+      "Expected input: uniform superposition over the triple register (prepared by the runner), ancillas |0>"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Claimed O~(n^{5/4}) query complexity of the paper's algorithm; an asymptotic statement, and the algorithm is not reconstructed."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Previous O(n^{9/7}) upper bound, cited comparison only."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Cited lower bound for the edge-weighted problem; no circuit content."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_oracle_edge_load plus the qc.ccz call in build_circuit",
+        "explanation": "Edge bits x_ab, x_bc, x_ac of each triple are loaded into ancillas by index-controlled X gates (graph data from the instance edge list). The CCZ computes their AND as a phase, and the load is then uncomputed."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop (oracle, then _diffusion)",
+        "explanation": "Grover iterate: phase oracle O_T followed by diffusion about the uniform state, repeated 'iterations' times. The uniform-state preparation is left to the runner. The phase-kickback qubit is replaced by a direct CCZ."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Dropped the |-> phase-kickback qubit and used a CCZ on the 3 edge ancillas for the phase flip, so the circuit has 3 ancillas instead of 4 non-index qubits.",
+        "reason": "A CCZ is the standard equivalent of Toffoli plus a |-> target and needs one qubit less."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The diffusion reflects about the uniform state over all 2^m basis states of the index register. Indices >= C(n,3) are unmarked padding. The circuit takes the iteration count as an instance parameter, with no automatic optimal choice.",
+        "reason": "When C(n,3) is not a power of two, a diffusion on exactly N states would need a state-preparation unitary, which the runner is supposed to supply. Only n=4 gives N=4 exactly."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The graph edges are classical instance data compiled into index-controlled gates, not a black-box adjacency query oracle.",
+        "reason": "Qiskit circuits cannot call a quantum query oracle. The edge loads emulate 3 queries per oracle call."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Scope narrowed to the Grover baseline circuit. The paper's O~(n^{5/4}) algorithm is not implemented and the complexity claims are not encoded.",
+        "reason": "The abstract gives no algorithmic or circuit details."
+      }
+    ],
+    "assumptions": [
+      "Undirected simple graph; duplicate edges are merged and edge orientation is ignored.",
+      "Triples are enumerated lexicographically with a<b<c, and triple index t is the computational-basis value of the index register (qubit 0 LSB).",
+      "The runner prepares the uniform superposition over the index register and leaves the ancillas in |0>.",
+      "Vertex count n is limited to 3..13 so that the total qubits m+3 are at most 12."
+    ],
+    "unresolved_issues": [
+      "The paper's actual combinatorial algorithm achieving O~(n^{5/4}) is not reconstructed.",
+      "Optimal iteration counts depend on the number of marked triples, which the circuit does not compute.",
+      "For N not a power of two, the diffusion over the padded index space only approximates uniform-over-N Grover search."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 5,
+    "gate_count": 304,
+    "depth": 192,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

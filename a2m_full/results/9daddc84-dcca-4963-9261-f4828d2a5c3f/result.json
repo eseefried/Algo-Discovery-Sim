@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "9daddc84-dcca-4963-9261-f4828d2a5c3f",
+  "parent_run_id": "e1e4f3ab-f269-4a09-8434-003513542c4e",
+  "created_at": "2026-11-01T00:10:40.876797+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "e4de3b105642b2d920e27d6966012a79ff2280a96d67de904e845d43352f9720",
+  "source_specification_sha256": "599cb47c550fb34efd7c5455caa04e7e9ed9965d3f0efe8f6ad16d5f6289cc41",
+  "source_python_sha256": "4fb702f66b5683ca0c8f71e785fc4511d2e065093e5c678dfe4eff9f34bdfe46",
+  "elapsed_seconds": 29.3,
+  "usage": {
+    "input_tokens": 5526,
+    "output_tokens": 4183,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements, for q=2, one Bernstein-Vazirani step on the discrete derivative of a multilinear polynomial f of degree <=d on n qubits. The operation is H^n . (U_f . X_i U_f X_i) . H^n, where U_f is a phase oracle built from multi-controlled-Z gates, one per monomial with coefficient 1. On input |0^n> the output is |a> up to a global phase, with a_j = c_{ij} for j != i and a_i = 0. This is the derivative-learning step of the assumed recursion, not the full algorithm.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    d = instance.get('d')\n    i = instance.get('direction')\n    monos = instance.get('monomials')\n    for v in (n, d, i):\n        if isinstance(v, bool) or not isinstance(v, int):\n            raise ValueError('n, d, direction must be integers')\n    if n < 1 or n > 12:\n        raise ValueError('n must be in 1..12')\n    if d < 1 or d > n:\n        raise ValueError('d must be in 1..n')\n    if i < 0 or i >= n:\n        raise ValueError('direction out of range')\n    if not isinstance(monos, list):\n        raise ValueError('monomials must be a list')\n    kept = set()\n    for S in monos:\n        if not isinstance(S, list):\n            raise ValueError('monomial must be a list of variable indices')\n        for v in S:\n            if isinstance(v, bool) or not isinstance(v, int) or v < 0 or v >= n:\n                raise ValueError('bad variable index')\n        if len(set(S)) != len(S):\n            raise ValueError('repeated variable: polynomial must be multilinear')\n        if len(S) > d:\n            raise ValueError('monomial degree exceeds d')\n        key = tuple(sorted(S))\n        # coefficients live in F_2: repeated monomials cancel in pairs\n        if key in kept:\n            kept.remove(key)\n        else:\n            kept.add(key)\n    return n, i, sorted(kept, key=lambda s: (len(s), s))\n\n\ndef _phase_oracle(qc, monos):\n    # eq_1 (q=2): U_f|x> = (-1)^{f(x)}|x>, f = sum_S c_S prod_{j in S} x_j\n    for S in monos:\n        if len(S) == 0:\n            qc.global_phase += math.pi\n        elif len(S) == 1:\n            qc.z(S[0])\n        else:\n            qc.mcp(math.pi, list(S[:-1]), S[-1])\n\n\ndef build_circuit(instance):\n    n, i, monos = _parse(instance)\n    qc = QuantumCircuit(n, name='bv_derivative')\n    for q in range(n):\n        qc.h(q)\n    # eq_3: derivative phase oracle (-1)^{f(x+e_i)+f(x)} = X_i U_f X_i . U_f\n    _phase_oracle(qc, monos)\n    qc.x(i)\n    _phase_oracle(qc, monos)\n    qc.x(i)\n    # eq_2: closing Hadamards of Bernstein-Vazirani\n    for q in range(n):\n        qc.h(q)\n    return qc",
+    "example_instance_json": "{\"n\":3,\"d\":2,\"monomials\":[[],[0],[0,1],[1,2]],\"direction\":0}",
+    "register_layout": [
+      "qubits 0..n-1: data register x, one qubit per variable x_j (qubit j = variable j, qubit 0 least significant)",
+      "no ancilla: the phase oracle is built directly, so no kickback ancilla is needed",
+      "example: n=3, qubits 0,1,2 = x_0,x_1,x_2; derivative direction i=0"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_phase_oracle",
+        "explanation": "The q=2 phase oracle (-1)^{f(x)} is built from Z, multi-controlled-phase(pi) and global-phase gates, one per monomial with coefficient 1. It is built directly, not from an XOR oracle with an ancilla."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit (Hadamard layers around the derivative oracle)",
+        "explanation": "H^n O H^n is applied with O the derivative oracle. On |0^n> this gives |a> up to phase, since the derivative has degree <=1 for d=2. For d>2 it is not a BV step."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit (oracle, X_i, oracle, X_i)",
+        "explanation": "The derivative phase oracle (-1)^{f(x+e_i)+f(x)} is U_f followed by X_i U_f X_i. This uses 2 oracle calls, and the constant term cancels."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Query-count recursion. Only one derivative step is built (2 oracle applications). The recursion over all i and the counting are not part of the circuit."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical reassembly of coefficients from measured outcomes and the f(0) evaluation. It involves measurement and postprocessing, so it is not a unitary operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The oracle is an explicit gate decomposition of f given by a monomial list in the instance, not an opaque black box or XOR oracle with a |-> ancilla.",
+        "reason": "A bound, measurement-free unitary operation with no ancilla preparation is required, and the oracle must exist as a circuit for varying parameters."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to a single derivative direction i with one BV step. The full recursion, the loop over all i, measurement, classical reassembly and query counting are excluded.",
+        "reason": "One explicitly scoped operation is required, with no measurement or dynamic control."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The BV step acts on all n qubits, not on n-1 qubits with x_i fixed to 0. Since D_{e_i}f does not depend on x_i, the output on |0^n> has qubit i in |0>.",
+        "reason": "This avoids a controlled-fix of x_i and keeps the same query structure."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The offset b of the derivative and the constant term c_empty appear only as global phases, which cancel for the derivative oracle.",
+        "reason": "This follows the specification, which notes b is a global phase and needs a separate evaluation."
+      }
+    ],
+    "assumptions": [
+      "q=2, so the phase is (-1)^{f(x)}",
+      "Coefficients are in F_2, so duplicate monomials in the instance cancel in pairs",
+      "The oracle is supplied as the monomial list, with variable j mapped to qubit j",
+      "Degree bound d satisfies 1<=d<=n, and each monomial has distinct variables and size <=d",
+      "n is capped at 12 qubits",
+      "Output is a BV result only when the derivative has degree <=1 (d<=2)"
+    ],
+    "unresolved_issues": [
+      "The paper's actual exact algorithm, its constants and the optimality argument are not reconstructed",
+      "General q and the QFT over F_q are not implemented",
+      "Handling of d>2, which needs a deeper recursion, is not implemented",
+      "Reed-Muller decoding details are not implemented"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 30,
+    "depth": 21,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

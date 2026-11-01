@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "7a72d71e-31d3-4308-b563-2bd9f7632210",
+  "parent_run_id": "6ac1cbf5-bc96-4314-9f40-fcf2e0dcd0bc",
+  "created_at": "2026-11-01T00:20:12.128035+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "8074cef88c7396b54a7a9907d4b45fb1926d0d162ae66b391afdad1d1083238e",
+  "source_specification_sha256": "8cafd5678619315e0248502e8ce2d8a66069d748e7f19bf0d973cdd46ed179f7",
+  "source_python_sha256": "26c3a3ac334c500bddd0db510344ba6df14db7619b65d82b09acb94c4ce9c2f9",
+  "elapsed_seconds": 43.512,
+  "usage": {
+    "input_tokens": 5767,
+    "output_tokens": 5895,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements one scoped PQF step as a measurement-free unitary W on 1 data qubit and 1 ancilla: H on the ancilla, controlled-G on the data qubit, then H on the ancilla. Here G = diag(e^{i a}, e^{-i a}) with a = j*pi/4, so each ancilla outcome m gives a data-qubit block A_m = (I + (-1)^m G)/2, which is proportional to a unitary. Block A_0 is proportional to Rz(-a), which is T^{-j} up to phase, and has probability cos^2(a/2). Block A_1 is proportional to Z*T^{-j}, with probability sin^2(a/2). An optional coherent (deferred-measurement) CZ correction implements the outcome-1 byproduct. Measurement, classical feedforward, the multi-step chain and the synthesis are not implemented.",
+    "source_python": "from math import pi\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef build_circuit(instance):\n    \"\"\"One PQF step W on (data, ancilla); ancilla is expected in |0> from the runner.\n\n    instance: {\"t_power\": int in {1,2,3,5,6,7}, \"apply_correction\": bool}\n    alpha = t_power*pi/4, G = diag(e^{i alpha}, e^{-i alpha}) = Rz(-2 alpha).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    j = instance.get('t_power', 1)\n    corr = instance.get('apply_correction', False)\n    if isinstance(j, bool) or not isinstance(j, int):\n        raise ValueError('t_power must be an integer')\n    if j < 1 or j > 7 or j % 4 == 0:\n        raise ValueError('t_power must be in {1,2,3,5,6,7}')\n    if not isinstance(corr, bool):\n        raise ValueError('apply_correction must be a bool')\n    alpha = j * pi / 4.0\n    data = QuantumRegister(1, 'data')\n    anc = QuantumRegister(1, 'anc')\n    qc = QuantumCircuit(data, anc)\n    # eq_1: W = (I_data x H_anc) * controlled-G * (I_data x H_anc)\n    qc.h(1)\n    qc.crz(-2.0 * alpha, 1, 0)\n    qc.h(1)\n    # optional deferred-measurement form of the outcome-1 byproduct C_{k,1} = Z\n    if corr:\n        qc.cz(1, 0)\n    return qc",
+    "example_instance_json": "{\"t_power\": 1, \"apply_correction\": false}",
+    "register_layout": [
+      "qubit 0: data (single-qubit state acted on by the chain unitary; little-endian index 0)",
+      "qubit 1: ancilla (input |0>, supplied by the runner; computational-basis value is the outcome m, which is not measured in the circuit)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: h(1); crz(-2*alpha,1,0); h(1)",
+        "explanation": "A concrete instance of the ancilla-assisted step. W(|psi>|0>) = sum_m (I+(-1)^m G)/2 |psi> (x) |m>. Each block is proportional to a unitary, as eq_1 requires. The probabilities are p_0=cos^2(alpha/2) and p_1=sin^2(alpha/2)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The full Markov-chain update needs mid-circuit measurement, classical feedforward and a multi-step chain, and the abstract gives no explicit chain. Only the optional coherent CZ correction (outcome-1 byproduct Z, via deferred measurement) touches this equation."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Absorbing target states, approximation error and termination need a synthesized chain for a target unitary U, which is not constructed here."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The expected cost is a classical post-hoc computation over branch probabilities. It is not part of the unitary circuit."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The asymptotic scaling claim cannot be realized or checked by a single-step circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Narrowed to a single measurement-free step with a hand-chosen W (H, controlled-Rz, H) instead of a chain of norm-equation-synthesized W_k with measurement and feedforward.",
+        "reason": "The abstract gives no explicit W_k or chain, and the required output must be a unitary circuit with no measurement or dynamic circuits."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The classically controlled correction C_{k,m} is replaced by an optional coherent CZ from the ancilla to the data qubit (deferred measurement), and the next-state composition is not built.",
+        "reason": "Classical feedforward is not allowed. Deferred measurement is the unitary equivalent for the single correction."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The block form is made concrete: A_0 is proportional to Rz(-alpha), i.e. T^{-j} up to phase, and A_1 is proportional to Z*Rz(-alpha).",
+        "reason": "An explicit unitary-block example is needed. The instance is invented for illustration and is not claimed to come from the paper."
+      }
+    ],
+    "assumptions": [
+      "The runner prepares the ancilla in |0> and the data qubit in an arbitrary state",
+      "alpha = t_power*pi/4, so the data blocks are T-power gates up to phase",
+      "Outcome m corresponds to the computational-basis value of qubit 1 after the final Hadamard",
+      "t_power multiples of 4 are rejected because one outcome has zero probability",
+      "The apply_correction option is a coherent stand-in for classical feedforward"
+    ],
+    "unresolved_issues": [
+      "The abstract does not specify the actual PQF W_k, fallback states, correction maps or the definition of b",
+      "The multi-step chain, the absorbing target and the expected T-count cost are not realized in the circuit",
+      "The Clifford+V and Clifford+pi/12 constructions are not implemented",
+      "The asymptotic scaling claim is not addressed"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 6,
+    "depth": 5,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

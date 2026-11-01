@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "89651cd2-57b2-4e31-95c8-b5199a869d80",
+  "parent_run_id": "18cb6506-c7aa-472a-ae70-dbce4bc50ddb",
+  "created_at": "2026-11-01T00:16:43.444231+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "91b18022c5922e839b31c297e3db12b151c3778f27be7824411939b1aef605db",
+  "source_specification_sha256": "5d8fe29eb07a7f660c45b5e30340c807f35df25e3111c5b34396f5b72fe01c82",
+  "source_python_sha256": "6994072f28e56b566654adea82e13ed163435cf3fb1ae3dd8026af4dc44f4041",
+  "elapsed_seconds": 42.178,
+  "usage": {
+    "input_tokens": 5603,
+    "output_tokens": 6023,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Grover iterations G^k for triangle finding on a small graph (3<=n<=8, at most 12 qubits). The graph comes from the instance's edge list, and the adjacency oracle O_G is compiled into multi-controlled X gates onto 3 edge ancillas. The phase oracle computes the three edge bits, applies a CCZ on them, then uncomputes, so the ancillas return to |0>. Diffusion is applied on the 3 vertex registers. The runner must prepare the uniform superposition on u,v,w and leave the ancillas in |0>. The circuit is measurement-free and unitary.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _is_int(x):\n    return isinstance(x, int) and not isinstance(x, bool)\n\n\ndef _edge_query(qc, xs, ys, target, pairs):\n    # eq_1: O_G|x,y,b> = |x,y,b xor A[x][y]> compiled for the instance graph\n    controls = list(xs) + list(ys)\n    for (a, b) in pairs:\n        flips = []\n        for i, q in enumerate(xs):\n            if not (a >> i) & 1:\n                flips.append(q)\n        for i, q in enumerate(ys):\n            if not (b >> i) & 1:\n                flips.append(q)\n        for q in flips:\n            qc.x(q)\n        qc.mcx(controls, target)\n        for q in flips:\n            qc.x(q)\n\n\ndef _phase_oracle(qc, U, V, W, E, pairs):\n    # eq_2/eq_3: compute edge bits, phase flip if all three set, uncompute\n    groups = [(U, V), (V, W), (U, W)]\n    for j, (xs, ys) in enumerate(groups):\n        _edge_query(qc, xs, ys, E[j], pairs)\n    qc.ccz(E[0], E[1], E[2])\n    for j, (xs, ys) in enumerate(groups):\n        _edge_query(qc, xs, ys, E[j], pairs)\n\n\ndef _diffusion(qc, reg):\n    # eq_4: reflection about uniform superposition (up to global phase)\n    for q in reg:\n        qc.h(q)\n    for q in reg:\n        qc.x(q)\n    qc.h(reg[-1])\n    qc.mcx(reg[:-1], reg[-1])\n    qc.h(reg[-1])\n    for q in reg:\n        qc.x(q)\n    for q in reg:\n        qc.h(q)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    if not _is_int(n) or n < 3 or n > 8:\n        raise ValueError('n must be an integer in 3..8')\n    edges = instance.get('edges')\n    if not isinstance(edges, (list, tuple)):\n        raise ValueError('edges must be a list of [a,b] pairs')\n    und = set()\n    for e in edges:\n        if not isinstance(e, (list, tuple)) or len(e) != 2:\n            raise ValueError('each edge must be a pair')\n        a, b = e\n        if not _is_int(a) or not _is_int(b) or a < 0 or b < 0 or a >= n or b >= n or a == b:\n            raise ValueError('invalid edge')\n        und.add((min(a, b), max(a, b)))\n    pairs = []\n    for (a, b) in sorted(und):\n        pairs.append((a, b))\n        pairs.append((b, a))\n    m = max(1, (n - 1).bit_length())\n    if 3 * m + 3 > 12:\n        raise ValueError('too many qubits')\n    adj = [[0] * n for _ in range(n)]\n    for (a, b) in und:\n        adj[a][b] = 1\n        adj[b][a] = 1\n    k = instance.get('iterations')\n    if k is None:\n        t = 0\n        for a in range(n):\n            for b in range(a + 1, n):\n                for c in range(b + 1, n):\n                    if adj[a][b] and adj[b][c] and adj[a][c]:\n                        t += 1\n        if t == 0:\n            raise ValueError('no triangle: give iterations explicitly')\n        M = 6 * t\n        N = 2 ** (3 * m)\n        theta = math.asin(math.sqrt(M / N))\n        k = max(0, int(round(math.pi / (4.0 * theta) - 0.5)))\n    if not _is_int(k) or k < 0 or k > 64:\n        raise ValueError('iterations must be an integer in 0..64')\n    ru = QuantumRegister(m, 'u')\n    rv = QuantumRegister(m, 'v')\n    rw = QuantumRegister(m, 'w')\n    re = QuantumRegister(3, 'e')\n    qc = QuantumCircuit(ru, rv, rw, re)\n    U = list(ru)\n    V = list(rv)\n    W = list(rw)\n    E = list(re)\n    for _ in range(k):\n        _phase_oracle(qc, U, V, W, E, pairs)\n        _diffusion(qc, U + V + W)\n    return qc",
+    "example_instance_json": "{\"n\": 4, \"edges\": [[0,1],[1,2],[0,2],[2,3]], \"iterations\": 2}",
+    "register_layout": [
+      "qubits 0..m-1: register u (first vertex, little-endian)",
+      "qubits m..2m-1: register v (second vertex, little-endian)",
+      "qubits 2m..3m-1: register w (third vertex, little-endian)",
+      "qubits 3m..3m+2: edge ancillas e0=A[u][v], e1=A[v][w], e2=A[u][w]; they start and end in |0>",
+      "m = max(1, ceil(log2 n)); the example n=4 has m=2, so u=0,1, v=2,3, w=4,5, e=6,7,8 (9 qubits)",
+      "The runner prepares the uniform superposition on u,v,w (qubits 0..3m-1) and |0> on the ancillas"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_edge_query",
+        "explanation": "The oracle is compiled from the instance edge list into multi-controlled X gates. Each ordered adjacent pair (a,b) flips the target when the registers hold |a>|b>."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_phase_oracle (CCZ on the AND of the three edge ancillas)",
+        "explanation": "The AND of the three edge bits is realised by the CCZ. Distinctness and range checks come for free: the diagonal of A is zero and out-of-range indices have no edges, so no flag ancilla is needed."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_phase_oracle",
+        "explanation": "Compute the three edge bits, apply CCZ, then uncompute the edge bits. CCZ acting on the edge bits directly replaces the kickback ancilla in |->, which has the same phase effect with one qubit fewer."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_diffusion and the loop in build_circuit",
+        "explanation": "The Grover diffusion H X MCZ X H on the 3m vertex qubits, composed with the oracle, repeated k times. It equals 2|s><s|-I up to a global phase of -1. The initial Hadamards that prepare |s> are left to the runner."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit (default iterations)",
+        "explanation": "If iterations is not given, k = round(pi/(4 theta) - 1/2), with sin(theta) = sqrt(M/N). M = 6 times the classically counted triangles, and N = 2^(3m). The success-probability formula itself is background."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The kickback ancilla in |-> is replaced by CCZ on the three edge ancillas, and the optional validity flag ancilla is dropped.",
+        "reason": "This saves qubits to stay within the 12-qubit cap. Validity checks are implied by the zero diagonal and the absence of edges at indices >= n."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "O_G is compiled from the instance's explicit edge list as multi-controlled X gates, not an opaque query. This costs no real queries and measures no query complexity.",
+        "reason": "The runner needs a concrete unitary, and opaque or dense unitaries are disallowed."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to the outer Grover skeleton with 3<=n<=8, reduced from the specified 4..6. Because of the 12-qubit cap, 3m+3 <= 12 is the real limit, and n=7 and 8 also fit. The paper's O~(n^{5/4}) combinatorial algorithm is not implemented.",
+        "reason": "The abstract gives no details of the combinatorial algorithm. The 12-qubit cap rules out the specified 3m+5 qubits for m=3."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The circuit excludes the initial Hadamards on u,v,w and the kickback preparation, as well as all measurements and classical verification.",
+        "reason": "The task requires an operation only. The runner prepares the inputs."
+      }
+    ],
+    "assumptions": [
+      "The graph is undirected, and duplicate edges are merged.",
+      "The input state is the uniform superposition over u,v,w with the edge ancillas in |0>.",
+      "If iterations is absent, the number of triangles is counted classically from the instance to choose k, and a graph with no triangle is then rejected.",
+      "Ordered triples are searched, so M = 6 times the number of triangles."
+    ],
+    "unresolved_issues": [
+      "The paper's O~(n^{5/4}) algorithm (sampling, edge classification, neighborhood search) is not reconstructed.",
+      "The skeleton does not realise a real query-complexity advantage, since the oracle is compiled from the known graph.",
+      "The measurement and classical verification steps of the specification are not part of the returned operation."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 9,
+    "gate_count": 5834,
+    "depth": 4970,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

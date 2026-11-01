@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "85322c8c-ff0b-4266-8492-400f05b344d3",
+  "parent_run_id": "7e9d2bc4-03bc-4e92-9033-c537dd93013f",
+  "created_at": "2026-10-31T22:33:41.411539+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "b9b847e1c2a20a1a8f799cc96e4cb75bf85cac776680efaea47a9ec27bb2246e",
+  "source_specification_sha256": "af70e02c5dd77c17170c2b20a763b1723d25ac6e75032d75d57d9c708577d3dd",
+  "source_python_sha256": "e85da81c3e0eabd65493446067059d525ea2cb7a6d3b6cb51b808bdcb2a40d85",
+  "elapsed_seconds": 37.417,
+  "usage": {
+    "input_tokens": 4706,
+    "output_tokens": 5332,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Trotterized CTQW search operator exp(-iHt), H = -gamma*A - epsilon|w><w|, on the smallest periodic honeycomb lattice (2x2 unit cells, 8 sites). With simple-graph periodic wrapping this lattice is the cube graph Q3, so A = X0+X1+X2 on 3 qubits. The hopping layers are exact RX rotations and the marking layer is a phase on |w>. A second-order Strang splitting is used with a user-set number of steps. The circuit contains no state preparation or measurement.",
+    "source_python": "from qiskit import QuantumCircuit\nimport math\n\n\ndef _num(v, name):\n    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):\n        raise ValueError(name + \" must be a finite real number\")\n    return float(v)\n\n\ndef _int(v, name):\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError(name + \" must be an integer\")\n    return v\n\n\ndef build_circuit(instance):\n    \"\"\"Trotterized exp(-i H t), H = -gamma*A - epsilon|w><w|, 2x2 periodic honeycomb (8 sites).\n\n    Site index s = x + 2*y + 4*b with qubits 0,1,2 = bits of s. Honeycomb A(x,y) -> (x, y, x^y),\n    B(u,v) -> (u, v, 1^u^v). A(x,y) neighbours are B(x,y), B(x+1,y), B(x,y+1) (mod 2),\n    which are exactly the three single-bit flips, so A = X0 + X1 + X2 (cube graph).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    gamma = _num(instance.get(\"gamma\"), \"gamma\")\n    eps = _num(instance.get(\"epsilon\"), \"epsilon\")\n    t = _num(instance.get(\"t\"), \"t\")\n    w = _int(instance.get(\"marked_site\"), \"marked_site\")\n    r = _int(instance.get(\"trotter_steps\", 1), \"trotter_steps\")\n    if gamma <= 0.0:\n        raise ValueError(\"gamma must be positive\")\n    if t < 0.0:\n        raise ValueError(\"t must be nonnegative\")\n    if w < 0 or w > 7:\n        raise ValueError(\"marked_site must be in 0..7\")\n    if r < 1 or r > 500:\n        raise ValueError(\"trotter_steps must be in 1..500\")\n    n = 3\n    dt = t / r\n    qc = QuantumCircuit(n)\n    for _ in range(r):\n        # half step of hopping: exp(+i gamma dt/2 X) = RX(-gamma dt)\n        for q in range(n):\n            qc.rx(-gamma * dt, q)\n        # marking: exp(+i eps dt |w><w|) = phase eps*dt on |w>\n        zeros = [q for q in range(n) if ((w >> q) & 1) == 0]\n        for q in zeros:\n            qc.x(q)\n        qc.mcp(eps * dt, [0, 1], 2)\n        for q in zeros:\n            qc.x(q)\n        # second half step of hopping\n        for q in range(n):\n            qc.rx(-gamma * dt, q)\n    return qc",
+    "example_instance_json": "{\"gamma\": 1.0, \"epsilon\": 2.0, \"t\": 1.5, \"marked_site\": 5, \"trotter_steps\": 8}",
+    "register_layout": [
+      "qubit 0: site-index bit 0 (LSB) = cell coordinate x",
+      "qubit 1: site-index bit 1 = cell coordinate y",
+      "qubit 2: site-index bit 2 = sublattice-dependent bit (A(x,y) -> (x,y,x^y); B(u,v) -> (u,v,1^u^v))",
+      "site index s = q0 + 2*q1 + 4*q2 in computational basis, N = 8 sites, marked_site w is this index"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: the loop over Trotter steps builds exp(-iHt) as a product of r Strang-split steps",
+        "explanation": "Time evolution is approximated by second-order Trotterization; the hopping part is exact per layer, only the splitting between hopping and marking is approximate."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: the rx(-gamma*dt) layers on qubits 0..2",
+        "explanation": "For the 2x2 periodic honeycomb lattice A = X0+X1+X2, so exp(+i gamma dt/2 A) is a product of RX(-gamma*dt) gates."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: the X-conjugated mcp(eps*dt, [0,1], 2) block",
+        "explanation": "The marking term -eps|w><w| gives the phase exp(+i eps dt) on basis state |w>, implemented with X gates and a multi-controlled phase gate. This is the generic on-site marking, not the paper's modified marking."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Initial state preparation is done by the runner; the circuit is an operation only."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The success probability is a measurement or post-processing quantity; the circuit contains no measurement."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Fixed the lattice to the 2x2 periodic honeycomb with simple-graph wrapping. This collapses the doubled edges and gives the cube graph Q3, so A = X0+X1+X2 with an explicit site relabeling.",
+        "reason": "This gives an exact, compact gate decomposition with standard gates and no dense unitary. The spec left the lattice size and boundary conditions open (8 sites assumed). With 8 sites the Dirac-point physics is not meaningfully resolved."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "exp(-iHt) is implemented approximately by Strang-split Trotterization with a user-chosen number of steps (1..500), not exactly.",
+        "reason": "The hopping and marking terms do not commute and no opaque dense unitary or operator construction is allowed."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The marking is the generic on-site potential -epsilon|w><w|. The paper's modified marking, the Dirac-point tuning, multi-site marking and the transfer protocol are not implemented.",
+        "reason": "They are not specified in the abstract."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The state preparation and success probability are excluded from the circuit.",
+        "reason": "The task requires an operation with no input preparation or measurement."
+      }
+    ],
+    "assumptions": [
+      "hbar = 1 and the Hamiltonian is time-independent",
+      "gamma > 0, epsilon is real and given directly (no Dirac-point tuning)",
+      "8 sites with periodic boundaries; the doubled edges of the 2x2 torus are treated as single edges",
+      "Single marked site w in 0..7",
+      "Computational-basis site encoding with qubit 0 as LSB"
+    ],
+    "unresolved_issues": [
+      "The paper's modified marking scheme and the optimal gamma and epsilon are unknown.",
+      "The 8-site lattice is too small to show Dirac-point scaling, so the Trotter error and the physical relevance of the instance are unverified.",
+      "The amplitude-transfer protocol and multiple marked sites are not implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 168,
+    "depth": 112,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

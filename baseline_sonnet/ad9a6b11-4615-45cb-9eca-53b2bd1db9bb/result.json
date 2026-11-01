@@ -1,0 +1,116 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "ad9a6b11-4615-45cb-9eca-53b2bd1db9bb",
+  "parent_run_id": "dc0172a9-6667-4629-bf34-7b9d311656ec",
+  "created_at": "2026-10-31T22:34:39.397465+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "20365d89309df8f06e424a846ea592b860030f44f56b738dde85cbb68291ecdb",
+  "source_specification_sha256": "87c02b7b1cf4feaafbd64dbb6ea104ecc3f8a09859355c49b9d082fe00e91109",
+  "source_python_sha256": "5bcad42eb0256c6a038d678e5f35abd140c2e748b42d59df86bb8ea7da93a8a7",
+  "elapsed_seconds": 19.802,
+  "usage": {
+    "input_tokens": 4382,
+    "output_tokens": 2956,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds an n-line reversible circuit from an explicit gate list over self-inverse gates (X, CX, CCX), and accepts it only if the gate sequence is palindromic (C = C^R, eq_2). The resulting circuit is therefore its own reverse and implements an involution. The paper's characterization theorem, extra-line construction and quantum-gate construction are not implemented.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n_ARITY = {\"x\": 1, \"cx\": 2, \"ccx\": 3}\n\n\ndef _normalize_gate(g, n):\n    if not isinstance(g, (list, tuple)) or len(g) < 2:\n        raise ValueError(\"each gate must be [name, qubit, ...]\")\n    name = g[0]\n    if not isinstance(name, str) or name.lower() not in _ARITY:\n        raise ValueError(\"unsupported gate name\")\n    name = name.lower()\n    qs = list(g[1:])\n    if len(qs) != _ARITY[name]:\n        raise ValueError(\"wrong number of qubits for gate\")\n    for q in qs:\n        if isinstance(q, bool) or not isinstance(q, int) or q < 0 or q >= n:\n            raise ValueError(\"qubit index out of range\")\n    if len(set(qs)) != len(qs):\n        raise ValueError(\"qubits must be distinct\")\n    if name == \"ccx\":\n        # controls are symmetric; canonicalize so equality is of the actual gate\n        qs = sorted(qs[:2]) + [qs[2]]\n    return (name, tuple(qs))\n\n\ndef build_circuit(instance):\n    \"\"\"Palindromic circuit over self-inverse gates (eq_2). Qubit i = bit i of x (LSB = qubit 0).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"n\")\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 12:\n        raise ValueError(\"n must be an integer in [1, 12]\")\n    gates = instance.get(\"gates\")\n    if not isinstance(gates, (list, tuple)) or len(gates) > 200:\n        raise ValueError(\"gates must be a list of at most 200 gates\")\n    norm = [_normalize_gate(g, n) for g in gates]\n    # eq_2: g_i = g_{k+1-i} for all i\n    if norm != norm[::-1]:\n        raise ValueError(\"gate sequence is not palindromic\")\n    qr = QuantumRegister(n, \"x\")\n    qc = QuantumCircuit(qr)\n    for name, qs in norm:\n        if name == \"x\":\n            qc.x(qr[qs[0]])\n        elif name == \"cx\":\n            qc.cx(qr[qs[0]], qr[qs[1]])\n        else:\n            qc.ccx(qr[qs[0]], qr[qs[1]], qr[qs[2]])\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"gates\": [[\"cx\", 0, 1], [\"x\", 0], [\"cx\", 0, 1]]}",
+    "register_layout": [
+      "qubit 0..n-1: register x, data lines; basis index = sum_i x_i 2^i, qubit 0 is least significant bit",
+      "no ancilla lines are used (n=2 in the example: qubits 0,1)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Defines involutions f∘f=id; the circuit's realized function is one when the circuit is palindromic, but no code checks or constructs permutations."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: palindrome check `norm != norm[::-1]` raising ValueError, with gates canonicalized by _normalize_gate",
+        "explanation": "Gate-sequence equality C=C^R is enforced on the input gate list; only palindromic sequences are emitted as circuits."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Reverse circuit equals inverse for self-inverse gates; this holds by the choice of X, CX, CCX gates and is not separately coded."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Consequence (palindromic implies involution) of eq_2 and eq_3; it is a property of the output circuit, not an operation, and the converse is not reconstructed."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Scope narrowed to a validator-plus-builder: user supplies the gate list and the module verifies it is palindromic, rather than synthesizing a palindromic circuit for a given involution.",
+        "reason": "The abstract gives no synthesis criterion or algorithm for which involutions are palindromically realizable."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Treated as background; no permutation-level analysis is implemented.",
+        "reason": "The missing characterization theorem and the requirement for a unitary circuit operation without simulation or dense operators."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Gate library fixed to X, CX, CCX; Toffoli controls are treated as unordered when testing equality.",
+        "reason": "The paper's gate library is not specified; these are standard self-inverse reversible gates."
+      }
+    ],
+    "assumptions": [
+      "Gate library is {X, CX, CCX}, each self-inverse",
+      "Equality in eq_2 is of gate sequences, not just of realized functions",
+      "Qubit i holds bit i of x (little-endian, matching Qiskit)",
+      "The extra-line and quantum-gate constructions are out of scope"
+    ],
+    "unresolved_issues": [
+      "Exact criterion for which involutions admit palindromic circuits is not given",
+      "Extra-line palindromic construction is not implemented",
+      "Quantum-gate palindromic construction is not implemented",
+      "The paper's gate library is unknown"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 3,
+    "depth": 3,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "6400f172-42fc-46a3-a4c1-78cda053b6a5",
+  "parent_run_id": "7630d59b-03ee-4dcd-95b2-d8c913701f5b",
+  "created_at": "2026-11-01T00:16:57.314591+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "87828e3259ef489ec05835b3f44acb0fdc010a4d7a592eeba238684fac3d2a07",
+  "source_specification_sha256": "59932cc90b93aa69781e67d773615328c6558723f3d9c558ee5fee23258e990f",
+  "source_python_sha256": "ff53a9dc2a8ef840f1b5ea6e136850a1c203ba72ca4fc034ec3042a95bb507a9",
+  "elapsed_seconds": 29.398,
+  "usage": {
+    "input_tokens": 6021,
+    "output_tokens": 4399,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the coin-then-shift discrete-time quantum walk on a cycle of N=2^n sites for t steps, followed by an optional fixed single-qubit correction D on the coin. The coin C is I, X, H or Ry(theta). The shift is a coin-controlled modular increment (coin 0) or decrement (coin 1) built from X and multi-controlled X gates. There is no state preparation or measurement; the runner supplies the input and checks the transfer fidelity.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _int(instance, key, lo, hi):\n    v = instance.get(key)\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError(key + ' must be an integer')\n    if v < lo or v > hi:\n        raise ValueError(key + ' out of range')\n    return v\n\n\ndef _real(d, key):\n    v = d.get(key, 0.0)\n    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):\n        raise ValueError(key + ' must be a finite real number')\n    return float(v)\n\n\ndef _shift(qc, pos, coin):\n    # eq_1: S = |0><0| (x) T+ + |1><1| (x) T-  (little-endian position register)\n    n = len(pos)\n    # coin=0 -> increment x -> x+1 mod 2^n (flip high bits first)\n    qc.x(coin)\n    for i in range(n - 1, -1, -1):\n        qc.mcx([coin] + pos[:i], pos[i])\n    qc.x(coin)\n    # coin=1 -> decrement: reversed gate order of the increment\n    for i in range(n):\n        qc.mcx([coin] + pos[:i], pos[i])\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _int(instance, 'n', 1, 11)\n    t = _int(instance, 't', 0, 1000)\n    coin_name = instance.get('coin')\n    if coin_name not in ('I', 'X', 'H', 'RY'):\n        raise ValueError('coin must be one of I, X, H, RY')\n    theta = _real(instance, 'theta')\n    corr = instance.get('correction')\n    if corr is not None:\n        if not isinstance(corr, dict):\n            raise ValueError('correction must be an object or null')\n        ct = _real(corr, 'theta')\n        cp = _real(corr, 'phi')\n        cl = _real(corr, 'lam')\n    pr = QuantumRegister(n, 'pos')\n    cr = QuantumRegister(1, 'coin')\n    qc = QuantumCircuit(pr, cr)\n    pos = list(pr)\n    coin = cr[0]\n    # eq_2: U = S (C (x) I); repeat t times\n    for _ in range(t):\n        if coin_name == 'X':\n            qc.x(coin)\n        elif coin_name == 'H':\n            qc.h(coin)\n        elif coin_name == 'RY':\n            qc.ry(theta, coin)\n        _shift(qc, pos, coin)\n    # eq_2: final state-independent correction D on the coin only\n    if corr is not None:\n        qc.u(ct, cp, cl, coin)\n    return qc",
+    "example_instance_json": "{\"n\":3,\"t\":4,\"coin\":\"I\",\"theta\":0.0,\"correction\":{\"theta\":0.0,\"phi\":0.0,\"lam\":0.0}}",
+    "register_layout": [
+      "qubits 0..n-1: position register 'pos', little-endian integer x=sum x_i 2^i, walker starts at site 0 (runner prepares |0...0>)",
+      "qubit n: coin qubit 'coin', carries the unknown state a|0>+b|1> supplied by the runner",
+      "example n=3: qubits 0,1,2 = position; qubit 3 = coin (4 qubits total)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_shift",
+        "explanation": "Coin-controlled modular increment (coin=0, right) and decrement (coin=1, left) on the little-endian position register, built from X and multi-controlled X gates."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit (loop over t steps, then final u gate)",
+        "explanation": "The coin C is applied first, then the shift S, repeated t times. The optional fixed correction D, a U(theta,phi,lam) gate, is applied to the coin qubit only."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The transfer criterion is evaluated from the statevector on the four test inputs. That happens in the runner's postprocessing, not in the operation."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Analytic prediction for C=I on the cycle (t=N/2, d=N/2, D=I). It is reproduced by build_circuit with coin 'I' and t=N/2 and is not coded separately."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Analytic behaviour of the flip coin under coin-then-shift ordering. It follows from the implemented circuit with coin 'X' and is not coded separately."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The periodicity search for the minimal T is classical postprocessing over many circuit instances. build_circuit only constructs U^t."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "D is not derived. It is supplied by the caller as explicit U(theta,phi,lam) parameters, or omitted for D=I. The circuit does not compute the 'inverse of coin-block unitary' mentioned in the steps.",
+        "reason": "The paper's D for Hadamard and biased coins is unknown, and the circuit may not simulate or search at build time."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Scope narrowed to the cycle with N=2^n and n between 1 and 11. The line walk, the arbitrary-distance theorems, the fidelity scan over (t,d), and the period search are not implemented in the circuit.",
+        "reason": "The 12-qubit cap and the rule that the circuit must be an operation without measurement or analysis. The line-walk construction is also unspecified."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Convention assumed from the specification: coin 0 moves right (+1), coin 1 moves left (-1), and the coin is applied before the shift. The Ry(theta) coin is parameterised by the 'theta' field and I, X and H are selected by name.",
+        "reason": "The abstract does not fix the ordering or direction convention."
+      }
+    ],
+    "assumptions": [
+      "Coin-then-shift ordering and coin-0=right convention, as in the specification",
+      "The runner prepares the walker at |0> on the position register and the unknown qubit on the coin qubit (index n)",
+      "Step count t is capped at 1000 and n at 11 so total qubits are at most 12",
+      "The correction D is a single-qubit U gate on the coin; omitting it means D=I"
+    ],
+    "unresolved_issues": [
+      "The exact coin and shift ordering used in the paper is unknown",
+      "The explicit D for Hadamard and biased coins is not specified",
+      "The paper's arbitrary-distance construction on a line is not reproduced",
+      "The paper's definition of distance and target site convention is unknown"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 385,
+    "depth": 301,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

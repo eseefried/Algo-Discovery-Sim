@@ -1,0 +1,124 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "dfcbdf63-4ce6-43fe-87c1-16a88b32f0a3",
+  "parent_run_id": "75c16c40-4433-4e32-b8e5-b1ba05539be2",
+  "created_at": "2026-10-31T22:33:56.334036+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "c20f5a41a5f6a702fe44391a2e6491c6c982abb5bc7a3235b4cc0c2d11b0c976",
+  "source_specification_sha256": "70240ed4d566727878b1fde4a5474a426920668a8cfbe823e72cfe265bf90a5a",
+  "source_python_sha256": "db0e19786d7b36b73059cfff00b2b828a677876f4da053d8c9bfbc1162fa862c",
+  "elapsed_seconds": 46.09,
+  "usage": {
+    "input_tokens": 5103,
+    "output_tokens": 6771,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit implementation of the background Szegedy quantum-walk operator W = S(2Π - I) for a classical Markov chain with 2^n nodes (n from 1 to 6), repeated `steps` times. The isometry U|i>|0> = |i>|phi_i> is built from multiplexed RY rotations. The reflection 2Π - I = U(I ⊗ (2|0><0| - I))U†. The paper-specific OQW-to-unitary conversion is not implemented because the abstract does not specify it.",
+    "source_python": "from qiskit import QuantumCircuit\nimport math\n\n\ndef _mux_ry(qc, angles, controls, target):\n    \"\"\"Uniformly controlled RY: angle angles[idx] where idx has controls[k] as bit k.\"\"\"\n    if not controls:\n        qc.ry(angles[0], target)\n        return\n    half = len(angles) // 2\n    a = [(angles[k] + angles[k + half]) / 2.0 for k in range(half)]\n    b = [(angles[k] - angles[k + half]) / 2.0 for k in range(half)]\n    c = controls[-1]\n    rest = controls[:-1]\n    _mux_ry(qc, a, rest, target)\n    qc.cx(c, target)\n    _mux_ry(qc, b, rest, target)\n    qc.cx(c, target)\n\n\ndef _prep(n, P):\n    \"\"\"Isometry-completing unitary U: |i>|0> -> |i> sum_j sqrt(P[i][j]) |j> (eq_2, |phi_i>).\"\"\"\n    N = 2 ** n\n    qc = QuantumCircuit(2 * n)\n    node = list(range(n))\n    tgt = list(range(n, 2 * n))\n    for k in range(n - 1, -1, -1):\n        nm = 2 ** (n - 1 - k)\n        angles = [0.0] * (N * nm)\n        for i in range(N):\n            for m in range(nm):\n                w0 = 0.0\n                w1 = 0.0\n                for j in range(N):\n                    if (j >> (k + 1)) == m:\n                        if (j >> k) & 1:\n                            w1 += P[i][j]\n                        else:\n                            w0 += P[i][j]\n                if w0 + w1 > 0.0:\n                    angles[i + N * m] = 2.0 * math.atan2(math.sqrt(w1), math.sqrt(w0))\n        controls = node + tgt[k + 1:]\n        _mux_ry(qc, angles, controls, tgt[k])\n    return qc\n\n\ndef _walk_step(n, P):\n    \"\"\"One Szegedy step W = S (2 Pi - I), Pi = U (I x |0><0|) U^dagger (eq_2).\"\"\"\n    prep = _prep(n, P)\n    w = QuantumCircuit(2 * n)\n    tgt = list(range(n, 2 * n))\n    w.compose(prep.inverse(), qubits=list(range(2 * n)), inplace=True)\n    # I - 2|0><0| on second register, then global phase pi gives 2|0><0| - I\n    for q in tgt:\n        w.x(q)\n    if n == 1:\n        w.z(tgt[0])\n    else:\n        w.h(tgt[-1])\n        w.mcx(tgt[:-1], tgt[-1])\n        w.h(tgt[-1])\n    for q in tgt:\n        w.x(q)\n    w.global_phase += math.pi\n    w.compose(prep, qubits=list(range(2 * n)), inplace=True)\n    for i in range(n):\n        w.swap(i, n + i)\n    return w\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('num_node_qubits')\n    steps = instance.get('steps')\n    P = instance.get('transition_matrix')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or 2 * n > 12:\n        raise ValueError('num_node_qubits must be an integer in 1..6')\n    if isinstance(steps, bool) or not isinstance(steps, int) or steps < 0 or steps > 64:\n        raise ValueError('steps must be an integer in 0..64')\n    N = 2 ** n\n    if not isinstance(P, list) or len(P) != N:\n        raise ValueError('transition_matrix must have 2^n rows')\n    M = []\n    for row in P:\n        if not isinstance(row, list) or len(row) != N:\n            raise ValueError('transition_matrix must be 2^n by 2^n')\n        r = []\n        for x in row:\n            if isinstance(x, bool) or not isinstance(x, (int, float)):\n                raise ValueError('entries must be numbers')\n            x = float(x)\n            if not math.isfinite(x) or x < 0.0:\n                raise ValueError('entries must be finite and nonnegative')\n            r.append(x)\n        if abs(sum(r) - 1.0) > 1e-9:\n            raise ValueError('rows must sum to 1')\n        M.append(r)\n    qc = QuantumCircuit(2 * n)\n    if steps == 0:\n        return qc\n    w = _walk_step(n, M)\n    for _ in range(steps):\n        qc.compose(w, qubits=list(range(2 * n)), inplace=True)\n    return qc",
+    "example_instance_json": "{\"num_node_qubits\": 1, \"transition_matrix\": [[0.25, 0.75], [0.6, 0.4]], \"steps\": 2}",
+    "register_layout": [
+      "qubits 0..n-1: first (node/position) register |i>, qubit 0 least significant bit of i",
+      "qubits n..2n-1: second register |j> (Szegedy neighbour register), qubit n least significant bit of j",
+      "example: n=1, qubit 0 = node register, qubit 1 = second register",
+      "basis state index = i + 2^n * j in Qiskit little-endian ordering"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "OQW Kraus-operator update is a non-unitary channel and the paper's unitary conversion is not specified; it is not implemented."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_prep (|phi_i> isometry U), _walk_step (W = S(2Π-I)), build_circuit (repeats W)",
+        "explanation": "Szegedy walk for a classical Markov chain with 2^n nodes. 2Π-I is built as U(I ⊗ (2|0><0|-I))U† using multiplexed RY rotations, then the registers are swapped."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Node probability is obtained by the runner measuring or projecting the node register; no measurement is in the circuit."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Time averaging and the asymptotic limit are classical post-processing, not part of the circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Scope narrowed to the background Szegedy walk operator for a classical Markov chain; the OQW-to-unitary conversion is not implemented.",
+        "reason": "The abstract gives no explicit OQW-to-unitary construction, so it cannot be reconstructed."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Pi is realized via U with U|i>|0> = |i>|phi_i>. 2Π-I = U(I ⊗ (2|0><0|-I))U†, where 2|0><0|-I is built from X, multi-controlled Z, X plus a global phase pi.",
+        "reason": "Gives an exact decomposition into standard gates without a dense opaque unitary."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Operator order is reflection first, then swap, with the node register as the first (low-index) register. The state |phi_i> is read as |i>|j> with qubits 0..n-1 holding i.",
+        "reason": "Fixes a concrete register order for W = S(2Π-I)."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Probabilities and averages are not computed in the circuit.",
+        "reason": "The task requires a measurement-free operation."
+      }
+    ],
+    "assumptions": [
+      "Number of nodes is a power of two, 2^n with n from 1 to 6, so the total is at most 12 qubits.",
+      "Transition matrix has nonnegative real entries with rows summing to 1 (tolerance 1e-9).",
+      "Input state is prepared by the runner.",
+      "The example uses a 2-node chain with an asymmetric transition matrix and two walk steps."
+    ],
+    "unresolved_issues": [
+      "The paper's OQW-to-unitary construction (Hilbert space, Kraus operators in the walk, coin and reflection) is unspecified and not implemented.",
+      "The asymptotic mean probability formula is not derived.",
+      "The paper's variant of the Szegedy operator may differ from the standard form used here."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 28,
+    "depth": 28,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

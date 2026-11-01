@@ -1,0 +1,128 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "4945ed03-bdc8-4cb7-9473-89c0214d4341",
+  "parent_run_id": "6fd198b0-0f04-4722-9ad8-653ccca740e9",
+  "created_at": "2026-11-01T00:19:12.790263+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "ab52a64c101087cf3012df8d277e6871b9e0b16e84eab150d55b864bd1337ae0",
+  "source_specification_sha256": "474a6acfd5758f180089dce40387583e1cd930615025cf3937ed59d55251a428",
+  "source_python_sha256": "f5a640a904c32fd27acbd1d0bf55798081d29b0cb7579c5c55a25146c70e7015",
+  "elapsed_seconds": 39.555,
+  "usage": {
+    "input_tokens": 5460,
+    "output_tokens": 5602,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Narrowed construction: compiles a product of 1-/2-level matrices E_(j,l) on n<=2 data qubits. Each factor is built as P^dagger C(W) P with a CX Gray-code permutation, X-conjugations for control and target polarity, and a user-supplied single-qubit word W over {h,s,sdg,t,tdg,x,z,w}. The classical Giles-Selinger column reduction over Z[omega] is not implemented. The controlled W gates are standard Qiskit gates (ch, cs, csdg, cp), not exact Clifford+T circuits.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit\n\n_ALLOWED = (\"h\", \"s\", \"sdg\", \"t\", \"tdg\", \"x\", \"z\", \"w\")\n\n\ndef _apply_word(qc, word, target, control):\n    \"\"\"Apply single-qubit word W (time order), optionally controlled (eq_5).\"\"\"\n    for g in word:\n        if control is None:\n            if g == \"h\":\n                qc.h(target)\n            elif g == \"s\":\n                qc.s(target)\n            elif g == \"sdg\":\n                qc.sdg(target)\n            elif g == \"t\":\n                qc.t(target)\n            elif g == \"tdg\":\n                qc.tdg(target)\n            elif g == \"x\":\n                qc.x(target)\n            elif g == \"z\":\n                qc.z(target)\n            else:\n                qc.global_phase += math.pi / 4\n        else:\n            if g == \"h\":\n                qc.ch(control, target)\n            elif g == \"s\":\n                qc.cs(control, target)\n            elif g == \"sdg\":\n                qc.csdg(control, target)\n            elif g == \"t\":\n                qc.cp(math.pi / 4, control, target)\n            elif g == \"tdg\":\n                qc.cp(-math.pi / 4, control, target)\n            elif g == \"x\":\n                qc.cx(control, target)\n            elif g == \"z\":\n                qc.cz(control, target)\n            else:\n                qc.p(math.pi / 4, control)\n\n\ndef _two_level(qc, n, j, l, word):\n    \"\"\"Append E_(j,l) = P^dag C(W) P; W index 0 <-> |j>, index 1 <-> |l>.\"\"\"\n    if n == 1:\n        _apply_word(qc, word, 0, None)\n        return\n    d = j ^ l\n    perm = False\n    if d == 3:\n        perm = True\n        j = j ^ ((j & 1) << 1)\n        l = l ^ ((l & 1) << 1)\n        d = j ^ l\n    target = 0 if d == 1 else 1\n    control = 1 - target\n    cbit = (j >> control) & 1\n    tbit = (j >> target) & 1\n    if perm:\n        qc.cx(0, 1)\n    if cbit == 0:\n        qc.x(control)\n    if tbit == 1:\n        qc.x(target)\n    _apply_word(qc, word, target, control)\n    if tbit == 1:\n        qc.x(target)\n    if cbit == 0:\n        qc.x(control)\n    if perm:\n        qc.cx(0, 1)\n\n\ndef build_circuit(instance):\n    \"\"\"instance: {\"n\": 1|2, \"factors\": [{\"pair\": [j, l], \"word\": [gate names]}, ...]}.\n    Factors are listed in circuit (time) order; the operator is E_m ... E_1 (eq_2).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"n\")\n    if isinstance(n, bool) or not isinstance(n, int) or n not in (1, 2):\n        raise ValueError(\"n must be 1 or 2\")\n    factors = instance.get(\"factors\")\n    if not isinstance(factors, list) or len(factors) == 0 or len(factors) > 60:\n        raise ValueError(\"factors must be a list of 1..60 entries\")\n    dim = 2 ** n\n    parsed = []\n    for f in factors:\n        if not isinstance(f, dict):\n            raise ValueError(\"bad factor\")\n        pair = f.get(\"pair\")\n        word = f.get(\"word\")\n        if not isinstance(pair, list) or len(pair) != 2:\n            raise ValueError(\"pair must have two indices\")\n        j, l = pair\n        for v in (j, l):\n            if isinstance(v, bool) or not isinstance(v, int) or v < 0 or v >= dim:\n                raise ValueError(\"pair index out of range\")\n        if j == l:\n            raise ValueError(\"pair indices must differ\")\n        if not isinstance(word, list) or len(word) > 200:\n            raise ValueError(\"word must be a list of at most 200 gates\")\n        for g in word:\n            if g not in _ALLOWED:\n                raise ValueError(\"unsupported gate in word\")\n        parsed.append((j, l, word))\n    qc = QuantumCircuit(n)\n    for j, l, word in parsed:\n        _two_level(qc, n, j, l, word)\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"factors\": [{\"pair\": [0, 3], \"word\": [\"h\", \"t\"]}, {\"pair\": [1, 2], \"word\": [\"s\", \"h\"]}, {\"pair\": [0, 1], \"word\": [\"h\"]}]}",
+    "register_layout": [
+      "qubit 0 = q0 (least significant bit of basis index)",
+      "qubit 1 = q1 (basis index = 2*q1 + q0)",
+      "no ancilla qubit is used (total qubits = n <= 2)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Ring form of entries is context; the code takes the single-qubit words directly and does no ring arithmetic."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop over factors, applying _two_level in time order",
+        "explanation": "Realizes the product E_m...E_1 from a supplied list of 1-/2-level factors. The classical column reduction that finds the factors for a given U is not implemented."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The O(k) gate-count bound is an asymptotic claim and is not constructed or checked."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The sde-reduction case analysis was not specified in the abstract and is not implemented."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "_two_level and _apply_word",
+        "explanation": "Implements E_(j,l)=P^dag C(W) P with a CX Gray-code permutation P for index pairs differing in both bits, X conjugations for control and target polarity, and a controlled single-qubit word W."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "Scope narrowed to compiling user-supplied two-level factors. The Z[omega] column reduction that derives the factors from U is not implemented.",
+        "reason": "The reduction rules (residue case analysis) are not given in the abstract and cannot be fixed from the specification."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Controlled W is built from standard Qiskit gates (ch, cs, csdg, cp(+-pi/4), cx, cz), not exact Clifford+T. The 'w' symbol is a global phase for n=1 and a controlled phase p(pi/4) on the control for n=2.",
+        "reason": "Exact controlled-W Clifford+T circuits (possibly with an ancilla) are unspecified. Standard controlled gates preserve the operator meaning."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "No ancilla is used and no gate-count bound is enforced.",
+        "reason": "The ancilla scheme and the constants are unspecified."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "In the pair (j,l), index 0 of W corresponds to |j> and index 1 to |l>. For n=1 only the pair as given is used, with W on qubit 0.",
+        "reason": "The orientation convention was not specified."
+      }
+    ],
+    "assumptions": [
+      "Word gates are listed in time order, so W = G_last ... G_first.",
+      "Little-endian basis index: index = 2*q1 + q0.",
+      "Identity is applied outside the two selected basis states.",
+      "For n=2 and a pair differing in both bits, CX(0->1) makes the indices adjacent (they differ only in bit 0 afterwards)."
+    ],
+    "unresolved_issues": [
+      "Column reduction over Z[omega] to derive factors from a given U is not implemented.",
+      "Controlled gates are not exact Clifford+T and no ancilla construction is provided.",
+      "The O(k) bound and the factor-count bounds are not addressed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 41,
+    "depth": 35,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

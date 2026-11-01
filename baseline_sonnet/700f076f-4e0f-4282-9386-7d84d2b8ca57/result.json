@@ -1,0 +1,140 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "700f076f-4e0f-4282-9386-7d84d2b8ca57",
+  "parent_run_id": "b51d67f7-96ac-40cf-891f-04390ae2f51e",
+  "created_at": "2026-10-31T22:24:04.109143+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "119b28a84cbb2089d2592f3557e5f35e6f825ef9e78bf7c0be0831c07916047e",
+  "source_specification_sha256": "c05f06020d6cd2c4d4f663086b11887b51c6a7033263ff03454023b3d6483df2",
+  "source_python_sha256": "4f005971152c8477bf4fb89e70f217211cbac8b3642338d72bcad6c3d2fc9347",
+  "elapsed_seconds": 28.224,
+  "usage": {
+    "input_tokens": 4576,
+    "output_tokens": 4035,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit operation for the Grover iterate G=(2|s><s|-I)O_w applied k times on an n-qubit index register (N=2^n, single marked index w), with k=floor(pi/(4 asin(1/sqrt(guessed N)))) taken from a possibly wrong guessed database size. Uniform-superposition preparation is left to the runner. The default example uses N=4, w=3, guess 4, giving k=1.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _int_param(instance, key, lo, hi):\n    if key not in instance:\n        raise ValueError('missing parameter: ' + key)\n    v = instance[key]\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError(key + ' must be an integer')\n    if v < lo or v > hi:\n        raise ValueError(key + ' out of range')\n    return v\n\n\ndef _mcz(qc, qubits):\n    # phase -1 on the all-ones state of the given qubits\n    if len(qubits) == 1:\n        qc.z(qubits[0])\n    else:\n        t = qubits[-1]\n        qc.h(t)\n        qc.mcx(list(qubits[:-1]), t)\n        qc.h(t)\n\n\ndef _oracle(qc, qubits, w):\n    # eq_1: O_w = I - 2|w><w| ; bit i of w acts on qubit i (little endian)\n    zeros = [q for i, q in enumerate(qubits) if not (w >> i) & 1]\n    for q in zeros:\n        qc.x(q)\n    _mcz(qc, qubits)\n    for q in zeros:\n        qc.x(q)\n\n\ndef _diffusion(qc, qubits):\n    # eq_2: 2|s><s| - I = -(H^n (I - 2|0><0|) H^n)\n    for q in qubits:\n        qc.h(q)\n    for q in qubits:\n        qc.x(q)\n    _mcz(qc, qubits)\n    for q in qubits:\n        qc.x(q)\n    for q in qubits:\n        qc.h(q)\n    qc.global_phase = qc.global_phase + math.pi\n\n\ndef _iterations(guess_n):\n    # eq_4: k = floor(pi / (4 arcsin(1/sqrt(guess_n))))\n    val = math.pi / (4.0 * math.asin(1.0 / math.sqrt(guess_n)))\n    return int(math.floor(val + 1e-12))\n\n\ndef build_circuit(instance):\n    \"\"\"Grover iterations G^k on n index qubits; no state preparation.\n\n    instance keys: n (1..12), marked (0..2^n-1), guess_N (2..4096, optional,\n    defaults to the true N = 2^n).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _int_param(instance, 'n', 1, 12)\n    w = _int_param(instance, 'marked', 0, 2 ** n - 1)\n    if 'guess_N' in instance:\n        guess_n = _int_param(instance, 'guess_N', 2, 4096)\n    else:\n        guess_n = 2 ** n\n        if guess_n < 2:\n            raise ValueError('invalid size')\n    k = _iterations(guess_n)\n    reg = QuantumRegister(n, 'index')\n    qc = QuantumCircuit(reg)\n    qubits = list(range(n))\n    for _ in range(k):\n        _oracle(qc, qubits, w)\n        _diffusion(qc, qubits)\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"marked\": 3, \"guess_N\": 4}",
+    "register_layout": [
+      "qubits 0..n-1: index register 'index'; computational basis |x>, x = sum_i b_i 2^i with qubit 0 least significant",
+      "Example (n=2): q0 = LSB, q1 = MSB of the database index; marked w=3 is |11>",
+      "No ancilla qubits; total qubits = n <= 12"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_oracle",
+        "explanation": "Phase oracle I-2|w><w| via X conjugation on zero bits of w and a multi-controlled Z."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_diffusion and build_circuit loop",
+        "explanation": "Inversion about the mean 2|s><s|-I built from H, X, multi-controlled Z, with a global phase of pi to fix the sign; applied after the oracle each iteration. The initial |s> preparation is not included in the operation."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Analytic description of the rotation state after k iterations; not coded. It serves as the expected behaviour of the circuit."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_iterations",
+        "explanation": "Iteration count computed from the guessed size guess_N with the floor formula."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Success probability is a measurement-level analytic quantity; the circuit contains no measurement and does not compute it."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The operation is the Grover iterations G^k only; the Hadamard layer preparing |s> from |0...0> is not included.",
+        "reason": "The operation must not prepare the input state; the runner supplies the input, e.g. the uniform superposition."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Index bit ordering follows Qiskit little endian (qubit 0 least significant) instead of the spec's 'first qubit most significant'.",
+        "reason": "Consistency with the required Qiskit convention; the phase oracle is a diagonal operation defined on the integer w."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The scope is generalized from fixed N=4 to N=2^n with n up to 12, with N=4 as the example.",
+        "reason": "Operation must work for varying valid parameters; the N=4 case is the n=2 instance."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "A tolerance of 1e-12 is added before the floor, and guess_N is restricted to integers in 2..4096.",
+        "reason": "Guards against floating-point error at exact integer values; bounds circuit depth. guess_N need not be a power of two since it only sets k."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The paper's quantum phone-book database, programmable name/number query, and unambiguous state discrimination analysis are not implemented; the query is reduced to a marked index.",
+        "reason": "These details are not specified in the abstract or specification."
+      }
+    ],
+    "assumptions": [
+      "Single marked item with index given directly as 'marked'.",
+      "True database size is N=2^n; the guessed size only determines the iteration count.",
+      "The runner prepares the uniform superposition (or any chosen input) before this operation.",
+      "The global phase of the diffusion is corrected so that each iterate equals (2|s><s|-I)O_w exactly."
+    ],
+    "unresolved_issues": [
+      "Paper-specific quantum database encoding and programmable query construction are unspecified.",
+      "Unambiguous discrimination of Grover states for unknown N is not implemented.",
+      "The floor rounding choice in eq_4 is an assumption, not taken from the paper."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 14,
+    "depth": 10,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

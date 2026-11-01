@@ -1,0 +1,139 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "545f2129-012b-4e4b-a8b4-1eff667a75ff",
+  "parent_run_id": "9bbb128d-02c9-4280-a13f-e0881f2bfe8e",
+  "created_at": "2026-11-01T00:22:35.996932+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "f8d64d57718df10bd2e56dc1993cf1bcc3b6496dfbe963d23f9a9228db20c638",
+  "source_specification_sha256": "a9a9a714c99255d0f54530eeabb1a86b03450b75fbd19149961af5c6d2667ec5",
+  "source_python_sha256": "935c86a9fc9c8e365b97fc370e71c8be488c2bd7a43d2bc78881443b7c0641fe",
+  "elapsed_seconds": 39.969,
+  "usage": {
+    "input_tokens": 5385,
+    "output_tokens": 5995,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Weighted-sum accumulator operation |x_1>...|x_k>|a> -> |x_1>...|x_k>|a + sum_j w_j x_j mod 2^m>. It applies QFTGate to the accumulator, then controlled-phase gates from each input bit to each accumulator qubit with classical integer weights, then the inverse QFTGate. Unsigned inputs are the default; two's-complement inputs are optional. No state preparation, measurement or classical averaging is included.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\n\n\ndef _isint(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef _default_m(n, weights, signed):\n    # smallest accumulator size that avoids overflow for all inputs\n    if signed:\n        xl, xh = -(2 ** (n - 1)), 2 ** (n - 1) - 1\n    else:\n        xl, xh = 0, 2 ** n - 1\n    lo = sum(min(w * xl, w * xh) for w in weights)\n    hi = sum(max(w * xl, w * xh) for w in weights)\n    if lo >= 0:\n        return max(1, hi.bit_length())\n    return max(hi.bit_length(), (-lo - 1).bit_length()) + 1\n\n\ndef build_circuit(instance):\n    \"\"\"Weighted sum into accumulator via Draper QFT phase addition.\n    instance: {'n': bits per input, 'weights': [ints], 'm': optional accumulator size,\n    'signed_inputs': optional bool}.\n    Qubits: input j bit i -> index j*n+i; accumulator bit l -> index k*n+l.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be an object')\n    n = instance.get('n')\n    weights = instance.get('weights')\n    m = instance.get('m')\n    signed = instance.get('signed_inputs')\n    if signed is None:\n        signed = False\n    if not isinstance(signed, bool):\n        raise ValueError('signed_inputs must be a boolean')\n    if not _isint(n) or n < 1 or n > 10:\n        raise ValueError('n must be an integer in 1..10')\n    if not isinstance(weights, list) or len(weights) == 0 or len(weights) > 12:\n        raise ValueError('weights must be a non-empty list')\n    if not all(_isint(w) for w in weights) or any(abs(w) > 4096 for w in weights):\n        raise ValueError('weights must be integers with |w| <= 4096')\n    k = len(weights)\n    if m is None:\n        m = _default_m(n, weights, signed)\n    elif not _isint(m) or m < 1:\n        raise ValueError('m must be a positive integer')\n    if k * n + m > 12:\n        raise ValueError('total qubits exceed 12')\n    xs = [QuantumRegister(n, 'x' + str(j)) for j in range(k)]\n    acc = QuantumRegister(m, 'A')\n    qc = QuantumCircuit(*xs, acc)\n    acc_idx = list(range(k * n, k * n + m))\n    mod = 2 ** m\n    qc.append(QFTGate(m), acc_idx)\n    for j in range(k):\n        for i in range(n):\n            coef = weights[j] * (-(2 ** (n - 1)) if (signed and i == n - 1) else 2 ** i)\n            for l in range(m):\n                # QFTGate (with swaps): qubit l carries phase 2*pi*a*2^l/2^m\n                val = (coef * (2 ** l)) % mod\n                if val:\n                    qc.cp(2.0 * math.pi * val / mod, xs[j][i], acc[l])\n    qc.append(QFTGate(m).inverse(), acc_idx)\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"weights\": [1, 2], \"signed_inputs\": false}",
+    "register_layout": [
+      "Example (n=2, k=2, weights [1,2], default m=4): 8 qubits.",
+      "qubits 0-1: x_1 (qubit 0 = LSB)",
+      "qubits 2-3: x_2 (qubit 2 = LSB)",
+      "qubits 4-7: accumulator A (qubit 4 = LSB), computational-basis little-endian encoding of a; output is a + w_1 x_1 + w_2 x_2 mod 2^m",
+      "general: input j bit i at index j*n+i; accumulator bit l at index k*n+l"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": "build_circuit: qc.append(QFTGate(m), acc_idx)",
+        "explanation": "The Fourier-basis product form is the background for the phase addition. QFTGate includes swaps, so the per-qubit phase index differs from the no-swap form (see specification_changes)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: qc.cp(...) loop over j, i, l",
+        "explanation": "Controlled phases from each input bit onto each accumulator qubit perform Draper addition mod 2^m. The angles use the swap-corrected index for QFTGate."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: coef = weights[j] * 2**i; val = (coef * 2**l) % mod",
+        "explanation": "Classical integer weight multiplies each angle; negative weights subtract. Angles are reduced mod 2*pi exactly via integer arithmetic. Optional two's-complement signed inputs give the MSB weight -2^(n-1)."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The quantum-quantum inner product with doubly controlled phases is not implemented; weights are classical."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: qc.append(QFTGate(m).inverse(), acc_idx)",
+        "explanation": "The inverse QFT returns the accumulator to the computational basis. Measurement and the classical division for the weighted average are not part of the operation and are not implemented."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Accumulator qubit l receives phase 2*pi*v*2^l/2^m (angle 2*pi*(w*2^(i+l) mod 2^m)/2^m) instead of 2*pi*v/2^(l+1).",
+        "reason": "QFTGate includes bit-reversal swaps, so in the output of QFTGate(m) qubit l carries phase exp(2*pi*i*a/2^(m-l)). The no-swap angle index 2^(l+1) would be wrong for it."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_5"
+        ],
+        "change": "The QFT and inverse QFT are done with QFTGate (with swaps) inside the operation, rather than the no-swap QFT.",
+        "reason": "This follows the required API; the swap-corrected angles give the same overall map a -> a + S mod 2^m."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to classical integer weights on basis-state or superposed input registers. Accumulator size m is validated and defaults to the no-overflow size, and the circuit is modular mod 2^m if m is given smaller. The spec's non-negative weights are extended to any integers.",
+        "reason": "Smallest well-defined construction; negative weights follow directly from phase additivity."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The operation excludes measurement and classical averaging S/sum(w).",
+        "reason": "The task requires a measurement-free unitary operation."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The doubly controlled inner-product variant is omitted.",
+        "reason": "Marked out of scope for the smallest instance."
+      }
+    ],
+    "assumptions": [
+      "Inputs are prepared externally; the accumulator is expected in a computational-basis state, typically |0>.",
+      "Weights are integers with |w| <= 4096; n in 1..10; at most 12 input registers; total qubits <= 12.",
+      "Unsigned inputs unless signed_inputs is true (two's complement).",
+      "Default m is the smallest value avoiding overflow over the full input range; an explicit m gives modular arithmetic."
+    ],
+    "unresolved_issues": [
+      "The paper's exact circuit layouts, gate counts and fixed-point weighted-average scheme are not reconstructed.",
+      "The controlled weighted sum and quantum-quantum inner product variants are not implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 8,
+    "gate_count": 140,
+    "depth": 70,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

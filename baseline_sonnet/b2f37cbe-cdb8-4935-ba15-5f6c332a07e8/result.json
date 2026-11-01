@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "b2f37cbe-cdb8-4935-ba15-5f6c332a07e8",
+  "parent_run_id": "29176df7-38bb-42ce-aeee-580e9426c8d3",
+  "created_at": "2026-10-31T22:28:57.746667+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "ec4d7bc4558873e578c5f108403aeabd6ceae68b3390b083657d5aa8f3a7ff37",
+  "source_specification_sha256": "be5ec79da0999f9b856556500aa0d8f5a407fde1dc0926e99ccb7e3faa5c7686",
+  "source_python_sha256": "447f3c200e8d78386f8ca673a1fef0eac94f85b71ad3dc1a373f077de1f39c15",
+  "elapsed_seconds": 60.495,
+  "usage": {
+    "input_tokens": 4901,
+    "output_tokens": 8849,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds t steps of a split-step 2D discrete-time quantum walk U = S D (I⊗C) on an L x L periodic lattice (L in {2,4,8}) with a 4-state Grover coin. Disorder is a diagonal site phase e^{i theta_x}, and S reflects on a user-given set of cut links. The circuit uses only standard gates (H, X, CZ, CX, MCX, MCP) and no dense unitaries. Initial state preparation, measurement and P_B(t) are left to the runner.",
+    "source_python": "import math\nimport numpy as np\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _as_int(v, name):\n    if isinstance(v, bool) or not isinstance(v, (int, np.integer)):\n        raise ValueError(name + ' must be an integer')\n    return int(v)\n\n\ndef _coin(qc, cq):\n    # Grover coin G = 2|s><s| - I = -(H H)(I - 2|00><00|)(H H); eq_1 coin factor\n    qc.h(cq[0])\n    qc.h(cq[1])\n    qc.x(cq[0])\n    qc.x(cq[1])\n    qc.cz(cq[0], cq[1])\n    qc.x(cq[0])\n    qc.x(cq[1])\n    qc.h(cq[0])\n    qc.h(cq[1])\n    qc.global_phase += math.pi\n\n\ndef _disorder(qc, pos, L, phases):\n    # eq_2: diagonal phase e^{i theta_x} on each site, identity on coin\n    n = len(pos)\n    for s in range(L * L):\n        th = phases[s]\n        if th == 0.0:\n            continue\n        zeros = [pos[i] for i in range(n) if not (s >> i) & 1]\n        for q in zeros:\n            qc.x(q)\n        qc.mcp(th, pos[:-1], pos[-1])\n        for q in zeros:\n            qc.x(q)\n\n\ndef _basis_swap(qc, qubits, a, b):\n    # exchange computational basis states |a> and |b| using CX + multi-controlled X\n    n = len(qubits)\n    d = [i for i in range(n) if ((a ^ b) >> i) & 1]\n    p = d[0]\n    pa = (a >> p) & 1\n    for j in d[1:]:\n        qc.cx(qubits[p], qubits[j])\n    controls = []\n    cs = 0\n    for i in range(n):\n        if i == p:\n            continue\n        bit = (a >> i) & 1\n        if i in d:\n            bit ^= pa\n        cs |= bit << len(controls)\n        controls.append(qubits[i])\n    qc.mcx(controls, qubits[p], ctrl_state=cs)\n    for j in d[1:]:\n        qc.cx(qubits[p], qubits[j])\n\n\ndef _cut_swaps(qc, allq, m, L, cuts):\n    # eq_3 (cut part): swap |x,R> <-> |x+e,L> across each cut link before the plain shift\n    for (x, y, ax) in cuts:\n        if ax == 0:\n            a = x + L * y + L * L * 0\n            b = ((x + 1) % L) + L * y + L * L * 1\n        else:\n            a = x + L * y + L * L * 2\n            b = x + L * ((y + 1) % L) + L * L * 3\n        _basis_swap(qc, allq, a, b)\n\n\ndef _shift(qc, m, xq, yq, cq):\n    # eq_3 (hop part): coin 0:+x, 1:-x, 2:+y, 3:-y with modular increment/decrement\n    for reg, cinc, cdec in ((xq, 0, 1), (yq, 2, 3)):\n        for k in range(m - 1, -1, -1):\n            qc.mcx(cq + reg[:k], reg[k], ctrl_state=cinc | (((1 << k) - 1) << 2))\n        for k in range(m - 1, -1, -1):\n            qc.mcx(cq + reg[:k], reg[k], ctrl_state=cdec)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    L = _as_int(instance.get('L', 4), 'L')\n    if L not in (2, 4, 8):\n        raise ValueError('L must be 2, 4 or 8')\n    m = int(round(math.log2(L)))\n    if 2 * m + 2 > 12:\n        raise ValueError('too many qubits')\n    T = _as_int(instance.get('steps', 1), 'steps')\n    if T < 0 or T > 16:\n        raise ValueError('steps must be in 0..16')\n    ph = instance.get('disorder_phases', None)\n    if ph is None:\n        phases = [0.0] * (L * L)\n    else:\n        if not isinstance(ph, (list, tuple)) or len(ph) != L * L:\n            raise ValueError('disorder_phases must have length L*L')\n        phases = []\n        for v in ph:\n            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):\n                raise ValueError('invalid phase')\n            phases.append(float(v))\n    raw = instance.get('cut_links', [])\n    if not isinstance(raw, (list, tuple)):\n        raise ValueError('cut_links must be a list')\n    cutset = set()\n    for c in raw:\n        if not isinstance(c, (list, tuple)) or len(c) != 3:\n            raise ValueError('cut link must be [x, y, axis]')\n        x = _as_int(c[0], 'x')\n        y = _as_int(c[1], 'y')\n        ax = _as_int(c[2], 'axis')\n        if not (0 <= x < L and 0 <= y < L and ax in (0, 1)):\n            raise ValueError('cut link out of range')\n        cutset.add((x, y, ax))\n    cuts = sorted(cutset)\n    xr = QuantumRegister(m, 'x')\n    yr = QuantumRegister(m, 'y')\n    cr = QuantumRegister(2, 'coin')\n    qc = QuantumCircuit(xr, yr, cr)\n    xq = list(range(m))\n    yq = list(range(m, 2 * m))\n    cq = [2 * m, 2 * m + 1]\n    allq = xq + yq + cq\n    pos = xq + yq\n    for _ in range(T):  # eq_1 / eq_4: U^T with U = S D (I x C)\n        _coin(qc, cq)\n        _disorder(qc, pos, L, phases)\n        _cut_swaps(qc, allq, m, L, cuts)\n        _shift(qc, m, xq, yq, cq)\n    return qc",
+    "example_instance_json": "{\"L\":4,\"steps\":2,\"cut_links\":[[0,1,1],[1,1,1],[2,1,1]],\"disorder_phases\":[0.3,1.1,2.0,0.7,4.2,5.1,0.2,3.3,1.9,2.8,0.5,6.0,3.7,1.4,2.2,0.9]}",
+    "register_layout": [
+      "qubits 0..m-1: x position bits (LSB first), m=log2(L)",
+      "qubits m..2m-1: y position bits (LSB first)",
+      "qubits 2m..2m+1: coin bits c = q_2m + 2*q_(2m+1); 0=+x(right),1=-x(left),2=+y(up),3=-y(down)",
+      "example L=4: x=q0,q1; y=q2,q3; coin=q4,q5 (6 qubits); basis index = x + L*y + L^2*c",
+      "cut_links entry [x,y,0] cuts link (x,y)-(x+1,y); [x,y,1] cuts link (x,y)-(x,y+1); periodic wrap"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (loop over steps) with _coin",
+        "explanation": "One step applies the coin on the coin register, then disorder, then shift, i.e. U = S D (I x C), repeated for each step."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_disorder",
+        "explanation": "For each site, X gates on the zero bits followed by an MCP applies the phase e^{i theta_x} independently of the coin."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_cut_swaps and _shift",
+        "explanation": "The plain shift is a controlled modular increment/decrement. It is preceded by swaps of |x,R> and |x+e,L> on each cut link, which makes the walker stay at its site with flipped direction."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit step loop",
+        "explanation": "The circuit implements U^t. The initial state |A,c0> is prepared by the runner, and P_B(t) is obtained by measurement outside this module."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The quasienergy eigenproblem and winding invariant are spectral analysis of U, not part of the circuit operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The Grover coin is built as H H (flip of |00>) H H with an explicit global phase of pi per step, which equals 2|s><s|-I exactly.",
+        "reason": "This realizes the 4x4 coin with standard gates and no dense unitary."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The reflecting shift is decomposed as S = S_plain times a product of basis-state swaps across the cut links. Cut links are supplied as [x,y,axis] entries with periodic boundaries.",
+        "reason": "This is an equivalent permutation, and it is implementable with multi-controlled X gates."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The scope is narrowed to L in {2,4,8}, 0..16 steps, and explicit disorder phases supplied in the instance (zeros if omitted).",
+        "reason": "This keeps the circuit within 12 qubits and a bounded gate count, and removes random sampling from the module."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The Floquet quasienergy and winding invariant are not implemented.",
+        "reason": "They are classical spectral analysis, and the abstract does not define the invariant."
+      }
+    ],
+    "assumptions": [
+      "Grover coin, periodic boundaries, reflecting cuts and phase disorder are proposed choices, not the paper's actual walk",
+      "Direction coding is 0=+x, 1=-x, 2=+y, 3=-y, with the opposite direction c XOR 1",
+      "Site index is x + L*y",
+      "Disorder phases are given per site in row-major order of x + L*y"
+    ],
+    "unresolved_issues": [
+      "The paper's actual coin, shift, disorder model and cut geometry are not available",
+      "The Floquet Hamiltonian realization and winding invariant are not specified",
+      "The source A, target B and initial coin state must be prepared by the runner"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 3408,
+    "depth": 2121,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

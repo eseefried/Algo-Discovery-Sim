@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "76e24f21-4a9f-4d44-8329-ee68e387108b",
+  "parent_run_id": "35e8979d-0eab-4756-b434-954874ba378a",
+  "created_at": "2026-10-31T22:23:20.926170+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "9229747a46d0cb3524426361db536f3bc637a9cc83e00776f8e5fe51cec28d06",
+  "source_specification_sha256": "6412331b30a6b2301c59e18d3a2c7e313e0096eac50af33975cda72ab8d78fde",
+  "source_python_sha256": "b82fc95cfaf8df647e9ad9729deaf5a0ea910aba67f40549f794928fd0aa5f3d",
+  "elapsed_seconds": 54.978,
+  "usage": {
+    "input_tokens": 5027,
+    "output_tokens": 7451,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Scoped construction: binary-fanout (f=2) shift-register trellis with one fixed start state and N decode steps. The path register holds one choice bit per step. The circuit prepares A = (additive branch-phase layer) * H^N, giving the uniform path superposition with a path-dependent phase. It then applies k generic amplitude-amplification iterations Q = A (I-2|0><0|) A^dagger (I-2|m><m|) with a caller-specified marked path m. The specialized QVA amplification, the FFT-butterfly state preparation and the speedup analysis are not implemented.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit\n\n\ndef _int(v, name, lo, hi):\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError(name + \" must be an integer in [\" + str(lo) + \",\" + str(hi) + \"]\")\n    return v\n\n\ndef _mcphase(qc, angle, qs):\n    # phase `angle` on the all-ones pattern of qubits qs\n    if len(qs) == 1:\n        qc.p(angle, qs[0])\n    else:\n        qc.mcp(angle, list(qs[:-1]), qs[-1])\n\n\ndef _flip_zeros(qc, qs, bits):\n    for q, b in zip(qs, bits):\n        if not b:\n            qc.x(q)\n\n\ndef _prepare_A(n_steps, q_len, phases):\n    # eq_1/eq_2: uniform superposition over f^N = 2^N paths (S_0 = 1), then eq_3 phase layer.\n    a = QuantumCircuit(n_steps)\n    a.h(range(n_steps))\n    for t in range(1, n_steps + 1):\n        m = min(t - 1, q_len - 1)\n        qs = [t - 1 - j for j in range(m + 1)]\n        row = phases[t - 1]\n        for idx in range(2 ** (m + 1)):\n            ang = row[idx]\n            if ang == 0.0:\n                continue\n            bits = [(idx >> j) & 1 for j in range(m + 1)]\n            _flip_zeros(a, qs, bits)\n            _mcphase(a, ang, qs)\n            _flip_zeros(a, qs, bits)\n    return a\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n_steps = _int(instance.get(\"N\"), \"N\", 1, 12)\n    q_len = _int(instance.get(\"Q\"), \"Q\", 1, 16)\n    k = _int(instance.get(\"iterations\", 1), \"iterations\", 0, 64)\n    fan = instance.get(\"fanout\", 2)\n    if fan != 2 or isinstance(fan, bool):\n        raise ValueError(\"only fanout 2 is supported\")\n    raw = instance.get(\"edge_phases\")\n    if not isinstance(raw, list) or len(raw) != n_steps:\n        raise ValueError(\"edge_phases must be a list with N rows\")\n    phases = []\n    for t in range(1, n_steps + 1):\n        m = min(t - 1, q_len - 1)\n        row = raw[t - 1]\n        if not isinstance(row, list) or len(row) != 2 ** (m + 1):\n            raise ValueError(\"edge_phases row has wrong length\")\n        out = []\n        for v in row:\n            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):\n                raise ValueError(\"edge phase must be a finite number\")\n            out.append(float(v))\n        phases.append(out)\n    marked = instance.get(\"marked_path\")\n    if k > 0:\n        if not isinstance(marked, list) or len(marked) != n_steps:\n            raise ValueError(\"marked_path must be a list of N bits\")\n        for b in marked:\n            if isinstance(b, bool) or b not in (0, 1):\n                raise ValueError(\"marked_path entries must be 0 or 1\")\n    a = _prepare_A(n_steps, q_len, phases)\n    a_inv = a.inverse()\n    allq = list(range(n_steps))\n    qc = QuantumCircuit(n_steps)\n    qc.compose(a, inplace=True)\n    for _ in range(k):\n        # eq_4: oracle I-2|m><m|\n        _flip_zeros(qc, allq, marked)\n        _mcphase(qc, math.pi, allq)\n        _flip_zeros(qc, allq, marked)\n        # A (I-2|0><0|) A^dagger  (equals -U_psi)\n        qc.compose(a_inv, inplace=True)\n        qc.x(allq)\n        _mcphase(qc, math.pi, allq)\n        qc.x(allq)\n        qc.compose(a, inplace=True)\n    return qc",
+    "example_instance_json": "{\"N\":3,\"Q\":2,\"fanout\":2,\"iterations\":2,\"marked_path\":[1,0,1],\"edge_phases\":[[0.0,0.7],[0.3,1.1,0.5,0.2],[0.9,0.4,1.3,0.6]]}",
+    "register_layout": [
+      "qubit t-1 (t=1..N): transition choice bit c_t at trellis step t (0 or 1), little-endian: qubit 0 is step 1",
+      "start state fixed to 0 (S_0=1); trellis state s_t = last Q-1 choice bits (shift register), not stored in qubits",
+      "no phase ancilla; example uses 3 qubits (N=3, Q=2)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_prepare_A (Hadamard layer on N qubits)",
+        "explanation": "With f=2 and S_0=1 the path register has 2^N = f^N basis states, all legal paths; the register size is validated at N<=12."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_prepare_A",
+        "explanation": "Uniform-amplitude superposition from Hadamards followed by a diagonal phase layer exp(i phi(p))."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_prepare_A phase loop over edge_phases",
+        "explanation": "phi(p) is realized as the sum over steps of caller-supplied branch phases indexed by (t, previous state, choice). The function g and the HMM probabilities are replaced by these supplied angles."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit iteration loop",
+        "explanation": "Generic amplitude amplification Q = -U_psi U_mark with U_psi = A(2|0><0|-I)A^dagger, realized as A(I-2|0><0|)A^dagger (I-2|m><m|), which is identical including sign."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Restricted to fanout f=2 and a single fixed start state (S_0=1); the path register is exactly N qubits with one choice bit per step.",
+        "reason": "Keeps the construction compact and the register encoding unambiguous."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The unspecified phase function g(Pr(p|y)) is replaced by an additive sum of caller-supplied per-branch phase angles, which corresponds to g = log-like of the product of branch probabilities. Phases are applied by pattern-controlled phase gates, with no ancilla and no explicit score computation.",
+        "reason": "The abstract gives no phase schedule; additive branch phases follow the factorized HMM form and need no workspace."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Trellis states are taken as a shift register (s_t = last Q-1 choice bits, with zero initial memory) so the branch metric depends on (t, s_{t-1}, c_t) via the preceding choice qubits.",
+        "reason": "The abstract does not give a trellis topology; the shift-register form matches a convolutional code."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The marked path is supplied directly in the instance rather than found by a quantum score comparison; the specialized amplification of the paper is replaced by generic Grover iterations with a single marked path (M=1).",
+        "reason": "No oracle or optimum-finding procedure is specified."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "The operation includes the Hadamard preparation A acting on the runner-supplied register (assumed |0...0>) as part of the operator; the initial state is not prepared by the circuit.",
+        "reason": "A is part of amplitude amplification and the uniform-superposition construction."
+      }
+    ],
+    "assumptions": [
+      "f=2, S_0=1, shift-register trellis with memory Q-1 bits",
+      "edge_phases[t-1] has length 2^(min(t-1,Q-1)+1), indexed by idx = sum_j c_{t-j} 2^j (bit 0 = current choice c_t, bit j = choice at step t-j)",
+      "marked_path[i] is the choice bit at step i+1 (qubit i)",
+      "The runner supplies the input |0...0> on the N qubits",
+      "Because the phase layer is diagonal and the oracle marks a basis state, the marking success probability follows the standard sin^2((2k+1)theta) law with sin^2(theta)=1/2^N regardless of the phase values"
+    ],
+    "unresolved_issues": [
+      "The actual phase function g and the oracle that marks the most probable path are unspecified",
+      "The specialized amplification procedure, FFT-butterfly state preparation and speedup/complexity claims are not reproduced",
+      "Marking of the best path is not derived from the phases (not computed quantumly)"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 368,
+    "depth": 269,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

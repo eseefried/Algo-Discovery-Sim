@@ -1,0 +1,138 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "2d84f77b-5477-4034-bbb6-feabcb6dd630",
+  "parent_run_id": "7fbd902d-9b0a-4e8d-890d-ac18bb7b7286",
+  "created_at": "2026-11-01T00:29:34.828593+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "7b2d23463da1b605b6a9466ed5dba158f62c97e1c719ff5311e149e32793e5cc",
+  "source_specification_sha256": "fd6e0edcb13eefe7e8fc7bc2876f1fbcb9bd788b97e284a7d442fbb1b63a3785",
+  "source_python_sha256": "f7951acdecb188275bd7c93cb95f2d83f1fd69485470835d121fc75809204c5d",
+  "elapsed_seconds": 42.802,
+  "usage": {
+    "input_tokens": 5344,
+    "output_tokens": 6251,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Trotterized continuous-time quantum walk search operator on a periodic 2x2-cell honeycomb lattice (8 sites, 3 qubits). Each step applies the three perfect-matching hopping layers exp(i*gamma*dt*A_c), which are exact X-parity rotations, followed by a multi-controlled phase exp(i*epsilon*dt|w><w|) on each marked site. This implements U=exp(-iHt) for H=-gamma*A-epsilon*sum|w><w|. Hadamard initial state, measurement and scans are left to the runner.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _real(v, name):\n    if isinstance(v, bool) or not isinstance(v, (int, float)):\n        raise ValueError(name + ' must be a real number')\n    v = float(v)\n    if not math.isfinite(v):\n        raise ValueError(name + ' must be finite')\n    return v\n\n\ndef build_circuit(instance):\n    '''CTQW search operator on the periodic 2x2-cell honeycomb (cube graph).\n    Site index = 4*sublattice + 2*y + x, qubit0=x, qubit1=y, qubit2=sublattice.\n    Edge colours (perfect matchings) are XOR with masks 0b100, 0b101, 0b110:\n    A(x,y)-B(x,y), A(x,y)-B(x-1,y), A(x,y)-B(x,y-1).'''\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    gamma = _real(instance.get('gamma'), 'gamma')\n    epsilon = _real(instance.get('epsilon'), 'epsilon')\n    dt = _real(instance.get('dt'), 'dt')\n    if dt <= 0:\n        raise ValueError('dt must be positive')\n    steps = instance.get('steps')\n    if isinstance(steps, bool) or not isinstance(steps, int) or steps < 1 or steps > 500:\n        raise ValueError('steps must be an integer in 1..500')\n    marked = instance.get('marked_sites')\n    if not isinstance(marked, list) or len(marked) < 1 or len(marked) > 8:\n        raise ValueError('marked_sites must be a list of 1..8 sites')\n    for w in marked:\n        if isinstance(w, bool) or not isinstance(w, int) or w < 0 or w > 7:\n            raise ValueError('marked site must be an integer in 0..7')\n    if len(set(marked)) != len(marked):\n        raise ValueError('marked_sites must be distinct')\n    pos = QuantumRegister(3, 'pos')\n    qc = QuantumCircuit(pos)\n    masks = ([2], [2, 0], [2, 1])\n    for _ in range(steps):\n        # eq_3 hopping layers: exp(i*gamma*dt*X_mask) = rx(-2*gamma*dt) on parity qubit\n        for m in masks:\n            c = m[0]\n            for t in m[1:]:\n                qc.cx(c, t)\n            qc.rx(-2.0 * gamma * dt, c)\n            for t in reversed(m[1:]):\n                qc.cx(c, t)\n        # eq_1/eq_3 marking: exp(i*epsilon*dt|w><w|) as multi-controlled phase\n        for w in marked:\n            zeros = [q for q in range(3) if not (w >> q) & 1]\n            for q in zeros:\n                qc.x(q)\n            qc.mcp(epsilon * dt, [0, 1], 2)\n            for q in zeros:\n                qc.x(q)\n    return qc",
+    "example_instance_json": "{\"gamma\": 1.0, \"epsilon\": 1.0, \"dt\": 0.1, \"steps\": 10, \"marked_sites\": [0]}",
+    "register_layout": [
+      "q0 = x cell coordinate bit (site bit 0, little-endian)",
+      "q1 = y cell coordinate bit (site bit 1)",
+      "q2 = sublattice bit (0 = A, 1 = B; site bit 2)",
+      "site index = 4*q2 + 2*q1 + q0; total 3 qubits, no ancillas"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: hopping layers (masks loop) and marking phase (marked loop)",
+        "explanation": "H=-gamma*A-epsilon*|w><w| is evolved as exp(-iHt)=exp(i*gamma*t*A+i*epsilon*t|w><w|), with the hopping and onsite parts applied in alternating Trotter steps."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The Dirac-point condition A|psi_D>=0 is not a gate. It only guides the choice of gamma and epsilon by the runner. See unresolved issues: the 2x2 torus has no zero mode."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop over steps, masks and marked sites",
+        "explanation": "First-order product formula with three matching layers, each exp(i*gamma*dt*A_c) with A_c a Pauli-X string, then the multi-controlled phase for each marked site, repeated r=steps times."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The Hadamard uniform initial state, measurement and the P_w estimate belong to the runner, because the circuit is only the operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: marked_sites list with two entries [s, r]",
+        "explanation": "The transfer Hamiltonian H_T with equal onsite energies on s and r is implemented as the operator with two marked sites. The runner supplies the initial state |s>. The transfer time t* and J_eff are determined numerically outside the circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "On the 2x2 torus A(x,y) neighbours B(x,y), B(x-1,y), B(x,y-1). These are three distinct sites, so the graph is the simple cube graph Q3 with no multi-edges. The three matchings are XOR with masks 100, 101, 110, each a Pauli-X string.",
+        "reason": "This resolves the multi-edge concern in the spec and gives an explicit site-to-bit map. The three hopping layers commute, so Trotter error comes only from the hopping/oracle splitting."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "The sign convention is fixed as U=exp(-iHt)=exp(+i*gamma*t*A+i*epsilon*t|w><w|), which uses rx(-2*gamma*dt) and cp-type phase +epsilon*dt.",
+        "reason": "The spec leaves the sign of the exponent implicit and this matches eq_3."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "State preparation and measurement are removed from the circuit.",
+        "reason": "The module must return an operation only and inputs are prepared by the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_5"
+        ],
+        "change": "Generalized the single marked site w to a list marked_sites of 1..8 distinct sites with a common epsilon.",
+        "reason": "This lets one function cover both search and two-site transfer."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "No Dirac eigenstate preparation circuit is included and the E=0 resonance is not claimed for this lattice.",
+        "reason": "The cube graph spectrum is {3,1,1,1,-1,-1,-1,-3}, so there is no zero mode on this tiny lattice."
+      }
+    ],
+    "assumptions": [
+      "The lattice is the periodic 2x2-cell honeycomb with the explicit site labelling given in the register layout.",
+      "Nearest-neighbour hopping amplitude is gamma, and the marking onsite energy epsilon is a free parameter.",
+      "The runner prepares the initial state and interprets qubit q_i as site bit i (little-endian).",
+      "Steps are capped at 500 and the marked sites are distinct."
+    ],
+    "unresolved_issues": [
+      "The 2x2 periodic honeycomb has no E=0 Dirac point, so the physics of the paper's Dirac-point search needs a larger lattice, which is beyond the 3-qubit scope.",
+      "The paper's exact lattice geometry, marking variants and optimal parameters are unknown.",
+      "The J_eff and t* for transfer must be determined numerically by the runner.",
+      "Trotter error from the hopping/marking splitting depends on dt and is not controlled here."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 260,
+    "depth": 201,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

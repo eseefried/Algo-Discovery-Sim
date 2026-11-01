@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "bc1fc411-aa04-48e7-8b7f-f4a8dc58a246",
+  "parent_run_id": "6e3cb61a-de9a-4447-8f27-dd4b1564250e",
+  "created_at": "2026-11-01T00:31:11.000283+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "1580deb6a6df7744e5b9cff34de3dd8cb1bc7a63ee4b8439f5d99dbc7ef2866c",
+  "source_specification_sha256": "b776b686a69006c41c49c037ac35ac4e22eaad708bec6f468891b90bcfc8fd7b",
+  "source_python_sha256": "ce84cfbb4c7ecaaadd32dab7f5188971d4d183492dba7aad6b98330a4f8b608b",
+  "elapsed_seconds": 33.922,
+  "usage": {
+    "input_tokens": 5232,
+    "output_tokens": 5265,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the operation (W^k O)^T for a coined discrete-time quantum walk on a cycle of N=2^n vertices with a 1-qubit coin. O is a phase-flip oracle on one marked vertex, applied once per iteration. W is a coin step followed by a coin-controlled increment or decrement shift mod N. The initial state and the measurement are left to the runner.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _get_int(instance, name, lo, hi):\n    v = instance.get(name)\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError(name + ' must be an integer in [' + str(lo) + ', ' + str(hi) + ']')\n    return v\n\n\ndef _mc(qc, controls, target):\n    if len(controls) == 1:\n        qc.cx(controls[0], target)\n    else:\n        qc.mcx(controls, target)\n\n\ndef _oracle(qc, vq, m):\n    # eq_1: O = I - 2|m><m| on vertex register, identity on coin (one query)\n    n = len(vq)\n    for i in range(n):\n        if not (m >> i) & 1:\n            qc.x(vq[i])\n    if n == 1:\n        qc.z(vq[0])\n    else:\n        qc.mcp(math.pi, vq[:-1], vq[-1])\n    for i in range(n):\n        if not (m >> i) & 1:\n            qc.x(vq[i])\n\n\ndef _shift(qc, vq, cq):\n    # S|v,c> = |v+1,c> for c=1 and |v-1,c> for c=0 (mod 2^n)\n    n = len(vq)\n    for i in reversed(range(n)):\n        _mc(qc, [cq] + vq[:i], vq[i])\n    qc.x(cq)\n    for i in range(n):\n        _mc(qc, [cq] + vq[:i], vq[i])\n    qc.x(cq)\n\n\ndef _walk_step(qc, vq, cq, coin):\n    # eq_2: coin step then shift\n    if coin == 'grover':\n        qc.x(cq)  # 2|s><s|-I = X for a 1-qubit coin\n    else:\n        qc.h(cq)\n    _shift(qc, vq, cq)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _get_int(instance, 'n', 1, 11)\n    m = _get_int(instance, 'marked', 0, 2 ** n - 1)\n    k = _get_int(instance, 'k', 1, 200)\n    T = _get_int(instance, 'T', 1, 200)\n    if k * T > 2000:\n        raise ValueError('k*T too large')\n    coin = instance.get('coin', 'grover')\n    if coin not in ('grover', 'hadamard'):\n        raise ValueError('coin must be grover or hadamard')\n    vertex = QuantumRegister(n, 'vertex')\n    cr = QuantumRegister(1, 'coin')\n    qc = QuantumCircuit(vertex, cr)\n    vq = list(vertex)\n    cq = cr[0]\n    # eq_3: (W^k O)^T\n    for _ in range(T):\n        _oracle(qc, vq, m)\n        for _ in range(k):\n            _walk_step(qc, vq, cq, coin)\n    return qc",
+    "example_instance_json": "{\"n\":3,\"marked\":5,\"k\":2,\"T\":3,\"coin\":\"hadamard\"}",
+    "register_layout": [
+      "qubits 0..n-1: vertex register, little-endian integer v=sum_i b_i 2^i (qubit 0 is least significant)",
+      "qubit n: coin qubit (1 = step +1, 0 = step -1 mod N)",
+      "example (n=3): vertex = qubits 0,1,2; coin = qubit 3; 4 qubits total",
+      "no flag ancilla is used"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_oracle",
+        "explanation": "The phase flip I-2|m><m| on the vertex register is built from X conjugation and a multi-controlled phase (Z for n=1). The coin is untouched. It is applied once per iteration."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_walk_step and _shift",
+        "explanation": "A coin step is followed by a coin-controlled shift. The shift is an increment (coin=1) or decrement (coin=0) mod 2^n, built from multi-controlled X ladders. The 1-qubit Grover coin reduces to X; an optional Hadamard coin is available."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit (loop over T iterations of O then k walk steps)",
+        "explanation": "The operator (W^k O)^T is implemented. The initial uniform state is prepared by the runner, not by this circuit."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "This is a heuristic for choosing k and T. Both are caller-supplied instance parameters and are not derived in the circuit."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The success probability is a Born-rule measurement on the vertex register, which the runner performs. The circuit has no measurements."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The circuit omits the initial-state preparation H^{⊗n}|0>|s_c> and implements only the operator (W^k O)^T.",
+        "reason": "The task requires an operation without input-state preparation; the runner prepares inputs."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "An optional 'coin':'hadamard' mode replaces the coin reflection by H. The default 'grover' uses X, the 1-qubit Grover reflection.",
+        "reason": "The spec notes that the 1-qubit Grover coin gives a trivial walk. H is a non-reflection substitute and is not the paper's walk."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The scope is narrowed to a cycle graph with 2^n vertices, 1-qubit coin, single marked vertex and no flag qubit. The torus and the 2-qubit coin are not implemented.",
+        "reason": "The paper's exact walk and graph are unknown, and the torus variant was only optional in the spec."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "No scan or optimization over T and k is performed in the module.",
+        "reason": "The module must return a single operation; scanning is left to external software."
+      }
+    ],
+    "assumptions": [
+      "The circuit's qubit count is n+1, with n between 1 and 11, so it stays within the 12-qubit cap.",
+      "The marked vertex is an integer in 0..2^n-1 and is validated.",
+      "k and T are integers in [1,200] with k*T at most 2000. This is an implementation limit I chose.",
+      "The oracle is a phase-flip placeholder with a single marked vertex, one use per iteration, and acts as identity on the coin.",
+      "The example uses the Hadamard coin to avoid the trivial X-coin walk."
+    ],
+    "unresolved_issues": [
+      "The paper's exact walk (Szegedy vs coined) and graph family are unknown.",
+      "The exact relation between k, the spectral gap and the oracle strength is not resolved.",
+      "The cubic speedup is not expected to show at tiny N, and this circuit does not demonstrate it.",
+      "The torus and 2-qubit coin variant is not implemented.",
+      "The runner's query budget and the final choice of k and T are unspecified."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 627,
+    "depth": 489,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "1114a5b9-2689-4805-9806-f3dc010607e9",
+  "parent_run_id": "0edbc907-4725-4b92-8231-da599378a333",
+  "created_at": "2026-10-31T22:27:43.251814+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "09c654fb3b2f4fda1ad353ad216d52d89d28d34a6ca8c881583000ccde70f6c3",
+  "source_specification_sha256": "5bde16dfcd92c40e7ff367ba80b5030bcc26023bfb6b1a2db36528f5fb8303ab",
+  "source_python_sha256": "f4d17a2704437baba23d9c06b7f6f0fc5f14ab4fc6c16cda3549a50375b35b6e",
+  "elapsed_seconds": 32.228,
+  "usage": {
+    "input_tokens": 4838,
+    "output_tokens": 4587,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Scoped Qiskit implementation of one Grover building block from the trivial quantum APSP baseline: r Grover iterations that amplify intermediate vertices k with d1(u,k)+w(k,v) < threshold for a fixed pair (u,v). The cost table is classical data compiled into a phase oracle of multi-controlled phase flips with no ancillas. The runner supplies the uniform superposition over k. The paper's nontrivial algorithms are not implemented.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _num(x):\n    if x is None:\n        return math.inf\n    if isinstance(x, bool) or not isinstance(x, (int, float)):\n        raise ValueError('weights must be numbers or null (infinity)')\n    if x != x or x < 0:\n        raise ValueError('weights must be nonnegative')\n    return float(x)\n\n\ndef _phase_flip_basis(qc, m, k):\n    # Flip the sign of computational basis state |k> on m index qubits.\n    zeros = [i for i in range(m) if not ((k >> i) & 1)]\n    for i in zeros:\n        qc.x(i)\n    if m == 1:\n        qc.z(0)\n    else:\n        qc.mcp(math.pi, list(range(1, m)), 0)\n    for i in zeros:\n        qc.x(i)\n\n\ndef _diffusion(qc, m):\n    # H^m (I - 2|0><0|) H^m = I - 2|s><s|, equals -(2|s><s|-I) up to global phase.\n    for i in range(m):\n        qc.h(i)\n    for i in range(m):\n        qc.x(i)\n    if m == 1:\n        qc.z(0)\n    else:\n        qc.mcp(math.pi, list(range(1, m)), 0)\n    for i in range(m):\n        qc.x(i)\n    for i in range(m):\n        qc.h(i)\n\n\ndef build_circuit(instance):\n    \"\"\"Grover iterations marking k with cost[k] = d1_row[k] + w_col[k] < threshold (eq_3 oracle).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    d1 = instance.get('d1_row')\n    wc = instance.get('w_col')\n    if not isinstance(d1, list) or not isinstance(wc, list):\n        raise ValueError('d1_row and w_col must be lists')\n    n = len(d1)\n    if n != len(wc) or n < 2 or (n & (n - 1)) != 0:\n        raise ValueError('n must be a power of two >= 2 and lists must match')\n    m = n.bit_length() - 1\n    if m > 12:\n        raise ValueError('too many qubits')\n    th = instance.get('threshold')\n    if isinstance(th, bool) or not isinstance(th, (int, float)) or th != th or math.isinf(th):\n        raise ValueError('threshold must be a finite number')\n    r = instance.get('iterations')\n    if isinstance(r, bool) or not isinstance(r, int) or r < 0 or r > 64:\n        raise ValueError('iterations must be an integer in [0, 64]')\n    costs = [_num(d1[k]) + _num(wc[k]) for k in range(n)]\n    marked = [k for k in range(n) if costs[k] < th]\n    reg = QuantumRegister(m, 'k')\n    qc = QuantumCircuit(reg)\n    for _ in range(r):\n        for k in marked:\n            _phase_flip_basis(qc, m, k)\n        _diffusion(qc, m)\n    return qc",
+    "example_instance_json": "{\"d1_row\":[3,1,4,1,5,9,2,6],\"w_col\":[2,7,1,8,2,8,1,8],\"threshold\":4,\"iterations\":2}",
+    "register_layout": [
+      "qubits 0..m-1 form register 'k' with m = log2(n); qubit i holds bit i of the candidate intermediate vertex index k (qubit 0 is the least significant bit)",
+      "example: n=8, so 3 qubits; qubit 0..2 encode k in 0..7",
+      "no workspace or ancilla qubits; the d(u,k)+w(k,v) values are classical data compiled into the oracle",
+      "the runner is expected to prepare the uniform superposition over k before the circuit"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Runtime statement about trivial classical and quantum algorithms; it is not a circuit operation."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Target subcubic and nontrivial quantum bounds. The abstract gives no algorithm achieving them."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: costs = d1_row[k] + w_col[k]; marked = {k : cost < threshold}; _phase_flip_basis",
+        "explanation": "The min-plus term d1(u,k)+w(k,v) is evaluated classically per k. A threshold phase oracle marks the k that improve on the threshold, which is one comparison step of Durr-Hoyer minimum finding."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The O(sqrt n) query count and n^2*sqrt(n) total motivate Grover use. The circuit exposes the iteration count as a parameter and does not implement the n^2 pair repetition or the full adaptive Durr-Hoyer loop."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Narrowed from full Durr-Hoyer minimum finding to a fixed number of Grover iterations with a threshold oracle for one pair (u,v).",
+        "reason": "Minimum finding is adaptive and needs mid-circuit measurement and classical updates, which are not allowed in a unitary circuit."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Dropped the quantum 'val' workspace register. Costs d1(u,k)+w(k,v) are precomputed classically and the oracle is compiled as phase flips on basis states.",
+        "reason": "The data oracle and precision are unspecified, and no ancillas are needed for a sparse marked set."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The number of vertices n must be a power of two (2 to 4096) so the uniform superposition over all index states is exactly over the vertices. The iteration count is a user parameter capped at 64.",
+        "reason": "Avoids padded invalid indices and keeps the circuit size bounded."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Complexity equations are not implemented.",
+        "reason": "They are asymptotic statements, not operations."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The initial uniform superposition is not prepared in the circuit. The circuit contains the Grover iterate (oracle then diffusion) repeated r times.",
+        "reason": "Inputs are prepared by the runner."
+      }
+    ],
+    "assumptions": [
+      "The marked condition is strict: cost < threshold.",
+      "A null weight denotes infinity, so that k is never marked.",
+      "The weights are nonnegative.",
+      "The oracle phase is -1 on marked basis states and the diffusion is I-2|s><s| up to a global phase.",
+      "The runner prepares the uniform superposition over k."
+    ],
+    "unresolved_issues": [
+      "The paper's nontrivial algorithms for geometric weights, small integer weights, few weights per vertex, and earliest arrivals are not described in the abstract and are not implemented.",
+      "A reversible arithmetic oracle for d1(u,k)+w(k,v) from quantum-accessible data is not implemented.",
+      "The full Durr-Hoyer adaptive minimum finding and the n^2 pair repetition are not implemented.",
+      "Non-power-of-two n is rejected."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 80,
+    "depth": 57,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

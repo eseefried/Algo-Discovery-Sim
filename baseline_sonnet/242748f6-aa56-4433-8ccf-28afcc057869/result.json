@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "242748f6-aa56-4433-8ccf-28afcc057869",
+  "parent_run_id": "902d05b5-350d-49c8-a6a7-228bd7a1d59a",
+  "created_at": "2026-10-31T22:23:26.281208+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "e26ce4d84cad991a31732a3c1cde1f8f55ff3b2f38e000713cc7665c54386bbb",
+  "source_specification_sha256": "0b172daa44d2104111d09c09fe5e4183711cb8fc783d3cca99ef7844c384ca62",
+  "source_python_sha256": "5266bd864fa124856d926eb2a0f4c125bdc5866570a73d0d10e85fe805a25c4c",
+  "elapsed_seconds": 23.465,
+  "usage": {
+    "input_tokens": 4792,
+    "output_tokens": 3467,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Measurement-free unitary for n iterations of a qubit-probe weak measurement on one system qubit. Each iteration applies a system pulse U_k, then exp(-i*eps_k*H_SP) with an assumed constant H_SP = |1><1|_S (x) X_P, implemented as a controlled-RX(2*eps_k) onto a fresh probe qubit. Probes start in |0> (prepared by the runner) and are read out in the computational basis by the runner. Projecting probe k onto <j| gives K_0 = diag(1, cos eps), K_1 = diag(0, -i sin eps), which have distinct singular values.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _num(x, name):\n    if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):\n        raise ValueError(name + ' must be a finite real number')\n    return float(x)\n\n\ndef build_circuit(instance):\n    \"\"\"System qubit 0, probe k at qubit 1+k. Iteration k: U3 pulse on S, then CRX(2*eps_k) S->P_k.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    eps = instance.get('epsilons')\n    if not isinstance(eps, list) or len(eps) < 1:\n        raise ValueError('epsilons must be a non-empty list')\n    n = len(eps)\n    if n + 1 > 12:\n        raise ValueError('at most 11 iterations (12 qubits total)')\n    pulses = instance.get('pulses')\n    if pulses is None:\n        pulses = [[0.0, 0.0, 0.0] for _ in range(n)]\n    if not isinstance(pulses, list) or len(pulses) != n:\n        raise ValueError('pulses must be a list with one [theta, phi, lam] per iteration')\n    eps = [_num(e, 'epsilon') for e in eps]\n    for e in eps:\n        if e <= 0:\n            raise ValueError('epsilon must be positive')\n    clean = []\n    for p in pulses:\n        if not isinstance(p, (list, tuple)) or len(p) != 3:\n            raise ValueError('each pulse needs three angles')\n        clean.append([_num(a, 'pulse angle') for a in p])\n    S = QuantumRegister(1, 'S')\n    P = QuantumRegister(n, 'P')\n    qc = QuantumCircuit(S, P)\n    for k in range(n):\n        th, ph, lam = clean[k]\n        qc.u(th, ph, lam, S[0])  # U_k pulse on system\n        qc.crx(2.0 * eps[k], S[0], P[k])  # exp(-i eps |1><1|_S (x) X_P)\n    return qc",
+    "example_instance_json": "{\"epsilons\":[0.2,0.2,0.2],\"pulses\":[[0,0,0],[0.5,0,0],[0.3,0.1,0]]}",
+    "register_layout": [
+      "qubit 0: system S (computational basis, qubit 0 is least significant bit)",
+      "qubit 1: probe P_0 (iteration 1), expected input |0>",
+      "qubit 2: probe P_1 (iteration 2), expected input |0>",
+      "qubit k+1: probe P_k (iteration k+1), expected input |0>; up to 11 probes"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Completeness of the Kraus operators follows from the global unitarity of the circuit (a probe-outcome partition) and is not coded separately."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: qc.crx(2*eps[k], S[0], P[k])",
+        "explanation": "Unitary exp(-i eps H_SP) with the assumed H_SP = |1><1|_S (x) X_P, acting on a fresh probe. The projection onto <j|_P (probe measurement) is left to the runner."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop over k with qc.u(...) then qc.crx(...)",
+        "explanation": "Interleaves system pulses U_k with weak-interaction iterations, using one fresh probe per iteration so that the Kraus product K_{j_n}U_n...K_{j_1}U_1 arises after probe outcomes are read. Coarse-graining is not implemented."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The SVD and distinct-singular-value condition is a characterization of achievable measurements, not an operation. The chosen H_SP gives K_0 = diag(1, cos eps), which has distinct singular values, but nothing checks that."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Chose the specific constant Hamiltonian H_SP = |1><1|_S (x) X_P, with initial probe |0> and computational-basis readout.",
+        "reason": "The abstract and spec leave H_SP unspecified, and a concrete choice is needed. A Z(x)X-type coupling would give two Kraus operators with equal singular values, so it was avoided."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Scope narrowed to a fixed, user-given list of iteration strengths and pulse angles, with no feedback, stopping rule or coarse-graining. Pulses are U3 gates (U(2), differing from SU(2) by a global phase). Probe measurements are deferred, and fresh probe qubits are used instead of reset.",
+        "reason": "The feedback rule is unspecified and dynamic circuits, reset and measurement are disallowed. Fresh probes make the circuit a unitary on the system plus the probes."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_4"
+        ],
+        "change": "Not implemented as circuit operations.",
+        "reason": "They are a background constraint and a characterization result, respectively."
+      }
+    ],
+    "assumptions": [
+      "The system is a single qubit.",
+      "The probe starts in |0> and is prepared by the runner.",
+      "Probe readout is in the computational basis and is done by the runner.",
+      "H_SP = |1><1|_S (x) X_P, so exp(-i eps H_SP) is a controlled-RX with angle 2*eps.",
+      "Fixed pulse angles and a fixed number of iterations are supplied in the instance.",
+      "If pulses are omitted, identity pulses are used."
+    ],
+    "unresolved_issues": [
+      "The paper's actual interaction Hamiltonian is unknown.",
+      "The feedback rule, stopping criterion and outcome coarse-graining to M_0 and M_1 are not implemented.",
+      "The continuous-time limit and the characterization theorem are not reconstructed.",
+      "The number of iterations is capped at 11 by the 12-qubit limit, which is far from a continuous decomposition."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 18,
+    "depth": 13,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,139 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "9071a260-82bc-469c-b9d6-f3a2ca18475f",
+  "parent_run_id": "fcde32b7-66cc-4b73-8835-bba35e90bf9f",
+  "created_at": "2026-11-01T00:31:35.601499+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "65c19d8ce8872a63792fae8795b9f83b07079a0c46cc013820530a34ac3356d0",
+  "source_specification_sha256": "225ffe70b509b3b8c3b10ce9772c5382567caeee5f78cfa15d231c55117685f3",
+  "source_python_sha256": "da577dd51e11508ddacbc90a2db50667c663bd210fd296c0ee8f73dd265e2a0b",
+  "elapsed_seconds": 31.206,
+  "usage": {
+    "input_tokens": 5288,
+    "output_tokens": 4683,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the first-order Lie-Trotter product (e^{-i dt|w><w|} e^{-i dt|s><s|})^m for Grover's Hamiltonian H=|w><w|+|s><s|, on n search qubits and with no ancilla. Each projector phase factor is an exact multi-controlled phase gate, so any dt is allowed. At dt=pi each factor is an exact reflection and one step is the Grover iterate. Input-state preparation and measurement are left to the runner.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\nimport numpy as np\n\n\ndef _get_int(instance, key, lo, hi):\n    if key not in instance:\n        raise ValueError('missing key: ' + key)\n    v = instance[key]\n    if isinstance(v, bool) or not isinstance(v, (int, np.integer)):\n        raise ValueError(key + ' must be an integer')\n    v = int(v)\n    if v < lo or v > hi:\n        raise ValueError(key + ' out of range')\n    return v\n\n\ndef _phase_on_basis_state(qc, qubits, value, angle):\n    # Applies diag(1,...,exp(i*angle) on |value>,...,1) = I + (e^{i angle}-1)|value><value|.\n    # Bit i of value is qubit qubits[i] (little endian).\n    zeros = [q for i, q in enumerate(qubits) if not (value >> i) & 1]\n    for q in zeros:\n        qc.x(q)\n    qc.mcp(angle, list(qubits[:-1]), qubits[-1])\n    for q in zeros:\n        qc.x(q)\n\n\ndef _w_factor(qc, qubits, marked, dt):\n    # eq_2/eq_3: exp(-i dt |w><w|); at dt=pi this equals the oracle I-2|w><w|\n    _phase_on_basis_state(qc, qubits, marked, -dt)\n\n\ndef _s_factor(qc, qubits, dt):\n    # eq_2/eq_3: exp(-i dt |s><s|) = H^n exp(-i dt |0><0|) H^n; at dt=pi it equals I-2|s><s|\n    for q in qubits:\n        qc.h(q)\n    _phase_on_basis_state(qc, qubits, 0, -dt)\n    for q in qubits:\n        qc.h(q)\n\n\ndef build_circuit(instance):\n    \"\"\"Lie-Trotter Grover evolution: m steps of (W(dt) S(dt)), S applied first in each step.\n\n    instance keys: n (3..6), marked (0..2^n-1), steps (0..200), dt (finite real).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _get_int(instance, 'n', 3, 6)\n    marked = _get_int(instance, 'marked', 0, 2 ** n - 1)\n    steps = _get_int(instance, 'steps', 0, 200)\n    if 'dt' not in instance:\n        raise ValueError('missing key: dt')\n    dt = instance['dt']\n    if isinstance(dt, bool) or not isinstance(dt, (int, float, np.integer, np.floating)):\n        raise ValueError('dt must be real')\n    dt = float(dt)\n    if not math.isfinite(dt):\n        raise ValueError('dt must be finite')\n    reg = QuantumRegister(n, 'search')\n    qc = QuantumCircuit(reg)\n    qubits = list(reg)\n    for _ in range(steps):\n        _s_factor(qc, qubits, dt)\n        _w_factor(qc, qubits, marked, dt)\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"marked\": 5, \"steps\": 2, \"dt\": 3.141592653589793}",
+    "register_layout": [
+      "qubits 0..n-1: 'search' register, little-endian computational basis (qubit i = bit i of the basis-state integer)",
+      "marked item w is the integer 'marked'; its bit i corresponds to qubit i",
+      "no ancilla qubits; total qubits = n <= 6",
+      "example: n=3, qubits 0,1,2; marked=5 is |101> (q2=1,q1=0,q0=1)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Defines the two projectors in H whose evolution factors are used. The exact e^{-iHT} is not built; only the product formula of eq_2 is."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop over steps, with _s_factor and _w_factor",
+        "explanation": "Implements (e^{-i dt|w><w|} e^{-i dt|s><s|})^m. The s factor acts first, since it is the rightmost operator. dt and m are given independently in the instance."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_w_factor and _s_factor with dt=pi",
+        "explanation": "At dt=pi the factors are exactly I-2|w><w| and I-2|s><s|, so one step is the Grover iterate up to a global sign. No special code path is used; it is the dt=pi case of the same construction."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Analytic success probability sin^2((2k+1)theta), used for choosing k and for post-hoc analysis. It is not part of the operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Power-law error fit of the Trotter arm is classical post-processing of simulation results, not a circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The oracle is not a black box. e^{-i dt|w><w|} is built explicitly from X gates on the zero bits of w and a multi-controlled phase of angle -dt. No ancilla is used.",
+        "reason": "The spec left the non-pi oracle rotation unspecified. An explicit marked-state phase gate resolves this, and the dt=pi case reproduces the standard phase oracle exactly."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The circuit contains the evolution operation only, with a single scope: the Trotter product with free dt and m. Separate Arm A and Arm B circuits, |s> preparation and measurement are dropped. The Grover arm is the dt=pi case.",
+        "reason": "The task requires an operation without state preparation or measurement, and a single construction."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Total time T=m*dt is not an input. dt and steps are given independently, and any real dt is accepted.",
+        "reason": "This simplifies the interface and covers both the dt=T/m Trotter regime and the maximal-step regime."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The fixed-point/recursive scheme and the exponential-error-control construction are excluded.",
+        "reason": "The phase schedule is not specified in the abstract and is not invented here."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The search register size is restricted to n in 3..6, and steps to at most 200.",
+        "reason": "This keeps the circuit well under the 12-qubit cap and follows the specified domain of n."
+      }
+    ],
+    "assumptions": [
+      "Marked item w is a single computational-basis integer, with bit i on qubit i (little endian)",
+      "Initial state |s> is prepared by the runner, not by this circuit",
+      "The Hamiltonian normalisation is exactly H=|w><w|+|s><s|, as in eq_1",
+      "In each step the |s> factor is applied before the |w> factor, following the operator product order in eq_2",
+      "Multi-controlled phases use qc.mcp without ancilla, which is fine for n<=6"
+    ],
+    "unresolved_issues": [
+      "The paper's exact Hamiltonian normalisation and evolution time are unknown",
+      "The fixed-point or generalised-reflection scheme for logarithmic error scaling is not implemented",
+      "The Trotter error exponent p and constant C in eq_5 are not given in the abstract"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 80,
+    "depth": 56,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

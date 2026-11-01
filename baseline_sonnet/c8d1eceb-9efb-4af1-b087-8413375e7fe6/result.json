@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "c8d1eceb-9efb-4af1-b087-8413375e7fe6",
+  "parent_run_id": "e2e8d93f-b31a-49c3-b2d6-46c90da8f937",
+  "created_at": "2026-10-31T22:28:37.806770+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "11f283a427d8abf2b749edfb48a28cc1b1ed0553e6c84662acf7fc3464db664d",
+  "source_specification_sha256": "71f2702e48fe3ff7a74fbbb7f527d8fa194845891fa20e3004fe8425de33b7bb",
+  "source_python_sha256": "b3c692212a633a00e4b49eca4258cf3900e9564ccdf8482e6c055b73ecb9e995",
+  "elapsed_seconds": 35.628,
+  "usage": {
+    "input_tokens": 5204,
+    "output_tokens": 5008,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the ancilla-controlled first-order Trotterized evolution C-U(t) = |0><0| (x) I + |1><1| (x) exp(-iHt) for the 2-level reduced pairing Hamiltonian mapped to 2 qubits. This is the core operation of the Hadamard-test spectroscopy in the spec. Input-state preparation, the final basis rotation, measurement and Fourier post-processing are not included.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _real(v, name):\n    try:\n        x = float(v)\n    except (TypeError, ValueError):\n        raise ValueError(name + ' must be a real number')\n    if not math.isfinite(x):\n        raise ValueError(name + ' must be finite')\n    return x\n\n\ndef build_circuit(instance):\n    \"\"\"Controlled Trotter evolution of H = sum_j (eps_j - G/2)(1 - Z_j) - (G/2)(XX+YY).\n\n    Qubits: 0,1 = system (pair occupation of levels 0,1; |1> = occupied), 2 = control ancilla.\n    instance keys: epsilon (list of 2 reals), G (real), time (real), trotter_steps (int 1..100).\n    \"\"\"\n    if type(instance) is not dict:\n        raise ValueError('instance must be a JSON object')\n    eps = instance.get('epsilon')\n    if type(eps) is not list or len(eps) != 2:\n        raise ValueError('epsilon must be a list of two reals')\n    e0 = _real(eps[0], 'epsilon[0]')\n    e1 = _real(eps[1], 'epsilon[1]')\n    g = _real(instance.get('G'), 'G')\n    t = _real(instance.get('time'), 'time')\n    n = instance.get('trotter_steps')\n    if type(n) is not int or n < 1 or n > 100:\n        raise ValueError('trotter_steps must be an integer in 1..100')\n    # eq_3 coefficients: H = sum_j a_j (1 - Z_j) - (G/2)(XX + YY), a_j = eps_j - G/2\n    a = [e0 - g / 2.0, e1 - g / 2.0]\n    const = a[0] + a[1]\n    dt = t / n\n    sysr = QuantumRegister(2, 'q')\n    anc = QuantumRegister(1, 'a')\n    qc = QuantumCircuit(sysr, anc)\n    # exchange block exp(+i G dt/2 (XX+YY)) = RXX(-G dt) RYY(-G dt); XX and YY commute\n    pair = QuantumCircuit(2)\n    pair.rxx(-g * dt, 0, 1)\n    pair.ryy(-g * dt, 0, 1)\n    cpair = pair.to_gate().control(1)\n    for _ in range(n):\n        # constant part of H: phase exp(-i const dt) on ancilla |1>\n        qc.p(-const * dt, 2)\n        # diagonal part: exp(+i a_j dt Z_j) = RZ(-2 a_j dt), controlled on ancilla\n        qc.crz(-2.0 * a[0] * dt, 2, 0)\n        qc.crz(-2.0 * a[1] * dt, 2, 1)\n        # XY exchange part\n        qc.append(cpair, [2, 0, 1])\n    return qc",
+    "example_instance_json": "{\"epsilon\": [0.5, 1.0], \"G\": 0.4, \"time\": 1.0, \"trotter_steps\": 4}",
+    "register_layout": [
+      "qubit 0: system qubit q[0], pair occupation of level 0 (|0> empty, |1> occupied; LSB)",
+      "qubit 1: system qubit q[1], pair occupation of level 1",
+      "qubit 2: control ancilla a[0] (Hadamard-test ancilla; the runner prepares |+> and the reference state e.g. |01> meaning level 1 occupied, i.e. q1=1, q0=0)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: coefficients a_j = eps_j - G/2 and exchange coupling G/2",
+        "explanation": "The two-level reduced pairing Hamiltonian, including j=k terms, fixes the gate angles."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: register layout, n_j=(1-Z_j)/2 with |1> occupied",
+        "explanation": "One qubit per pair level; sigma+ sigma- exchange is realized as (XX+YY)/2."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: const, a[], crz and RXX/RYY block",
+        "explanation": "Implemented in simplified form H = sum_j (eps_j - G/2)(1-Z_j) - (G/2)(XX+YY). The zero-valued placeholder term is dropped."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: for _ in range(n) loop",
+        "explanation": "First-order Trotter product with n steps of dt=t/n. Each step applies the constant phase, the Z rotations and the XX+YY block, all controlled on the ancilla."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "S(t) is obtained by a Hadamard test whose controlled evolution is provided here. The ancilla Hadamard or phase rotation, measurement and Fourier transform are outside the circuit operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Removed the zero-valued placeholder term and merged the number terms: eps_j(1-Z_j) - G(1-Z_j)/2 = (eps_j - G/2)(1-Z_j).",
+        "reason": "The placeholder carries no content. Merging gives the same operator with fewer terms."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The Trotterized evolution is controlled on an ancilla, with the constant energy offset implemented as a phase gate on the ancilla.",
+        "reason": "The Hadamard test needs a controlled-U, and the constant term of H is then a relative phase that affects S(t)."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Scope narrowed to the controlled-evolution operation only. Initial-state preparation, ancilla basis changes, measurement and Fourier analysis are excluded.",
+        "reason": "The circuit must be a measurement-free operation with inputs prepared by the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope is a generic 2-level reduced pairing model, not the paper's specific Hamiltonians or nearest-neighbor decompositions.",
+        "reason": "The abstract gives no explicit equations."
+      }
+    ],
+    "assumptions": [
+      "Uniform pairing coupling G and two levels with energies epsilon_0 and epsilon_1",
+      "The ancilla is the control qubit, with ancilla |1> selecting evolution",
+      "Trotter ordering within each step: constant phase, CRZ on q0, CRZ on q1, then XX+YY exchange",
+      "Valid inputs: finite real epsilon (length 2), G and time; integer trotter_steps in 1..100"
+    ],
+    "unresolved_issues": [
+      "The paper's actual Hamiltonians, hardware-native gate sequences, fidelity metrics and spectrum measurement scheme are not specified in the abstract",
+      "The reference state |01> and the ancilla |+> must be prepared by the runner"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 532,
+    "depth": 374,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

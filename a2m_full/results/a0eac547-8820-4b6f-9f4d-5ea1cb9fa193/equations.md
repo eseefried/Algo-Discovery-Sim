@@ -1,0 +1,142 @@
+# Abstract to equations
+
+Status: **partial**
+
+Model: `external:a2m_swarm`
+
+Mathematics has not been independently verified.
+
+Learn a hidden n-bit parity s from a quantum example oracle that prepares 2^{-n/2} sum_x |x>|s.x mod 2>, possibly followed by depolarizing noise on its output qubits. Use Hadamard (Bernstein-Vazirani) Fourier sampling on each noisy copy, then bitwise majority vote over m=O(log n/(1-2p')^2) runs.
+
+Scope: One smallest construction: n=3 or 4 data qubits plus 1 label qubit, one oracle query per run, H on all qubits, measure the data qubits, then classical majority voting across runs. Noise is modeled as per-qubit depolarizing noise after the oracle, and the sketch's single-qubit Pauli analysis is taken as given. Outside scope: any proof of the query or computational complexity bounds, exact optimality, the LPN hardness argument, and the quantum-classical separation claim. Noise-rate estimation is also out of scope.
+
+## Symbols
+
+- $n$: number of data qubits / bits of the parity; domain: positive integer
+- $s$: hidden parity string; domain: {0,1}^n
+- $f_s(x)$: parity function s.x mod 2, no offset; domain: {0,1}
+- $p$: depolarizing probability of a random Pauli on one qubit; domain: [0,3/4)
+- $p'$: effective bit-flip probability on each readout bit, 2p/3; domain: [0,1/2)
+- $m$: number of repetitions, one query each; domain: positive integer
+- $e$: noise string, i.i.d. Bernoulli(p') per bit; domain: {0,1}^n
+- $y^{(j)}$: measured data string in run j; domain: {0,1}^n
+
+## eq_1: Quantum example state
+
+$$
+|\psi_s\rangle=2^{-n/2}\sum_{x\in\{0,1\}^n}|x\rangle|s\cdot x \bmod 2\rangle
+$$
+
+The noiseless coherent example oracle applied to |0^n>|0>, with the label qubit carrying f_s(x).
+
+Provenance: `abstract_inferred`. The abstract names a quantum example oracle for parities. The coherent uniform-superposition form is the standard definition, and the task sketch states it.
+
+Abstract evidence: making queries to a quantum example oracle
+
+Equation assumptions:
+
+- Standard coherent example oracle
+- No constant offset
+
+## eq_2: Fourier sampling
+
+$$
+(H^{\otimes n}\otimes H)|\psi_s\rangle=|s\rangle|1\rangle
+$$
+
+After the oracle, H on the label gives |-> by phase kickback, and the data register is the state 2^{-n/2} sum_x (-1)^{s.x}|x>. H^{\otimes n} then maps the data register to |s>. Equivalently, the state before the final label H is |s>|->.
+
+Provenance: `standard_background`. Standard Bernstein-Vazirani identity: 2^{-n/2} sum_x |x>|s.x> = 2^{-n/2} sum_x (-1)^{s.x}|x>|-> after label basis change.
+
+Equation assumptions:
+
+- Noiseless oracle
+
+## eq_3: Effective noisy readout
+
+$$
+y^{(j)}=s\oplus e^{(j)},\quad e^{(j)}_i\sim\mathrm{Bernoulli}(p'),\; p'=2p/3
+$$
+
+Depolarizing noise after the oracle becomes independent bit-flip noise on the Fourier-sampled string. X or Y errors flip the readout bit, and the label qubit's Z errors do not affect it.
+
+Provenance: `assumption`. Taken from the task sketch, which assumes independent depolarizing noise on each output qubit after the oracle. The abstract only says that noise at any constant rate keeps learning efficient. Exact independence and the Z-error argument are not checked here.
+
+Equation assumptions:
+
+- Per-qubit depolarizing channel with a uniform random Pauli with probability p
+- Independent errors across qubits and runs
+- Noise acts after the oracle
+- p<3/4
+
+## eq_4: Majority vote
+
+$$
+\hat s_i=\mathrm{Maj}\{y^{(1)}_i,\dots,y^{(m)}_i\}
+$$
+
+Bitwise majority vote across the m runs recovers each bit of s.
+
+Provenance: `assumption`. The sketch proposes majority voting. The abstract only asserts efficiency of noisy quantum learning, with at most logarithmic overhead.
+
+Equation assumptions:
+
+- m odd or ties broken arbitrarily
+- p'<1/2
+
+## eq_5: Repetition count
+
+$$
+m=O\!\left(\frac{\log n}{(1-2p')^{2}}\right),\quad \Pr[\hat s_i\ne s_i]\le e^{-m(1-2p')^2/2}
+$$
+
+A Chernoff/Hoeffding bound per bit, followed by a union bound over n bits, gives total error probability at most n e^{-m(1-2p')^2/2}, which is 1/poly(n) for m=O(log n/(1-2p')^2).
+
+Provenance: `abstract_inferred`. The logarithmic overhead is consistent with this bound. The exact constants come from standard Hoeffding and are not from the abstract.
+
+Abstract evidence: does not increase the computational (or query) complexity of quantum learning more than logarithmically
+
+Equation assumptions:
+
+- Independent runs
+- Known bound on p'<1/2
+
+## Registers
+
+- data: n qubits; Oracle input/output register holding x, read as s after H^{\otimes n}; qubit i corresponds to s_i
+- label: 1 qubits; Carries f_s(x); H is applied to it to produce |->
+
+## Initial state
+
+|0^n>|0>, with the oracle placeholder acting on all n+1 qubits to produce the example state
+
+## Measurement
+
+Measure the n data qubits in the computational basis after the Hadamards. The label qubit is not needed; measure it only if the task requires.
+
+## Classical postprocessing
+
+Per-bit majority vote over m measured strings, with qubit index i mapped via bits[::-1][i].
+
+## Algorithm steps
+
+1. Place the example-oracle black box once on data+label, starting from |0^n>|0>. If noise is simulated, apply a depolarizing channel to each qubit after the oracle by sampling Pauli errors with probability p. (eq_1, eq_3)
+2. Apply H to the label qubit, then H to every data qubit. (eq_2)
+3. Measure the n data qubits only. Read bit i as bits[::-1][i], which is s_i for little-endian Qiskit order. Repeat the whole circuit m times with one query each. (eq_3, eq_5)
+4. Classically take the bitwise majority across the m strings to output the estimate of s. (eq_4, eq_5)
+
+## Assumptions
+
+- Chosen instance: n=3 or 4, one query per run, m set from the target error rate
+- Oracle is the standard coherent example oracle with no offset
+- Depolarizing noise is per-qubit, independent, after the oracle, and uses p<3/4
+- The noisy oracle is supplied by the task, or noise is simulated by sampling Paulis
+- The noise rate is known, or at least bounded away from the 1/2 threshold on p'
+
+## Missing information
+
+- Exact noise model used by the paper's analysis (the sketch's p'=2p/3 effective flip rate is not given in the abstract)
+- Whether the actual method uses Fourier sampling plus majority vote, or a different or more noise-robust procedure
+- Exact query-count constants
+- Whether the task's black box includes noise or the runner adds it
+- Details of the label-qubit Z-error argument

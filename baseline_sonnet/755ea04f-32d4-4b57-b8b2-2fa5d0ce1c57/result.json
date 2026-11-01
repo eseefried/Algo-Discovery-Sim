@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "755ea04f-32d4-4b57-b8b2-2fa5d0ce1c57",
+  "parent_run_id": "90f6ebb1-0699-4a99-ab7a-c903818f4fc2",
+  "created_at": "2026-10-31T22:28:30.026557+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "8ddbfeb0d51981d8226dd99f3496a94e78ab45ce0a8e3fdf2d2cd838f6994104",
+  "source_specification_sha256": "d5d96794b4e89050f8b36232d884ef7dc8ec3019788a6e38dacee8f1a3833f82",
+  "source_python_sha256": "a635729ec7e67c318079b3e363a7769806e714efc48a7dc6284e38b7f3e30058",
+  "elapsed_seconds": 25.571,
+  "usage": {
+    "input_tokens": 4777,
+    "output_tokens": 3744,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit circuit for a QFT-domain weighted sum (inner product of classical integer weights w with a quantum data vector x) accumulated modulo 2^n. It applies QFTGate to the accumulator, then controlled-phase rotations from each bit of each x_j onto each accumulator qubit, then the inverse QFTGate. The result is acc -> (acc + sum_j w_j x_j) mod 2^n. The inputs are left unchanged.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\nimport math\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef build_circuit(instance):\n    \"\"\"Draper-style QFT weighted-sum accumulator.\n\n    instance keys:\n      n_acc: int, accumulator qubits (modulus N = 2**n_acc)\n      weights: list[int], classical weights w_j (negative allowed, taken mod N)\n      input_bits: list[int], qubit count m_j of each input register x_j\n    Layout (little-endian everywhere): acc = qubits 0..n-1, then x_0, x_1, ...\n    Operation: |x_0>..|x_J>|b> -> |x_0>..|x_J>|(b + sum_j w_j x_j) mod N>.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n_acc')\n    weights = instance.get('weights')\n    bits = instance.get('input_bits')\n    if not _is_int(n) or n < 1:\n        raise ValueError('n_acc must be a positive integer')\n    if not isinstance(weights, list) or not isinstance(bits, list):\n        raise ValueError('weights and input_bits must be lists')\n    if len(weights) != len(bits) or len(weights) < 1:\n        raise ValueError('weights and input_bits must be nonempty and of equal length')\n    for w in weights:\n        if not _is_int(w):\n            raise ValueError('weights must be integers')\n    for m in bits:\n        if not _is_int(m) or m < 1:\n            raise ValueError('input_bits entries must be positive integers')\n    if n + sum(bits) > 12:\n        raise ValueError('total qubits exceed 12')\n\n    N = 2 ** n\n    acc = QuantumRegister(n, 'acc')\n    xregs = [QuantumRegister(m, 'x%d' % j) for j, m in enumerate(bits)]\n    qc = QuantumCircuit(acc, *xregs)\n    acc_q = list(range(n))\n\n    # eq_1/eq_3: move accumulator to the Fourier domain\n    qc.append(QFTGate(n), acc_q)\n\n    # eq_2/eq_4: phase-domain accumulation of w_j * x_j mod N\n    for j, m in enumerate(bits):\n        for l in range(m):\n            ctrl = xregs[j][l]\n            for t in range(n):\n                coeff = (weights[j] * (2 ** (l + t))) % N\n                if coeff == 0:\n                    continue\n                qc.cp(2.0 * math.pi * coeff / N, ctrl, acc[t])\n\n    # eq_3: return to the computational basis\n    qc.append(QFTGate(n).inverse(), acc_q)\n    return qc",
+    "example_instance_json": "{\"n_acc\": 3, \"weights\": [1, 3], \"input_bits\": [2, 2]}",
+    "register_layout": [
+      "q0..q2: acc (accumulator, little-endian, q0 least significant; holds b and ends as (b + S) mod 8)",
+      "q3..q4: x0 (2-bit input, q3 least significant)",
+      "q5..q6: x1 (2-bit input, q5 least significant)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": "build_circuit: QFTGate(n) appended on acc qubits",
+        "explanation": "The QFT definition is supplied by Qiskit's QFTGate, whose convention matches eq_1, including bit reversal. It is not re-implemented."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: controlled-phase loop (qc.cp)",
+        "explanation": "Addition in the Fourier domain by phase rotations, with angle 2*pi*coeff/N on acc qubit t. Each rotation is controlled by an input bit, so the added amount is the data-dependent value w_j*2^l."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: QFTGate, phase block, QFTGate.inverse() on acc",
+        "explanation": "Full pipeline QFT -> phase addition -> inverse QFT, giving (b + S) mod N in the computational basis."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: nested loops over j, l, t",
+        "explanation": "For every input j and bit l, controlled phases of 2*pi*w_j*2^(l+t)/N on acc qubit t give the total phase exp(2*pi*i*k*S/N) with S = sum_j w_j x_j. The result is the inner product modulo N."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Weights are classical integers fixed in the instance. Quantum-register weights are not implemented.",
+        "reason": "The specification left open whether weights are classical or quantum. Classical weights are the smallest well-defined construction."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "The accumulator is not restricted to start in |0>. The circuit adds S to whatever computational-basis value b it holds, and the example is not tied to b=0.",
+        "reason": "The operation must act on runner-prepared inputs. For b=0 it reduces to eq_4."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Bit order is little-endian (qubit 0 least significant) for both the accumulator and the x registers, instead of the big-endian assumption in the initial-state description.",
+        "reason": "This matches Qiskit and QFTGate conventions. Because QFTGate includes bit reversal, the rotation on acc qubit t is 2*pi*S*2^t/N."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "Rotation coefficients are reduced mod N, so weights may be negative (two's-complement style mod N), and zero rotations are skipped.",
+        "reason": "Phases are periodic, which makes modular arithmetic exact and the circuit smaller."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Scope is narrowed to the modular weighted-sum accumulator. Signed-integer interpretation, extra carry-qubit non-modular variants, a global control qubit, and weighted-average division are not implemented.",
+        "reason": "The abstract gives no details of those variants, so they cannot be reconstructed reliably."
+      }
+    ],
+    "assumptions": [
+      "Inputs x_j are unsigned integers held in computational-basis registers (little-endian).",
+      "The accumulator holds an integer b in the computational basis on entry, prepared by the runner.",
+      "Weights are classical integers. Exact (non-wrapping) results need n_acc large enough that the sum stays below 2^n_acc.",
+      "Total qubits are n_acc + sum(input_bits), capped at 12."
+    ],
+    "unresolved_issues": [
+      "The paper's specific adder and multiplier variants, including controlled and signed ones, are not reconstructed from the abstract.",
+      "The transform-domain weighted-average method is not implemented.",
+      "Quantum-valued weights, that is products of two quantum registers, are not implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 7,
+    "gate_count": 92,
+    "depth": 54,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

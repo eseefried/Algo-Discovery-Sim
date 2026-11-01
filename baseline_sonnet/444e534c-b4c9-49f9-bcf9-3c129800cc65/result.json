@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "444e534c-b4c9-49f9-bcf9-3c129800cc65",
+  "parent_run_id": "69ee6693-bf0f-4ef1-be91-916bad820143",
+  "created_at": "2026-10-31T22:24:29.872213+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "f5755cd7762dae9c6d6b9b5523b0dbd4b7737095ea41a62d2461d601f9c10386",
+  "source_specification_sha256": "1d8138375ef7d7e9700ebbc5a0833f105580d459ebd9dfac89d155c4f1ac8f2d",
+  "source_python_sha256": "9bbcae97fea2e0f6582ba6127f2b35323e20a6a560fe527bc8d8c3b71b007f0c",
+  "elapsed_seconds": 27.776,
+  "usage": {
+    "input_tokens": 5366,
+    "output_tokens": 4046,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the diagonal bipartite gate U = sum_{j,k} exp(i phi_jk)|jk><jk| on two n-qubit registers (N = 2^n), with the phases supplied as an N x N matrix (the matrix A, as angles) or a flat list of length N^2. The diagonal is synthesized exactly from a Walsh-Hadamard (parity) expansion of the phases, using CX ladders and RZ gates plus a global phase. The auxiliary state rho and its entropy are classical post-processing and are not part of the circuit.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport numpy as np\n\n\ndef _wht(v):\n    \"\"\"Unnormalized fast Walsh-Hadamard transform of a length-2^m vector.\"\"\"\n    v = np.array(v, dtype=float)\n    h = 1\n    while h < v.shape[0]:\n        w = v.reshape(-1, 2, h)\n        a = w[:, 0, :]\n        b = w[:, 1, :]\n        v = np.stack([a + b, a - b], axis=1).reshape(-1)\n        h *= 2\n    return v\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    if 'N' not in instance or 'phases' not in instance:\n        raise ValueError('instance needs N and phases')\n    N = instance['N']\n    if isinstance(N, bool) or not isinstance(N, int):\n        raise ValueError('N must be an integer')\n    if N < 2 or (N & (N - 1)) != 0:\n        raise ValueError('N must be a power of two >= 2')\n    n = N.bit_length() - 1\n    if 2 * n > 12:\n        raise ValueError('at most 12 qubits allowed (N <= 64)')\n    try:\n        ph = np.asarray(instance['phases'], dtype=float)\n    except (TypeError, ValueError):\n        raise ValueError('phases must be real numbers')\n    if ph.shape == (N, N):\n        ph = ph.reshape(-1)\n    elif ph.shape != (N * N,):\n        raise ValueError('phases must have shape (N,N) or (N*N,)')\n    if not np.all(np.isfinite(ph)):\n        raise ValueError('phases must be finite')\n    return n, ph\n\n\ndef build_circuit(instance):\n    \"\"\"Diagonal gate U = sum_{jk} exp(i phi_jk)|j><j| x |k><k|.\n\n    Diagonal index x = j*N + k (row-major, eq_1): qubits 0..n-1 hold k (register B),\n    qubits n..2n-1 hold j (register A).\n    phi(x) = sum_S a_S (-1)^{x.S}, a_S = WHT(phi)[S]/N^2; exp(i a_S Z_S) is a parity RZ.\n    \"\"\"\n    n, ph = _parse(instance)\n    M = ph.shape[0]\n    coeffs = _wht(ph) / M\n    kreg = QuantumRegister(n, 'B_k')\n    jreg = QuantumRegister(n, 'A_j')\n    qc = QuantumCircuit(kreg, jreg)\n    nq = 2 * n\n    qc.global_phase = float(coeffs[0])\n    for S in range(1, M):\n        a = float(coeffs[S])\n        if abs(a) < 1e-13:\n            continue\n        qs = [i for i in range(nq) if (S >> i) & 1]\n        t = qs[-1]\n        for q in qs[:-1]:\n            qc.cx(q, t)\n        qc.rz(-2.0 * a, t)\n        for q in reversed(qs[:-1]):\n            qc.cx(q, t)\n    return qc",
+    "example_instance_json": "{\"N\": 2, \"phases\": [[0.0, 0.7], [1.9, 2.5]]}",
+    "register_layout": [
+      "qubit 0..n-1: register B_k, little-endian bits of column index k",
+      "qubit n..2n-1: register A_j, little-endian bits of row index j",
+      "computational basis index x = j*N + k, N = 2^n; for the N=2 example: qubit 0 = k, qubit 1 = j",
+      "U acts as exp(i*phases[j][k]) on |j>|k>"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (diagonal gate, row-major index x=j*N+k) with _parse (reshape of phases into A) and _wht",
+        "explanation": "Gate diag(exp(i phi_jk)) is synthesized exactly via a Walsh-Hadamard parity expansion; the phases are given as inputs (the runner or caller may draw them i.i.d. uniform)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "rho = A A^dagger / N^2 is classical post-processing of the phases and is not part of the circuit."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Property of unimodular A (rho_jj = 1/N); no circuit operation corresponds to it."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Von Neumann entropy is a classical quantity, not implemented in the circuit."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The N=2 illustration has a garbled rho_12 expression. It is only usable as an input instance (N=2 and phases), and the entropy computation is outside the circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The printed rho_12 expression is not used. With A=[[1,e^{ia}],[e^{ib},e^{ic}]], the correct element is rho_12 = (A A^dagger)_{12}/4 = (e^{-ib}+e^{i(a-c)})/4, which the abstract spec already states as the replacement. No circuit code depends on it.",
+        "reason": "The latex in eq_5 is internally inconsistent and the circuit does not need rho."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Narrowed scope to implementing only the diagonal gate U, with the phases supplied as input rather than sampled inside the circuit. N is restricted to powers of two with 2*log2(N) <= 12, i.e. N <= 64. The matrix A is represented by its phase-angle matrix.",
+        "reason": "The circuit must be a deterministic unitary operation for a given instance, and qubit registers require N = 2^n."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The auxiliary state, the entropy and the entangling-power relation are not built into the circuit, which only implements U.",
+        "reason": "These are classical post-processing steps. The exact relation between entangling power and S(rho) is missing from the specification."
+      }
+    ],
+    "assumptions": [
+      "N is a power of two, so each subsystem is n = log2 N qubits.",
+      "Row-major reshaping: diagonal index x = j*N + k, with k on the low (least significant) qubits.",
+      "Phases are provided as real angles, either an N x N matrix or a flat list of length N^2.",
+      "The global phase is tracked via the circuit global_phase (the S=0 Walsh coefficient)."
+    ],
+    "unresolved_issues": [
+      "The exact relation between entangling power and S(rho) is not in the specification, so no entangling-power circuit was built.",
+      "Moment formulas, the Borel-triangle conjecture and the mean-entropy result are not implemented because they are analytic results.",
+      "The circuit uses O(N^2) parity rotations with CX ladders, so it is not gate-efficient for larger N."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 5,
+    "depth": 4,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -2,17 +2,25 @@
 # Run the full pipeline over every dataset abstract. Resumable: papers that finished
 # (exit 0 or 2) are skipped on rerun; errors and interrupted runs are retried.
 # Usage: scripts/run_baseline.sh [OUT_DIR] [PARALLEL]
+# PAPERS_FROM=DIR limits the run to the papers named DIR/<arxiv_id>.json (e.g. single_agent_specs).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 OUT=${1:-baseline_results}
 PARALLEL=${2:-4}
 mkdir -p "$OUT/logs"
-TOTAL=$(ls data/circuit_dataset_300_v1/abstracts | wc -l)
+paper_ids() {
+  if [ -n "${PAPERS_FROM:-}" ]; then
+    ls "$PAPERS_FROM"/*.json | xargs -n1 basename | sed 's/\.json$//'
+  else
+    ls data/circuit_dataset_300_v1/abstracts | sed 's/^arxiv-//; s/\.txt$//'
+  fi
+}
+TOTAL=$(paper_ids | wc -l)
 echo 0 > "$OUT/.progress"
 # Truncation at the 8,192 default was common; the environment value wins over .env.
 export CLAUDE_MAX_TOKENS=${CLAUDE_MAX_TOKENS:-16384}
-echo "CLAUDE_MAX_TOKENS=$CLAUDE_MAX_TOKENS, parallel=$PARALLEL, output=$OUT"
+echo "model=${CLAUDE_MODEL:-.env default} effort=${CLAUDE_EFFORT:-.env default} code_effort=${CLAUDE_CODE_EFFORT:-same} CLAUDE_MAX_TOKENS=$CLAUDE_MAX_TOKENS, papers=$TOTAL, parallel=$PARALLEL, output=$OUT"
 export OUT TOTAL
 
 run_one() {
@@ -37,7 +45,7 @@ run_one() {
 }
 export -f run_one
 
-ls data/circuit_dataset_300_v1/abstracts | sed 's/^arxiv-//; s/\.txt$//' |
+paper_ids |
   xargs -P "$PARALLEL" -I{} bash -c 'run_one "$1"' _ {}
 
 echo "Done. Rerun the same command to retry papers that ended in an error."

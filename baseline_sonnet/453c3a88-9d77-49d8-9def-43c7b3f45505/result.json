@@ -1,0 +1,137 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "453c3a88-9d77-49d8-9def-43c7b3f45505",
+  "parent_run_id": "11944ef5-df97-4ea5-8a54-fbb671f49cb8",
+  "created_at": "2026-10-31T22:35:21.790319+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "bf21ac9194321cc63107a95155c5e925f83c3a577e183c9b6185b68cd18ba27c",
+  "source_specification_sha256": "1dd17f2f5d46f9eb44ee627b68b5ea1bd660bc6e9ac5c352c3d47773d85ea777",
+  "source_python_sha256": "9ff3686372488290b474abd8fe990905c245789429434aefee46ac3b7dfa4ff4",
+  "elapsed_seconds": 80.871,
+  "usage": {
+    "input_tokens": 5190,
+    "output_tokens": 11318,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Lackadaisical quantum-walk search step U^t on the complete graph with N=2^n vertices, one marked vertex, phase-flip (Grover) coin, and l in {0,1} self-loops per vertex. Arcs are labelled by an XOR offset c, with the arc (v,c) leading to vertex v XOR c. c=0 is the self-loop, which exists only for l=1, so the shift is a bitwise CNOT from the coin register onto the vertex register. The coin is A (2|0><0|-I) A^dagger controlled on the vertex not being the marked vertex, and -I on the marked vertex. A is H^n for l=1 and a real-amplitude preparation of the uniform state over the nonzero offsets for l=0. The circuit contains no input-state preparation and no measurement.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import RYGate\nimport math\n\n\ndef build_circuit(instance):\n    \"\"\"Lackadaisical phase-flip-coin walk step U^t on K_N, N=2^n, one marked vertex.\n\n    instance keys: n_vertex_qubits (1..6), self_loops (0 or 1),\n    marked_vertex (0..2^n-1), steps (0..100).\n    Layout: vertex qubits 0..n-1 (bit i of v at qubit i), coin qubits n..2n-1\n    (bit i of the XOR offset c at qubit n+i). Arc (v,c) -> (v xor c, c); c=0 is a self-loop.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    vals = []\n    for name in ('n_vertex_qubits', 'self_loops', 'marked_vertex', 'steps'):\n        x = instance.get(name)\n        if isinstance(x, bool) or not isinstance(x, int):\n            raise ValueError('missing or non-integer parameter: ' + name)\n        vals.append(x)\n    n, l, w, t = vals\n    if n < 1 or n > 6:\n        raise ValueError('n_vertex_qubits must be in 1..6 (total qubits <= 12)')\n    if l not in (0, 1):\n        raise ValueError('self_loops must be 0 or 1')\n    if w < 0 or w >= 2 ** n:\n        raise ValueError('marked_vertex out of range')\n    if t < 0 or t > 100:\n        raise ValueError('steps must be in 0..100')\n\n    vertex = QuantumRegister(n, 'vertex')\n    coin = QuantumRegister(n, 'coin')\n    qc = QuantumCircuit(vertex, coin)\n    vq = [vertex[i] for i in range(n)]\n    cq = [coin[i] for i in range(n)]\n\n    # Coin basis change A: A|0> = |s_c>, uniform over allowed offsets\n    prep = QuantumCircuit(n)\n    if l == 1:\n        for i in range(n):\n            prep.h(i)\n    else:\n        for k in range(n - 1, -1, -1):\n            theta = 2.0 * math.asin(math.sqrt((2.0 ** k) / (2.0 ** (k + 1) - 1.0)))\n            if k == n - 1:\n                prep.ry(theta, k)\n            else:\n                prep.ry(math.pi / 2.0, k)\n                upper = list(range(k + 1, n))\n                prep.append(RYGate(theta - math.pi / 2.0).control(len(upper), ctrl_state=0), upper + [k])\n    prep_inv = prep.inverse()\n\n    for _ in range(t):\n        # Coin: C = A D A^dagger, D = -(I - 2 P[c=0 and v != w])  (eq_2)\n        qc.compose(prep_inv, qubits=cq, inplace=True)\n        # phase flip on c=0\n        for q in cq:\n            qc.x(q)\n        if n == 1:\n            qc.z(cq[0])\n        else:\n            qc.h(cq[-1])\n            qc.mcx(cq[:-1], cq[-1])\n            qc.h(cq[-1])\n        for q in cq:\n            qc.x(q)\n        # second phase flip on (c=0 and v=w): cancels the first on the marked vertex\n        for q in cq:\n            qc.x(q)\n        for i in range(n):\n            if not (w >> i) & 1:\n                qc.x(vq[i])\n        allq = cq + vq\n        qc.h(allq[-1])\n        qc.mcx(allq[:-1], allq[-1])\n        qc.h(allq[-1])\n        for i in range(n):\n            if not (w >> i) & 1:\n                qc.x(vq[i])\n        for q in cq:\n            qc.x(q)\n        qc.global_phase += math.pi\n        qc.compose(prep, qubits=cq, inplace=True)\n        # Shift S: (v,c) -> (v xor c, c)  (eq_1)\n        for i in range(n):\n            qc.cx(cq[i], vq[i])\n    return qc",
+    "example_instance_json": "{\"n_vertex_qubits\": 2, \"self_loops\": 1, \"marked_vertex\": 0, \"steps\": 1}",
+    "register_layout": [
+      "qubits 0..n-1: vertex register, little-endian binary label v (bit i of v on qubit i)",
+      "qubits n..2n-1: coin register, little-endian binary XOR offset c (bit i of c on qubit n+i); arc (v,c) leads to vertex v XOR c; c=0 is the self-loop",
+      "example (n=2): qubits 0,1 = vertex; qubits 2,3 = coin",
+      "total qubits = 2n <= 12"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: per-step coin block (A^dagger, phase flips, A) followed by the shift loop of CNOTs from coin to vertex",
+        "explanation": "U = S times (controlled coin), with the coin applied first. The shift is the XOR-offset arc pairing (v,c) <-> (v xor c,c), which fixes self-loops (c=0)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: prep (A), the two multi-controlled phase flips and the global phase of pi",
+        "explanation": "C_0 = A(2|0><0|-I)A^dagger on unmarked vertices, C_1 = -I on the marked vertex. Both are implemented as A D A^dagger with diagonal D = -(I - 2P[c=0, v!=w]). For l=1, A = H^n and |s_c> is uniform over all N offsets. For l=0, A is a real-amplitude preparation of the uniform state over nonzero offsets."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The task says the runner prepares the input state. The circuit is only the operation U^t, so the initial uniform state is not built here. For l=1 it is H on all 2n qubits. For l=0 the uniform vertex superposition is combined with the uniform state over nonzero offsets."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Measurement of the vertex register and probability estimation are done by the runner, not by this circuit."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "This is the abstract's asymptotic claim, a target behaviour to compare against. It is not an operation and is not hardcoded."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Restricted to N=2^n vertices and l in {0,1}. Arcs are labelled by an XOR offset c (target vertex = v XOR c). The shift is a CNOT layer instead of a generic arc-swap permutation.",
+        "reason": "This keeps the coin vertex-independent on unmarked vertices and avoids padding the coin dimension N-1+l to a power of two. The labelling is a relabelling of the arcs, which does not change the walk."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "For l=0 the coin dimension is N-1 but the register holds 2^n offset states. The reflection 2|s_c><s_c|-I acts on the full register and gives -1 on the unused offset c=0.",
+        "reason": "The nonzero-offset subspace is invariant and c=0 is never populated by a valid initial state, so the walk dynamics are unchanged."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The initial state is not prepared inside the circuit.",
+        "reason": "The task requires the circuit to be an operation only; the runner prepares inputs."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Added an integer parameter steps (0..100) giving the number of repeated applications of U, and the marked vertex is a parameter.",
+        "reason": "The operation should be usable for several t and marked vertices; the cap bounds the circuit size."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Number of self-loops limited to l in {0,1}; larger l is rejected with ValueError.",
+        "reason": "A larger l would need a multi-self-loop coin dimension that is not in the XOR-offset scheme. This narrows the scope but covers the abstract's l=0 versus l=1 comparison."
+      }
+    ],
+    "assumptions": [
+      "The 'phase flip coin' is the Grover diffusion coin on unmarked vertices with -I on the marked vertex, as in eq_2.",
+      "The coin is applied before the shift, with one marked vertex.",
+      "The runner prepares the initial state, which is uniform over vertices and over allowed coin states.",
+      "The complete graph has N=2^n vertices with n between 1 and 6, so 2n <= 12 qubits.",
+      "A global phase of pi per step is included for exactness and has no effect on probabilities."
+    ],
+    "unresolved_issues": [
+      "The paper's exact phase-flip coin and shift definitions are not known, so this is an assumed reading of the abstract.",
+      "The abstract's 1/2 and 1 success probabilities are asymptotic in N, so small instances will only approximate them.",
+      "The optimal number of steps is not derived here; the user chooses steps.",
+      "The SKW coin, continuous-time walks, multiple marked vertices and l>1 are not implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 54,
+    "depth": 37,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,138 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "b94838a5-d5db-40cc-9057-4c830edad8d4",
+  "parent_run_id": "495e379e-fe93-4add-86f0-9937db72b209",
+  "created_at": "2026-11-01T00:17:11.388918+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "6f2bd5855a3d6d5c87d58eb28016e6d1d57555775b5e3b3af10a22a63d3d710e",
+  "source_specification_sha256": "f187fd810ac6f301c30afc9a81383e588f2d183af593ed6d3f74f17905c4462c",
+  "source_python_sha256": "32af8e668fff4ffca232d0058458832d6c4f99267e73dca3c0462c3896b01e52",
+  "elapsed_seconds": 30.878,
+  "usage": {
+    "input_tokens": 5694,
+    "output_tokens": 4591,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "build_circuit(instance) returns the random-phase diagonal gate U = sum_{jk} exp(i phi_jk)|j><j| (x) |k><k| on two n-qubit registers (A = qubits 0..n-1 holding j, B = qubits n..2n-1 holding k). The phases come from an explicit list or from a seed. U is synthesized exactly from standard gates by a Moebius (subset) transform of the phase table, which gives one phase or multi-controlled-phase gate per qubit subset plus a global phase. Hadamard input preparation, statevector reshaping, entropy and averaging are left to the runner.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\nimport numpy as np\n\n\ndef _get_phases(instance, n):\n    \"\"\"Return N*N phases indexed as phases[j*N+k] (eq_1 reshape A_{jk}).\"\"\"\n    size = (1 << n) * (1 << n)\n    if \"phases\" in instance:\n        ph = instance[\"phases\"]\n        if not isinstance(ph, (list, tuple)) or len(ph) != size:\n            raise ValueError(\"phases must be a list of length N^2\")\n        out = []\n        for v in ph:\n            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):\n                raise ValueError(\"phases must be finite real numbers\")\n            out.append(float(v))\n        return out\n    seed = instance.get(\"seed\")\n    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:\n        raise ValueError(\"provide 'phases' or a non-negative integer 'seed'\")\n    rng = np.random.default_rng(seed)\n    return [float(v) for v in rng.uniform(0.0, 2.0 * math.pi, size)]\n\n\ndef build_circuit(instance):\n    \"\"\"Diagonal gate U of eq_1 on registers A (low n qubits, index j) and B (high n qubits, index k).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"n\")\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 6:\n        raise ValueError(\"n must be an integer in 1..6 (2n <= 12 qubits)\")\n    N = 1 << n\n    ph = _get_phases(instance, n)\n    A = QuantumRegister(n, \"A\")\n    B = QuantumRegister(n, \"B\")\n    qc = QuantumCircuit(A, B)\n    m = 2 * n\n    size = 1 << m\n    # phase table by computational basis index x = k*N + j (A is least significant)\n    a = [0.0] * size\n    for j in range(N):\n        for k in range(N):\n            a[k * N + j] = ph[j * N + k]\n    # Moebius transform: phi(x) = sum_{S subset of x} a_S\n    for i in range(m):\n        bit = 1 << i\n        for x in range(size):\n            if x & bit:\n                a[x] -= a[x ^ bit]\n    qc.global_phase = a[0]\n    for s in range(1, size):\n        ang = math.remainder(a[s], 2.0 * math.pi)\n        if abs(ang) < 1e-12:\n            continue\n        qs = [i for i in range(m) if (s >> i) & 1]\n        if len(qs) == 1:\n            qc.p(ang, qs[0])\n        else:\n            qc.mcp(ang, qs[:-1], qs[-1])\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"phases\": [0.3, 1.1, 2.5, 4.0, 5.2, 0.7, 3.3, 1.9, 2.2, 6.0, 0.1, 4.4, 3.9, 2.8, 5.5, 1.4]}",
+    "register_layout": [
+      "qubits 0-1: register A (index j, qubit 0 least significant)",
+      "qubits 2-3: register B (index k, qubit 2 is least significant bit of k)",
+      "basis index x = k*N + j; phase applied to |x> is phases[j*N+k] = phi_jk",
+      "no ancillas for n=2 (2n qubits in general, n<=6)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (Moebius transform + p/mcp gates); _get_phases",
+        "explanation": "The diagonal gate with unimodular entries exp(i phi_jk) is built exactly from a global phase, single-qubit phase gates and multi-controlled phase gates."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit (index mapping x = k*N + j; U layer only)",
+        "explanation": "Only the U part of U H^{2n}|0> is implemented, together with the A=low qubits, B=high qubits layout and the reshape index j*N+k. The Hadamard layer is input preparation and is supplied by the runner."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Property of the resulting state (rho_jj = 1/N for unimodular A), not a circuit element."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Entropy from the SVD of the reshaped statevector is classical postprocessing, excluded from the operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Purity is a classical check or a swap-test extension; not implemented."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Monte Carlo averaging over phase draws is done outside the circuit, by the runner calling build_circuit with different phases or seeds."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The Hadamard layer H^{2n}|0> is excluded from build_circuit; only the diagonal gate U is returned.",
+        "reason": "The task requires an operation without input-state preparation; the runner prepares |+>^{2n}."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "Amplitude matrix index convention: with A on the low qubits, basis index is x = k*N + j. The code maps phases[j*N+k] to x = k*N + j, so M[j,k] = psi[k*N+j] corresponds to A_{jk}/N.",
+        "reason": "Qiskit is little-endian, and the spec's reshape j*N+k would be wrong if applied directly to Qiskit basis indices."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_6"
+        ],
+        "change": "Phases are supplied via instance ('phases' list or integer 'seed') rather than sampled internally with hidden state; n is capped at 6.",
+        "reason": "Makes the operation deterministic and reproducible per instance, and respects the 12-qubit cap."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4",
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Scope narrowed to the gate construction. Entropy, purity, ensemble averaging, moments and Borel triangle claims are not implemented.",
+        "reason": "They are classical postprocessing or analytic results, not part of a unitary operation."
+      }
+    ],
+    "assumptions": [
+      "Phases are real numbers in radians; uniform sampling on [0,2pi) is used only when a seed is given.",
+      "Register A holds j on qubits 0..n-1 and register B holds k on qubits n..2n-1.",
+      "The global phase of U is included in the circuit's global_phase.",
+      "Valid n is an integer from 1 to 6."
+    ],
+    "unresolved_issues": [
+      "The proportionality between entangling power and S(rho) is not specified, so it is not used.",
+      "Gate count grows as 2^(2n), and the n=6 case needs many high-order multi-controlled phase gates; this is acceptable only for small instances."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 135,
+    "depth": 104,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

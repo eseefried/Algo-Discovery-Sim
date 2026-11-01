@@ -1,0 +1,126 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "c1239119-da9d-43e0-8f55-3b56556b2c56",
+  "parent_run_id": "f611d44c-b4c6-49cd-b2a6-3362967ac77a",
+  "created_at": "2026-10-31T22:23:19.745127+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "6554ef25cdab0a5325f9c7e506892183c38db334c08b36b716e3ef700c20f9a6",
+  "source_specification_sha256": "28e2db3a80651ea4f88a6e85f612ec92ba30b1b94ad2abed6f6d4fe30143fa4f",
+  "source_python_sha256": "497b9b52debd30459703b94bbeda0a2d2d4fbec9f155d70bf5b98c2501c8da63",
+  "elapsed_seconds": 35.421,
+  "usage": {
+    "input_tokens": 4893,
+    "output_tokens": 5148,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Exact bit-flip oracle U_f|x>|y> = |x>|y xor f(x)> for a Boolean function f given as a truth table, or as the n-bit OR (eq_5). Construction: H on the target, a diagonal phase exp(i*pi*y*f(x)) built from the Walsh-parity expansion of f, then H on the target again. Each parity term uses CNOTs onto one qubit of S, a controlled-phase to the target, and CNOT uncomputation. Constant depth, the MBQC translation and unbounded fan-out are not implemented. Depth here grows with the number of nonzero Walsh coefficients.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\nimport numpy as np\n\n\ndef _walsh(values):\n    a = np.array(values, dtype=float)\n    h = 1\n    while h < len(a):\n        a = a.reshape(-1, 2, h)\n        a = np.stack([a[:, 0, :] + a[:, 1, :], a[:, 0, :] - a[:, 1, :]], axis=1)\n        a = a.reshape(-1)\n        h *= 2\n    return a / len(a)\n\n\ndef _truth_table(instance, n):\n    tt = instance.get('truth_table')\n    fn = instance.get('function')\n    if tt is not None and fn is not None:\n        raise ValueError('give either truth_table or function, not both')\n    if tt is not None:\n        if not isinstance(tt, (list, tuple)) or len(tt) != 2 ** n:\n            raise ValueError('truth_table must have length 2**n')\n        out = []\n        for v in tt:\n            if isinstance(v, bool) or not isinstance(v, int) or v not in (0, 1):\n                raise ValueError('truth_table entries must be 0 or 1')\n            out.append(v)\n        return out\n    if fn == 'or':\n        # eq_5: OR(x) = 1 xor prod(1 xor x_i); x = 0 is the only zero\n        return [0] + [1] * (2 ** n - 1)\n    raise ValueError('unknown or missing function; use truth_table or function=\"or\"')\n\n\ndef build_circuit(instance):\n    \"\"\"Oracle on x (qubits 0..n-1, bit i of index x = qubit i) and target y (qubit n).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n + 1 > 12:\n        raise ValueError('n must be an integer with 1 <= n <= 11')\n    tt = _truth_table(instance, n)\n    # eq_3: Walsh coefficients of g = (-1)^f\n    g = [1 - 2 * v for v in tt]\n    coef = _walsh(g)\n    xr = QuantumRegister(n, 'x')\n    yr = QuantumRegister(1, 'y')\n    qc = QuantumCircuit(xr, yr)\n    y = n\n    # eq_2 (corrected): H on target conjugating controlled-Z^{f(x)}\n    qc.h(y)\n    # f(x) = f(0) + sum_{S != empty} ghat(S) x_S, so phase exp(i pi y f(x))\n    if tt[0] == 1:\n        qc.z(y)\n    for mask in range(1, 2 ** n):\n        c = float(coef[mask])\n        if abs(c) < 1e-12:\n            continue\n        bits = [i for i in range(n) if (mask >> i) & 1]\n        t = bits[0]\n        others = bits[1:]\n        for o in others:\n            qc.cx(o, t)\n        qc.cp(math.pi * c, t, y)\n        for o in reversed(others):\n            qc.cx(o, t)\n    qc.h(y)\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"function\": \"or\"}",
+    "register_layout": [
+      "qubit 0: x_0 (least significant input bit)",
+      "qubit 1: x_1",
+      "qubit 2: x_2",
+      "qubit 3: target y (computational basis, y -> y xor f(x))",
+      "no ancilla qubits; input index x = sum_i x_i 2^i"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (whole circuit)",
+        "explanation": "The circuit acts as |x>|y> -> |x>|y xor f(x)> for any truth table or for OR."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: qc.h(y) before and after the phase block",
+        "explanation": "Implemented in corrected form: Hadamards on the target conjugate sum_x |x><x| (x) Z^{f(x)}. The stated form, with a bare diagonal phase on x and no target dependence, is the phase-kickback form and does not equal U_f."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_walsh and the coefficient loop in build_circuit",
+        "explanation": "The Walsh coefficients of (-1)^f give the exact identity f(x) = f(0) + sum_{S nonempty} ghat(S) x_S. This drives the controlled-phase angles pi*ghat(S) on the parity x_S."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The paper's Z-rotation-on-parity elementary gate is not used literally. Parities are computed in place with CNOTs and the phase is applied with a controlled-phase to the target. The paper's angle schedule is unspecified."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "_truth_table: function == 'or' branch",
+        "explanation": "OR(x) = 1 xor prod(1 xor x_i) is 0 only at x = 0, giving the truth table [0,1,...,1]."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Replaced the diagonal phase operator on x alone by the target-controlled form sum_x |x><x| (x) Z^{f(x)}, conjugated by H on the target.",
+        "reason": "The original expression is not equal to the bit-flip oracle U_f."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Used the real-valued parity expansion f(x) = f(0) + sum ghat(S) x_S with controlled-phase gates onto the target, rather than Rz rotations on parity qubits.",
+        "reason": "This gives an exact, ancilla-free gate-model oracle from the stated Walsh background."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Narrowed scope to a standard-gate circuit-model oracle for a truth-table function (including OR). The constant-depth property, MBQC pattern, unbounded fan-out and ancilla-based construction are not implemented.",
+        "reason": "The abstract does not give the constant-depth construction, angle schedule or MBQC pattern."
+      }
+    ],
+    "assumptions": [
+      "Input index convention: x_i is on qubit i, so truth_table[x] uses x = sum x_i 2^i.",
+      "Target is qubit n; no ancillas are used.",
+      "n is capped at 11 so the total qubit count stays at most 12."
+    ],
+    "unresolved_issues": [
+      "The paper's constant-depth MBQC construction is not reconstructed; this circuit's depth scales with the number of nonzero Walsh coefficients.",
+      "The exact constant-depth OR implementation is not reproduced.",
+      "Fan-out and the MBQC equivalence are not modelled."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 47,
+    "depth": 37,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

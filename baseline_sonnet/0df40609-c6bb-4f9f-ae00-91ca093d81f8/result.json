@@ -1,0 +1,139 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "0df40609-c6bb-4f9f-ae00-91ca093d81f8",
+  "parent_run_id": "d9e90636-dfaa-4c79-aaf4-db0aa6ae77e5",
+  "created_at": "2026-10-31T22:31:31.437879+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "f4a57172185d1cdb0c07150c53e3a82d4198f37517a7702a1733ee7ce6a6fc32",
+  "source_specification_sha256": "09b86d5b5a198a0b2f9c533da7f83cbf6be823d1a7af5990320633c843b08a87",
+  "source_python_sha256": "bffaac21a364062f6bd30f1d4fb44908e9879c609e0bda1c973b8f4e61cf2faa",
+  "elapsed_seconds": 75.548,
+  "usage": {
+    "input_tokens": 4609,
+    "output_tokens": 10676,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "One step of a lazy discrete-time quantum walk on a cyclic line with a 3-level DFT coin (left, stay, right), repeated t times. The coin is a two-qubit register with 3 of 4 levels used. The 3x3 DFT is built from standard gates through an analytic two-level (Givens) decomposition. The shift is a coin-controlled increment (right) or decrement (left) mod 2^n, and 'stay' is the identity. No state preparation or measurement is included.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _get_int(instance, key, lo, hi):\n    if not isinstance(instance, dict) or key not in instance:\n        raise ValueError('missing parameter ' + key)\n    v = instance[key]\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError('invalid parameter ' + key)\n    return v\n\n\ndef _dft_coin(qc, c0, c1):\n    # eq_3: 3x3 DFT on logical levels k=0,1,2 with physical codes (c1 c0) = 00, 01, 11; code 10 is untouched.\n    # DFT = W V with V = -S*H on span{1,2} and W = R12(pi/4) R01(beta), cos(beta)=1/sqrt(3).\n    beta = math.acos(math.sqrt(1.0 / 3.0))\n    gamma = math.pi / 4.0\n    qc.ch(c0, c1)\n    qc.cp(math.pi / 2.0, c0, c1)\n    qc.z(c0)\n    qc.cry(2.0 * beta, c1, c0, ctrl_state=0)\n    qc.cry(2.0 * gamma, c0, c1)\n\n\ndef _shift(qc, pos, c0, c1):\n    # eq_2: S|x,c> = |x+c,c> mod 2^n. Coin 11 = right (+1), coin 00 = left (-1), coin 01 = stay.\n    n = len(pos)\n    for i in reversed(range(n)):\n        qc.mcx([c0, c1] + pos[:i], pos[i])\n    qc.x(c0)\n    qc.x(c1)\n    for i in range(n):\n        qc.mcx([c0, c1] + pos[:i], pos[i])\n    qc.x(c0)\n    qc.x(c1)\n\n\ndef build_circuit(instance):\n    t = _get_int(instance, 'steps', 0, 64)\n    n = _get_int(instance, 'position_qubits', 2, 10)\n    if n + 2 > 12:\n        raise ValueError('too many qubits')\n    pos_reg = QuantumRegister(n, 'pos')\n    coin_reg = QuantumRegister(2, 'coin')\n    qc = QuantumCircuit(pos_reg, coin_reg)\n    pos = list(pos_reg)\n    c0, c1 = coin_reg[0], coin_reg[1]\n    for _ in range(t):\n        _dft_coin(qc, c0, c1)\n        _shift(qc, pos, c0, c1)\n    return qc",
+    "example_instance_json": "{\"steps\": 3, \"position_qubits\": 4}",
+    "register_layout": [
+      "qubits 0..n-1: position register 'pos', unsigned integer, qubit 0 is the least significant bit; the walker position is x = value - offset (offset chosen by the runner), arithmetic mod 2^n",
+      "qubit n: coin bit c0 (least significant coin bit)",
+      "qubit n+1: coin bit c1 (most significant coin bit)",
+      "coin code (c1 c0): 00 = left (c=-1, logical 0), 01 = stay (c=0, logical 1), 11 = right (c=+1, logical 2), 10 = unused (identity under the coin, shift acts trivially)",
+      "example: n=4 gives 6 qubits, pos = qubits 0-3, coin = qubits 4-5"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The n-th moment and its O(t^n) scaling are classical post-processing of the measured position histogram. The circuit has no measurement, so it is not implemented."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_shift and the loop in build_circuit",
+        "explanation": "Each step applies the coin and then the conditional shift. The shift is a coin-controlled increment (right) or decrement (left) of the position register, and stay is the identity. The position register is cyclic."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_dft_coin",
+        "explanation": "The 3x3 DFT C_jk = w^(jk)/sqrt(3) is built analytically from ch, cp, z and two controlled-Ry gates, as a product of two-level rotations. It acts as identity on the unused fourth coin level."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The Born-rule marginal over coin states is obtained by measuring the position register, which the runner does."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The initial state (walker at the origin, coin chi) is prepared by the runner. The circuit is an operation only."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The position register has a fixed instance-supplied size n and the shift is cyclic mod 2^n, not an unbounded line.",
+        "reason": "A finite qubit register requires periodic boundaries. Wrap-around is avoided if the walker starts near the register centre and t < 2^(n-1)."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The 3-level coin is embedded in 2 qubits with the logical-to-physical code 0->00, 1->01, 2->11 and the unused code 10 acting as identity. The DFT index j=0,1,2 is identified with c=-1,0,+1.",
+        "reason": "A 3-level system needs 2 qubits. The Gray-code ordering lets the two-level rotations be single controlled gates."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The DFT is synthesized from standard gates through an exact analytic decomposition, with no dense unitary matrix.",
+        "reason": "Opaque unitaries are not allowed. The decomposition is DFT = R12(pi/4) R01(acos(1/sqrt3)) applied after (-S H on span{1,2}), where the -1 is a Z on c0."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "State preparation is excluded.",
+        "reason": "The task defines the output as an operation. The runner prepares the walker and the coin state."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_4"
+        ],
+        "change": "Scope is limited to the walk unitary t steps. Moments, occupancy number and occupancy rate are not computed.",
+        "reason": "The occupancy definitions are missing, and moments are classical post-processing."
+      }
+    ],
+    "assumptions": [
+      "Lazy walk model is the 3-state-coin walk with a DFT coin, as in the spec's assumed eq_2.",
+      "Coin applied first, then shift, each step.",
+      "Each lattice position offset is applied by the runner; the circuit only adds integers mod 2^n.",
+      "steps limited to 0..64 and position_qubits to 2..10, so total qubits are at most 12."
+    ],
+    "unresolved_issues": [
+      "The exact lazy walk definition from the source paper (e.g. Childs' lazy walk) may differ from this 3-state-coin model.",
+      "Definitions of occupancy number and occupancy rate were not provided.",
+      "The initial coin state is not fixed by the source and must be chosen by the runner.",
+      "The abstract does not specify the coin dimension. The 3x3 DFT is an assumption."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 1923,
+    "depth": 1191,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

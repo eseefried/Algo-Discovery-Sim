@@ -1,0 +1,141 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "7e3030d2-4cad-4bfd-9b3b-d9601d930452",
+  "parent_run_id": "eab3df43-4bc9-460f-b811-669405554bb8",
+  "created_at": "2026-11-01T00:14:42.310441+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "5a28c44df97cb79ed3044a5a2b96895f0982a6afe8d13d0e6c8e7cb373de9b02",
+  "source_specification_sha256": "5ff936db0f0422cac68cd3f061e8ffa575b44d9a2cefb96e198607e47e2fe70c",
+  "source_python_sha256": "03163d3ee4c61720ededb7f43625e49d1c8319dac3832f0d8004a4bcec67f450",
+  "elapsed_seconds": 45.319,
+  "usage": {
+    "input_tokens": 5953,
+    "output_tokens": 6315,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Reset-free, measurement-free Qiskit circuit for a second-order Trotterized single-qubit Lindblad semigroup exp(tL), with L = Hamiltonian (omega X/2) + pure dephasing (gamma) + amplitude damping (Gamma). The system is qubit 0. Each non-unitary factor uses its own fresh |0> ancilla, since reset is not allowed. The ancillas are left entangled, and the runner takes the partial trace over them. Narrowed scope: r is at most 5 because of the 12-qubit cap.",
+    "source_python": "from qiskit import QuantumCircuit\nimport math\n\n\ndef _get(instance, key, lo_inclusive):\n    if key not in instance:\n        raise ValueError('missing parameter ' + key)\n    v = instance[key]\n    if isinstance(v, bool) or not isinstance(v, (int, float)):\n        raise ValueError('parameter ' + key + ' must be a real number')\n    v = float(v)\n    if not math.isfinite(v) or v < 0.0 or (v == 0.0 and not lo_inclusive):\n        raise ValueError('parameter ' + key + ' out of range')\n    return v\n\n\ndef _dephase(qc, sys_q, anc, gamma, s):\n    # eq_5 dephasing: rho01 -> exp(-gamma s) rho01 = Kraus {sqrt(1-q) I, sqrt(q) Z}, q=(1-e^{-gamma s})/2\n    # eq_4: dilation with a fresh ancilla in |0>\n    q = (1.0 - math.exp(-gamma * s)) / 2.0\n    phi = 2.0 * math.asin(math.sqrt(min(1.0, max(0.0, q))))\n    qc.ry(phi, anc)\n    qc.cz(anc, sys_q)\n\n\ndef _damp(qc, sys_q, anc, rate, s):\n    # eq_5 amplitude damping, p = 1 - exp(-Gamma s); eq_4 dilation:\n    # controlled-RY(2 asin sqrt p) from system to ancilla, then CNOT ancilla -> system\n    p = 1.0 - math.exp(-rate * s)\n    phi = 2.0 * math.asin(math.sqrt(min(1.0, max(0.0, p))))\n    qc.cry(phi, sys_q, anc)\n    qc.cx(anc, sys_q)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    t = _get(instance, 't', True)\n    omega = _get(instance, 'omega', True)\n    gamma = _get(instance, 'gamma', True)\n    rate = _get(instance, 'Gamma', True)\n    r = instance.get('r')\n    if isinstance(r, bool) or not isinstance(r, int) or r < 1:\n        raise ValueError('r must be a positive integer')\n    if 1 + 2 * r > 12:\n        raise ValueError('r too large: needs 1+2r <= 12 qubits')\n    qc = QuantumCircuit(1 + 2 * r)\n    s = t / r\n    # eq_2: S2(s) = H(s/2) D(s/2) A(s) D(s/2) H(s/2); D and A commute so D(s/2)A(s)D(s/2)=D(s)A(s);\n    # adjacent H(s/2) factors of neighbouring segments merge to H(s). H(s)=exp(-i omega s X/2)=rx(omega s)\n    qc.rx(omega * s / 2.0, 0)\n    for k in range(r):\n        _dephase(qc, 0, 1 + 2 * k, gamma, s)\n        _damp(qc, 0, 2 + 2 * k, rate, s)\n        if k < r - 1:\n            qc.rx(omega * s, 0)\n    qc.rx(omega * s / 2.0, 0)\n    return qc",
+    "example_instance_json": "{\"t\": 1.0, \"r\": 3, \"omega\": 2.0, \"gamma\": 0.3, \"Gamma\": 0.5}",
+    "register_layout": [
+      "qubit 0: system qubit (holds rho; input prepared by runner)",
+      "qubits 1,3,5,...,2r-1: dephasing dilation ancillas for segments 0..r-1, each starting in |0>",
+      "qubits 2,4,6,...,2r: amplitude-damping dilation ancillas for segments 0..r-1, each starting in |0>",
+      "total qubits = 1 + 2r <= 12; output = reduced state of qubit 0 after tracing out all ancillas; Qiskit little-endian indexing"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (generator split into H = omega X/2, dephasing, amplitude damping; one qubit-0 operation per piece)",
+        "explanation": "The target is T_t = exp(tL) with L = L_H + L_deph + L_damp. The instance fixes this three-piece decomposition."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit (gate loop: rx half-step, then per-segment dephase + damp, rx full step between segments, rx half-step at the end)",
+        "explanation": "Symmetric second-order product formula with r segments, with exact merging of adjacent identical or commuting factors."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The error scaling and the choice of r from epsilon are not computed in the circuit. r is supplied directly in the instance, and epsilon is not an input."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_dephase and _damp (Stinespring dilation with one fresh |0> ancilla per non-unitary factor)",
+        "explanation": "Each Kraus-rank-2 channel is realized as a unitary on system plus ancilla. The ancilla is not reset and stays entangled, which implements the partial trace."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "_dephase (RY + CZ), _damp (CRY + CNOT), build_circuit (rx for the Hamiltonian piece)",
+        "explanation": "Dephasing is a Z-mixture with probability q=(1-e^{-gamma s})/2. Amplitude damping uses p=1-e^{-Gamma s} with phi=2 asin sqrt(p). The Hamiltonian is exp(-i omega s X/2) = rx(omega s), with the X axis chosen so it does not commute with the dissipators."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "No ancilla reset between factors. Each dephasing or damping factor gets its own fresh ancilla qubit, giving 1+2r qubits in total.",
+        "reason": "The task forbids reset and dynamic circuits. A single reused ancilla is not possible in a measurement-free unitary circuit."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_5"
+        ],
+        "change": "The three pieces are ordered H, D, A. The symmetric product is merged exactly: A(s/2)A(s/2)=A(s), D and A commute so D(s/2)A(s)D(s/2)=D(s)A(s), and neighbouring H(s/2) factors combine into H(s). D and A are still implemented as two separate rank-2 channels.",
+        "reason": "This reduces the number of ancillas. The merged form is mathematically identical to the specified second-order product."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_5"
+        ],
+        "change": "The Hamiltonian is fixed as omega X/2 and the dephasing is a Z-type channel with rate gamma on the coherence. Rates are nonnegative reals.",
+        "reason": "The specification left the axis open. A Hamiltonian that does not commute with Z gives a nontrivial Trotter structure."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The segment count r is an integer instance parameter limited to 1..5, and epsilon is not used.",
+        "reason": "The 12-qubit cap with 2 ancillas per segment limits r. The error-to-r formula has unspecified constants."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to one exact-dilation, second-order Trotter instance. The paper's own decomposition/recombination technique and general channel approximation are not implemented.",
+        "reason": "These details are not available in the supplied abstract or specification."
+      }
+    ],
+    "assumptions": [
+      "The input state on qubit 0 and |0> on all ancillas are prepared by the runner.",
+      "Evaluation traces out ancilla qubits 1..2r and compares the system state with exp(tL) rho.",
+      "The Lindblad convention is: dephasing multiplies rho01 by e^{-gamma t}, damping uses p = 1-e^{-Gamma t}, and the Hamiltonian is H = omega X/2.",
+      "t, omega, gamma and Gamma are finite and nonnegative."
+    ],
+    "unresolved_issues": [
+      "Only r <= 5 is reachable under the 12-qubit cap.",
+      "Gate-count scaling O((||L|| t)^{3/2}/eps^{1/2}) is not demonstrated, since the paper's synthesis method is not reconstructed.",
+      "Whether the paper's decomposition matches this one is unknown."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 7,
+    "gate_count": 31,
+    "depth": 25,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

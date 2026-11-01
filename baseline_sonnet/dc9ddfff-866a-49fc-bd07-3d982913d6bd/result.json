@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "dc9ddfff-866a-49fc-bd07-3d982913d6bd",
+  "parent_run_id": "5b64c98f-6828-44de-be70-ee68dc15976f",
+  "created_at": "2026-10-31T22:36:08.748058+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "b31ca52f96a6d3b4fb4a4bbac7fad4b49fbb999e51e993667a681d0d8d2d1806",
+  "source_specification_sha256": "4ec15d79aaf2eb4b2cdb56b8e8065e3f740ddb01dfedf458395a720e7d143c52",
+  "source_python_sha256": "d0a0b8646d4cb77add943ba10c0d7005333dce8a5385fc843e508b7247b27803",
+  "elapsed_seconds": 30.163,
+  "usage": {
+    "input_tokens": 5320,
+    "output_tokens": 4495,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "First-order Trotter circuit for the 1D quantum harmonic oscillator H=p^2/2+x^2/2 on a periodic grid of N=2^n points (n<=12 qubits). Each step applies the kinetic factor exp(-iT t/r) as QFT^dagger, then the momentum-space phases k^2/2, then QFT. It then applies the potential factor exp(-iV t/r) as position-space phases x_j^2/2. Both diagonal phases are built from single-qubit P gates, CP gates and a global phase, so there is no dense unitary. The refined Lie-algebraic schedule from the abstract is not reconstructed.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit\nfrom qiskit.circuit.library import QFTGate\n\n\ndef _quad_phase(qc, weights, c, scale):\n    # Applies diag exp(i*scale*(sum_k w_k b_k - c)^2) using P, CP and global phase.\n    n = len(weights)\n    for k in range(n):\n        w = weights[k]\n        ang = scale * (w * w - 2.0 * c * w)\n        if ang != 0.0:\n            qc.p(ang, k)\n    for k in range(n):\n        for l in range(k + 1, n):\n            ang = 2.0 * scale * weights[k] * weights[l]\n            if ang != 0.0:\n                qc.cp(ang, k, l)\n    qc.global_phase += scale * c * c\n\n\ndef _num(v, name):\n    if isinstance(v, bool) or not isinstance(v, (int, float)):\n        raise ValueError(name + ' must be a real number')\n    v = float(v)\n    if not math.isfinite(v):\n        raise ValueError(name + ' must be finite')\n    return v\n\n\ndef build_circuit(instance):\n    \"\"\"Trotterized QHO evolution (T then V per step, r steps) on n position qubits.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n_qubits')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 12:\n        raise ValueError('n_qubits must be an integer in [1, 12]')\n    r = instance.get('trotter_steps')\n    if isinstance(r, bool) or not isinstance(r, int) or r < 1 or r > 1000:\n        raise ValueError('trotter_steps must be an integer in [1, 1000]')\n    t = _num(instance.get('time'), 'time')\n    N = 2 ** n\n    if 'delta' in instance and instance['delta'] is not None:\n        delta = _num(instance['delta'], 'delta')\n        if delta <= 0.0:\n            raise ValueError('delta must be positive')\n    else:\n        delta = math.sqrt(2.0 * math.pi / N)\n    dk = 2.0 * math.pi / (N * delta)\n    s = t / r\n    qc = QuantumCircuit(n, name='qho_trotter')\n    pos_w = [float(2 ** k) for k in range(n)]\n    c = (N - 1) / 2.0\n    mom_w = [float(2 ** k) for k in range(n - 1)] + [-float(2 ** (n - 1))]\n    qubits = list(range(n))\n    for _ in range(r):\n        # kinetic factor exp(-i T s) = F^dag diag(exp(-i s k^2/2)) F\n        qc.append(QFTGate(n).inverse(), qubits)\n        _quad_phase(qc, mom_w, 0.0, -s * dk * dk / 2.0)\n        qc.append(QFTGate(n), qubits)\n        # potential factor exp(-i V s), x_j = delta*(j-(N-1)/2)\n        _quad_phase(qc, pos_w, c, -s * delta * delta / 2.0)\n    return qc",
+    "example_instance_json": "{\"n_qubits\": 3, \"time\": 1.0, \"trotter_steps\": 4}",
+    "register_layout": [
+      "qubits 0..n-1: position register, little-endian grid index j=sum_k 2^k b_k (qubit 0 least significant)",
+      "position x_j = delta*(j-(N-1)/2), N=2^n, default delta=sqrt(2*pi/N)",
+      "in momentum space (between QFT^dagger and QFT) the index is read as signed two's complement m in [-N/2,N/2-1], k=m*2*pi/(N*delta)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Defines the QHO Hamiltonian with hbar=m=omega=1; it motivates the circuit but is not a gate-level object."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop over r Trotter steps",
+        "explanation": "First-order product formula (e^{-iVt/r}e^{-iTt/r})^r, with r=trotter_steps."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit and _quad_phase: kinetic block (QFTGate inverse, momentum phases, QFTGate) and potential block (position phases)",
+        "explanation": "The kinetic factor is F^dag diag(e^{-i s k^2/2}) F and the potential factor is diag(e^{-i s x_j^2/2}), both on a periodic uniform grid. The quadratic phases are decomposed into P, CP and a global phase."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Asymptotic complexity claim for the paper's refined method; it is not a circuit construction and the method is not reconstructed."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Generic Trotter error bound; it informs the choice of trotter_steps, which is user supplied, and no error control is implemented."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Scope generalized from the fixed N=4 grid to N=2^n for n in 1..12, with n, t and r as instance parameters.",
+        "reason": "The task requires implementation for varying valid parameters. n=2 recovers the specified instance."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Within each step, kinetic is applied first and potential second, following the operator product e^{-iVs}e^{-iTs}. The step list in the specification described potential first.",
+        "reason": "The equation and the step list disagree on ordering. The operator-product order was chosen, and both are valid first-order formulas."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Grid is x_j=delta*(j-(N-1)/2) with default delta=sqrt(2*pi/N). Momentum is k=2*pi*m/(N*delta) with m signed. The QFTGate sign convention is irrelevant because the kinetic phase is even in k.",
+        "reason": "The specification left the offset and spacing unspecified. This choice gives a centered, self-dual grid."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The refined Lie-algebraic Trotter-Suzuki schedule, the energy cutoff and the subpolynomial complexity are not implemented. Only plain first-order Trotterization is built.",
+        "reason": "The abstract does not give enough detail to reconstruct the refined method."
+      }
+    ],
+    "assumptions": [
+      "Units hbar=m=omega=1",
+      "Periodic boundary conditions on a uniform centered grid",
+      "Input state preparation and measurement are handled by the runner",
+      "The number of steps r is supplied by the user; no automatic choice from epsilon",
+      "trotter_steps is capped at 1000 and n_qubits at 12"
+    ],
+    "unresolved_issues": [
+      "The paper's actual product-formula order and schedule are unknown",
+      "The discretized eigenstate preparation, quartic potential, general 1D systems and fractional Fourier transform are not covered",
+      "No validation contract was provided, so there is no target to check the discretization against"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 312,
+    "depth": 244,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

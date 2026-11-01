@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "a6f6853d-9061-4c46-a449-fd30cef94fc2",
+  "parent_run_id": "b61ff766-4505-4f06-8a38-7070c048d881",
+  "created_at": "2026-11-01T00:20:44.304078+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "7b55a6146a511a784bbe4f8b0dbbc7dec10c7df0d104e854d7ca35bb92edc54c",
+  "source_specification_sha256": "a01539162188e622dd794cf22999a68dbe1043ce893590aa1fa1b18a62f6dc65",
+  "source_python_sha256": "c554f930d952d7355f5befce355cb8b29c376595e36fddca95ede325512a51e8",
+  "elapsed_seconds": 35.638,
+  "usage": {
+    "input_tokens": 5739,
+    "output_tokens": 5482,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit operation for T steps of a Hadamard-coin discrete-time quantum walk on a cyclic 2^n-site lattice. Each step applies H on the coin, a coin-conditioned increment/decrement of the position register, and spin and spatial dephasing realized as unitary dilations with fresh ancillas per step. An optional fixed coin Rz(theta0) models quasi-stationary dephasing. The initial state, measurement, and coherence-length/Wigner post-processing are left to the runner.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import MCXGate\nimport math\n\n\ndef _int_param(instance, key, lo, hi):\n    v = instance.get(key)\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError('parameter ' + key + ' must be an integer in [' + str(lo) + ', ' + str(hi) + ']')\n    return v\n\n\ndef _prob_param(instance, key):\n    v = instance.get(key, 0.0)\n    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0.0 or v > 1.0:\n        raise ValueError('parameter ' + key + ' must be a probability in [0, 1]')\n    return float(v)\n\n\ndef _real_param(instance, key):\n    v = instance.get(key, 0.0)\n    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):\n        raise ValueError('parameter ' + key + ' must be a finite real number')\n    return float(v)\n\n\ndef build_circuit(instance):\n    \"\"\"DTQW operation. instance keys: n (position qubits), steps (T), p_s, q, theta0 (optional).\n    Qubits: pos[0..n-1] (little endian), coin = n, spin ancillas n+1..n+T, spatial ancillas n+T+1..n+2T.\n    Ancillas are assumed to start in |0>; they are the environment of the dephasing dilation.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _int_param(instance, 'n', 1, 10)\n    T = _int_param(instance, 'steps', 1, 5)\n    if n + 1 + 2 * T > 12:\n        raise ValueError('total qubits n+1+2*steps must not exceed 12')\n    p_s = _prob_param(instance, 'p_s')\n    q = _prob_param(instance, 'q')\n    theta0 = _real_param(instance, 'theta0')\n\n    pos = QuantumRegister(n, 'pos')\n    coin = QuantumRegister(1, 'coin')\n    aspin = QuantumRegister(T, 'aspin')\n    aspace = QuantumRegister(T, 'aspace')\n    qc = QuantumCircuit(pos, coin, aspin, aspace)\n    c = coin[0]\n\n    for t in range(T):\n        # coin toss (eq_1): Hadamard on spin\n        qc.h(c)\n        # conditional shift (eq_1): spin 0 -> x+1, spin 1 -> x-1 (mod 2^n)\n        # bit i of x+1 flips iff lower bits all 1; bit i of x-1 flips iff lower bits all 0.\n        # process top bit first so lower bits are still the original values.\n        for i in range(n - 1, -1, -1):\n            controls = [c] + [pos[j] for j in range(i)]\n            inc_state = 0\n            for j in range(i):\n                inc_state |= 1 << (j + 1)  # coin=0 (bit0 of state = 0), lower bits = 1\n            qc.append(MCXGate(len(controls), ctrl_state=inc_state), controls + [pos[i]])\n            dec_state = 1  # coin=1, lower bits = 0\n            qc.append(MCXGate(len(controls), ctrl_state=dec_state), controls + [pos[i]])\n        # optional quasi-stationary spin dephasing: fixed Z rotation per run\n        if theta0 != 0.0:\n            qc.rz(theta0, c)\n        # spin dephasing dilation (eq_3): phase flip on coin with probability p_s\n        if p_s > 0.0:\n            qc.ry(2.0 * math.asin(math.sqrt(p_s)), aspin[t])\n            qc.cz(aspin[t], c)\n        # spatial dephasing dilation (eq_4): Z on least significant position qubit with probability q\n        if q > 0.0:\n            qc.ry(2.0 * math.asin(math.sqrt(q)), aspace[t])\n            qc.cz(aspace[t], pos[0])\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"steps\": 2, \"p_s\": 0.1, \"q\": 0.05, \"theta0\": 0.0}",
+    "register_layout": [
+      "qubits 0..n-1: pos register, little-endian integer position x (qubit 0 = least significant bit); n=3 -> qubits 0,1,2",
+      "qubit n: coin/spin (|0> -> increment, |1> -> decrement); n=3 -> qubit 3",
+      "qubits n+1..n+T: fresh spin-dephasing ancillas, one per step, assumed |0>; example -> qubits 4,5",
+      "qubits n+T+1..n+2T: fresh spatial-dephasing ancillas, one per step, assumed |0>; example -> qubits 6,7",
+      "total qubits = n+1+2T <= 12"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: H on coin followed by the loop of two MCXGate with ctrl_state (coin-conditioned increment/decrement)",
+        "explanation": "Step operator U=S(I⊗H) on a cyclic lattice of 2^n sites, implemented with multi-controlled X gates, no dense unitary."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Initial state preparation is done by the runner, not by this operation. The suggested center site N/2 with coin (|0>+i|1>)/sqrt2 is not built into the circuit."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: ry(2 asin(sqrt(p_s))) on aspin[t], then cz(aspin[t], coin)",
+        "explanation": "Unitary dilation of the phase-flip channel with probability p_s per step. Tracing out the ancilla is left to the runner. The optional rz(theta0) is a separate coherent quasi-stationary dephasing extension."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: ry(2 asin(sqrt(q))) on aspace[t], then cz(aspace[t], pos[0])",
+        "explanation": "Unitary dilation of Z dephasing on the least significant position qubit with probability q per step."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Coherence profile C(d), coherence length, and discrete Wigner function are classical post-processing of the reduced density matrix, not circuit operations."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Initial-state preparation removed from the circuit.",
+        "reason": "The task requires an operation without input-state preparation, so the runner must prepare the walker position, coin state, and |0> ancillas."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Added an optional coherent Rz(theta0) on the coin after each shift, default 0 (not applied).",
+        "reason": "This represents the quasi-stationary dephasing noted in the steps. The averaging over random theta0 across runs is left to the runner, since a single circuit has one fixed angle."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Scope narrowed to one parametrized family: n position qubits (1 to 10), T steps (1 to 5), n+1+2T <= 12. Ancillas are fresh per step and the dephasing order is shift, then spin, then spatial.",
+        "reason": "The qubit cap of 12 and the fresh-ancilla dilation limit the instance size. The paper's actual decoherence model is not specified."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Excluded from the circuit.",
+        "reason": "It requires classical post-processing from the statevector or density matrix."
+      }
+    ],
+    "assumptions": [
+      "Hadamard coin; increment for spin 0 and decrement for spin 1; cyclic boundary mod 2^n.",
+      "Position is a little-endian integer on the pos register.",
+      "Ancilla qubits start in |0> and are traced out by the runner.",
+      "Spin dephasing is a Z-type phase flip. Spatial dephasing is Z on position qubit 0, which damps coherence between sites of opposite parity.",
+      "The 'p_s' and 'q' defaults are 0 and 'theta0' defaults to 0 if keys are omitted."
+    ],
+    "unresolved_issues": [
+      "The paper's real decoherence parametrization and Wigner function definition are unknown, so this is a phenomenological reconstruction.",
+      "The spatial dephasing model (parity-only) is a limited toy model.",
+      "Averaging over random theta0 and the ancilla trace must be done by the runner."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 8,
+    "gate_count": 238,
+    "depth": 156,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

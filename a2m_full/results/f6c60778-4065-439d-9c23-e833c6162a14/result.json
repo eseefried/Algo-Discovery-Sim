@@ -1,0 +1,139 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "f6c60778-4065-439d-9c23-e833c6162a14",
+  "parent_run_id": "70491494-0e46-4658-ad72-341d5162660d",
+  "created_at": "2026-11-01T00:26:19.969236+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "fb7da5f3fc3ff5d1a1a9315817ba372ec73d1dca15090af06423605b6cf3331e",
+  "source_specification_sha256": "bc73c89b1e1a1e7504408cfdde1a3c270ff2c6af8174bbfe0f4e20487463ec1b",
+  "source_python_sha256": "0a5207c8317a0d62a08b122c70ec01d48e4e784069111fdf3b2749d26e06b462",
+  "elapsed_seconds": 28.81,
+  "usage": {
+    "input_tokens": 5807,
+    "output_tokens": 4399,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Generalized Grover-type two-reflection iteration Q = D*O repeated k times on n data qubits (single marked item), with the oracle phase a = pi + delta1 and the diffusion phase b = pi + delta2. The oracle is a multi-controlled phase of angle a conjugated by X on the zero bits of the marked item. The diffusion is H^n X^n mcp(b) X^n H^n. The circuit applies the operation only: the runner prepares |s> and does all measurement, the P_k sweep and the comparison with Grover. The ancilla and any coin qubit are dropped, and the paper's optimized random-walk operator is not reconstructed.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _int(v, name, lo, hi):\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError(name + ' must be an integer')\n    if v < lo or v > hi:\n        raise ValueError(name + ' out of range [' + str(lo) + ', ' + str(hi) + ']')\n    return v\n\n\ndef _real(v, name):\n    if isinstance(v, bool) or not isinstance(v, (int, float)):\n        raise ValueError(name + ' must be a real number')\n    x = float(v)\n    if not math.isfinite(x):\n        raise ValueError(name + ' must be finite')\n    return x\n\n\ndef _phase_all_ones(qc, angle, n):\n    # diag(1,...,1,exp(i*angle)) on the all-ones basis state of qubits 0..n-1\n    if n == 2:\n        qc.cp(angle, 0, 1)\n    else:\n        qc.mcp(angle, list(range(n - 1)), n - 1)\n\n\ndef build_circuit(instance):\n    \"\"\"k iterations of Q = D O with O = I-(1-e^{ia})|w><w| (eq_1), D = I-(1-e^{ib})|s><s| (eq_1), Q^k (eq_2).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _int(instance.get('n'), 'n', 2, 6)\n    marked = _int(instance.get('marked'), 'marked', 0, 2 ** n - 1)\n    k = _int(instance.get('iterations'), 'iterations', 0, 200)\n    d1 = _real(instance.get('delta1', 0.0), 'delta1')\n    d2 = _real(instance.get('delta2', 0.0), 'delta2')\n    a = math.pi + d1\n    b = math.pi + d2\n    q = QuantumRegister(n, 'data')\n    qc = QuantumCircuit(q)\n    zeros = [i for i in range(n) if not (marked >> i) & 1]\n    for _ in range(k):\n        # oracle O: phase e^{ia} on |marked>\n        for i in zeros:\n            qc.x(i)\n        _phase_all_ones(qc, a, n)\n        for i in zeros:\n            qc.x(i)\n        # diffusion D = H^n (I-(1-e^{ib})|0><0|) H^n\n        for i in range(n):\n            qc.h(i)\n        for i in range(n):\n            qc.x(i)\n        _phase_all_ones(qc, b, n)\n        for i in range(n):\n            qc.x(i)\n        for i in range(n):\n            qc.h(i)\n    return qc",
+    "example_instance_json": "{\"n\": 4, \"marked\": 5, \"iterations\": 3, \"delta1\": 0.1, \"delta2\": -0.05}",
+    "register_layout": [
+      "qubits 0..n-1: data register 'data', little-endian (qubit 0 is the least significant bit); marked item w is the integer 'marked', with bit i of w on qubit i",
+      "no ancilla and no coin qubit; total qubits = n, with 2 <= n <= 6",
+      "input state |s> = H^n|0> must be prepared by the runner; the circuit contains only Q^k"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: oracle block (X on zero bits of marked, _phase_all_ones with angle a, X) and diffusion block (H^n X^n _phase_all_ones with angle b X^n H^n)",
+        "explanation": "O = I-(1-e^{ia})|w><w| and D = H^n(I-(1-e^{ib})|0><0|)H^n are implemented exactly with a = pi+delta1 and b = pi+delta2, using a multi-controlled phase without an ancilla."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: the for-loop over k iterations",
+        "explanation": "Q = D O is applied k times in sequence, oracle first and then diffusion. P_k is obtained by the runner from the output state on input |s>."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The reduced 2x2 matrix in span{|w>,|w_perp>} is an analytic description of the operation implemented. It is not built in the circuit."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The eigen-decomposition and the A, phi, offset fit are classical analysis, not part of a unitary circuit."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The P_max and k_opt sweep is classical post-processing. The circuit takes the iteration count k as an input parameter."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "The circuit contains no state preparation. It is only the operator Q^k on n data qubits, and |s> is prepared by the runner.",
+        "reason": "The task requires an operation without input-state preparation."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The ancilla in |-> and kickback oracle are dropped. The oracle is a direct multi-controlled phase of angle a on the marked basis state.",
+        "reason": "This gives an exact adjustable phase a = pi+delta1 without needing a prepared ancilla, and it keeps the circuit measurement-free and unitary."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The model is the generic two-reflection Grover iteration with phase errors, not the paper's optimized quantum random-walk search. The tuned optimized phases are not implemented. Ideal Grover phases pi plus errors are used.",
+        "reason": "The abstract does not give the optimized operator or its phases, as already stated in the specification."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The instance restricts n to 2..6 and iterations to 0..200, and diffusion is exactly I-(1-e^{ib})|s><s|. At b = pi this equals the usual Grover diffusion up to a global sign (-1).",
+        "reason": "Qubit cap and size validation. The global sign is physically irrelevant."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Analytic fits, the sweep over k and the Grover comparison are not part of the circuit.",
+        "reason": "These are classical post-processing steps and the circuit must not contain experiments."
+      }
+    ],
+    "assumptions": [
+      "Single marked item given as integer 'marked' in [0, 2^n-1], with bit i on qubit i",
+      "Phase errors delta1 and delta2 are fixed real numbers (default 0) applied identically on every iteration",
+      "The instance has keys n, marked, iterations, delta1 (optional), delta2 (optional)",
+      "The iteration count is supplied by the instance, not derived from the k_opt formula",
+      "The multi-controlled phase is built with qc.cp for n=2 and qc.mcp for n>2"
+    ],
+    "unresolved_issues": [
+      "The actual optimized random-walk operator, its tuned phases and any coin qubit are not recovered",
+      "Closed forms for theta_eff, A, phi and offset are not provided, so eq_4 and eq_5 are not checked in the circuit",
+      "The exact robustness comparison metric against Grover is not specified"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 354,
+    "depth": 230,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

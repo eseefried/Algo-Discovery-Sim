@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "a56638c2-f5a9-40f6-94c8-d61243f0cdfb",
+  "parent_run_id": "b86db6bd-fb01-4784-9682-519858c2084f",
+  "created_at": "2026-11-01T00:26:14.136658+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "d5109451b89f52e9a1a670f5392153e530113f363874f66ccdd1f81cd6ff306f",
+  "source_specification_sha256": "b641ba7d2f5eb646f317b4baf512e2fc335c37860e244f702719393d4bf51c88",
+  "source_python_sha256": "fe721be437e28243537ca4cca5a618d5824c21f7937ef6200641d4571b99a6df",
+  "elapsed_seconds": 86.433,
+  "usage": {
+    "input_tokens": 5696,
+    "output_tokens": 12309,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds t steps of a lazy discrete-time quantum walk on a cycle of N=2^n sites. Each step applies a 3x3 DFT coin embedded in a 2-qubit coin register (state |3> idle), then the conditional shift. The coin is compiled by a Givens (two-level) decomposition into controlled-U gates and phases, with no dense unitary. The shift is built from multi-controlled X ripple increment/decrement. The circuit has no state preparation or measurement. Moments, occupancy and comparison walks are classical post-processing and are not implemented.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import UGate\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef _arg(z):\n    return math.atan2(z.imag, z.real)\n\n\ndef _dft3(sign):\n    # eq_2: (F_3)_{jk} = exp(sign*2*pi*i*j*k/3)/sqrt(3)\n    s = 1.0 / math.sqrt(3.0)\n    return [[complex(math.cos(2 * math.pi * ((j * k) % 3) / 3), sign * math.sin(2 * math.pi * ((j * k) % 3) / 3)) * s for k in range(3)] for j in range(3)]\n\n\ndef _givens(M):\n    # Reduce M to a diagonal with two-level rotations G3*G2*G1*M = D\n    m = [row[:] for row in M]\n    ops = []\n    for a, b, col in ((0, 1, 0), (0, 2, 0), (1, 2, 1)):\n        x = m[a][col]\n        y = m[b][col]\n        r = math.hypot(abs(x), abs(y))\n        g = [[x.conjugate() / r, y.conjugate() / r], [-y / r, x / r]]\n        for k in range(3):\n            u = m[a][k]\n            v = m[b][k]\n            m[a][k] = g[0][0] * u + g[0][1] * v\n            m[b][k] = g[1][0] * u + g[1][1] * v\n        ops.append((a, b, g))\n    return ops, [m[k][k] for k in range(3)]\n\n\ndef _u3_params(V):\n    # V = exp(i*al) * U3(th, ph, lam)\n    eps = 1e-12\n    if abs(V[0][0]) > eps:\n        al = _arg(V[0][0])\n        th = 2.0 * math.atan2(abs(V[1][0]), abs(V[0][0]))\n        if abs(V[1][0]) > eps:\n            ph = _arg(V[1][0]) - al\n            lam = _arg(-V[0][1]) - al\n        else:\n            ph = 0.0\n            lam = _arg(V[1][1]) - al\n    else:\n        al = _arg(V[1][0])\n        th = math.pi\n        ph = 0.0\n        lam = _arg(-V[0][1]) - al\n    return al, th, ph, lam\n\n\ndef _ctrl0(qc, ctrl, tgt, V):\n    al, th, ph, lam = _u3_params(V)\n    qc.append(UGate(th, ph, lam).control(1, ctrl_state=0), [ctrl, tgt])\n    qc.x(ctrl)\n    qc.p(al, ctrl)\n    qc.x(ctrl)\n\n\ndef _two_level(qc, a, b, V, c0, c1):\n    # 2x2 unitary V on coin basis states a,b (coin value = 2*c1 + c0)\n    if (a, b) == (0, 1):\n        _ctrl0(qc, c1, c0, V)\n    elif (a, b) == (0, 2):\n        _ctrl0(qc, c0, c1, V)\n    else:\n        qc.cx(c1, c0, ctrl_state=0)\n        _ctrl0(qc, c0, c1, V)\n        qc.cx(c1, c0, ctrl_state=0)\n\n\ndef _coin(qc, c0, c1, ops, diag):\n    # eq_2: coin = G1^dag G2^dag G3^dag D ; D acts first. State |3> untouched.\n    for k in range(3):\n        phi = _arg(diag[k])\n        flips = [q for q, bit in ((c0, k & 1), (c1, k >> 1)) if bit == 0]\n        for q in flips:\n            qc.x(q)\n        qc.cp(phi, c1, c0)\n        for q in flips:\n            qc.x(q)\n    for a, b, g in reversed(ops):\n        gd = [[g[0][0].conjugate(), g[1][0].conjugate()], [g[0][1].conjugate(), g[1][1].conjugate()]]\n        _two_level(qc, a, b, gd, c0, c1)\n\n\ndef _shift(qc, pos, c0, c1):\n    # eq_1: coin |10> (R) -> T (increment); coin |00> (L) -> T^-1; |01> (S), |11> idle\n    n = len(pos)\n    qc.x(c0)\n    for i in range(n - 1, -1, -1):\n        qc.mcx([c1, c0] + pos[:i], pos[i])\n    qc.x(c0)\n    qc.x(c0)\n    qc.x(c1)\n    for i in range(n):\n        qc.mcx([c1, c0] + pos[:i], pos[i])\n    qc.x(c0)\n    qc.x(c1)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n_position_qubits')\n    t = instance.get('steps')\n    sign = instance.get('coin_sign', 1)\n    if not _is_int(n) or n < 2 or n > 10:\n        raise ValueError('n_position_qubits must be an integer in [2, 10]')\n    if not _is_int(t) or t < 0 or t > 64:\n        raise ValueError('steps must be an integer in [0, 64]')\n    if not _is_int(sign) or sign not in (1, -1):\n        raise ValueError('coin_sign must be +1 or -1')\n    if n + 2 > 12:\n        raise ValueError('too many qubits')\n    pr = QuantumRegister(n, 'pos')\n    cr = QuantumRegister(2, 'coin')\n    qc = QuantumCircuit(pr, cr)\n    pos = list(range(n))\n    c0 = n\n    c1 = n + 1\n    ops, diag = _givens(_dft3(sign))\n    for _ in range(t):\n        _coin(qc, c0, c1, ops, diag)\n        _shift(qc, pos, c0, c1)\n    return qc",
+    "example_instance_json": "{\"n_position_qubits\": 4, \"steps\": 3, \"coin_sign\": 1}",
+    "register_layout": [
+      "qubits 0..n-1: position register 'pos', little-endian integer x in [0, 2^n) (cycle, x+1 mod N)",
+      "qubit n: coin bit c0 (least significant coin bit)",
+      "qubit n+1: coin bit c1 (most significant coin bit)",
+      "coin value 2*c1+c0: 0=|L> (shift -1), 1=|S> (stay), 2=|R> (shift +1), 3=idle (identity, never populated if input has no weight there)",
+      "Example n=4: pos = qubits 0-3, coin = qubits 4-5, 6 qubits total"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_shift (called each step in build_circuit)",
+        "explanation": "Conditional shift: multi-controlled-X ripple increment when coin=|10> (R), decrement when coin=|00> (L), identity for |01> (S) and |11> (idle). The coin is applied before it in each step, giving U = S (C x I)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_dft3, _givens, _coin",
+        "explanation": "F_3 is computed as plain complex numbers and compiled by Givens elimination into two-level rotations (controlled UGate plus phases) and a diagonal of controlled phases on coin states 0..2. State |3> is left as identity. The sign of the exponent is selectable via coin_sign."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop over steps",
+        "explanation": "The circuit implements U^t. The initial state (|L>+i|R>)/sqrt2 (x) |0> must be prepared by the runner, and the marginal P(x,t) is computed from the output statevector, so neither is part of the circuit."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Moment computation and the O(t^k) slope fit are classical post-processing on P(x,t)."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Occupancy number/rate (with an assumed threshold) and the comparison with Hadamard, classical and lazy classical walks are classical post-processing and are not circuit operations."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Removed the initial-state preparation (H and S on the coin MSB) from the circuit.",
+        "reason": "The task requires an operation without input-state preparation. The runner prepares the input, e.g. coin=(|00>+i|10>)/sqrt2 and pos=|0>."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Resolved the open question of the F_3 decomposition by an exact Givens (two-level) decomposition into controlled U gates and controlled phases. The sign convention is exposed as the parameter coin_sign (+1 matches the spec).",
+        "reason": "Opaque dense unitaries are not allowed and F_3 is not a library gate. The decomposition is exact up to numerical precision."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Generalised from the fixed n=4, t<=5 instance to n in [2,10] and steps in [0,64]. The constraint 2t+1<N is not enforced, so wraparound is allowed.",
+        "reason": "The operation is a valid unitary on any cycle. The no-wraparound condition only matters for the classical moment and occupancy analysis."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Narrowed scope to the walk operation only; moments, occupancy number/rate, interval and comparison walks are excluded.",
+        "reason": "They are classical post-processing, and the occupancy definition and threshold are guessed in the specification."
+      }
+    ],
+    "assumptions": [
+      "Coin encoding |L>=|00>, |S>=|01>, |R>=|10>, |idle>=|11> in (c1 c0)",
+      "Coin acts as identity on the idle state and the shift is identity there",
+      "Position register is little-endian with wraparound mod 2^n via ripple MCX increment/decrement",
+      "Coin sign convention exp(+2*pi*i*jk/3) by default",
+      "Controlled phases implement the diagonal exactly, including the global phase of the coin (global phase is irrelevant to the walk anyway)"
+    ],
+    "unresolved_issues": [
+      "The paper's exact lazy-walk definition (3-state coin vs laziness parameter) is not confirmed",
+      "The paper's occupancy number/rate definition and threshold are unknown",
+      "Symmetry of the DFT-coin distribution with the chosen initial state is not guaranteed and must be checked numerically by post-processing",
+      "MCX gates with up to n+1 controls are used without ancillas, so transpiled depth grows with n and t"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 2055,
+    "depth": 1262,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "fd93026c-97db-4cfe-bed7-757aa5661d3d",
+  "parent_run_id": "aa0fa66b-5be1-4cf8-9a23-9c06bd86f21d",
+  "created_at": "2026-11-01T00:20:24.965708+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "12dacc20f0f92395b8c94e2edb5804e7c0c767f74e53567c907dc33ed2f16766",
+  "source_specification_sha256": "6c10bdc210171e6739b7e7108c8d7d4c154d9f759c144d555c56569c2a285985",
+  "source_python_sha256": "761efec2f1292b00fc53fb83b42b197d287b33ab5c1a1810ebaa32900c13cc83",
+  "elapsed_seconds": 69.829,
+  "usage": {
+    "input_tokens": 5573,
+    "output_tokens": 9892,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "One-qubit fixed-point amplitude amplification with Yoder-Low-Chuang Chebyshev phases. The circuit prepares A|0> = Ry(2*theta)|0> with sin^2(theta) = lambda and good state |1>. It then applies d pairs of S_t(beta_j) = P(beta_j) and S_s(alpha_j) = A X P(alpha_j) X A^dagger, so L = 2d+1 uses of A in total. The phases are computed classically from epsilon and d.",
+    "source_python": "'''Fixed-point amplitude amplification (Yoder-Low-Chuang phases), 1-qubit A.'''\nimport math\nfrom qiskit import QuantumCircuit\n\n\ndef _phases(d, eps):\n    # eq_3: alpha_j = 2 arccot(tan(2 pi j / L) sqrt(1 - gamma^2)), gamma = 1/T_{1/L}(1/delta)\n    L = 2 * d + 1\n    delta = math.sqrt(eps)\n    inv_gamma = math.cosh(math.acosh(1.0 / delta) / L)\n    gamma = 1.0 / inv_gamma\n    root = math.sqrt(max(0.0, 1.0 - gamma * gamma))\n    alphas = []\n    for j in range(1, d + 1):\n        x = math.tan(2.0 * math.pi * j / L) * root\n        alphas.append(2.0 * math.atan2(1.0, x))\n    # beta_j = -alpha_{d-j+1}\n    betas = [-alphas[d - j] for j in range(1, d + 1)]\n    return alphas, betas\n\n\ndef _start_reflection(qc, theta, alpha):\n    # eq_1: S_s(alpha) = A S_0(alpha) A^dagger, S_0(alpha) = diag(e^{i alpha}, 1) = X P(alpha) X\n    qc.ry(-2.0 * theta, 0)\n    qc.x(0)\n    qc.p(alpha, 0)\n    qc.x(0)\n    qc.ry(2.0 * theta, 0)\n\n\ndef build_circuit(instance):\n    try:\n        lam = float(instance['lambda'])\n        eps = float(instance['epsilon'])\n        d_raw = float(instance['d'])\n    except (KeyError, TypeError, ValueError):\n        raise ValueError('instance needs numeric lambda, epsilon, d')\n    if not (math.isfinite(lam) and math.isfinite(eps) and math.isfinite(d_raw)):\n        raise ValueError('parameters must be finite')\n    if not (0.0 < lam <= 1.0):\n        raise ValueError('lambda must be in (0,1]')\n    if not (1e-12 <= eps < 1.0):\n        raise ValueError('epsilon must be in [1e-12,1)')\n    if d_raw != int(d_raw) or d_raw < 1 or d_raw > 500:\n        raise ValueError('d must be an integer in [1,500]')\n    d = int(d_raw)\n    theta = math.asin(math.sqrt(lam))\n    alphas, betas = _phases(d, eps)\n    qc = QuantumCircuit(1)\n    # A|0> = sqrt(1-lambda)|0> + sqrt(lambda)|1>\n    qc.ry(2.0 * theta, 0)\n    for j in range(d):\n        # eq_1/eq_2: target reflection S_t(beta_j) = diag(1, e^{i beta_j}), one oracle query\n        qc.p(betas[j], 0)\n        # eq_1/eq_2: start reflection S_s(alpha_j)\n        _start_reflection(qc, theta, alphas[j])\n    return qc",
+    "example_instance_json": "{\"lambda\": 0.2, \"epsilon\": 0.01, \"d\": 2}",
+    "register_layout": [
+      "qubit 0: search register S (single qubit, little-endian index 0); A = Ry(2*theta) with sin^2(theta)=lambda; good state |1>, bad state |0>",
+      "no flag or control ancilla: S_t is a direct phase gate on |1> and S_s uses X-conjugated phase on |0> between A^dagger and A"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (qc.p(betas[j],0) for S_t) and _start_reflection (S_s)",
+        "explanation": "S_t(b) = I-(1-e^{ib})|1><1| = P(b). S_s(a) = A (X P(a) X) A^dagger, with X P(a) X = diag(e^{ia},1) = I-(1-e^{ia})|0><0|."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit main loop",
+        "explanation": "Applies A, then for j=1..d the sequence S_t(beta_j) followed by S_s(alpha_j), i.e. S_s(alpha_d)S_t(beta_d)...S_s(alpha_1)S_t(beta_1)A|0>. This is L=2d+1 uses of A/A^dagger, with d oracle S_t queries."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_phases",
+        "explanation": "alpha_j = 2 arccot(tan(2 pi j/L) sqrt(1-gamma^2)) for j=1..d, with gamma = 1/cosh(arccosh(1/sqrt(eps))/L). beta_j = -alpha_{d-j+1}, replacing the specification's alpha_j = beta_{L-j+1}."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Chebyshev amplitude/failure formula is the analytic guarantee, not constructed in the circuit. The circuit realizes the phase sequence whose good amplitude is this polynomial type."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The L versus lambda_min scaling and the failure guarantee are targets for later checking. L is not computed from lambda_min; the caller supplies d."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Oracle query count: S_t is applied d=(L-1)/2 times; L=2d+1 counts all uses of A and A^dagger (1 initial plus 2 per pair). The ordering is fixed as S_t(beta_j) then S_s(alpha_j) for j=1..d, applied to A|0>.",
+        "reason": "Matches the Yoder-Low-Chuang fixed-point search structure; the specification's 'L applications of S_t' and ordering were unresolved."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Phase symmetry corrected to beta_j = -alpha_{d-j+1} with j=1..d (d=(L-1)/2), instead of alpha_j = beta_{L-j+1}. cot^{-1} is implemented as atan2(1,x), whose branch choice only changes alpha by multiples of 2 pi.",
+        "reason": "The specification's indexing range and sign were flagged as unfixed. The sign and index form follows the recalled Yoder-Low-Chuang schedule."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "L is not derived from lambda_min and epsilon. The instance supplies integer d directly, and lambda_min is not an input.",
+        "reason": "The exact L formula was approximate and the specification said to choose the smallest odd L numerically, which this module cannot do without simulation."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to a single-qubit A = Ry(2 theta) and good state |1>, with no flag or control ancilla. The initial A is included in the operation, so the circuit is the full amplification unitary applied to |0>.",
+        "reason": "The specification named a tiny instance. The extra registers are optional in the specification, and the multi-qubit general-n construction is out of scope."
+      }
+    ],
+    "assumptions": [
+      "The phase schedule and ordering are the Yoder-Low-Chuang form, not confirmed as the paper's own schedule",
+      "lambda is in (0,1], epsilon is in [1e-12,1), and d is an integer in [1,500]",
+      "Global phase conventions are irrelevant to the good-state probability",
+      "Software later checks numerically that failure is at most epsilon over the intended lambda range"
+    ],
+    "unresolved_issues": [
+      "The paper's exact schedule for the quadratic-speedup version may differ from the Yoder-Low-Chuang phases used here",
+      "Application order of the pairs (j increasing first) is assumed and is not verified here",
+      "The relation between d and lambda_min (smallest sufficient L) is left to the caller",
+      "The eq_4 normalization and sign conventions are not implemented"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 1,
+    "gate_count": 13,
+    "depth": 13,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

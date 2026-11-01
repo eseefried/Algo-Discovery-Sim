@@ -2,6 +2,7 @@ import json
 import sys
 
 import anthropic
+import httpx
 import httpx2
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +25,41 @@ def build_circuit(instance):
     qc.h(0)
     return qc
 """
+
+
+def test_local_code_generation_preserves_validation_and_context(code_request, code_artifact, tmp_path, monkeypatch):
+    def no_anthropic(*args, **kwargs):
+        raise AssertionError("local code must not construct an Anthropic client")
+
+    monkeypatch.setattr(anthropic, "Anthropic", no_anthropic)
+
+    def respond(request):
+        payload = json.loads(request.content)
+        assert payload["model"] == "nemotron-quantum"
+        assert [m["role"] for m in payload["messages"]] == ["system", "user", "assistant", "user"]
+        assert "authorization" not in request.headers
+        return httpx.Response(200, json={
+            "model": "nemotron-quantum", "choices": [{"finish_reason": "stop",
+            "message": {"content": json.dumps(code_artifact)}}],
+            "usage": {"prompt_tokens": 200, "completion_tokens": 300},
+        })
+
+    settings = Settings(api_key="", backend="local", model="nemotron-quantum",
+                        base_url="http://127.0.0.1:8000/v1", artifact_dir=tmp_path)
+    request = code_request.model_copy(update={"validate_circuit": False})
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        result = generate_code(request, settings, client=client)
+    assert result.backend == "local" and result.static_checks_passed
+    assert result.usage.input_tokens == 200 and result.usage.output_tokens == 300
+    assert (tmp_path / result.run_id / "circuit.py").exists()
+
+
+def test_local_settings_need_no_claude_key(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CLAUDE_HACKATHON_API", raising=False)
+    monkeypatch.delenv("NEMOTRON_API_KEY", raising=False)
+    settings = Settings.from_env(backend="local")
+    assert settings.backend == "local" and settings.api_key == ""
 
 
 @pytest.fixture

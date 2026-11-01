@@ -1,0 +1,147 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "f8e83636-c177-4d5b-a384-ff1f7c73622d",
+  "parent_run_id": "012a1d40-badb-4cb1-8eec-fff649e2a8b6",
+  "created_at": "2026-11-01T00:11:29.028061+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "357f0697a39d104acbb9c03471ce852e35e9d88915fe430d4dc21ae40dfc4e34",
+  "source_specification_sha256": "1d3e4f8f54b6de63278743bde15cf1d383e7f31582845230e87c60fcc13022b5",
+  "source_python_sha256": "f53d131cf0b5329e4f6efc7bae54889275122f635c0b0c10baf7c776755034c9",
+  "elapsed_seconds": 43.928,
+  "usage": {
+    "input_tokens": 5191,
+    "output_tokens": 6511,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit construction of canonical amplitude estimation for the mean of f:{0,1}^n->[0,1]. It uses A = H^n on x followed by multiplexed Ry rotations onto a, the Grover iterate Q = -A S_0 A^-1 S_chi, controlled-Q^(2^j) from counting qubit c_j, and QFTGate(t).inverse() on the counting register. The circuit is unitary, measurement-free and bound. It covers only the standard amplitude-estimation reconstruction, not the paper's novel algorithm, the Aharonov variant or the median algorithm.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate, RYGate\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be an object')\n    n = instance.get('n')\n    t = instance.get('t')\n    f = instance.get('f')\n    if isinstance(n, bool) or not isinstance(n, int):\n        raise ValueError('n must be an integer')\n    if isinstance(t, bool) or not isinstance(t, int):\n        raise ValueError('t must be an integer')\n    if n < 1 or t < 1 or t > 8 or n + 1 + t > 12:\n        raise ValueError('need n>=1, 1<=t<=8, n+1+t<=12')\n    if not isinstance(f, list) or len(f) != 2 ** n:\n        raise ValueError('f must be a list of length 2^n')\n    vals = []\n    for v in f:\n        if isinstance(v, bool) or not isinstance(v, (int, float)):\n            raise ValueError('f entries must be numbers')\n        if not math.isfinite(v) or v < 0 or v > 1:\n            raise ValueError('f entries must lie in [0,1]')\n        vals.append(float(v))\n    return n, t, vals\n\n\ndef _prep(n, f):\n    # eq_1: A|0> = N^-1/2 sum_x |x>(sqrt(1-f)|0> + sqrt(f)|1>)\n    qc = QuantumCircuit(n + 1)\n    for i in range(n):\n        qc.h(i)\n    for xv in range(2 ** n):\n        if f[xv] > 0.0:\n            theta = 2.0 * math.asin(math.sqrt(f[xv]))\n            g = RYGate(theta).control(n, ctrl_state=xv)\n            qc.append(g, list(range(n)) + [n])\n    return qc\n\n\ndef _body(n, A):\n    # eq_2 without the global -1: A S_0 A^-1 S_chi (circuit order: S_chi, A^-1, S_0, A)\n    qc = QuantumCircuit(n + 1)\n    allq = list(range(n + 1))\n    qc.z(n)\n    qc.append(A.inverse(), allq)\n    for i in allq:\n        qc.x(i)\n    qc.h(n)\n    qc.mcx(list(range(n)), n)\n    qc.h(n)\n    for i in allq:\n        qc.x(i)\n    qc.append(A, allq)\n    return qc\n\n\ndef build_circuit(instance):\n    n, t, f = _parse(instance)\n    x = QuantumRegister(n, 'x')\n    a = QuantumRegister(1, 'a')\n    c = QuantumRegister(t, 'c')\n    qc = QuantumCircuit(x, a, c)\n    xa = list(range(n + 1))\n    cnt = list(range(n + 1, n + 1 + t))\n    A = _prep(n, f).to_gate(label='A')\n    cbody = _body(n, A).to_gate(label='Qbody').control(1)\n    for q in cnt:\n        qc.h(q)\n    qc.append(A, xa)\n    # eq_3: phase estimation of Q; controlled-Q^(2^j) from counting qubit j\n    for j in range(t):\n        ctrl = cnt[j]\n        for _ in range(2 ** j):\n            qc.append(cbody, [ctrl] + xa)\n            qc.p(math.pi, ctrl)  # the global -1 of Q becomes a phase on the control\n    # eq_5: inverse QFT so that counting qubit j carries weight 2^j\n    qc.append(QFTGate(t).inverse(), cnt)\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"t\": 3, \"f\": [0.0, 0.25, 0.5, 1.0]}",
+    "register_layout": [
+      "qubit 0..n-1: index register x (little-endian, x=sum x_i 2^i); example: qubits 0,1",
+      "qubit n: value qubit a, the |1> amplitude carries sqrt(f); example: qubit 2",
+      "qubits n+1..n+t: counting register c, qubit n+1+j has weight 2^j in y; example: qubits 3,4,5",
+      "total qubits n+1+t, at most 12; example uses 6"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_prep(n, f)",
+        "explanation": "H on every x qubit, then for each x a multi-controlled Ry(2*asin(sqrt f(x))) on a with ctrl_state=x. Output is the stated A|0>, so P(a=1) is the mean of f."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_body(n, A) and the p(pi) on the control in build_circuit",
+        "explanation": "Q = -A S_0 A^-1 S_chi. S_chi is Z on a. S_0 is X-conjugated multi-controlled Z. The global -1 is applied as a phase gate on the control qubit of each controlled-Q use."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Eigenphase structure of Q that justifies phase estimation. It is not coded separately; the circuit performs the phase estimation."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical postprocessing p_hat = sin^2(pi y/M) and the error bound involve measurement and analysis, which the operation does not include."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: qc.append(QFTGate(t).inverse(), cnt)",
+        "explanation": "Inverse QFTGate on counting qubits listed in increasing index order, with controlled-Q^(2^j) controlled by cnt[j]. The little-endian integer y is then readable with qubit j weighted 2^j. Measurement is not included."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The module generalises the tiny instance to a parametrised n, t and f table, with f rescaled into [0,1] by the caller.",
+        "reason": "The operation must work for varying valid instances and validate parameters."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "The circuit includes the initial H on the counting register and the state preparation A, so it acts on the all-zero input as the full amplitude-estimation unitary.",
+        "reason": "A is part of the algorithm in the specification; I treated it as part of the operation rather than as input-state preparation."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The overall -1 in Q is applied as a phase gate on the control qubit per controlled-Q use, rather than as a global phase on the body.",
+        "reason": "A global phase becomes a relative phase once Q is controlled, so it must be explicit."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The inverse QFT is QFTGate(t).inverse() on the counting qubits in increasing index order, with no hand-built factorized QFT or extra swap handling.",
+        "reason": "QFTGate includes the bit-reversal swaps, which gives the little-endian weight convention."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Measurement and the postprocessing for y and p_hat are omitted.",
+        "reason": "The task requires a measurement-free operation."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The counting register is capped at t<=8, and n>=1.",
+        "reason": "This keeps circuit size (2^t-1 controlled-Q repetitions) bounded."
+      }
+    ],
+    "assumptions": [
+      "f values are already in [0,1] and given as a list of length 2^n; f(x) is indexed by the little-endian integer of the x register.",
+      "The oracle is a direct multiplexed rotation, with no query-counting ancillas.",
+      "Only the standard amplitude-estimation reconstruction is implemented, as stated in the specification."
+    ],
+    "unresolved_issues": [
+      "The paper's novel optimal algorithm, the Aharonov-style variant and the median algorithm are not implemented because the abstract does not specify them.",
+      "The variance-based rescaling for unbounded f is not implemented.",
+      "Circuit depth grows as 2^t controlled-Q uses, so t is capped at 8."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 10186,
+    "depth": 7903,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

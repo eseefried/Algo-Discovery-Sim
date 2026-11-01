@@ -1,0 +1,125 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "61f133a1-8490-4ff8-a416-b52415da4668",
+  "parent_run_id": "46978259-42a9-4b82-8854-9657211ad1b3",
+  "created_at": "2026-10-31T22:29:55.434444+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "0054bedca86f299e03cc96422e93495ce3699d7162b3c47c7d84cef2c8c47006",
+  "source_specification_sha256": "9bd568954a4b528cd3e6c0d0b1fea2fb72480caaff113cfa6ea4815a6a6ee780",
+  "source_python_sha256": "d0a27644abf1d51d189516846f1a0f8ae5780221706dff191272693b17e350d2",
+  "elapsed_seconds": 28.403,
+  "usage": {
+    "input_tokens": 4723,
+    "output_tokens": 4150,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the unitary core of a Trugenberger-style Hamming-distance interference step: CNOTs XOR the input register into the pattern register, per-bit controlled phases (angle pi/n) act from an ancilla, the XOR is uncomputed, and a final Hadamard on the ancilla follows. The runner must prepare |M> (eq_1), |x> and the ancilla in |+>. The classification vote (eq_5) is classical and not implemented. The class register is optional and untouched.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _int_param(instance, key, default, minimum):\n    value = instance.get(key, default)\n    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:\n        raise ValueError(key + \" must be an integer >= \" + str(minimum))\n    return value\n\n\ndef build_circuit(instance):\n    \"\"\"Distance-phase interference operation.\n\n    Layout: pattern 0..n-1, input n..2n-1, ancilla 2n, optional class 2n+1...\n    Expects ancilla in |+> on entry (prepared by the runner).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = _int_param(instance, \"n\", None, 1)\n    c = _int_param(instance, \"class_qubits\", 0, 0)\n    if 2 * n + 1 + c > 12:\n        raise ValueError(\"total qubits exceed 12\")\n    pattern = QuantumRegister(n, \"pattern\")\n    inp = QuantumRegister(n, \"input\")\n    anc = QuantumRegister(1, \"ancilla\")\n    if c > 0:\n        cls = QuantumRegister(c, \"class\")\n        qc = QuantumCircuit(pattern, inp, anc, cls)\n    else:\n        qc = QuantumCircuit(pattern, inp, anc)\n    theta = math.pi / n\n    # eq_2: pattern_j <- x^k_j XOR x_j\n    for j in range(n):\n        qc.cx(inp[j], pattern[j])\n    # eq_3: ancilla-controlled phase, relative phase pi*d_H/n on ancilla=1 branch\n    for j in range(n):\n        qc.cp(theta, anc[0], pattern[j])\n    # uncompute XOR\n    for j in range(n):\n        qc.cx(inp[j], pattern[j])\n    # eq_4: interference on the ancilla\n    qc.h(anc[0])\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"class_qubits\": 1}",
+    "register_layout": [
+      "qubits 0..n-1: pattern register (stored patterns |x^k>, little-endian, bit j on qubit j)",
+      "qubits n..2n-1: input register |x> (bit j on qubit n+j)",
+      "qubit 2n: ancilla (must enter in |+>; ancilla=0 is the post-selected outcome)",
+      "qubits 2n+1..2n+class_qubits: optional class register (untouched by the operation)",
+      "Example n=3, class_qubits=1: pattern 0-2, input 3-5, ancilla 6, class 7"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The memory superposition |M> is input-state preparation, done by the runner. The circuit acts on it but does not create it."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: CNOT loops (cx input_j -> pattern_j) computing x_j XOR x^k_j",
+        "explanation": "The bitwise XOR whose Hamming weight is d_H is computed into the pattern register, and uncomputed after the phase step."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: cp(pi/n, ancilla, pattern_j) loop",
+        "explanation": "Ancilla-controlled phase proportional to d_H. The ancilla=1 branch gets exp(i*pi*d_H/n) relative to the ancilla=0 branch."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: final qc.h(ancilla)",
+        "explanation": "The final Hadamard on the ancilla yields P(anc=0 | k) = cos^2(pi d_H/(2n)). The 1/p factor comes from the runner-prepared uniform |M>."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The classification rule is classical post-processing of measurement counts and is not part of the unitary operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The relative phase between ancilla branches is pi*d_H/n, not pi*d_H/(2n) as written in eq_3.",
+        "reason": "With the ancilla in |+> and a final Hadamard, a relative phase theta gives P(0)=cos^2(theta/2). Reproducing eq_4, cos^2(pi d_H/(2n)), requires theta=pi*d_H/n. Using pi/(2n) would give cos^2(pi d_H/(4n)), contradicting eq_4."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to the unitary distance-interference operation. State preparation (|M>, |x>, ancilla |+>), measurement, post-selection and voting are excluded.",
+        "reason": "The task requires an operation circuit with no state preparation or measurement."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The ancilla Hadamard that prepares |+> is not included. The runner must supply the ancilla in |+>.",
+        "reason": "Ancilla preparation is input preparation. A single Hadamard at the end completes the interference."
+      }
+    ],
+    "assumptions": [
+      "The ancilla enters in |+> and the pattern and input registers hold computational-basis superpositions prepared by the runner.",
+      "Little-endian qubit order within each register: bit j of a pattern is on qubit j, and bit j of the input is on qubit n+j.",
+      "The optional class register is only reserved in the layout, with no gates applied.",
+      "The phase schedule is a generic Trugenberger-style construction, not the paper's verified circuit."
+    ],
+    "unresolved_issues": [
+      "The paper's exact state-preparation and training-set storage method is unknown.",
+      "The paper's exact circuit and phase schedule are unverified.",
+      "MNIST binarization and encoding are not addressed.",
+      "The paper's classification rule and advantage claims are not reconstructed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 8,
+    "gate_count": 22,
+    "depth": 14,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

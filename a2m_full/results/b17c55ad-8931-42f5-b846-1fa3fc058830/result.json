@@ -1,0 +1,141 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "b17c55ad-8931-42f5-b846-1fa3fc058830",
+  "parent_run_id": "94fcd2bb-3f28-4265-81d1-b8bd72db36b2",
+  "created_at": "2026-11-01T00:27:24.580087+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "5a9a789234eafebc4a251f9fea0d5f8b4d67498f627c84da21b173fd9a7f3715",
+  "source_specification_sha256": "b1f433274c298ee55371ba65e17a77ce46730292537b24646d8c4221ac357f40",
+  "source_python_sha256": "901cb4d96d3dc2c8449e7c6380b8b21313320b68ceafd0e52d0535571f000a0f",
+  "elapsed_seconds": 28.503,
+  "usage": {
+    "input_tokens": 5623,
+    "output_tokens": 4069,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the operation U^T, where U = S·(Ry(2θ) on coin ⊗ I) is a coin-controlled increment/decrement shift on a 2^n-site ring. The n position qubits are little-endian and the coin is the extra qubit n. The default n=5 gives 32 sites and 6 qubits. The circuit has no state preparation, measurement, decision rule or GA.",
+    "source_python": "from qiskit import QuantumCircuit\nimport math\n\n\ndef _int_param(instance, key, default, lo, hi):\n    v = instance.get(key, default)\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError(key + \" must be an integer in [\" + str(lo) + \",\" + str(hi) + \"]\")\n    return v\n\n\ndef build_circuit(instance):\n    \"\"\"Coin-shift quantum particle walk U^T on a 2^n ring.\n    Qubits 0..n-1: position (little-endian); qubit n: coin.\n    U = S (Ry(2 theta) on coin); S = |0><0| x (+1 mod 2^n) + |1><1| x (-1 mod 2^n).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = _int_param(instance, \"n\", 5, 2, 11)\n    steps = _int_param(instance, \"steps\", 1, 1, 64)\n    theta = instance.get(\"theta\", None)\n    if isinstance(theta, bool) or not isinstance(theta, (int, float)) or not math.isfinite(theta):\n        raise ValueError(\"theta must be a finite real number\")\n    theta = float(theta)\n    coin = n\n    qc = QuantumCircuit(n + 1)\n    for _ in range(steps):\n        # coin rotation C(theta) = Ry(2 theta)\n        qc.ry(2.0 * theta, coin)\n        # coin = 0: increment j -> j+1 (mod 2^n); high bit first, then flip bit 0\n        for k in range(n - 1, 0, -1):\n            ctrls = [coin] + list(range(k))\n            state = ((1 << k) - 1) << 1  # coin bit (LSB) = 0, lower position bits = 1\n            qc.mcx(ctrls, k, ctrl_state=state)\n        qc.cx(coin, 0, ctrl_state=0)\n        # coin = 1: decrement j -> j-1 (mod 2^n), inverse sequence\n        qc.cx(coin, 0, ctrl_state=1)\n        for k in range(1, n):\n            ctrls = [coin] + list(range(k))\n            state = (((1 << k) - 1) << 1) | 1  # coin bit = 1, lower position bits = 1\n            qc.mcx(ctrls, k, ctrl_state=state)\n    return qc",
+    "example_instance_json": "{\"n\":5,\"theta\":0.7,\"steps\":3}",
+    "register_layout": [
+      "qubits 0-4: position register pos, little-endian (qubit i = bit i of position index j; for n=5 the 32 sites encode the input index x)",
+      "qubit 5: coin qubit (coin index = n); |0> moves +1, |1> moves -1",
+      "for general n in 2..11: position qubits 0..n-1, coin qubit n",
+      "no classical bits; the runner prepares input states and handles measurement"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The initial state |c=0>|x> is prepared by the runner, so the circuit contains no X-gate loading. build_circuit acts on whatever state it receives, and its position encoding is little-endian to match eq_1."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: ry(2*theta) on the coin, then the coin-controlled mcx increment (coin=0) and decrement (coin=1) blocks inside the steps loop",
+        "explanation": "U = S (C(theta) ⊗ I) with C = Ry(2 theta). V (+1 mod 2^n) is a ripple of multi-controlled X gates, and V† is its inverse sequence. Each is controlled on the coin via ctrl_state."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop over steps repeats U, giving U^T",
+        "explanation": "The circuit implements the unitary U^T. Measuring the position qubits and marginalizing over the coin is left to the runner and is not in the circuit."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The boundary-partition decision rule is classical post-processing of measurement outcomes and is not part of the unitary operation. The partition P was also not specified."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The GA fitness is an offline classical optimization objective. It is not a circuit operation, and no GA-found parameters are available."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The initial-state preparation was removed from the circuit.",
+        "reason": "The task requires the operation to contain no input-state preparation. The runner supplies |c=0>|x>."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The position register was generalized from fixed n=5 (32 sites) to a validated n in 2..11 with default 5. The ring size is 2^n, and the total qubit count is n+1, capped at 12.",
+        "reason": "The task asks for varying valid parameters with a qubit cap. The default n=5 reproduces the specified 32-site instance."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The coin is mandatory in the implementation, as qubit n. The spec described it as optional.",
+        "reason": "The coin-controlled shift form of U requires a coin qubit."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "T (steps) and theta are taken from the instance, with steps in 1..64 and theta any finite real. The spec's domain for theta was [0, pi].",
+        "reason": "No GA-found values exist, so they must be supplied. Ry(2 theta) is well defined for any real theta."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Measurement, probability marginalization, thresholding and GA fitness are excluded from the circuit.",
+        "reason": "The circuit must be a measurement-free unitary operation. The decision and optimization steps are classical."
+      }
+    ],
+    "assumptions": [
+      "The coin-shift form of U is a stand-in for the paper's unspecified QPA operator.",
+      "Position qubit i holds bit i, and the shift is arithmetic +1 or -1 modulo 2^n on that little-endian register.",
+      "The coin is qubit n, with |0> meaning +1 and |1> meaning -1.",
+      "Ry(2 theta) uses Qiskit's Ry convention.",
+      "The mcx ctrl_state integer bit i corresponds to control i in the control list, with the coin first."
+    ],
+    "unresolved_issues": [
+      "The paper's exact unitary and parameterization (extra Ry/Rz/CX layers) are unknown.",
+      "The GA-found theta, T and boundary partition P are not available.",
+      "It is not known whether the paper uses a coin or another internal degree of freedom.",
+      "The task supplied no validation contract or requested instance, so the example instance is arbitrary."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 1881,
+    "depth": 1206,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

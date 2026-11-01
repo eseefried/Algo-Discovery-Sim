@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "46b34f8e-71c8-4a2f-85d7-4bbe44ee15df",
+  "parent_run_id": "8bebfa68-c0fd-40a2-8801-15f684a6b06e",
+  "created_at": "2026-11-01T00:30:14.903427+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "65ac0b00468af33946963e4f0e8ab2a09dba33c351e5cd27f697e7e107dc66c6",
+  "source_specification_sha256": "067b9fd0fac7030527af8b44519e86d23fdf5b0a3ccf41bf5ed38accd1ad5638",
+  "source_python_sha256": "aee17399d7aa7f8ba1fe2feae899726e3781fae3166ffb584bc53d3a8fedb4e8",
+  "elapsed_seconds": 111.61,
+  "usage": {
+    "input_tokens": 5286,
+    "output_tokens": 15256,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "build_circuit(instance) synthesizes an n-qubit unitary U from a classically given 2^n x 2^m isometry V, using column-by-column reduction. For each column c, Givens rotations on index pairs (c,i), i>c, zero the entries below the pivot. A final phase on |c> makes the pivot equal to 1. The reduction gates S satisfy S V = [I;0]. The returned circuit is U = S^dagger, so U|x>_m|0>^(n-m) = V|x>. Each Givens step is a permutation-conjugated, multi-controlled Rz-Ry-Rz rotation. Gray-code multiplexors, CNOT optimization, and the CSD and qubit-by-qubit schemes are not implemented.",
+    "source_python": "'''Column-by-column isometry synthesis (Givens rotations as multi-controlled SU(2) gates).'''\nimport math\nimport numpy as np\nfrom qiskit import QuantumCircuit\nfrom qiskit.circuit.library import RYGate, RZGate, PhaseGate\n\n\ndef _angles(p, q):\n    '''ZYZ angles with Rz(phi) Ry(theta) Rz(lam) = [[p, q], [-conj(q), conj(p)]] (SU(2)).'''\n    theta = 2.0 * float(np.arctan2(abs(q), abs(p)))\n    ap = float(np.angle(p))\n    aq = float(np.angle(q))\n    return theta, -ap - aq - math.pi, -ap + aq + math.pi\n\n\ndef _ctrl(qc, gate, ctrls, t, cs):\n    if ctrls:\n        qc.append(gate.control(len(ctrls), ctrl_state=cs), list(ctrls) + [t])\n    else:\n        qc.append(gate, [t])\n\n\ndef _givens(qc, W, n, c, i):\n    '''Zero W[i, c] into W[c, c] by a two-level rotation on span{|c>, |i>} (eq_3).'''\n    if abs(W[i, c]) < 1e-12:\n        return\n    x = c ^ i\n    t = (x & -x).bit_length() - 1\n    if (c >> t) & 1:\n        a, b = i, c\n    else:\n        a, b = c, i\n    alpha = W[a, c]\n    beta = W[b, c]\n    r = math.sqrt(abs(alpha) ** 2 + abs(beta) ** 2)\n    if i == b:\n        p = np.conj(alpha) / r\n        q = np.conj(beta) / r\n    else:\n        p = beta / r\n        q = -alpha / r\n    um = np.array([[p, q], [-np.conj(q), np.conj(p)]], dtype=complex)\n    W[[a, b], :] = um @ W[[a, b], :]\n    theta, phi, lam = _angles(p, q)\n    others = [j for j in range(n) if j != t]\n    cs = 0\n    for pos, j in enumerate(others):\n        cs |= ((a >> j) & 1) << pos\n    flips = [d for d in range(n) if d != t and (x >> d) & 1]\n    for d in flips:\n        qc.cx(t, d)\n    if abs(lam) > 1e-12:\n        _ctrl(qc, RZGate(lam), others, t, cs)\n    if abs(theta) > 1e-12:\n        _ctrl(qc, RYGate(theta), others, t, cs)\n    if abs(phi) > 1e-12:\n        _ctrl(qc, RZGate(phi), others, t, cs)\n    for d in reversed(flips):\n        qc.cx(t, d)\n\n\ndef _phase_fix(qc, W, n, c):\n    '''Multiply basis state |c> by exp(-i arg W[c,c]) leaving all other basis states fixed.'''\n    ph = float(np.angle(W[c, c]))\n    if abs(ph) < 1e-12:\n        return\n    W[c, :] = W[c, :] * np.exp(-1j * ph)\n    if (c & 1) == 0:\n        qc.x(0)\n    if n == 1:\n        qc.p(-ph, 0)\n    else:\n        qc.append(PhaseGate(-ph).control(n - 1, ctrl_state=c >> 1), list(range(1, n)) + [0])\n    if (c & 1) == 0:\n        qc.x(0)\n\n\ndef build_circuit(instance):\n    '''instance: {n, m, matrix_real, matrix_imag (optional)}; matrix has shape (2^n, 2^m).'''\n    try:\n        n = int(instance['n'])\n        m = int(instance['m'])\n        if n < 1 or n > 12 or m < 0 or m > n:\n            raise ValueError('require 1 <= n <= 12 and 0 <= m <= n')\n        re = np.array(instance['matrix_real'], dtype=float)\n        if 'matrix_imag' in instance:\n            im = np.array(instance['matrix_imag'], dtype=float)\n        else:\n            im = np.zeros_like(re)\n    except (KeyError, TypeError, ValueError, AttributeError):\n        raise ValueError('invalid instance: need integer n, m and numeric matrix_real[, matrix_imag]')\n    if re.shape != (2 ** n, 2 ** m) or im.shape != re.shape:\n        raise ValueError('matrix must have shape (2^n, 2^m)')\n    V = re + 1j * im\n    if not np.all(np.isfinite(V)):\n        raise ValueError('matrix must be finite')\n    if not np.allclose(V.conj().T @ V, np.eye(2 ** m), atol=1e-8):\n        raise ValueError('matrix is not an isometry')\n    W = V.astype(complex).copy()\n    red = QuantumCircuit(n, name='isometry_reduction')\n    for c in range(2 ** m):\n        for i in range(2 ** n - 1, c, -1):\n            _givens(red, W, n, c, i)\n        _phase_fix(red, W, n, c)\n    out = red.inverse()\n    out.name = 'isometry'\n    return out",
+    "example_instance_json": "{\"n\":2,\"m\":1,\"matrix_real\":[[0.5,0.5],[0.5,0.0],[0.5,-0.5],[0.5,0.0]],\"matrix_imag\":[[0,0],[0,0.5],[0,0],[0,-0.5]]}",
+    "register_layout": [
+      "q0..q(m-1): input qubits (little-endian, q0 least significant bit of column index x)",
+      "q(m)..q(n-1): qubits that the runner prepares in |0> (ancilla-like outputs)",
+      "Basis index = sum_j q_j 2^j; column x of V is V|x>, with |x>_m on q0..q(m-1) and |0> on the rest",
+      "Example n=2, m=1: q0 is the input qubit, q1 starts in |0>"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: isometry validation (V^dagger V = I) and the final inverse of the reduction circuit",
+        "explanation": "The returned unitary U satisfies U|x>|0..0> = V|x>, with the inputs on the low-order qubits and the other qubits in |0>. The phase is fixed per column. The runner supplies the inputs."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Parameter-counting lower bound on the CNOT count. It is not a gate-level construction and is not used in the code."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop with _givens and _phase_fix; the final red.inverse()",
+        "explanation": "For each column c, G_c is built from two-level rotations on span{|c>,|i>} (i>c) and a phase on |c>. Both act only on indices >= c, so the fixed columns 0..c-1 are untouched. The returned circuit is the inverse of the product G_{2^m-1}...G_0."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Uniformly controlled rotations with Gray-code CNOT/rotation compilation are not implemented. Each rotation here is a single-pattern multi-controlled Rz/Ry (a special case of a multiplexor) built with gate.control(ctrl_state=...), with no Gray-code or Walsh-Hadamard compression."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The 2^(m+n) leading CNOT scaling is not achieved by this implementation. It uses O(2^(m+n)) multi-controlled gates, each of which compiles to many CNOTs, so no CNOT-count claim is made."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Elementary steps of the column clearing are two-level (Givens) rotations on span{|c>,|i>}. Each is a CNOT-conjugated multi-controlled Rz-Ry-Rz rotation, not Gray-code uniformly controlled Ry/Rz cascades.",
+        "reason": "The exact angle formulas and control ordering of the cascade were not specified. The Givens form is exact, easy to verify, and keeps earlier columns fixed."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Column phases are fixed by a multi-controlled phase gate on basis state |c>, replacing the 'diagonal phase' of the sketch.",
+        "reason": "This gives an exact V rather than V up to column-dependent phases. The global phase of the circuit is still unspecified."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_5"
+        ],
+        "change": "CNOT-count optimization and the bound comparison are not implemented.",
+        "reason": "The exact constants are unknown and the chosen construction is not CNOT-efficient."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The matrix V is supplied in the instance JSON as matrix_real and matrix_imag (2^n x 2^m), with the little-endian convention that the input qubits are q0..q(m-1). The code accepts any m and n with 0<=m<=n<=12 and rejects non-isometries (tolerance 1e-8) with ValueError.",
+        "reason": "The instance parameters must define a concrete classical isometry."
+      }
+    ],
+    "assumptions": [
+      "The isometry is given as a dense classical matrix; the classical angle computation uses NumPy.",
+      "The inputs occupy the low-order qubits and ancilla-like qubits are |0> (prepared by the runner).",
+      "Multi-controlled gates from gate.control are acceptable standard gates and may be transpiled to CNOTs later.",
+      "Rz-Ry-Rz in time order Rz(lam), Ry(theta), Rz(phi) realizes the SU(2) matrix [[p,q],[-conj q,conj p]].",
+      "Tolerances of 1e-12 for skipping negligible rotations and 1e-8 for isometry validation are acceptable."
+    ],
+    "unresolved_issues": [
+      "The circuit is not CNOT-optimal and does not reproduce the paper's gate counts or the factor-two-from-bound claim.",
+      "The Knill/CSD and qubit-by-qubit decompositions, small-case numerical optimizations, and the Stinespring/POVM extension are not implemented.",
+      "Large n with m close to n creates very many multi-controlled gates, so synthesis and transpilation can be slow near the 12-qubit cap.",
+      "The code has not been simulated here; verification is left to the runner."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 82,
+    "depth": 73,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

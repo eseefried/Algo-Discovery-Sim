@@ -1,0 +1,122 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "8a83fab0-d563-463a-ad34-baabe4c1fde8",
+  "parent_run_id": "e0d4e338-1c5f-4e62-ab09-1bc27e44813c",
+  "created_at": "2026-10-31T22:36:15.252903+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "9055cfdf889d6793d51fc05ef6f19058cd42a9cf1be625a8d3f6cb53384ae2b6",
+  "source_specification_sha256": "721a5a377fef3069778995f89edf37baa2deb0496861754fc102fcef7a76cec6",
+  "source_python_sha256": "ab2be0ac7ae56a59cb75a5428f325fb519346f4032fc6327a9911ecabd7a237d",
+  "elapsed_seconds": 37.219,
+  "usage": {
+    "input_tokens": 4682,
+    "output_tokens": 5166,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements a scoped, unitary version of the single-edge noisy hop (eq_2) on a hypercube-labelled vertex register: for an edge (source, source XOR 2^direction) it applies the two-level real orthogonal unitary |a> -> eps|a> + sqrt(1-eps^2)|b>, |b> -> sqrt(1-eps^2)|a> - eps|b>, and acts as identity on all other vertices. At eps=0 this is a perfect hop (a swap of a and b); at eps=1 the particle always stays. The asymptotic threshold (eq_1, eq_5), Grover iteration and the full walk are not built.",
+    "source_python": "from qiskit import QuantumCircuit\nfrom qiskit.circuit.library import RYGate, XGate\nimport math\n\n\ndef _int_in_range(value, name, lo, hi):\n    if isinstance(value, bool) or not isinstance(value, int) or value < lo or value > hi:\n        raise ValueError(name + \" must be an integer in [\" + str(lo) + \", \" + str(hi) + \"]\")\n    return value\n\n\ndef build_circuit(instance):\n    \"\"\"Noisy hop (eq_2) along one hypercube edge of an n-qubit vertex register.\n\n    Two-level unitary on vertices a=source and b=source^(1<<direction):\n    M = X . RY(theta), theta = 2*asin(epsilon), so M = [[eps, s], [s, -eps]], s = sqrt(1-eps^2),\n    in the basis (|a>, |b>). All other vertices are untouched.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = _int_in_range(instance.get(\"n_qubits\"), \"n_qubits\", 1, 12)\n    source = _int_in_range(instance.get(\"source\"), \"source\", 0, 2 ** n - 1)\n    d = _int_in_range(instance.get(\"direction\"), \"direction\", 0, n - 1)\n    eps = instance.get(\"epsilon\")\n    if isinstance(eps, bool) or not isinstance(eps, (int, float)):\n        raise ValueError(\"epsilon must be a number in [0, 1]\")\n    eps = float(eps)\n    if not math.isfinite(eps) or eps < 0.0 or eps > 1.0:\n        raise ValueError(\"epsilon must be a number in [0, 1]\")\n    theta = 2.0 * math.asin(eps)\n\n    qc = QuantumCircuit(n, name=\"noisy_hop\")\n    controls = [q for q in range(n) if q != d]\n    flips = [q for q in controls if not (source >> q) & 1]\n    # map the source vertex to the all-ones control pattern with target bit 0\n    for q in flips:\n        qc.x(q)\n    if (source >> d) & 1:\n        qc.x(d)\n    # eq_2 core: M = X * RY(theta) on the target, controlled on the other bits\n    if controls:\n        k = len(controls)\n        qc.append(RYGate(theta).control(k), controls + [d])\n        qc.append(XGate().control(k), controls + [d])\n    else:\n        qc.ry(theta, d)\n        qc.x(d)\n    if (source >> d) & 1:\n        qc.x(d)\n    for q in flips:\n        qc.x(q)\n    return qc",
+    "example_instance_json": "{\"n_qubits\": 3, \"source\": 0, \"direction\": 1, \"epsilon\": 0.2}",
+    "register_layout": [
+      "Qubits 0..n-1: vertex register, little-endian; qubit i holds bit i of the vertex index x (qubit 0 is least significant).",
+      "Edge: vertex a=source and vertex b=source XOR (1<<direction), i.e. a hypercube edge flipping qubit 'direction'.",
+      "No ancilla qubits; total qubits = n_qubits <= 12."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Asymptotic scaling statement (eps=O(1/sqrt N) gives T=O(sqrt N), otherwise O(N)); it is a runtime claim, not an operation, and cannot be encoded in a single circuit."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit (controlled RY(2*asin(eps)) followed by controlled X on the edge qubit)",
+        "explanation": "Single-edge noisy hop with stay amplitude eps and hop amplitude sqrt(1-eps^2), completed to a unitary by |b> -> sqrt(1-eps^2)|a> - eps|b>."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Standard Grover iterate; not built, since the paper's walk operator and its noisy form are not specified."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Ideal iteration count pi/4*sqrt(N); only informs how many steps a full search would use. No repetition is encoded."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Heuristic cumulative no-failure amplitude; the spec itself notes it does not match the abstract's claim, and it is not a circuit operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Chose the unitary completion M=[[eps, s],[s, -eps]] (real, Hermitian, M^2=I), with phase -eps on the b->b component and no relative phase between the two terms of the a->(b,a) image.",
+        "reason": "eq_2 leaves the unitary completion and relative phase unspecified; a unitary circuit needs a definite choice. This reduces to a perfect hop (swap of a and b) at eps=0."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Narrowed scope from a generic graph hop to one hypercube edge (Hamming distance 1) between vertices a and b on a power-of-two vertex set 2^n.",
+        "reason": "The graph and barrier model are not given; a hypercube edge is the simplest exactly implementable edge with standard controlled gates."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "No Grover walk, repeated steps, oracle, or scaling analysis is built; only the single noisy hop operation.",
+        "reason": "The paper's walk operator, barrier model and proof are not available, so a faithful full construction cannot be resolved."
+      }
+    ],
+    "assumptions": [
+      "Vertex x is encoded as the computational basis state |x> with little-endian bit order.",
+      "Failure amplitude epsilon is a real number in [0,1] and the hop is the real orthogonal two-level unitary described above.",
+      "Applying the circuit once represents one noisy hop; repeated hops are left to the caller (the same-edge hop is an involution)."
+    ],
+    "unresolved_issues": [
+      "The paper's actual noisy-hop unitary, relative phases and barrier model are unknown, so this completion may differ from the paper's.",
+      "The O(1/sqrt N) threshold claim is not encoded and eq_5's heuristic is inconsistent with it.",
+      "No full noisy Grover quantum walk (marked-vertex step plus noisy hops, or the continuous-time case) is implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 42,
+    "depth": 31,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

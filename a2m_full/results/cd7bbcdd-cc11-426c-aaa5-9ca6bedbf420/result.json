@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "cd7bbcdd-cc11-426c-aaa5-9ca6bedbf420",
+  "parent_run_id": "edf08a75-3924-402d-b9fd-fecbb5ff876e",
+  "created_at": "2026-11-01T00:29:28.530091+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "238595301a27e32da50be5aa0a9df9fde6898d7e887bfa5c3c7fa0df1da34327",
+  "source_specification_sha256": "eb45b3b702a7eb484ef8218d3b3d75b55fa9511be810af09a5758e6c68f62953",
+  "source_python_sha256": "06cae06965535571b79b85552b01c2e040126c26080773ef7e0d4fd5eba81d07",
+  "elapsed_seconds": 58.828,
+  "usage": {
+    "input_tokens": 5472,
+    "output_tokens": 8265,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "build_circuit returns a first-order Trotterized continuous-time quantum walk search evolution exp(-iHt) with H=-gamma*A - sum_{w in W}|w><w| on the simplex of M+1 cliques K_M (N=M(M+1) vertices, M in 2..6). It takes the marked set, gamma, t and the number of Trotter steps as parameters. Each adjacency edge is compiled as a multi-controlled RX two-level rotation, and each marked vertex gets a multi-controlled phase. No state preparation or measurement is included.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import RXGate\nimport math\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef _is_num(v):\n    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)\n\n\ndef _edges(M):\n    # eq_2: simplex of K_M. index = clique*M + local position.\n    edges = []\n    for c in range(M + 1):\n        for i in range(M):\n            for j in range(i + 1, M):\n                edges.append((c * M + i, c * M + j))\n    # one connector edge per clique pair (i<j): c_ij = i*M+(j-1), c_ji = j*M+i\n    for i in range(M + 1):\n        for j in range(i + 1, M + 1):\n            edges.append((i * M + (j - 1), j * M + i))\n    return edges\n\n\ndef _two_level(qc, n, a, b, theta):\n    # exp(i*theta*(|a><b|+|b><a|)) as CX network + multi-controlled RX(-2*theta)\n    diff = a ^ b\n    p = (diff & -diff).bit_length() - 1\n    flips = [q for q in range(n) if q != p and (diff >> q) & 1]\n    ap = a\n    for q in flips:\n        if (ap >> p) & 1:\n            ap ^= 1 << q\n    for q in flips:\n        qc.cx(p, q)\n    ctrls = [q for q in range(n) if q != p]\n    state = 0\n    for k, q in enumerate(ctrls):\n        state |= ((ap >> q) & 1) << k\n    gate = RXGate(-2.0 * theta).control(len(ctrls), ctrl_state=state)\n    qc.append(gate, ctrls + [p])\n    for q in reversed(flips):\n        qc.cx(p, q)\n\n\ndef _phase_state(qc, n, x, angle):\n    # multiply basis state |x> by exp(i*angle)\n    zeros = [q for q in range(n) if not (x >> q) & 1]\n    for q in zeros:\n        qc.x(q)\n    qc.mcp(angle, list(range(1, n)), 0)\n    for q in zeros:\n        qc.x(q)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    for key in ('M', 'marked', 'gamma', 't', 'steps'):\n        if key not in instance:\n            raise ValueError('missing key ' + key)\n    M = instance['M']\n    marked = instance['marked']\n    gamma = instance['gamma']\n    t = instance['t']\n    steps = instance['steps']\n    if not _is_int(M) or M < 2 or M > 6:\n        raise ValueError('M must be an integer in 2..6')\n    N = M * (M + 1)\n    n = max(1, (N - 1).bit_length())\n    if n > 12:\n        raise ValueError('too many qubits')\n    if not isinstance(marked, list) or len(marked) == 0:\n        raise ValueError('marked must be a nonempty list')\n    for w in marked:\n        if not _is_int(w) or w < 0 or w >= N:\n            raise ValueError('marked vertex out of range')\n    if len(set(marked)) != len(marked):\n        raise ValueError('marked vertices must be distinct')\n    if not _is_num(gamma) or gamma < 0:\n        raise ValueError('gamma must be a finite number >= 0')\n    if not _is_num(t) or t < 0:\n        raise ValueError('t must be a finite number >= 0')\n    if not _is_int(steps) or steps < 1 or steps > 64:\n        raise ValueError('steps must be an integer in 1..64')\n    reg = QuantumRegister(n, 'v')\n    qc = QuantumCircuit(reg)\n    edges = _edges(M)\n    theta = float(gamma) * float(t) / steps\n    phi = float(t) / steps\n    for _ in range(steps):\n        # exp(i*gamma*A*t/r), edge by edge\n        for a, b in edges:\n            _two_level(qc, n, a, b, theta)\n        # exp(i*t/r * sum_w |w><w|)\n        for w in marked:\n            _phase_state(qc, n, w, phi)\n    return qc",
+    "example_instance_json": "{\"M\":2,\"marked\":[0,3],\"gamma\":0.8,\"t\":3.5,\"steps\":8}",
+    "register_layout": [
+      "Single register 'v' with n=ceil(log2(M(M+1))) qubits (3 for M=2, 4 for M=3, 5 for M=4..5, 6 for M=6)",
+      "Qiskit qubit 0 is the least significant bit of the vertex index",
+      "Vertex index = clique*M + local_position, with clique in 0..M and local_position in 0..M-1",
+      "Connector between clique i<j: vertex i*M+(j-1) in clique i joined to vertex j*M+i in clique j",
+      "Basis states with index >= N are padding. They are left untouched by the A-term and receive no phase.",
+      "Example (M=2): 3 qubits, N=6, cliques {0,1},{2,3},{4,5}, connector edges (0,3),(1,4),(2,5)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (A-term via _two_level, marked-vertex term via _phase_state)",
+        "explanation": "Implements exp(-iHt) with H=-gamma*A - sum_{w in W}|w><w|, so the evolution is exp(+i(gamma*A + P_W)t). The padding penalty term is dropped because padding states are exactly decoupled (see specification_changes)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_edges(M)",
+        "explanation": "Builds the edge list: complete graph K_M inside each of the M+1 cliques plus one connector edge per clique pair, with every vertex a connector as in the specification."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The uniform starting state |s> and the marked-set probability readout are prepared and performed by the runner. The circuit only supplies the evolution operator exp(-iHt)."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The critical rate gamma*(config,M) and the time t*~(pi/2)sqrt(N) are not reconstructed. gamma and t are free instance parameters that can be scanned externally."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop over steps; _two_level; _phase_state",
+        "explanation": "First-order Trotter product of r steps, each with an A-factor exp(i*gamma*A*t/r) followed by a diagonal marked-vertex phase factor exp(i*t/r) on each marked basis state. The A-factor is compiled from standard gates (CX and multi-controlled RX), with no dense unitary."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_5"
+        ],
+        "change": "The padding penalty E_pad is omitted. For N that is not a power of 2, padding basis states are left idle.",
+        "reason": "A is compiled only from two-level rotations between valid vertex states. The padding subspace is therefore exactly decoupled from the vertex subspace, and a penalty phase would have no effect on vertex dynamics. It would only add gates."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The A-factor exp(i*gamma*A*t/r) is itself approximated by a sequential product of per-edge two-level rotations, rather than being exactly diagonalized.",
+        "reason": "Edge terms do not commute, and an exact compilation would need an opaque dense unitary, which is disallowed. This adds a first-order Trotter error that shrinks as steps grows."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The connector assignment is fixed as vertex i*M+(j-1) in clique i joined to vertex j*M+i in clique j, for i<j.",
+        "reason": "The specification left the local connector position open. This choice makes the vertex-to-connector map a bijection in every clique."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Scope narrowed to the evolution operator for an explicitly supplied marked set, with M limited to 2..6. Initial-state preparation, measurement, gamma scans and configuration comparison are left to the runner.",
+        "reason": "The task requires an operation only, with no state preparation or measurement. The explicit gamma* formulas are not available."
+      }
+    ],
+    "assumptions": [
+      "Adjacency-matrix Hamiltonian with oracle strength 1",
+      "Evolution is exp(-iHt) with H=-gamma*A-P_W, so the phase signs are +i*gamma*A*t and +i*t on marked states",
+      "The caller supplies marked vertex indices in the convention index = clique*M + local_position",
+      "The runner prepares the initial state. If it uses H on all qubits when N is not a power of 2, the padding amplitude stays inert and the marked-set probability is scaled by N/2^n relative to a uniform state over the N vertices.",
+      "The Trotter step count is given by the instance and should be large enough for the desired accuracy"
+    ],
+    "unresolved_issues": [
+      "The paper's exact connector structure and Laplacian-versus-adjacency convention are not confirmed",
+      "The explicit critical jumping rates gamma* per marked-vertex configuration are not reconstructed",
+      "The M+1 and 2(M+1) marked-vertex configurations are not provided as presets. They can only be entered manually through the marked list.",
+      "Trotter error is not bounded or checked in the module",
+      "For N not a power of 2, a clean start in the N-dimensional vertex subspace is left to the runner"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 1520,
+    "depth": 1088,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

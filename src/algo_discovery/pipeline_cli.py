@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -71,7 +72,10 @@ def run(args, settings: Settings, summary: dict) -> int:
 
 def run_code_and_simulation(equations_dir: Path, args, settings: Settings, summary: dict) -> int:
     """Stages 2-3, shared by the full pipeline and externally supplied specifications."""
-    log("[2/3] equations -> Qiskit (Docker validation)")
+    # Optional separate effort for code generation, e.g. to match another system's budget.
+    if os.getenv("CLAUDE_CODE_EFFORT"):
+        settings = replace(settings, effort=os.environ["CLAUDE_CODE_EFFORT"])
+    log(f"[2/3] equations -> Qiskit (Docker validation; {settings.model}, effort {settings.effort})")
     instance = json.loads(args.instance_file.read_text()) if args.instance_file else None
     code_request = load_code_request(
         equations_dir / "result.json",

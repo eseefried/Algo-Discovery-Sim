@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "75ce81dd-bfb8-48c8-89ea-7b14a42def74",
+  "parent_run_id": "45c0ef5e-6db0-4cdb-af8a-44606c12fb59",
+  "created_at": "2026-10-31T22:32:47.915129+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "ba8f1accdcc2755907fbfaacddb89b209e59d5f91ca0d850af750f6c5bf2164d",
+  "source_specification_sha256": "417b450810c3dd5df87983e9a197cdfc2261c922d0303b78d23550ac57b749a9",
+  "source_python_sha256": "62608297567ba4a71d9a3a7b6f94d0dd4876752d8f5ed895ff8e2ce9bdeaa648",
+  "elapsed_seconds": 25.632,
+  "usage": {
+    "input_tokens": 4720,
+    "output_tokens": 3882,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds a first-order-accurate (Strang-split, second-order) Trotterized propagator U(T) for the two-spin Hamiltonian H = (mu_B B(t)/2)(g1 Z1 + g2 Z2) + (J/4) sigma1.sigma2, with B(t) piecewise constant over user-supplied segments (eq_1, eq_3). The Heisenberg exchange terms commute and are applied exactly via RXX, RYY and RZZ. The g-factor-dependent Zeeman terms are applied via RZ. No optimal control, no resonant drive and no fidelity evaluation are included.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _num(x, name):\n    if isinstance(x, bool) or not isinstance(x, (int, float)):\n        raise ValueError(name + ' must be a real number')\n    f = float(x)\n    if not math.isfinite(f):\n        raise ValueError(name + ' must be finite')\n    return f\n\n\ndef _zeeman(qc, a1, a2, dt):\n    # exp(-i dt (a1 Z1 + a2 Z2)); RZ(theta)=exp(-i theta Z/2)\n    qc.rz(2.0 * a1 * dt, 0)\n    qc.rz(2.0 * a2 * dt, 1)\n\n\ndef _exchange(qc, j, dt):\n    # exp(-i dt J/4 (XX+YY+ZZ)); RPP(theta)=exp(-i theta PP/2) -> theta=J dt/2\n    theta = j * dt / 2.0\n    qc.rxx(theta, 0, 1)\n    qc.ryy(theta, 0, 1)\n    qc.rzz(theta, 0, 1)\n\n\ndef build_circuit(instance):\n    \"\"\"Trotterized U(T) for piecewise-constant B(t) (eq_1, eq_3). hbar=1.\n    instance keys: g1, g2, j, mu_b (optional, default 1.0), trotter_steps (int per segment),\n    segments: list of {\"b\": field amplitude, \"duration\": time >= 0}.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    g1 = _num(instance.get('g1'), 'g1')\n    g2 = _num(instance.get('g2'), 'g2')\n    j = _num(instance.get('j'), 'j')\n    mu_b = _num(instance.get('mu_b', 1.0), 'mu_b')\n    if g1 <= 0 or g2 <= 0 or mu_b <= 0:\n        raise ValueError('g1, g2, mu_b must be positive')\n    n = instance.get('trotter_steps')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 200:\n        raise ValueError('trotter_steps must be an integer in [1, 200]')\n    segs = instance.get('segments')\n    if not isinstance(segs, list) or len(segs) < 1 or len(segs) > 64:\n        raise ValueError('segments must be a list of 1..64 items')\n    parsed = []\n    for s in segs:\n        if not isinstance(s, dict):\n            raise ValueError('each segment must be a dict')\n        b = _num(s.get('b'), 'b')\n        d = _num(s.get('duration'), 'duration')\n        if d < 0:\n            raise ValueError('duration must be nonnegative')\n        parsed.append((b, d))\n    if n * len(parsed) > 4000:\n        raise ValueError('circuit too large')\n    q1 = QuantumRegister(1, 'q1')\n    q2 = QuantumRegister(1, 'q2')\n    qc = QuantumCircuit(q1, q2)\n    for b, d in parsed:\n        dt = d / n\n        a1 = mu_b * b * g1 / 2.0\n        a2 = mu_b * b * g2 / 2.0\n        for _ in range(n):\n            _zeeman(qc, a1, a2, dt / 2.0)\n            _exchange(qc, j, dt)\n            _zeeman(qc, a1, a2, dt / 2.0)\n    return qc",
+    "example_instance_json": "{\"g1\":2.0,\"g2\":1.98,\"j\":0.5,\"mu_b\":1.0,\"trotter_steps\":4,\"segments\":[{\"b\":1.0,\"duration\":0.8},{\"b\":1.2,\"duration\":0.5}]}",
+    "register_layout": [
+      "qubit 0 = q1 (electron 1 spin, register q1)",
+      "qubit 1 = q2 (electron 2 spin, register q2)",
+      "Encoding: computational basis |0> = sigma_z +1, |1> = sigma_z -1; Qiskit qubit 0 is least significant bit"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_zeeman and _exchange (called from build_circuit)",
+        "explanation": "The Zeeman term with g1, g2 is implemented by RZ rotations, and the isotropic Heisenberg exchange J/4 sigma1.sigma2 by RXX, RYY and RZZ with angle J*dt/2."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Resonance addressing motivates the g1 != g2 difference, but no rotating-frame drive or resonance tuning is implemented. B is just a static value per segment."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit segment/Trotter loop",
+        "explanation": "The time-ordered exponential is approximated by a product over piecewise-constant segments, each with a symmetric (Strang) Trotter splitting of Zeeman and exchange parts."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The fidelity objective is a classical optimization cost. This module returns only the operation and does no optimization or evaluation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The exact time-ordered exponential is replaced by a Strang-split Trotter product with a user-chosen number of steps per segment, so the unitary is approximate with error that shrinks as trotter_steps grows.",
+        "reason": "The Zeeman difference term (g1-g2) does not commute with the exchange term, so no exact standard-gate decomposition is generally available."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "B(t) is restricted to piecewise-constant segments supplied in the instance. mu_B is a user-supplied scale (default 1) and hbar=1. The circuit's global phase is not tracked.",
+        "reason": "A gate-based circuit needs a discrete, bound parametrization. The abstract gives no numeric values or units."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Scope is narrowed to isotropic exchange with static-field segments. There is no non-diagonal exchange, no exchange suppression by repeated single-spin rotations, no resonant drive, and no optimal-control search.",
+        "reason": "These details are absent from the abstract, and the specification marks them as assumptions or missing information."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The fidelity cost is not implemented.",
+        "reason": "It is a classical objective and not part of the circuit operation."
+      }
+    ],
+    "assumptions": [
+      "hbar=1 and the angular-frequency units are consistent with J and mu_B*B",
+      "Isotropic Heisenberg exchange replaces the paper's non-diagonal exchange",
+      "Segments are applied in list order, first segment first",
+      "g1 and g2 are positive and J may be any real value"
+    ],
+    "unresolved_issues": [
+      "The paper's actual non-diagonal exchange form is unknown",
+      "Realistic values of J, g1, g2 and field amplitudes are unknown",
+      "The optimal control parametrization and the target gate durations are not available",
+      "The Trotter error is not quantified here"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 168,
+    "depth": 120,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

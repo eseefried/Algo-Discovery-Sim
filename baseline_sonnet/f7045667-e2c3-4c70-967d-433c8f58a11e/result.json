@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "f7045667-e2c3-4c70-967d-433c8f58a11e",
+  "parent_run_id": "e5838a33-5242-4fba-bb7d-67ddac321f56",
+  "created_at": "2026-10-31T22:30:37.237826+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "50e24fe53366365f284ca073f38c1dc3fe11584e31bc5f0898d4f836b81aecc9",
+  "source_specification_sha256": "6419635d5f04e68b1b24044cd9e4a3cde3aa4be321042d84a6af3fbcaf8cc108",
+  "source_python_sha256": "9aa85c054a3f767bbe2f831fc53eb3f0bfed45cfbb9718b865f233e1240b0c7a",
+  "elapsed_seconds": 25.172,
+  "usage": {
+    "input_tokens": 5077,
+    "output_tokens": 4098,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Level-one QAOA operation for Max E3LIN2: the phase-separation unitary exp(-i*gamma*C) with C = sum_k (1 + s_k Z_a Z_b Z_c)/2, followed by the transverse-field mixer exp(-i*beta*sum X_j). Each clause is a CNOT parity ladder, an RZ, and an uncompute. The |+>^n input is left to the runner, and gamma and beta are instance parameters.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef _is_real(v):\n    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)\n\n\ndef build_circuit(instance):\n    \"\"\"Level-one QAOA operation U = exp(-i beta B) exp(-i gamma C) for E3LIN2.\n\n    instance: {\"n\": int 1..12, \"equations\": [[a,b,c,bit],...],\n               \"gamma\": float, \"beta\": float, optional \"D\": int max occurrence}\n    Qubit j encodes variable x_j (Z eigenvalue (-1)^x_j). No state prep.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"n\")\n    if not _is_int(n) or n < 3 or n > 12:\n        raise ValueError(\"n must be an integer in [3, 12]\")\n    eqs = instance.get(\"equations\")\n    if not isinstance(eqs, (list, tuple)) or len(eqs) < 1 or len(eqs) > 200:\n        raise ValueError(\"equations must be a list of 1..200 entries\")\n    gamma = instance.get(\"gamma\")\n    beta = instance.get(\"beta\")\n    if not _is_real(gamma) or not _is_real(beta):\n        raise ValueError(\"gamma and beta must be finite real numbers\")\n    gamma = float(gamma)\n    beta = float(beta)\n    clauses = []\n    counts = [0] * n\n    for eq in eqs:\n        if not isinstance(eq, (list, tuple)) or len(eq) != 4:\n            raise ValueError(\"each equation must be [a, b, c, bit]\")\n        a, b, c, bit = eq\n        for v in (a, b, c):\n            if not _is_int(v) or v < 0 or v >= n:\n                raise ValueError(\"variable index out of range\")\n        if len({a, b, c}) != 3:\n            raise ValueError(\"equation variables must be distinct\")\n        if not _is_int(bit) or bit not in (0, 1):\n            raise ValueError(\"right-hand side bit must be 0 or 1\")\n        for v in (a, b, c):\n            counts[v] += 1\n        clauses.append((a, b, c, bit))\n    if \"D\" in instance:\n        d = instance[\"D\"]\n        if not _is_int(d) or d < 1:\n            raise ValueError(\"D must be a positive integer\")\n        if max(counts) > d:\n            raise ValueError(\"a variable occurs in more than D equations\")\n    qr = QuantumRegister(n, \"q\")\n    qc = QuantumCircuit(qr)\n    # Phase separation: exp(-i gamma (1 + s Z Z Z)/2) per clause\n    for a, b, c, bit in clauses:\n        s = -1.0 if bit == 1 else 1.0\n        qc.cx(a, c)\n        qc.cx(b, c)\n        qc.rz(gamma * s, c)  # exp(-i gamma s/2 Z_a Z_b Z_c)\n        qc.cx(b, c)\n        qc.cx(a, c)\n    qc.global_phase += -gamma * len(clauses) / 2.0  # the constant 1/2 in each C_k\n    # Mixer: exp(-i beta X) = RX(2 beta) on each qubit\n    for j in range(n):\n        qc.rx(2.0 * beta, j)\n    return qc",
+    "example_instance_json": "{\"n\": 6, \"equations\": [[0,1,2,0],[1,3,4,1],[2,4,5,0],[0,3,5,1]], \"gamma\": 0.4, \"beta\": 0.3, \"D\": 2}",
+    "register_layout": [
+      "Qiskit qubit j (0..n-1) = boolean variable x_j in the computational basis; qubit 0 is the least significant bit; Z eigenvalue (-1)^{x_j}",
+      "Single register 'q' of n qubits, no ancillas",
+      "Input state (e.g. |+>^n) is prepared by the runner, not by this circuit"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: clause loop (CX ladder onto qubit c, RZ(gamma*s_k), uncompute) plus the global_phase term",
+        "explanation": "exp(-i*gamma*C) = prod_k exp(-i*gamma/2) exp(-i*gamma*s_k/2 Z_aZ_bZ_c), with s_k = (-1)^{b_k}. The ZZZ rotation is the parity ladder and an RZ, and the constant 1/2 per clause goes into the circuit global phase."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: phase-separation loop followed by the RX(2*beta) mixer loop",
+        "explanation": "Implements the operator exp(-i*beta*B) exp(-i*gamma*C) with B = sum X_j. The |+>^n preparation is excluded because the runner prepares inputs."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The expectation objective F(gamma,beta) is an evaluation quantity, not part of the operation. No expectation is computed or optimized in the circuit."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The worst-case performance guarantee is a theorem about the algorithm and is not a circuit construction."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The typical-case guarantee is a claim about performance. Its meaning is undefined in the abstract, and it requires specific angles that are not given."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Scope narrowed to the unitary U(gamma,beta) = exp(-i*beta*B) exp(-i*gamma*C). The |+>^n preparation is not included in the circuit.",
+        "reason": "The task requires an operation with no input-state preparation. Apply the circuit to |+>^n to get the QAOA state."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "gamma and beta are required instance inputs, as are the equation list, n, and an optional D. No optimized or D-dependent angle values are supplied.",
+        "reason": "The abstract does not give the angle schedule, so the angles cannot be hardcoded."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The constant offset in C is included as a circuit global phase of -gamma*m/2.",
+        "reason": "This makes the circuit exactly equal exp(-i*gamma*C) rather than only equal up to a global phase."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Performance guarantees are not implemented. They are classified out_of_scope.",
+        "reason": "They are asymptotic claims about performance, not circuit constructions."
+      }
+    ],
+    "assumptions": [
+      "The Z-product clause encoding and standard transverse-field mixer are standard background, not taken from the abstract.",
+      "Equations contain three distinct variables, indexed from 0 to n-1.",
+      "Right-hand side bit b_k = 1 gives s_k = -1.",
+      "n is restricted to 3 <= n <= 12, because an equation needs three distinct variables.",
+      "The number of equations is capped at 200.",
+      "If D is supplied, each variable's occurrence count is validated against it."
+    ],
+    "unresolved_issues": [
+      "The abstract does not give the optimal (gamma,beta) as a function of D.",
+      "The meaning of 'typical case' and the expectation-vs-high-probability criterion are undefined.",
+      "The guarantee proofs and the classical comparison algorithm are not reconstructed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 26,
+    "depth": 19,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

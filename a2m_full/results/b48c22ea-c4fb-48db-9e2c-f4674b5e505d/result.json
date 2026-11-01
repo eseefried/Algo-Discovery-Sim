@@ -1,0 +1,135 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "b48c22ea-c4fb-48db-9e2c-f4674b5e505d",
+  "parent_run_id": "18c8056f-187d-4ec7-bf3a-5e2800d6b504",
+  "created_at": "2026-11-01T00:12:48.243390+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "88db8b946d74c4633554b27d5bf59f4170a8b3d181414460c42bd181626d61c8",
+  "source_specification_sha256": "528c8e3b00e53ffd2aee32595241a3bf1bc83100afe85d7d577a3c353777ca84",
+  "source_python_sha256": "29d797bce7c72c9f1a53e003ff1eff22a4cb53e749af96977c0e15725e58ecdc",
+  "elapsed_seconds": 37.106,
+  "usage": {
+    "input_tokens": 5507,
+    "output_tokens": 5251,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the label-independent Bell-like basis-generating operation for the n-qubit scope: H on m control qubits, then a type A CNOT fan from controls to targets realizing the GF(2)-linear map f, then optional type B sign gates (Z on controls) for g(c)=w.c. The runner prepares |b>_ctrl|a>_tgt with X gates, and the circuit maps it to |Psi_{a,b}> of eq_1. No measurements or state preparation are included.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _as_int(v, name):\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError(name + \" must be an integer\")\n    return v\n\n\ndef _gf2_rank(rows):\n    basis = []\n    for r in rows:\n        for b in basis:\n            r = min(r, r ^ b)\n        if r:\n            basis.append(r)\n    return len(basis)\n\n\ndef build_circuit(instance):\n    \"\"\"Bell-like basis generator. instance keys: n, m, optional fan, optional w.\n    Qubits 0..m-1 are controls, qubits m..n-1 are targets.\n    fan[i] = list of target indices (0..n-m-1) flipped by control i.\n    w = list of m bits defining the type B sign g(c)=XOR_i w_i c_i.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = _as_int(instance.get(\"n\"), \"n\")\n    m = _as_int(instance.get(\"m\"), \"m\")\n    if n < 3 or n > 12:\n        raise ValueError(\"n must be in 3..12\")\n    if m < 1 or n - m < m:\n        raise ValueError(\"need 1 <= m <= n-m for an injective fan map\")\n    t = n - m\n    fan = instance.get(\"fan\")\n    if fan is None:\n        fan = [[i] for i in range(m)]\n        fan[m - 1] = list(range(m - 1, t))\n    if not isinstance(fan, (list, tuple)) or len(fan) != m:\n        raise ValueError(\"fan must have one entry per control\")\n    rows = []\n    clean = []\n    for lst in fan:\n        if not isinstance(lst, (list, tuple)):\n            raise ValueError(\"fan entries must be lists\")\n        mask = 0\n        items = []\n        for j in lst:\n            j = _as_int(j, \"fan target\")\n            if j < 0 or j >= t or (mask >> j) & 1:\n                raise ValueError(\"invalid or duplicate fan target\")\n            mask |= 1 << j\n            items.append(j)\n        rows.append(mask)\n        clean.append(items)\n    if _gf2_rank(rows) != m:\n        raise ValueError(\"fan map must be injective (rank m over GF(2))\")\n    w = instance.get(\"w\")\n    if w is None:\n        w = [0] * m\n    if not isinstance(w, (list, tuple)) or len(w) != m:\n        raise ValueError(\"w must have length m\")\n    for x in w:\n        if _as_int(x, \"w entry\") not in (0, 1):\n            raise ValueError(\"w entries must be 0 or 1\")\n    ctrl = QuantumRegister(m, \"ctrl\")\n    tgt = QuantumRegister(t, \"tgt\")\n    qc = QuantumCircuit(ctrl, tgt)\n    # eq_1: Hadamards turn |b> into sum_c (-1)^{b.c}|c>\n    for i in range(m):\n        qc.h(ctrl[i])\n    # eq_1 type A fan: |c>|a> -> |c>|a xor f(c)>\n    for i in range(m):\n        for j in clean[i]:\n            qc.cx(ctrl[i], tgt[j])\n    # eq_4 type B: sign (-1)^{w.c}\n    for i in range(m):\n        if w[i]:\n            qc.z(ctrl[i])\n    return qc",
+    "example_instance_json": "{\"n\":3,\"m\":1,\"fan\":[[0,1]],\"w\":[0]}",
+    "register_layout": [
+      "qubit 0: ctrl[0] (control, H applied; input X sets phase label b_0)",
+      "qubits 1..n-m... generally: qubits 0..m-1 = ctrl[0..m-1], least significant first",
+      "qubits m..n-1 = tgt[0..n-m-1] (input X sets bit-flip label a)",
+      "example n=3,m=1: q0=ctrl[0], q1=tgt[0], q2=tgt[1]; input basis state |a_1 a_0 b_0> in Qiskit order, fan flips both targets (GHZ-like for a=0,b=0)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: H loop on controls and CNOT fan loop",
+        "explanation": "H on controls plus CNOT fan maps runner-prepared |b>|a> to (1/sqrt(2^m)) sum_c (-1)^{b.c}|c>|f(c) xor a>."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Amplitude magnitude is a property of the output states (H then CNOTs and Z only); it is checked externally, not coded."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Orthonormality follows because the circuit is unitary and maps computational basis labels bijectively; Gram matrix check is a classical postprocessing step outside the operation."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: Z loop over controls with w_i = 1",
+        "explanation": "Type B sign (-1)^{w.c} is implemented as Z gates on the control qubits selected by w."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Monogamy score is classical statevector postprocessing, not part of the circuit operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Labels a and b are not applied inside the circuit; the runner prepares |b>_ctrl|a>_tgt with X gates and the circuit is only the H+fan(+sign) operation.",
+        "reason": "The task requires an operation without input-state preparation."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "Injectivity of f is enforced as GF(2) rank m of the fan matrix, which requires m <= n-m; invalid fans raise ValueError. A default fan is provided: control i flips target i, and the last control flips targets m-1..n-m-1.",
+        "reason": "The specification assumes f injective and linear, but did not fix a pattern."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Type B is implemented as Z gates on controls (g depends only on c). Since this equals a relabeling b -> b xor w, it permutes basis states and yields the same set of states, differing only in label assignment.",
+        "reason": "Matches the stated linear g(c) literally; the paper's actual CZ-type gate is not specified."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Instance size range widened from n in 3..5 to n in 3..12 (the platform qubit cap).",
+        "reason": "The 12-qubit cap is the actual constraint; the circuit is cheap and valid for any n."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Entanglement and monogamy measures excluded.",
+        "reason": "Classical postprocessing on statevectors, not a circuit operation."
+      }
+    ],
+    "assumptions": [
+      "The paper's two multiple-qubit controlled unitaries are interpreted as a CNOT-fan type A and a linear phase type B (my interpretation, not the paper's definitions).",
+      "Gate order is H on controls, then CNOT fan, then sign gates.",
+      "Qiskit little-endian order: controls at qubits 0..m-1, targets at m..n-1."
+    ],
+    "unresolved_issues": [
+      "The paper's exact controlled-unitary definitions and basis-generation orderings are not recoverable from the abstract.",
+      "Type B as Z on controls only relabels b, so it does not produce a genuinely different basis; paper's different-entanglement bases may require other constructions.",
+      "Monogamy-score measure used by the paper is unspecified."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 3,
+    "depth": 3,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "4ed8bef7-a542-4b9a-8139-007d9c4c083b",
+  "parent_run_id": "c4baa7fa-280c-49ec-aa6e-c992bb1aba61",
+  "created_at": "2026-11-01T00:15:51.397561+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "d04479f827da985c44d515b492f3affd5a9f142c6f3b52af8477fff0de8fb58c",
+  "source_specification_sha256": "770eb2454abfbc3ae28bb7811e97e7223178e355690a845b6ddd986b2f2f2b6b",
+  "source_python_sha256": "c42599f0eea0cfe69a28144a4df545183a47e96d1ed2fcda21585fd8094be700",
+  "elapsed_seconds": 54.622,
+  "usage": {
+    "input_tokens": 5838,
+    "output_tokens": 7522,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Grover search over all 2^N input-bit paths of a small binary rate-1/n convolutional-code trellis (example: Q=3, generators (7,5) octal, N=3, hard-decision Hamming metric, start state 0, no tail). Optional H layer builds the uniform path superposition. Each of R iterations is a threshold phase oracle (M<T) followed by diffusion on the path register. The oracle computes the Hamming metric into a work register, applies a phase to every metric value below T, then uncomputes the metric. No flag qubit is used and no measurements are made.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _chk(v, lo, hi):\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError(\"invalid parameter\")\n    return v\n\n\ndef _mcz(qc, q):\n    if len(q) == 1:\n        qc.z(q[0])\n    else:\n        qc.h(q[-1])\n        qc.mcx(q[:-1], q[-1])\n        qc.h(q[-1])\n\n\ndef _inc(c, ctl, met):\n    # controlled +1 on little-endian metric register (no overflow: register is large enough)\n    for k in range(len(met) - 1, -1, -1):\n        c.mcx([ctl] + met[:k], met[k])\n\n\ndef _metric_circuit(N, Q, gens, rec, path, err, met, total):\n    # eq_2: shift-register trellis output and Hamming-distance accumulation\n    c = QuantumCircuit(total)\n    for t in range(1, N + 1):\n        s = QuantumCircuit(total)\n        for j, g in enumerate(gens):\n            for k in range(Q):\n                if (g >> (Q - 1 - k)) & 1 and t - k >= 1:\n                    s.cx(path[t - 1 - k], err[j])\n            if (rec[t - 1] >> j) & 1:\n                s.x(err[j])\n        c.compose(s, qubits=list(range(total)), inplace=True)\n        for e in err:\n            _inc(c, e, met)\n        c.compose(s.inverse(), qubits=list(range(total)), inplace=True)\n    return c\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    N = _chk(instance.get(\"N\"), 1, 8)\n    Q = _chk(instance.get(\"Q\"), 2, 6)\n    gens = instance.get(\"generators\")\n    rec = instance.get(\"received\")\n    if not isinstance(gens, list) or not 1 <= len(gens) <= 4:\n        raise ValueError(\"generators must be a list of 1..4 ints\")\n    n = len(gens)\n    for g in gens:\n        _chk(g, 1, 2 ** Q - 1)\n    if not isinstance(rec, list) or len(rec) != N:\n        raise ValueError(\"received must have length N\")\n    for r in rec:\n        _chk(r, 0, 2 ** n - 1)\n    T = _chk(instance.get(\"threshold\"), 1, n * N + 1)\n    R = _chk(instance.get(\"iterations\"), 0, 64)\n    prep = instance.get(\"prepare_uniform\", True)\n    if not isinstance(prep, bool):\n        raise ValueError(\"prepare_uniform must be bool\")\n    m = (n * N).bit_length()\n    total = N + n + m\n    if total > 12:\n        raise ValueError(\"too many qubits\")\n    qr_path = QuantumRegister(N, \"path\")\n    qr_err = QuantumRegister(n, \"err\")\n    qr_met = QuantumRegister(m, \"metric\")\n    qc = QuantumCircuit(qr_path, qr_err, qr_met)\n    path = list(range(N))\n    err = list(range(N, N + n))\n    met = list(range(N + n, total))\n    comp = _metric_circuit(N, Q, gens, rec, path, err, met, total)\n    comp_inv = comp.inverse()\n    allq = list(range(total))\n    if prep:\n        qc.h(path)  # eq_1\n    for _ in range(R):\n        # eq_3: threshold phase oracle (-1)^[M<T]\n        qc.compose(comp, qubits=allq, inplace=True)\n        for v in range(min(T, 2 ** m)):\n            zeros = [met[i] for i in range(m) if not (v >> i) & 1]\n            if zeros:\n                qc.x(zeros)\n            _mcz(qc, met)\n            if zeros:\n                qc.x(zeros)\n        qc.compose(comp_inv, qubits=allq, inplace=True)\n        # eq_4: diffusion about uniform path state\n        qc.h(path)\n        qc.x(path)\n        _mcz(qc, path)\n        qc.x(path)\n        qc.h(path)\n    return qc",
+    "example_instance_json": "{\"N\":3,\"Q\":3,\"generators\":[7,5],\"received\":[3,1,0],\"threshold\":1,\"iterations\":2,\"prepare_uniform\":true}",
+    "register_layout": [
+      "qubits 0..N-1: path register, qubit t-1 = input/branch bit b_t (little-endian, qubit 0 = b_1)",
+      "qubits N..N+n-1: err work register (n = number of generators), reused per step and returned to |0>",
+      "qubits N+n..N+n+m-1: metric work register, m=bit_length(n*N), little-endian Hamming-distance counter, returned to |0>",
+      "example: N=3, n=2, m=3 -> path 0-2, err 3-4, metric 5-7 (8 qubits)",
+      "received integer r_t: bit j is the received bit for generator j; generator tap k=0 (current bit) is the MSB of the generator value"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: qc.h(path) when prepare_uniform is true",
+        "explanation": "Hadamards on the path register give the uniform superposition over all 2^N branch sequences (f=2)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_metric_circuit",
+        "explanation": "The branch outputs are the parity of the shift-register taps, computed with CNOTs from the path bits. They are XORed with the hardwired received bits and the mismatch weight is accumulated into the metric register by controlled increments. The state register is not stored explicitly."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit oracle block: compose(comp), per-value _mcz loop, compose(comp_inv)",
+        "explanation": "Metric computation, a -1 phase on every metric value v<T via multi-controlled Z, then metric uncomputation. The phase is applied directly, so no flag ancilla in |-> is needed."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: diffusion block (h, x, _mcz, x, h on path)",
+        "explanation": "Standard Grover diffusion 2|psi0><psi0|-I on the path register, up to global phase."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": "build_circuit: for _ in range(R) loop",
+        "explanation": "The count and success formula are classical analysis. Only the iteration count R is taken as an input parameter and repeated."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The trellis state register is not materialized. The code outputs are computed directly as XOR parities of the current and previous Q-1 path bits, with bits before step 1 treated as 0.",
+        "reason": "With s_0=0 the shift-register state is exactly the last Q-1 input bits, so this is equivalent and saves qubits under the 12-qubit cap."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The flag ancilla in |-> is replaced by a direct phase (multi-controlled Z) on each metric value below T. The err register is reused per step and uncomputed.",
+        "reason": "This avoids input-state preparation of an ancilla and saves a qubit, with the same phase action on the path register."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to one threshold-marking Grover operation with fixed T and R. The paper's specialized amplitude amplification, butterfly/FFT efficiency structure, soft-decision metrics and the outer Durr-Hoyer loop are omitted.",
+        "reason": "The abstract does not specify these procedures."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The uniform H layer is included in the circuit by default and can be disabled with prepare_uniform=false.",
+        "reason": "The Grover circuit needs the uniform superposition from |0...0>, and the spec lists this preparation as step 1."
+      }
+    ],
+    "assumptions": [
+      "f=2, binary rate-1/n feedforward code, hard-decision Hamming metric, start state 0, no tail termination",
+      "Generator integers use MSB = tap on the current input bit; instance fields are N, Q, generators, received, threshold (1..nN+1), iterations, prepare_uniform",
+      "Work registers (err, metric) start in |0> and are returned to |0>",
+      "The example received word 3,1,0 is the encoding of input bits 1,0,1 with generators (7,5), so M=0 for that path; T=1 gives K=1 and R=2 is near-optimal for 8 paths"
+    ],
+    "unresolved_issues": [
+      "The paper's actual phase function of path probability and its specialized amplitude amplification are not reproduced",
+      "K is not computed in the circuit; the caller must choose R",
+      "Whether the runner expects the uniform-superposition layer inside the operation is uncertain, hence the prepare_uniform switch"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 8,
+    "gate_count": 1339,
+    "depth": 961,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

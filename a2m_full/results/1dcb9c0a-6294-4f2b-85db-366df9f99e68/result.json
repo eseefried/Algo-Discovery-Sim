@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "1dcb9c0a-6294-4f2b-85db-366df9f99e68",
+  "parent_run_id": "d9dd0bd6-6f5b-41dd-9531-dfc8a57a8ce9",
+  "created_at": "2026-11-01T00:24:39.575941+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "60d048a889ab009cc19e26043f59e2401298032d5a8311647a39ef886bbb896a",
+  "source_specification_sha256": "1856c1fc8832920dcae12135e1f1756cb553572b4a7eb142cdec14077f199b8d",
+  "source_python_sha256": "cac1483482db8dbe789baa5ae1b0c0c28f09eff40507d74d6af4f46204132981",
+  "elapsed_seconds": 20.006,
+  "usage": {
+    "input_tokens": 5712,
+    "output_tokens": 3079,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the unitary core of the truncated-Fock phase-encoding and readout-rotation model (eq_2 and the basis-rotation part of eq_3): the diagonal phase shift exp(-i*phi*n) as P(-2^j*phi) gates on little-endian qubit j, followed optionally by H on every Fock qubit. Squeezed-state preparation, measurement, ML phase estimation, Kalman/RTS smoothing and minimax design are not part of the circuit.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef build_circuit(instance):\n    \"\"\"Phase encoding exp(-i*phi*n) on an n-qubit little-endian Fock register,\n    then optionally H on all qubits (readout basis rotation).\n    instance keys: n_qubits (int 1..12), phi (finite real, radians),\n    apply_readout_rotation (bool, optional, default True).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"n_qubits\")\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 12:\n        raise ValueError(\"n_qubits must be an integer in 1..12\")\n    phi = instance.get(\"phi\")\n    if isinstance(phi, bool) or not isinstance(phi, (int, float)):\n        raise ValueError(\"phi must be a real number\")\n    phi = float(phi)\n    if not math.isfinite(phi):\n        raise ValueError(\"phi must be finite\")\n    rot = instance.get(\"apply_readout_rotation\", True)\n    if not isinstance(rot, bool):\n        raise ValueError(\"apply_readout_rotation must be a bool\")\n    reg = QuantumRegister(n, \"fock\")\n    qc = QuantumCircuit(reg)\n    # eq_2: exp(-i*phi*nhat) = product_j P(-2^j * phi) on qubit j (bit j of n)\n    for j in range(n):\n        qc.p(-(2.0 ** j) * phi, reg[j])\n    # eq_3: Hadamard rotation of the Fock register (measurement left to runner)\n    if rot:\n        for j in range(n):\n            qc.h(reg[j])\n    return qc",
+    "example_instance_json": "{\"n_qubits\": 3, \"phi\": 0.7, \"apply_readout_rotation\": true}",
+    "register_layout": [
+      "Qubits 0..n_qubits-1: Fock register 'fock', little-endian: qubit j is bit j of photon number n = sum_j 2^j b_j",
+      "Example (n_qubits=3): qubit 0 = LSB (weight 1), qubit 1 = weight 2, qubit 2 = weight 4",
+      "No classical bits; no measurements in the circuit"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical random-walk generation of the hidden phase trajectory with uncertain q; the circuit takes a single phi as an input parameter."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop applying qc.p(-(2**j)*phi) on qubit j",
+        "explanation": "The diagonal phase shift exp(-i*phi*n) is implemented exactly with P gates. The squeezed-vacuum amplitudes c_n are not prepared because the runner supplies the input state."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: Hadamard loop under apply_readout_rotation",
+        "explanation": "Only the H^{⊗n} basis rotation is implemented. Measurement, outcome statistics and ML phase estimation are left to the runner or classical postprocessing."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical scalar Kalman filter; not a quantum circuit operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical RTS fixed-interval smoother; not a quantum circuit operation."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical minimax grid search for the robust design noise q_r."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Squeezed-vacuum state preparation (RY ladder) is omitted from the circuit. The circuit contains only the phase-encoding unitary.",
+        "reason": "The task requires an operation without input-state preparation; the runner prepares inputs."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Measurement is omitted. Only H on all Fock qubits is applied, and it can be disabled with apply_readout_rotation=false.",
+        "reason": "The circuit must be measurement-free and unitary."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The register size is generalized from a fixed 3 qubits to n_qubits in 1..12, and a single phi is a parameter of the instance.",
+        "reason": "The operation must work for varying valid instance parameters, with a cap of 12 qubits."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_4",
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "The classical smoothing and robust-design pipeline is excluded from the implemented scope.",
+        "reason": "These equations have no circuit realization. Only one quantum construction is implemented."
+      }
+    ],
+    "assumptions": [
+      "Register is little-endian: qubit j carries weight 2^j in Fock number n.",
+      "Phase phi is in radians and is applied as exp(-i*phi*n) with the sign convention of eq_2.",
+      "The runner supplies the truncated squeezed-state input and performs any measurement."
+    ],
+    "unresolved_issues": [
+      "The paper's actual robust smoother, its uncertainty model and the continuous-mode homodyne model are not reconstructed.",
+      "Squeezing parameter xi and the readout noise r are not used by the circuit.",
+      "Phase periodicity (2π ambiguity) is not addressed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 6,
+    "depth": 2,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

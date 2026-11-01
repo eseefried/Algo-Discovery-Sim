@@ -1,0 +1,142 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "56cc9ae1-b127-4b27-9da4-d734e3efc60d",
+  "parent_run_id": "6425e81c-2db0-496a-be80-2626ee805242",
+  "created_at": "2026-11-01T00:16:38.155479+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "3efacd1acf1c911e4dda2964ea408addb2511597199e941f55086c5b72ae6147",
+  "source_specification_sha256": "5170b01a08a4740168be8e82e3022908f79e84c9e94be9a3d2a7657ac7c8d3b0",
+  "source_python_sha256": "d3b75ff0d8bfa41740e803cce5edd5a762c78b2c3bddb12291453c7367e095bb",
+  "elapsed_seconds": 42.427,
+  "usage": {
+    "input_tokens": 5173,
+    "output_tokens": 6291,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds t Grover iterations over a small quantum phone book (N=2^k entries, constant name and number tables loaded by index-controlled X gates). Each iteration is: load tables, phase-flip the entries whose selected field (name or number) equals the query, unload tables, then diffuse the index register. The discrimination analysis (overlap and IDP success) is out of scope. The runner must supply H on the index register and |0> on the data registers.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _int(v, name, lo, hi):\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError(name + \" must be an integer in [%d, %d]\" % (lo, hi))\n    return v\n\n\ndef _table(v, name, n, bits):\n    if not isinstance(v, (list, tuple)) or len(v) != n:\n        raise ValueError(name + \" must be a list of length %d\" % n)\n    return [_int(x, name, 0, 2 ** bits - 1) for x in v]\n\n\ndef _mcz(qc, qs):\n    # multi-controlled Z on all qubits in qs\n    if len(qs) == 1:\n        qc.z(qs[0])\n    else:\n        qc.h(qs[-1])\n        qc.mcx(list(qs[:-1]), qs[-1])\n        qc.h(qs[-1])\n\n\ndef _load(qc, idx, tgt, values, bits):\n    # eq_1: |i>|0> -> |i>|value_i> by index-controlled X gates (self-inverse, also unloads)\n    for i, v in enumerate(values):\n        zeros = [idx[j] for j in range(len(idx)) if not (i >> j) & 1]\n        for b in range(bits):\n            if (v >> b) & 1:\n                if zeros:\n                    qc.x(zeros)\n                qc.mcx(list(idx), tgt[b])\n                if zeros:\n                    qc.x(zeros)\n\n\ndef _oracle(qc, data, q, bits):\n    # eq_2: phase flip (-1) when the data register equals the query q\n    zeros = [data[b] for b in range(bits) if not (q >> b) & 1]\n    if zeros:\n        qc.x(zeros)\n    _mcz(qc, list(data))\n    if zeros:\n        qc.x(zeros)\n\n\ndef _diffuse(qc, idx):\n    qc.h(list(idx))\n    qc.x(list(idx))\n    _mcz(qc, list(idx))\n    qc.x(list(idx))\n    qc.h(list(idx))\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    k = _int(instance.get(\"k\"), \"k\", 1, 4)\n    nb = _int(instance.get(\"name_bits\"), \"name_bits\", 1, 4)\n    mb = _int(instance.get(\"number_bits\"), \"number_bits\", 1, 4)\n    if k + nb + mb > 12:\n        raise ValueError(\"total qubits exceed 12\")\n    n = 2 ** k\n    names = _table(instance.get(\"names\"), \"names\", n, nb)\n    nums = _table(instance.get(\"numbers\"), \"numbers\", n, mb)\n    field = instance.get(\"search\")\n    if field not in (\"name\", \"number\"):\n        raise ValueError(\"search must be 'name' or 'number'\")\n    use_name = field == \"name\"\n    bits = nb if use_name else mb\n    data_vals = names if use_name else nums\n    q = _int(instance.get(\"query\"), \"query\", 0, 2 ** bits - 1)\n    t = instance.get(\"iterations\")\n    if t is None:\n        m = data_vals.count(q)\n        if m == 0:\n            raise ValueError(\"query matches no entry\")\n        theta = math.asin(math.sqrt(m / n))\n        t = max(0, int(round(math.pi / (4 * theta) - 0.5)))\n    else:\n        t = _int(t, \"iterations\", 0, 64)\n    idx = QuantumRegister(k, \"index\")\n    nreg = QuantumRegister(nb, \"name\")\n    mreg = QuantumRegister(mb, \"number\")\n    qc = QuantumCircuit(idx, nreg, mreg)\n    data = nreg if use_name else mreg\n    for _ in range(t):\n        _load(qc, idx, nreg, names, nb)\n        _load(qc, idx, mreg, nums, mb)\n        _oracle(qc, data, q, bits)\n        _load(qc, idx, mreg, nums, mb)\n        _load(qc, idx, nreg, names, nb)\n        _diffuse(qc, idx)\n    return qc",
+    "example_instance_json": "{\"k\":2,\"name_bits\":2,\"number_bits\":2,\"names\":[2,0,3,1],\"numbers\":[1,3,0,2],\"search\":\"number\",\"query\":3,\"iterations\":1}",
+    "register_layout": [
+      "qubits 0..k-1: index register (little-endian, qubit 0 least significant); expected input H^k|0>",
+      "qubits k..k+name_bits-1: name register (little-endian), expected input |0>, returned to |0>",
+      "qubits k+name_bits..k+name_bits+number_bits-1: number register (little-endian), expected input |0>, returned to |0>",
+      "example (k=2, 2-bit names, 2-bit numbers): index=0,1; name=2,3; number=4,5 (6 qubits total)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_load (index-controlled X loading and unloading of the name and number tables)",
+        "explanation": "Implements the loading of classical entries. The uniform index superposition H^k is not applied, so the runner prepares it."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_oracle (X on zero query bits, multi-controlled Z on the data register, undo X)",
+        "explanation": "Phase-flips entries whose selected field equals the query. A direct multi-controlled Z replaces the |-> flag ancilla, which is equivalent."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit default iterations: t = round(pi/(4*theta) - 1/2), theta = asin(sqrt(M/N))",
+        "explanation": "Used only when 'iterations' is omitted. The exact-angle form is used because round(pi/4*sqrt(N/M)) gives 2 for N=4, M=1 instead of the optimal 1."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Describes the 2D Grover geometry that the circuit realizes, so no separate code is needed."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The overlap of states for sizes N and N' is a classical post-processing analysis and needs a cross-size identification that this single circuit does not do."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The IDP success probability is a classical formula evaluated on overlaps and is not a circuit operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The initial H on the index register is not in the circuit; it is expected from the runner as input preparation.",
+        "reason": "The task requires an operation with no input-state preparation."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "No flag qubit or |-> preparation. The oracle is a direct phase flip via multi-controlled Z on the data register, and both data registers are unloaded after each oracle call.",
+        "reason": "Equivalent to the phase-kickback oracle while avoiding state preparation and an extra qubit."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The default iteration count is round(pi/(4 asin(sqrt(M/N))) - 1/2), with M counted from the table. An explicit 'iterations' value overrides it.",
+        "reason": "Gives the correct optimal t for small N and is a standard refinement of the approximate formula."
+      },
+      {
+        "equation_ids": [
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Scope narrowed to the Grover search circuit only. The discrimination analysis is not implemented.",
+        "reason": "It is statevector post-processing across two different database sizes rather than a single unitary circuit."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "M is not restricted to 1: the oracle marks every entry that matches the query. Table sizes are capped at k<=4 and 4 bits per field, with total qubits <=12.",
+        "reason": "The oracle handles multiple matches without extra work, and the caps keep the circuit within the 12-qubit limit."
+      }
+    ],
+    "assumptions": [
+      "The runner prepares H^k on the index register and |0> on the name and number registers.",
+      "Tables are fixed classical constants supplied in the instance.",
+      "The global phase of the diffusion (-1) is irrelevant.",
+      "N = 2^k with k >= 1; the search field is either 'name' or 'number'."
+    ],
+    "unresolved_issues": [
+      "The paper's programmable query mechanism and unknown-size parametrization are not reconstructed.",
+      "The overlap and IDP analysis for N versus N' must be done outside this circuit."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 286,
+    "depth": 184,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

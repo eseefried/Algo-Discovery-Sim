@@ -1,0 +1,151 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "668c22e1-64dc-48b9-aed7-7b246074797f",
+  "parent_run_id": "10be5ce5-e847-408d-808e-84fca88d5c84",
+  "created_at": "2026-11-01T00:24:25.527262+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "908f25f7f5b82235c9c181d91e87660f7f009cec1ced8d1a3797193f74e6dfa1",
+  "source_specification_sha256": "a9680df6d0a514f6870ce7a8bf71bf34a09d9a77d6d4937e65dffd0dfb43c8ef",
+  "source_python_sha256": "1680268d1b28b8ee1ddf0a9e8716525de0d0515113e8eed119265ccabe67306d",
+  "elapsed_seconds": 58.144,
+  "usage": {
+    "input_tokens": 6219,
+    "output_tokens": 8875,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the postselection-ready Gibbs-state preparation for a small Boltzmann machine. Each free unit gets an Ry(theta_i) mean-field rotation, then a classically tabulated multiplexed ancilla Ry whose |1> amplitude is sqrt(exp(-E(x))/(kappa Q(x))). Postselecting ancilla=1 gives sum_x sqrt(P(x))|x>. An optional clamp_visible vector fixes the visible units with X gates, so the hidden units get the conditional Gibbs state for the data term. No measurement, no amplitude estimation, no gradient update.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import RYGate\nimport math\n\n\ndef _finite(v, name, bound):\n    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or abs(v) > bound:\n        raise ValueError('invalid ' + name)\n    return float(v)\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef _energy(x, b, w):\n    # eq_1: E(x) = -sum_i b_i x_i - sum_{i<j} w_ij x_i x_j\n    e = 0.0\n    for i, bi in enumerate(b):\n        e -= bi * x[i]\n    for i, j, wij in w:\n        e -= wij * x[i] * x[j]\n    return e\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    nv = instance.get('n_visible')\n    nh = instance.get('n_hidden')\n    if not _is_int(nv) or not _is_int(nh) or nv < 1 or nh < 1:\n        raise ValueError('n_visible and n_hidden must be positive integers')\n    n = nv + nh\n    if n > 6 or n + 1 > 12:\n        raise ValueError('too many units (max 6 units plus 1 ancilla)')\n    b_raw = instance.get('biases')\n    if not isinstance(b_raw, list) or len(b_raw) != n:\n        raise ValueError('biases must be a list of length n_visible+n_hidden')\n    b = [_finite(v, 'bias', 10.0) for v in b_raw]\n    w_raw = instance.get('weights', [])\n    if not isinstance(w_raw, list):\n        raise ValueError('weights must be a list of [i, j, w]')\n    w = []\n    seen = set()\n    for t in w_raw:\n        if not isinstance(t, (list, tuple)) or len(t) != 3:\n            raise ValueError('weight entries are [i, j, w]')\n        i, j = t[0], t[1]\n        if not _is_int(i) or not _is_int(j) or i < 0 or j < 0 or i >= n or j >= n or i == j:\n            raise ValueError('invalid weight indices')\n        a, c = min(i, j), max(i, j)\n        if (a, c) in seen:\n            raise ValueError('duplicate weight pair')\n        seen.add((a, c))\n        w.append((a, c, _finite(t[2], 'weight', 10.0)))\n    clamp = instance.get('clamp_visible')\n    x_fix = [0] * n\n    free = list(range(n))\n    if clamp is not None:\n        if not isinstance(clamp, list) or len(clamp) != nv:\n            raise ValueError('clamp_visible must be a list of length n_visible')\n        for v in clamp:\n            if not _is_int(v) or v not in (0, 1):\n                raise ValueError('clamp_visible entries must be 0 or 1')\n        for i in range(nv):\n            x_fix[i] = clamp[i]\n        free = list(range(nv, n))\n    freeset = set(free)\n    f = len(free)\n    q = [0.5] * n\n    q_raw = instance.get('q')\n    if q_raw is None:\n        # eq_2: classical mean-field marginals (damped fixed point) on the free units\n        beff = {}\n        for i in free:\n            s = b[i]\n            for a, c, wij in w:\n                if a == i and c not in freeset:\n                    s += wij * x_fix[c]\n                if c == i and a not in freeset:\n                    s += wij * x_fix[a]\n            beff[i] = s\n        for _ in range(500):\n            for i in free:\n                s = beff[i]\n                for a, c, wij in w:\n                    if a == i and c in freeset:\n                        s += wij * q[c]\n                    if c == i and a in freeset:\n                        s += wij * q[a]\n                new = 1.0 / (1.0 + math.exp(-s))\n                val = 0.5 * q[i] + 0.5 * new\n                q[i] = min(1.0 - 1e-6, max(1e-6, val))\n    else:\n        if not isinstance(q_raw, list) or len(q_raw) != n:\n            raise ValueError('q must be a list of length n')\n        for i in range(n):\n            v = _finite(q_raw[i], 'q', 1.0)\n            if not (0.0 < v < 1.0):\n                raise ValueError('q entries must lie strictly in (0,1)')\n            q[i] = v\n    # classical table of ratios r(x) = exp(-E(x)) / Q(x) over free assignments\n    ratios = []\n    for m in range(2 ** f):\n        x = list(x_fix)\n        qm = 1.0\n        for k, idx in enumerate(free):\n            bit = (m >> k) & 1\n            x[idx] = bit\n            qm *= q[idx] if bit else (1.0 - q[idx])\n        ratios.append(math.exp(-_energy(x, b, w)) / qm)\n    kmin = max(ratios)\n    kappa = instance.get('kappa')\n    if kappa is None:\n        kappa = kmin\n    else:\n        kappa = _finite(kappa, 'kappa', 1e12)\n        if kappa < kmin * (1.0 - 1e-12):\n            raise ValueError('kappa too small: exp(-E) <= kappa Q violated')\n        kappa = max(kappa, kmin)\n    vis = QuantumRegister(nv, 'vis')\n    hid = QuantumRegister(nh, 'hid')\n    anc = QuantumRegister(1, 'anc')\n    qc = QuantumCircuit(vis, hid, anc)\n    qubits = list(vis) + list(hid)\n    # clamped visible units (data term, eq_5)\n    for i in range(n):\n        if i not in freeset and x_fix[i] == 1:\n            qc.x(qubits[i])\n    # mean-field product state Ry(theta_i)|0>, q_i = sin^2(theta_i/2)  (eq_2)\n    for i in free:\n        theta = 2.0 * math.asin(math.sqrt(q[i]))\n        qc.ry(theta, qubits[i])\n    # multiplexed ancilla rotation (eq_3)\n    targets = [qubits[i] for i in free] + [anc[0]]\n    for m in range(2 ** f):\n        s = min(1.0, ratios[m] / kappa)\n        phi = 2.0 * math.asin(math.sqrt(s))\n        if phi == 0.0:\n            continue\n        qc.append(RYGate(phi).control(f, ctrl_state=m), targets)\n    return qc",
+    "example_instance_json": "{\"n_visible\": 1, \"n_hidden\": 1, \"biases\": [0.3, -0.2], \"weights\": [[0, 1, 0.8]], \"clamp_visible\": null}",
+    "register_layout": [
+      "qubit 0: vis[0] (visible unit 0, little-endian bit 0)",
+      "qubits 1..n_visible-1: further visible units",
+      "qubits n_visible..n_visible+n_hidden-1: hidden units (example: qubit 1 = hid[0])",
+      "qubit n_visible+n_hidden: ancilla anc[0], postselect on |1> (example: qubit 2)",
+      "encoding: unit qubit |x_i> = binary unit value x_i; ancilla |1> marks accepted branch; basis index bit i = qubit i"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_energy",
+        "explanation": "Energy with biases and each pair counted once, evaluated classically to build the ancilla rotation table."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: mean-field fixed point (q) and Ry(theta_i) loop",
+        "explanation": "Q is the product of q_i factors with q_i=sin^2(theta_i/2), prepared by Ry(theta_i) on each free qubit. The typographical Q formula is not used."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: ratios table and RYGate(phi).control(f, ctrl_state=m) loop",
+        "explanation": "For every free assignment m the ancilla rotates with sin^2(phi/2)=exp(-E)/(kappa Q), so postselecting ancilla=1 gives sqrt(P(x)). Postselection itself is left to the runner."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Readout identity from Z and ZZ expectations. It is applied after the circuit and is not part of the operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: clamp_visible handling (X gates, free-unit restriction)",
+        "explanation": "One training vector per circuit: visible qubits are clamped with X gates and the hidden units get the conditional Gibbs state. The sum over training vectors and the h_j readout are classical."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The gradient combination and the gradient-ascent update with eta are classical postprocessing."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Q(x) is the product of q_i^{x_i}(1-q_i)^{1-x_i} with q_i=sin^2(theta_i/2), not the garbled sin^{2(theta_i/2) x_i} latex.",
+        "reason": "The latex is a typographical simplification, and Ry(theta)|0> gives P(1)=sin^2(theta/2)."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Mean-field marginals q are computed by a damped fixed-point iteration q_i=sigmoid(b_i+sum_j w_ij q_j), clipped to [1e-6,1-1e-6], unless the instance supplies q.",
+        "reason": "The spec leaves the mean-field computation unspecified. The construction needs only that Q be a product distribution with q strictly inside (0,1)."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "kappa defaults to max_x exp(-E)/Q (the smallest valid value) and P_succ=Z/kappa because Q is normalized. A user-supplied kappa below that maximum raises ValueError.",
+        "reason": "This guarantees exp(-E)<=kappa Q, so every ancilla rotation amplitude is at most 1."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The multiplexed rotation is built from 2^f multi-controlled RYGate instances with explicit ctrl_state, limited to at most 6 units.",
+        "reason": "This uses standard gates only and stays tractable at small sizes."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "In clamp mode the energy, mean-field and rotation table are restricted to the hidden units with the visible values fixed. Only one training vector is handled per circuit.",
+        "reason": "This is the conditional Gibbs state P(h|v), and the data average is done classically."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Biases and weights are bounded in absolute value by 10, and weights are given as [i,j,w] triples over all units, with visible units first.",
+        "reason": "This keeps the exponentials finite and defines full connectivity, including visible-visible and hidden-hidden couplings."
+      }
+    ],
+    "assumptions": [
+      "Unit order is visible units first, then hidden units, then the ancilla, with little-endian qubit indexing.",
+      "The builder knows b and w, so rotation angles are computed classically for tiny instances.",
+      "Postselection on ancilla=1 and the Z/ZZ readout are done exactly by the runner outside this operation.",
+      "Applying X gates to clamp visible units and Ry gates for the mean-field state are part of the state-preparation operation, since the qubits start in |0>."
+    ],
+    "unresolved_issues": [
+      "No amplitude estimation, Grover amplification, QRAM data access or energy-oracle phase implementation is included.",
+      "The O(sqrt(kappa)/epsilon) scaling and the speedup claims are not represented.",
+      "Only small fully connected instances (at most 6 units) are supported.",
+      "The mean-field fixed point is a heuristic and not guaranteed to minimise kappa."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 102,
+    "depth": 71,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}
