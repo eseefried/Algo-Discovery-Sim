@@ -1,7 +1,5 @@
 # Examples from the hybrid swarm
 
-**Every example below comes from your three-agent hybrid swarm.** There are no single-attempt Nemotron baseline examples in this file. The snapshots cover three candidates from two completed swarm runs; examples 1 and 2 belong to the same affine-function pilot.
-
 Nemotron proposes numbered LaTeX equations. Sonnet coordinates method plans, assembles mathematical specifications, generates Qiskit code, and reviews candidates. The raw native equations and coordinator additions are stored separately. These are hybrid-system outputs, not code written by the fine-tuned Nemotron model.
 
 | Example | Swarm run | Candidate | Docker / Aer | Swarm decision |
