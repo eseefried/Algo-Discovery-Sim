@@ -1,0 +1,138 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "20eaaf74-2939-4257-9b53-6ecf2a58c423",
+  "parent_run_id": "9f37b962-29fc-4e99-9e11-eb124223bc1f",
+  "created_at": "2026-11-01T00:20:06.366493+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "b2f0995ae504f0a1f72b3ed60b17bbd934d47bedc1a88767356b375132da5641",
+  "source_specification_sha256": "62d8d19f83c80650276c45af5ac3d5d892ba703978c7d27a0d039c607037a004",
+  "source_python_sha256": "4a8fffc0cd563f87f8e53f1a02644d0fd3fb68ccc4095386448d5f7c4aa974e7",
+  "elapsed_seconds": 29.105,
+  "usage": {
+    "input_tokens": 5341,
+    "output_tokens": 4336,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Trotterized two-stage continuous-time quantum walk search operation U on an n-cube (hypercube, A = sum_j X_j) with n in {3,4}, one marked vertex w, and no ancillas. Stage k applies r first-order Trotter steps of RX mixing at rate gamma_k for total time T_k, interleaved with a phase oracle exp(i dt |w><w|) built from X-conjugated multi-controlled phase. Setting T2=0 gives the single-stage walk. The circuit contains no state preparation or measurement.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _real(x, name, strictly_positive):\n    if isinstance(x, bool) or not isinstance(x, (int, float)):\n        raise ValueError(name + ' must be a real number')\n    x = float(x)\n    if not math.isfinite(x):\n        raise ValueError(name + ' must be finite')\n    if strictly_positive and x <= 0.0:\n        raise ValueError(name + ' must be > 0')\n    if (not strictly_positive) and x < 0.0:\n        raise ValueError(name + ' must be >= 0')\n    return x\n\n\ndef _integer(x, name, lo, hi):\n    if isinstance(x, bool) or not isinstance(x, int):\n        raise ValueError(name + ' must be an integer')\n    if x < lo or x > hi:\n        raise ValueError(name + ' must be in [' + str(lo) + ', ' + str(hi) + ']')\n    return x\n\n\ndef _stage(qc, n, w, gamma, t, r):\n    # eq_1/eq_4: (exp(i gamma A dt) exp(i |w><w| dt))^r, dt = t/r, A = sum_j X_j\n    dt = t / r\n    for _ in range(r):\n        for j in range(n):\n            # exp(i gamma dt X) = RX(-2 gamma dt)\n            qc.rx(-2.0 * gamma * dt, j)\n        for j in range(n):\n            if not (w >> j) & 1:\n                qc.x(j)\n        # phase exp(i dt) on |1...1>, i.e. on |w> after conjugation\n        qc.mcp(dt, list(range(n - 1)), n - 1)\n        for j in range(n):\n            if not (w >> j) & 1:\n                qc.x(j)\n\n\ndef build_circuit(instance):\n    \"\"\"Two-stage Trotterized hypercube walk-search operation U = U2 U1 (eq_2).\n\n    instance keys: n (3 or 4), w (marked vertex), gamma1, T1, gamma2, T2, r.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    for key in ('n', 'w', 'gamma1', 'T1', 'gamma2', 'T2', 'r'):\n        if key not in instance:\n            raise ValueError('missing key ' + key)\n    n = _integer(instance['n'], 'n', 3, 4)\n    w = _integer(instance['w'], 'w', 0, 2 ** n - 1)\n    r = _integer(instance['r'], 'r', 1, 200)\n    g1 = _real(instance['gamma1'], 'gamma1', True)\n    g2 = _real(instance['gamma2'], 'gamma2', True)\n    t1 = _real(instance['T1'], 'T1', False)\n    t2 = _real(instance['T2'], 'T2', False)\n    reg = QuantumRegister(n, 'v')\n    qc = QuantumCircuit(reg, name='two_stage_walk_search')\n    if t1 > 0.0:\n        _stage(qc, n, w, g1, t1, r)\n    if t2 > 0.0:\n        _stage(qc, n, w, g2, t2, r)\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"w\": 5, \"gamma1\": 0.33, \"T1\": 2.0, \"gamma2\": 0.5, \"T2\": 1.0, \"r\": 20}",
+    "register_layout": [
+      "Register 'v' with n qubits (n=3 or 4); qubit i (Qiskit index i) holds bit i of the vertex label, little-endian, so qubit 0 is the least significant bit of w.",
+      "Marked vertex w is in {0,...,2^n-1} and uses the same little-endian encoding.",
+      "No ancilla qubits. Input state (e.g. uniform superposition from Hadamards) must be prepared by the runner."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_stage: RX mixing implements the -gamma*A term with A=sum_j X_j; mcp-based oracle implements the -|w><w| term",
+        "explanation": "H(gamma)=-gamma A - |w><w| is split into hypercube hopping and a marked-vertex phase. The graph is fixed to the n-cube, which is a stand-in for the paper's graphs."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: stage 1 (gamma1,T1) followed by stage 2 (gamma2,T2)",
+        "explanation": "Sequential composition U = exp(-iH(gamma2)T2) exp(-iH(gamma1)T1), each stage Trotterized. T2=0 reduces it to a single stage."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Success probability and the uniform start state are an experiment/readout concern. The circuit is the operation U only, with no state preparation or measurement."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_stage",
+        "explanation": "First-order Trotter product of exp(i gamma A dt) and exp(i dt |w><w|). For the hypercube the first factor is the product of RX(-2 gamma dt) on each qubit. The oracle is a free-angle phase on |w> built from X conjugation and a multi-controlled phase gate."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The T_opt versus sqrt(N) scan and fit is classical post-processing over many circuits, not part of one circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_4"
+        ],
+        "change": "Graph restricted to the hypercube on n=3 or 4 qubits with A=sum_j X_j; no complete-graph-pair or bridge graph is implemented.",
+        "reason": "The paper's exact graphs are not given in the specification, and the hypercube factorization is the only one stated explicitly."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The Hadamard state preparation listed in the steps is omitted from the circuit.",
+        "reason": "The task requires the circuit to be an operation with inputs prepared by the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The oracle is realised as a phase exp(i dt) on |w> with a free angle, implemented in-circuit via X gates and a multi-controlled phase, rather than as an external black box.",
+        "reason": "A black-box oracle is unavailable, and the free-angle oracle is needed to match exp(-iH dt)."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "Trotter step count r is shared by both stages and capped at 200. A stage with T=0 is skipped.",
+        "reason": "Bounds circuit size and keeps the single-stage case a special case."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Scan and fit are not implemented.",
+        "reason": "They are classical scaling analysis, outside one circuit construction."
+      }
+    ],
+    "assumptions": [
+      "Adjacency-matrix Hamiltonian with the Childs-Goldstone sign convention H=-gamma A - |w><w|.",
+      "Within each Trotter step the graph term is applied first, then the oracle phase.",
+      "Little-endian vertex encoding, with qubit i corresponding to bit i of the vertex label.",
+      "The global phase from the exact exp(i dt) convention is retained through the mcp gate, up to Trotter error.",
+      "The runner prepares the initial state, typically the uniform superposition, and does the measurement."
+    ],
+    "unresolved_issues": [
+      "The paper's actual two graph families and their critical gamma values are not reproduced.",
+      "Appropriate gamma1, gamma2, T1, T2 and r must be chosen by an external scan; the example values are guesses near gamma ~ 1/n.",
+      "First-order Trotter error is not controlled analytically, so results approximate the exact evolution.",
+      "Whether the true oracle allows a free phase angle or only a fixed sign flip is unresolved."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 720,
+    "depth": 520,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

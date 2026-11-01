@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "d8c4546c-ca93-49a9-afa3-96f377f847d2",
+  "parent_run_id": "b3511eb8-07be-4867-8ad5-06f1fe3b0069",
+  "created_at": "2026-11-01T00:28:27.363401+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "4a3e6297e461d3c6e32478389881d69d5f08bb8d6081c82519033db995d2efe7",
+  "source_specification_sha256": "a4f1b73033a4f513ef2fe8e7514c1a22ef6c9ff88d5d9a0ddbccab6e2b01f902",
+  "source_python_sha256": "461264c0686c90e3ac41beb6458ce74afd9804ad988b8588577f9686969314db",
+  "elapsed_seconds": 35.131,
+  "usage": {
+    "input_tokens": 5289,
+    "output_tokens": 5027,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the Hadamard-test operation H(ctrl) - controlled-U_sigma - H(ctrl) on 3 qubits, with exactly one controlled query to a permutation sigma of {0,1,2,3}. U_sigma is built from multi-controlled X gates by cycle-to-transposition decomposition. Probe-state preparation, measurement and the parity decision are left to the runner or classical post-processing.",
+    "source_python": "from qiskit import QuantumCircuit\nfrom qiskit.circuit.library import XGate\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict) or 'permutation' not in instance:\n        raise ValueError('instance must be a dict with key permutation')\n    p = instance['permutation']\n    if not isinstance(p, (list, tuple)) or len(p) != 4:\n        raise ValueError('permutation must have length 4')\n    out = []\n    for v in p:\n        if isinstance(v, bool) or not isinstance(v, int):\n            raise ValueError('permutation entries must be ints')\n        out.append(v)\n    if sorted(out) != [0, 1, 2, 3]:\n        raise ValueError('not a permutation of 0..3')\n    return out\n\n\ndef _cycles(perm):\n    seen = [False] * 4\n    cycles = []\n    for s in range(4):\n        if seen[s]:\n            continue\n        cyc = []\n        x = s\n        while not seen[x]:\n            seen[x] = True\n            cyc.append(x)\n            x = perm[x]\n        if len(cyc) > 1:\n            cycles.append(cyc)\n    return cycles\n\n\ndef _cswap_single_bit(qc, a, b):\n    # a, b differ in exactly one bit; qubit 0 = ctrl, qubit 1 = bit0, qubit 2 = bit1\n    diff = a ^ b\n    tbit = 0 if diff == 1 else 1\n    kbit = 1 - tbit\n    v = (a >> kbit) & 1\n    cs = 1 | (v << 1)\n    qc.append(XGate().control(2, ctrl_state=cs), [0, kbit + 1, tbit + 1])\n\n\ndef _cswap(qc, a, b):\n    # controlled transposition |a> <-> |b> on the sys register\n    if a ^ b == 3:\n        # CX(bit0 -> bit1) maps x -> x ^ (2 if x&1 else 0); conjugation relabels the pair\n        def f(x):\n            return x ^ (2 if (x & 1) else 0)\n        qc.cx(1, 2)\n        _cswap_single_bit(qc, f(a), f(b))\n        qc.cx(1, 2)\n    else:\n        _cswap_single_bit(qc, a, b)\n\n\ndef build_circuit(instance):\n    \"\"\"Hadamard-test operation: H(ctrl), controlled-U_sigma (one query), H(ctrl).\n    Qubit 0 = ctrl; qubits 1,2 = sys with x = 2*q2 + q1.\"\"\"\n    perm = _validate(instance)\n    qc = QuantumCircuit(3)\n    qc.h(0)\n    # U_sigma|x> = |sigma(x)>: cycle (c0 c1 ... ck-1) with c_i -> c_{i+1}\n    # equals swaps (c_{k-2},c_{k-1}), ..., (c_0,c_1) applied in that order\n    for cyc in _cycles(perm):\n        for i in range(len(cyc) - 2, -1, -1):\n            _cswap(qc, cyc[i], cyc[i + 1])\n    qc.h(0)\n    return qc",
+    "example_instance_json": "{\"permutation\": [1, 2, 0, 3]}",
+    "register_layout": [
+      "qubit 0: ctrl (Hadamard-test control, least significant bit of the Qiskit index)",
+      "qubit 1: sys bit b0 (least significant bit of ququart x)",
+      "qubit 2: sys bit b1 (most significant bit of ququart x); x = 2*b1 + b0",
+      "Input convention: runner prepares the probe |phi> on qubits 1,2 and ctrl in |0>; the operation applies H, controlled-U_sigma, H on ctrl; ctrl is to be measured by the runner"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Parity as determinant of the permutation matrix is a standard fact motivating the task; the circuit does not compute it."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit (H on ctrl, controlled-U_sigma via _cswap, H on ctrl)",
+        "explanation": "The Hadamard-test structure with a single controlled-U_sigma query. P0 = (1+Re<phi|U|phi>)/2 holds for the runner-prepared probe |phi>."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Classical amplitude expansion of the overlap, used only for offline tabulation; no circuit element."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Existence and search of a probe |phi> separating even and odd permutations is not resolved here and is not part of the operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical decision rule on 2*P0-1 is post-processing performed outside the circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Probe-state preparation of |phi> (spec step 2) is omitted from the circuit; |phi> is expected to be prepared by the runner on qubits 1,2.",
+        "reason": "The task requires an operation without input-state preparation, and no verified separating |phi> is available."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The black-box placeholder is replaced by an explicit controlled permutation built from multi-controlled X gates and CX conjugation, parametrized by the instance permutation.",
+        "reason": "A concrete bound unitary circuit is required, and an opaque dense unitary is not allowed."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_5"
+        ],
+        "change": "Measurement of ctrl is not included in the circuit.",
+        "reason": "The circuit must be measurement-free; the runner measures or computes P(0) from the final state."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The parity-decision claim is narrowed: no claim is made that the single-probe separation exists or that parity is determined.",
+        "reason": "The separation property is unverified in the specification."
+      }
+    ],
+    "assumptions": [
+      "Instance is {\"permutation\": [sigma(0),sigma(1),sigma(2),sigma(3)]} with U|x>=|sigma(x)>",
+      "Sys encoding x = 2*q2 + q1, control is qubit 0",
+      "The initial H on the control is part of the operation, and ctrl is supplied in |0>",
+      "The controlled oracle counts as one query; its internal gate decomposition is an implementation detail"
+    ],
+    "unresolved_issues": [
+      "No verified probe |phi> separating even and odd permutations by Re<phi|U|phi> is given",
+      "The correspondence to the paper's photonic ququart protocol is not established",
+      "The two-copy antisymmetric variant is not implemented"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 36,
+    "depth": 25,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

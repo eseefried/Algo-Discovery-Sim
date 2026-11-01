@@ -1,0 +1,129 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "9b2eb9a6-1f52-4088-a61a-14e3840df5a0",
+  "parent_run_id": "c93174b2-7a82-4c75-a388-8694e17ead41",
+  "created_at": "2026-10-31T22:19:20.675468+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "b89c2da0d7ecc42248adde31f279f701e43bb9439f3df039c5b5509569689a12",
+  "source_specification_sha256": "0c9693e785d16cc2d90ca57f25255ab5ae4688a45d9ab87e08ac621c6979793e",
+  "source_python_sha256": "0baff215e401f86bfa2b3f62b35f40cf97e81b4dd2248f78b58d3c852d4503ad",
+  "elapsed_seconds": 54.123,
+  "usage": {
+    "input_tokens": 4736,
+    "output_tokens": 7329,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Order-finding core of Shor's algorithm for N=15 with a base a coprime to 15 and t counting qubits (t<=8). It applies ideal controlled modular multiplications U_a^(2^k) built from cswap/cx, then a QFT whose controlled-phase angles are perturbed as theta_k + epsilon + delta_g. The sign convention matches QFTGate and eq_2. Hadamards and the work-register |1> preparation are left to the runner.",
+    "source_python": "import math\nimport numpy as np\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n_ROT = {2: ((2, 3), (1, 2), (0, 1)), 4: ((0, 2), (1, 3)), 8: ((0, 1), (1, 2), (2, 3))}\n_MULT = {1: (1, False), 2: (2, False), 4: (4, False), 8: (8, False), 14: (1, True), 13: (2, True), 11: (4, True), 7: (8, True)}\n\n\ndef _num(v):\n    if isinstance(v, bool) or not isinstance(v, (int, float)):\n        raise ValueError('numeric parameter required')\n    v = float(v)\n    if not math.isfinite(v):\n        raise ValueError('parameter must be finite')\n    return v\n\n\ndef _cmult(qc, c, w, m):\n    # controlled |y> -> |m y mod 15> on 4 work qubits (little endian); eq_2 modular exponentiation\n    base, comp = _MULT[m]\n    if base != 1:\n        for i, j in _ROT[base]:\n            qc.cswap(c, w[i], w[j])\n    if comp:\n        for q in w:\n            qc.cx(c, q)\n\n\ndef _perturbed_qft(qc, q, eps, deltas):\n    # eq_3: QFT (same convention as QFTGate) with angle 2*pi/2^k + eps + delta_g per controlled phase\n    n = len(q)\n    g = 0\n    for j in range(n - 1, -1, -1):\n        qc.h(q[j])\n        for m in range(j - 1, -1, -1):\n            qc.cp(2 * math.pi / 2 ** (j - m + 1) + eps + deltas[g], q[m], q[j])\n            g += 1\n    for i in range(n // 2):\n        qc.swap(q[i], q[n - 1 - i])\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be an object')\n    N = instance.get('N', 15)\n    a = instance.get('a', 7)\n    t = instance.get('t', 8)\n    for v in (N, a, t):\n        if isinstance(v, bool) or not isinstance(v, int):\n            raise ValueError('N, a, t must be integers')\n    if N != 15:\n        raise ValueError('only N=15 is supported')\n    if a not in (2, 4, 7, 8, 11, 13, 14) or math.gcd(a, N) != 1:\n        raise ValueError('a must be coprime to 15 with 1<a<15')\n    if t < 1 or t > 8:\n        raise ValueError('t must be in 1..8 (total qubits <= 12)')\n    eps = _num(instance.get('epsilon', 0.0))\n    sigma = _num(instance.get('sigma', 0.0))\n    if sigma < 0:\n        raise ValueError('sigma must be >= 0')\n    ng = t * (t - 1) // 2\n    if 'deltas' in instance:\n        d = instance['deltas']\n        if not isinstance(d, list) or len(d) != ng:\n            raise ValueError('deltas must be a list of length t(t-1)/2')\n        deltas = [_num(x) for x in d]\n    elif sigma > 0:\n        seed = instance.get('seed', 0)\n        if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:\n            raise ValueError('seed must be a non-negative integer')\n        deltas = [float(x) for x in np.random.default_rng(seed).normal(0.0, sigma, ng)]\n    else:\n        deltas = [0.0] * ng\n    cnt = QuantumRegister(t, 'cnt')\n    wrk = QuantumRegister(4, 'wrk')\n    qc = QuantumCircuit(cnt, wrk)\n    w = list(wrk)\n    for k in range(t):\n        m = pow(a, 2 ** k, 15)\n        _cmult(qc, cnt[k], w, m)\n    _perturbed_qft(qc, list(cnt), eps, deltas)\n    return qc",
+    "example_instance_json": "{\"N\":15,\"a\":7,\"t\":8,\"epsilon\":0.02,\"sigma\":0.01,\"seed\":1}",
+    "register_layout": [
+      "Qubits 0..t-1: counting register 'cnt', little endian (qubit k is bit k of x and of y)",
+      "Qubits t..t+3: work register 'wrk' for y mod 15, little endian (qubit t+i is bit i)",
+      "Expected runner input: counting register in uniform superposition (Hadamards), work register |0001>",
+      "Example: t=8 gives 12 qubits total (cnt 0..7, wrk 8..11)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Order definition. Not computed in the circuit; it only motivates the choice of multipliers a^(2^k) mod 15, which the code computes via pow(a, 2**k, 15)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop with _cmult (modular exponentiation) followed by _perturbed_qft (QFT with e^{+2 pi i x y/Q} sign)",
+        "explanation": "Controlled modular multiplications take sum_x|x>|1> to sum_x|x>|a^x mod 15>. The QFT then gives the eq_2 state when the angle errors are zero. The Hadamards and work |1> are supplied by the runner."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_perturbed_qft and the deltas construction in build_circuit",
+        "explanation": "Every controlled-phase angle is 2 pi/2^k + epsilon + delta_g. Systematic error is epsilon, random error is delta_g (explicit list or seeded Gaussian with std sigma), combined error uses both."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Success probability is a figure of merit computed from measurement statistics, not an operation. The circuit contains no measurement."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical gcd post-processing after continued fractions is not part of the unitary circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Scope narrowed to N=15, with a in {2,4,7,8,11,13,14}, t<=8. Modular exponentiation is built from cswap/cx permutation networks because a^(2^k) mod 15 is in {1,2,4,7,8,11,13,14}.",
+        "reason": "A general modular-exponentiation circuit is not specified and the 12-qubit cap makes a small fixed-modulus construction necessary."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The operation excludes initial Hadamards on the counting register and the work register preparation |1>.",
+        "reason": "The task forbids input-state preparation in the returned operation; the runner prepares inputs."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Errors apply only to controlled-phase gates of the QFT. Hadamards, swaps and the modular exponentiation are ideal. delta_j is indexed by controlled-phase gate in emission order (target j descending, control m descending). Random errors are either given explicitly or drawn from a seeded normal distribution.",
+        "reason": "The abstract gives no parametrization; a deterministic, bound circuit requires fixed numeric angles."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Measurement, success probability and classical post-processing are not implemented.",
+        "reason": "The circuit must be measurement-free and purely unitary."
+      }
+    ],
+    "assumptions": [
+      "The QFT sign convention follows eq_2 (e^{+2 pi i x y/Q}), identical to QFTGate; the circuit is the explicit H/cp/swap decomposition with the angles perturbed.",
+      "Counting qubit k controls multiplication by a^(2^k) mod 15; for k>=2 this multiplier is 1, so no gates are emitted.",
+      "Multiplication by 7, 11, 13 and 14 is implemented as a rotation (by 3, 2, 1 or 0 positions) followed by complement of all four work bits (since -y = 15-y mod 15), which is valid on y in 0..14.",
+      "The runner is expected to set the work register to |0001>."
+    ],
+    "unresolved_issues": [
+      "The paper's actual error model, affected gates and threshold formula are unknown, so the perturbation model is a proposal.",
+      "Work states y=15 (outside the modular group) are not acted on meaningfully; the circuit is intended for inputs y in 0..14.",
+      "The success-probability metric and threshold must be computed outside this module."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 12,
+    "gate_count": 249,
+    "depth": 97,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

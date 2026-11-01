@@ -1,0 +1,127 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "68c46cb3-c81d-4583-b2d2-b5defcc54589",
+  "parent_run_id": "ae82899d-fcfd-4403-af5c-748d701366a4",
+  "created_at": "2026-11-01T00:30:06.247847+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "827cc930fe29a54048c06ef2dcfeb188d3a8872c9f9ae8be5d6839a7f15e9ec1",
+  "source_specification_sha256": "8bdd3dae304801510a970be1366a074ee6d51aa87004f78dd1f888096f026258",
+  "source_python_sha256": "362a01406e1099c81884e8e803d24c8557fe52136ffcc3ecf8717a1fb3fd67cd",
+  "elapsed_seconds": 29.206,
+  "usage": {
+    "input_tokens": 5845,
+    "output_tokens": 4187,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "One-qubit operation implementing k sequential applications of the noisy amplitude-error pi pulse U = exp(-i*pi*(1+epsilon)/2 * sigma_x) = Rx(pi(1+epsilon)), where k is given either directly or as 2^stage. An optional known ideal X pulse removes the leftover ideal pulse for odd k, so the net operation is a pure rotation by k*phi about x (phi = pi*epsilon) up to global phase. State preparation, basis change, measurement and all classical estimation (atan2, branch unwrapping, scaling) are left to the runner and the classical post-processing.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\nMAX_POWER = 1024\nMAX_STAGE = 10\n\n\ndef _is_real(value):\n    return (not isinstance(value, bool)) and isinstance(value, (int, float)) and math.isfinite(value)\n\n\ndef _is_int(value):\n    return (not isinstance(value, bool)) and isinstance(value, int)\n\n\ndef build_circuit(instance):\n    \"\"\"U^k for the amplitude-error gate U = Rx(pi*(1+epsilon)) on one qubit.\n\n    instance keys: epsilon (float, |epsilon|<=0.5); exactly one of\n    stage (int 0..10, k=2^stage) or power (int 0..1024, k=power);\n    undo_ideal_pulse (bool, optional): append a known X if k is odd.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    allowed = {'epsilon', 'stage', 'power', 'undo_ideal_pulse'}\n    for key in instance:\n        if key not in allowed:\n            raise ValueError('unknown instance key: %s' % (key,))\n    if 'epsilon' not in instance:\n        raise ValueError('epsilon is required')\n    eps = instance['epsilon']\n    if not _is_real(eps) or abs(eps) > 0.5:\n        raise ValueError('epsilon must be a finite real with |epsilon| <= 0.5')\n    has_stage = 'stage' in instance\n    has_power = 'power' in instance\n    if has_stage == has_power:\n        raise ValueError('provide exactly one of stage or power')\n    if has_stage:\n        j = instance['stage']\n        if not _is_int(j) or j < 0 or j > MAX_STAGE:\n            raise ValueError('stage must be an int in 0..%d' % MAX_STAGE)\n        k = 2 ** j\n    else:\n        k = instance['power']\n        if not _is_int(k) or k < 0 or k > MAX_POWER:\n            raise ValueError('power must be an int in 0..%d' % MAX_POWER)\n    undo = instance.get('undo_ideal_pulse', False)\n    if not isinstance(undo, bool):\n        raise ValueError('undo_ideal_pulse must be a bool')\n\n    q = QuantumRegister(1, 'q')\n    qc = QuantumCircuit(q)\n    # eq_1: noisy pi pulse, theta = pi*(1+epsilon), U = exp(-i*theta/2*sigma_x)\n    theta = math.pi * (1.0 + float(eps))\n    # eq_2: U^k as k sequential black-box placements (k queries)\n    for _ in range(k):\n        qc.rx(theta, 0)\n    # eq_2: odd k leaves an ideal pi pulse (-i X); undo it with a known X\n    if undo and (k % 2 == 1):\n        qc.x(0)\n    return qc",
+    "example_instance_json": "{\"epsilon\": 0.05, \"stage\": 2, \"undo_ideal_pulse\": true}",
+    "register_layout": [
+      "qubit 0: q[0], the single data qubit; U^k acts on it (little-endian trivial, 1 qubit)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: theta = pi*(1+epsilon) and qc.rx(theta, 0)",
+        "explanation": "Rx(theta) = exp(-i*theta/2*sigma_x) is exactly the noisy gate U. The factorization into an ideal pulse times a rotation by phi is an algebraic identity, realized implicitly."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop of k qc.rx calls and optional qc.x for odd k",
+        "explanation": "k sequential copies of U give U^k. For even k this equals the pure rotation exp(-i*(k/2)*phi*sigma_x) up to global phase. For odd k the optional known X cancels the ideal pulse, up to global phase."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The SPAM signal model (visibility, bias) concerns state preparation and measurement, which the runner handles. The operation includes no SPAM."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "atan2 readout is classical post-processing of measured counts. No measurement is allowed in the circuit."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Branch unwrapping and refinement is classical adaptive post-processing across stages."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Heisenberg scaling is an asymptotic statement about estimation error versus query count. It motivates the choice k=2^stage but is not a circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Scope narrowed to the coherent U^k operation for a single stage (single k) on one qubit. The full multi-stage adaptive estimation protocol is not built.",
+        "reason": "The task requires a single measurement-free unitary operation, with preparation, measurement and classical estimation excluded."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The task spec writes U^{2k} = (-1)^k exp(-i k phi sigma_x), a pure rotation by 2k*phi. The code handles general k (even or odd) by repeated U, with an optional X to cancel the ideal pulse for odd k, so the net rotation angle is k*phi for the k applications.",
+        "reason": "The estimation stages use k=2^j applications, so the operation is parametrized by number of applications, not by 2k."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Restricted to axis n=x with |epsilon|<=0.5, with no off-resonance component.",
+        "reason": "Matches the stated narrow amplitude-error-only scope. The bound is an input validation limit."
+      }
+    ],
+    "assumptions": [
+      "Axis n = x, no off-resonance error, no drift.",
+      "The ideal pulse correction for odd k is an optional exact X gate (known pi pulse), which differs from the exact remainder only by a global phase.",
+      "Power is capped at 1024 and stage at 10 to bound circuit size."
+    ],
+    "unresolved_issues": [
+      "The sign and offset convention for sin/cos quadratures in eq_3 is not fixed in the circuit and is left to the runner's state preparation and basis change.",
+      "Robust theorem constants, off-resonance estimator and universal gate-set sequences from the paper are not implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 1,
+    "gate_count": 4,
+    "depth": 4,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,124 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "f1da76f7-2cb4-493e-b129-18a6890a9eb5",
+  "parent_run_id": "7613470c-049f-478a-b2f2-9d7af12d7f98",
+  "created_at": "2026-10-31T21:50:35.808687+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "84276d4b937f55c647caabd3142cd78ec6a1d68d193bef7ad91fa6569e0996d6",
+  "source_specification_sha256": "de780612ebf3eb3736a898ec9059cedc8939fc97c6f9886ce1a8591ab105679b",
+  "source_python_sha256": "218ac106c8cae03617361987f31f07019b40ed72a5d83f79ad4335121b129837",
+  "elapsed_seconds": 103.832,
+  "usage": {
+    "input_tokens": 4648,
+    "output_tokens": 11549,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Mixed-radix QFT on a hybrid register of one qutrit (levels 0,1,2 stored in 2 qubits, level 3 unused) and m qubits, total dimension N=3*2^m (N=12 for m=2). The circuit applies the qutrit DFT H_3, built from two-level rotations. Then it applies a generalized controlled phase exp(2*pi*i*k1*j0/N) between the qutrit and the qubit register, and finally a QFTGate on the qubit register. This is the Cooley-Tukey factorization of F_N, so the output digits are ordered k = k1 + 3*k2.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    for key in instance:\n        if key not in ('num_register_qubits', 'inverse'):\n            raise ValueError('unknown instance key: ' + str(key))\n    m = instance.get('num_register_qubits')\n    if isinstance(m, bool) or not isinstance(m, int) or m < 1 or m > 10:\n        raise ValueError('num_register_qubits must be an integer in 1..10')\n    inv = instance.get('inverse', False)\n    if not isinstance(inv, bool):\n        raise ValueError('inverse must be a bool')\n    return m, inv\n\n\ndef _qutrit_dft(qc, a, b):\n    # eq_2: H_3 = DFT_3 on levels {0,1,2}; level = q_a + 2*q_b; level 3 fixed.\n    # DFT_3 = S^dag R^dag D H12 (two-level decomposition); time order below.\n    # H12: Hadamard on levels (1,2) via CX conjugation and controlled-H.\n    qc.cx(b, a)\n    qc.ch(a, b)\n    qc.cx(b, a)\n    # D = diag(1,-1,-i,1) on levels 0..3\n    qc.x(b)\n    qc.cz(a, b)\n    qc.x(b)\n    qc.x(a)\n    qc.cp(-math.pi / 2, b, a)\n    qc.x(a)\n    # R^dag: rotation on levels (0,1), applied when q_b = 0\n    qc.cry(2.0 * math.atan(math.sqrt(2.0)), b, a, ctrl_state=0)\n    # S^dag: rotation on levels (1,2)\n    qc.cx(b, a)\n    qc.cry(math.pi / 2, a, b)\n    qc.cx(b, a)\n\n\ndef build_circuit(instance):\n    \"\"\"Hybrid qutrit+qubits QFT (mixed radix 3*2^m). Output digit order k=k1+3*k2.\"\"\"\n    m, inv = _validate(instance)\n    t = QuantumRegister(2, 't')\n    r = QuantumRegister(m, 'r')\n    qc = QuantumCircuit(t, r)\n    n_total = 3 * (2 ** m)\n    # Step 1 (eq_2): generalized Hadamard on the qutrit\n    _qutrit_dft(qc, 0, 1)\n    # Step 2 (eq_3): generalized controlled phase exp(2 pi i k1 j0 / N)\n    for i in range(m):\n        theta = 2.0 * math.pi * (2 ** i) / n_total\n        qc.cp(theta, 0, 2 + i)\n        qc.cp(2.0 * theta, 1, 2 + i)\n    # Step 3 (eq_1): QFT of dimension 2^m on the qubit register\n    qc.append(QFTGate(m), list(range(2, 2 + m)))\n    if inv:\n        return qc.inverse()\n    return qc",
+    "example_instance_json": "{\"num_register_qubits\": 2, \"inverse\": false}",
+    "register_layout": [
+      "qubit 0: qutrit low bit (level = q0 + 2*q1; levels 0,1,2 used, level 3 unused)",
+      "qubit 1: qutrit high bit",
+      "qubits 2..m+1: qubit register x, little-endian (qubit 2 is the least significant bit)",
+      "Input index j = 2^m*j1 + j0, with j1 in the qutrit and j0 in the register",
+      "Output index k = k1 + 3*k2, with k1 in the qutrit and k2 in the register",
+      "Example m=2: 4 qubits, N=12"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (whole factorized circuit; QFTGate on register qubits)",
+        "explanation": "F_N with N=3*2^m is factorized as H_3 on the qutrit, then a controlled phase, then F_{2^m} on the register. Since j1*k2 is an integer, that term drops out. The result equals F_N up to the output digit ordering k=k1+3*k2."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_qutrit_dft",
+        "explanation": "H_3=F_3 (omega=e^{+2 pi i/3}) is embedded in the 2-qubit space on levels 0..2 and decomposed into controlled two-level rotations and phases. Level 3 is left fixed. The qubit Hadamards H_2 are not applied explicitly; they are inside QFTGate."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit (cp loop after _qutrit_dft)",
+        "explanation": "The qutrit-register phase exp(2 pi i k1 j0/(3*2^m)) is applied as cp(theta*2^i) on the qutrit bits weighted 1 and 2 for each register qubit i. Here d=3 and d'=2^m."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The circuit implements F_N up to a fixed digit reordering: the output is stored as k=k1+3*k2 (qutrit holds k1, register holds k2) rather than in natural mixed-radix order. The mixed-radix output permutation is not applied.",
+        "reason": "The Cooley-Tukey factorization naturally yields this order. Natural order would require a modular-arithmetic permutation that the abstract does not specify."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The qubit-only part of the spec (H_2 on each qubit plus controlled phases between qubits, plus swaps) is replaced by a single QFTGate(m) on the register, which includes its own bit reversal. m is variable (1..10).",
+        "reason": "This is an equivalent standard implementation of the 2^m-dimensional QFT. The abstract gives no decomposition for it."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The qutrit is encoded in 2 qubits as levels 0,1,2 with level 3 unused. H_3 acts as identity on level 3. The controlled phase treats level 3 as k1=3 (phase 3*theta), and the register QFT acts regardless of the qutrit level. The operation is therefore unitary on all 2^(m+2) states, but the level-3 subspace is outside the specified domain.",
+        "reason": "A 3-level system cannot fill a 2-qubit space. The spec also leaves the emulator embedding unspecified."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Scope is narrowed to the unitary QFT operation only. NMR pulses, selective rotations, measurement, tomography and fidelity analysis are omitted. An optional 'inverse' flag is added.",
+        "reason": "The task requires a measurement-free, unitary operation. Experimental details are not given."
+      }
+    ],
+    "assumptions": [
+      "The generalized Hadamard is the DFT matrix with omega=exp(+2*pi*i/3).",
+      "The qutrit is the most significant digit of the input index.",
+      "Level encoding is level = q0 + 2*q1.",
+      "Qubit register values are little-endian.",
+      "Gate decompositions use only standard gates (cx, ch, cz, cp, cry, x, QFTGate)."
+    ],
+    "unresolved_issues": [
+      "The paper's exact decomposition and gate ordering are unknown.",
+      "The qutrit-to-qubit embedding used by the NMR emulator is unknown.",
+      "The output digit ordering differs from natural-order F_12 and may need a permutation to match the paper.",
+      "The behavior on the unused qutrit level 3 is a free choice.",
+      "The implementation has not been simulated or verified."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 63,
+    "depth": 54,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

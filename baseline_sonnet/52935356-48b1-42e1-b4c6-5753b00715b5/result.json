@@ -1,0 +1,142 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "52935356-48b1-42e1-b4c6-5753b00715b5",
+  "parent_run_id": "692ef7a4-3ad5-459d-b5a0-c1bf082dc679",
+  "created_at": "2026-10-31T22:29:44.680139+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "214c4faf6c3549f646cc3840fc8387f00709a2e16674235c47d49541e4b74a28",
+  "source_specification_sha256": "4686a43db2fb404a35a257aebcafa051a274ef5f6cef116177975223f71f3dde",
+  "source_python_sha256": "1bb008f57496c8dd9ee7fd8b8716107b9759548525b727301fd24144eeb9ab19",
+  "elapsed_seconds": 34.753,
+  "usage": {
+    "input_tokens": 5239,
+    "output_tokens": 5178,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds a measurement-free first-order randomized-Trotter circuit for fast-signal-assisted AQC on an EC3 instance. Each of N steps applies the driver H_B=-sum X_i with weight (1-s_k), the EC3 penalty H_P with weight s_k, and one supplied signal rotation xi_k*sigma_j. The signal sequence is passed in the instance, so the circuit is deterministic. The runner must prepare |+>^n.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _num(x):\n    if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):\n        raise ValueError('numeric value required')\n    return float(x)\n\n\ndef _int(x):\n    if isinstance(x, bool) or not isinstance(x, int):\n        raise ValueError('integer required')\n    return x\n\n\ndef build_circuit(instance):\n    \"\"\"Randomized-Trotter fast-signal-assisted AQC for EC3 (eq_1, eq_2, eq_3, eq_5).\n\n    instance: n (3..12), clauses (list of distinct-index triples), T>0, N (1..200),\n    signals: list of N entries [qubit, 'x'|'y'|'z', amplitude xi_k].\n    Qubit i carries bit z_i of the clause labels. Input state is prepared by the runner.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be an object')\n    n = _int(instance.get('n'))\n    if n < 3 or n > 12:\n        raise ValueError('n must be in 3..12')\n    T = _num(instance.get('T'))\n    if T <= 0:\n        raise ValueError('T must be positive')\n    N = _int(instance.get('N'))\n    if N < 1 or N > 200:\n        raise ValueError('N must be in 1..200')\n    raw = instance.get('clauses')\n    if not isinstance(raw, list) or len(raw) == 0 or len(raw) > 40:\n        raise ValueError('clauses must be a non-empty list')\n    clauses = []\n    for c in raw:\n        if not isinstance(c, (list, tuple)) or len(c) != 3:\n            raise ValueError('each clause needs 3 indices')\n        t = tuple(_int(v) for v in c)\n        if len(set(t)) != 3 or min(t) < 0 or max(t) >= n:\n            raise ValueError('invalid clause indices')\n        clauses.append(t)\n    sig = instance.get('signals')\n    if not isinstance(sig, list) or len(sig) != N:\n        raise ValueError('signals must be a list of length N')\n    parsed = []\n    for e in sig:\n        if not isinstance(e, (list, tuple)) or len(e) != 3:\n            raise ValueError('signal entry must be [qubit, axis, amplitude]')\n        j = _int(e[0])\n        ax = e[1]\n        if j < 0 or j >= n or ax not in ('x', 'y', 'z'):\n            raise ValueError('invalid signal entry')\n        parsed.append((j, ax, _num(e[2])))\n\n    q = QuantumRegister(n, 'q')\n    qc = QuantumCircuit(q)\n    dt = T / N\n    for k in range(1, N + 1):\n        s = k / N\n        # driver exp(-i dt (1-s) H_B), H_B = -sum X_i  -> RX(-2 dt (1-s))\n        for i in range(n):\n            qc.rx(-2.0 * dt * (1.0 - s), q[i])\n        # EC3 penalty (z_a+z_b+z_c-1)^2 = 1 - (Za+Zb+Zc)/2 + (ZaZb+ZaZc+ZbZc)/2\n        for (a, b, c) in clauses:\n            for v in (a, b, c):\n                qc.rz(-dt * s, q[v])\n            qc.rzz(dt * s, q[a], q[b])\n            qc.rzz(dt * s, q[a], q[c])\n            qc.rzz(dt * s, q[b], q[c])\n        # fast signal exp(-i dt xi sigma_j) = R_sigma(2 dt xi)\n        j, ax, xi = parsed[k - 1]\n        ang = 2.0 * dt * xi\n        if ax == 'x':\n            qc.rx(ang, q[j])\n        elif ax == 'y':\n            qc.ry(ang, q[j])\n        else:\n            qc.rz(ang, q[j])\n    return qc",
+    "example_instance_json": "{\"n\":3,\"clauses\":[[0,1,2]],\"T\":4.0,\"N\":8,\"signals\":[[0,\"z\",0.5],[1,\"x\",-0.5],[2,\"y\",0.5],[0,\"x\",-0.5],[1,\"z\",0.5],[2,\"x\",-0.5],[0,\"y\",0.5],[1,\"y\",-0.5]]}",
+    "register_layout": [
+      "qubits 0..n-1 (n=3 in the example): qubit i encodes EC3 bit z_i = (1-Z_i)/2, with qubit 0 the least significant bit of the computational-basis index",
+      "Expected runner input: |+>^n, the ground state of H_B=-sum X_i",
+      "No ancilla qubits; no measurements"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: driver RX(-2 dt (1-s_k)) layer and problem-phase layer weighted by s_k",
+        "explanation": "The linear interpolation H(s)=(1-s)H_B+sH_P is exponentiated per step, with H_B=-sum X_i as an assumed driver and a linear schedule."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: signal rotation at the end of each step",
+        "explanation": "The fast-signal term is reduced to one Pauli term xi_k*sigma_j per step, with all values supplied through instance['signals']. It is a placeholder form."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop over k=1..N with s_k=k/N and dt=T/N",
+        "explanation": "Generic first-order randomized product step. The split terms (driver, problem, signal) are applied sequentially in each step, and the sampling of xi_k and j_k is delegated to the caller."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The adiabatic condition is a runtime criterion. It is not an operation, and the code does not check it."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: clause loop using rz and rzz",
+        "explanation": "Each clause penalty (z_a+z_b+z_c-1)^2 is expanded as 1 - (Za+Zb+Zc)/2 + (ZaZb+ZaZc+ZbZc)/2 and exponentiated with RZ and RZZ gates. The constant 1 is dropped as a global phase."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The signal sequence is a deterministic instance input, one single-qubit Pauli rotation per step, instead of randomness sampled inside the module.",
+        "reason": "The abstract does not give the signal distribution, and the module must return a bound, deterministic, unitary circuit without hidden randomness."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The exponential of the sum H(s_k)+xi_k*sigma_j is replaced by a first-order sequential split, with driver, problem and signal factors applied one after another in each step.",
+        "reason": "This is the simplest standard product formula. The paper's randomized Trotter formula is unknown."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_5"
+        ],
+        "change": "The driver is fixed to H_B=-sum X_i, the schedule is linear, and a concrete clause list is required as input. The constant term of each clause penalty is dropped (global phase).",
+        "reason": "The abstract does not specify these choices, and they are the smallest self-consistent assumptions."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The adiabatic condition is background only and is not enforced by the circuit.",
+        "reason": "It is a diagnostic inequality, not a gate sequence."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The scope is narrowed to a unitary closed-system circuit with n between 3 and 12. Open-system decoherence, the paper's specific signals, the trapped-ion implementation and the runtime-reduction analysis are not implemented. The spec's 'q_1 most significant' convention is replaced by clause index i mapping directly to Qiskit qubit i.",
+        "reason": "These details are missing from the abstract. Clause indices are 0-based."
+      }
+    ],
+    "assumptions": [
+      "Driver H_B=-sum_i X_i, so the initial state is |+>^n, prepared by the runner",
+      "Linear schedule with s_k=k/N and dt=T/N",
+      "The EC3 clauses are chosen by the caller; the example uses the single clause (0,1,2)",
+      "Signal operators are single-qubit Paulis X, Y or Z with caller-specified amplitude",
+      "The Trotter order is first and the Hamiltonian is closed-system"
+    ],
+    "unresolved_issues": [
+      "The paper's actual signal form, statistics and randomized Trotter formula are unknown",
+      "The specific EC3 instance and driver in the paper are unknown",
+      "No decoherence or system-bath model is included, so the runtime-reduction claim cannot be tested with this circuit",
+      "The Trotter error and the effect of the signals on the final ground-state overlap are not characterised in the module"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 128,
+    "depth": 91,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

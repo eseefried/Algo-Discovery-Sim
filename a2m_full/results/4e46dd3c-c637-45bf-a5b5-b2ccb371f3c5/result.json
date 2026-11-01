@@ -1,0 +1,139 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "4e46dd3c-c637-45bf-a5b5-b2ccb371f3c5",
+  "parent_run_id": "b6fe77a5-5c4c-408f-8c1e-0d679cbab80a",
+  "created_at": "2026-11-01T00:24:59.720838+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "ae1c843b6bddbeeb12571b7f70db9be5e08417267c18275fe1f9ec4ba31432fc",
+  "source_specification_sha256": "a793b85f7350a287640d53c7723ab0e5054d1c3b6a0211c14dee797c63a50b6f",
+  "source_python_sha256": "3c62203104364229aba505e73d42d770a867b38b54acecdcd2cc0d39d9c94c37",
+  "elapsed_seconds": 31.842,
+  "usage": {
+    "input_tokens": 5636,
+    "output_tokens": 4870,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Exact compute-phase-uncompute implementation of a diagonal n-qubit unitary with k distinct phases. A multi-controlled-X oracle writes j(x) into an index register. The index diagonal is applied as parity Rz rotations from a Walsh-Hadamard decomposition. The oracle is then undone. No Clifford+T synthesis is performed; Rz stays exact.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef _oracle(qc, data, idx, index_map, n, m):\n    # U_j: |x>|y> -> |x>|y xor j(x)>  (self-inverse, eq_2)\n    for x, j in enumerate(index_map):\n        if j == 0:\n            continue\n        zeros = [data[i] for i in range(n) if not (x >> i) & 1]\n        for q in zeros:\n            qc.x(q)\n        for b in range(m):\n            if (j >> b) & 1:\n                qc.mcx(list(data), idx[b])\n        for q in zeros:\n            qc.x(q)\n\n\ndef _walsh(f, m):\n    # f(j) = sum_s c_s (-1)^{s.j}  (eq_3)\n    size = 1 << m\n    coeffs = []\n    for s in range(size):\n        tot = 0.0\n        for j in range(size):\n            sign = -1.0 if (bin(s & j).count('1') & 1) else 1.0\n            tot += sign * f[j]\n        coeffs.append(tot / size)\n    return coeffs\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    if not _is_int(n) or n < 1 or n > 10:\n        raise ValueError('n must be an integer in 1..10')\n    phases = instance.get('phases')\n    if not isinstance(phases, (list, tuple)) or len(phases) < 1 or len(phases) > (1 << n):\n        raise ValueError('phases must be a list of 1..2^n reals')\n    ph = []\n    for p in phases:\n        if isinstance(p, bool) or not isinstance(p, (int, float)) or not math.isfinite(p):\n            raise ValueError('phases must be finite reals')\n        ph.append(float(p))\n    k = len(ph)\n    index_map = instance.get('index_map')\n    if not isinstance(index_map, (list, tuple)) or len(index_map) != (1 << n):\n        raise ValueError('index_map must have length 2^n')\n    for j in index_map:\n        if not _is_int(j) or j < 0 or j >= k:\n            raise ValueError('index_map entries must be integers in 0..k-1')\n    index_map = [int(j) for j in index_map]\n    m = max(1, (k - 1).bit_length())\n    if n + m > 12:\n        raise ValueError('total qubits exceed 12')\n\n    data_reg = QuantumRegister(n, 'data')\n    idx_reg = QuantumRegister(m, 'index')\n    qc = QuantumCircuit(data_reg, idx_reg)\n    data = list(data_reg)\n    idx = list(idx_reg)\n\n    f = ph + [0.0] * ((1 << m) - k)  # unused index values get phase 0\n    coeffs = _walsh(f, m)\n    qc.global_phase = coeffs[0]  # gamma\n\n    # compute index\n    _oracle(qc, data, idx, index_map, n, m)\n\n    # Delta via parity rotations: alpha_s = -2 c_s\n    for s in range(1, 1 << m):\n        alpha = -2.0 * coeffs[s]\n        if abs(alpha) < 1e-15:\n            continue\n        bits = [b for b in range(m) if (s >> b) & 1]\n        target = bits[0]\n        for b in bits[1:]:\n            qc.cx(idx[b], idx[target])\n        qc.rz(alpha, idx[target])\n        for b in reversed(bits[1:]):\n            qc.cx(idx[b], idx[target])\n\n    # uncompute index\n    _oracle(qc, data, idx, index_map, n, m)\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"phases\": [0.0, 0.7, -1.3], \"index_map\": [0, 1, 2, 1, 0, 2, 2, 1]}",
+    "register_layout": [
+      "Qubits 0..n-1: data register (little-endian, data qubit i is bit i of x)",
+      "Qubits n..n+m-1: index register, m = max(1, ceil(log2 k)), little-endian bits of j(x); starts and ends in |0>",
+      "Example: n=3, k=3, m=2 gives data = qubits 0,1,2 and index = qubits 3,4 (5 qubits total)",
+      "No extra work ancillas: multi-controlled X gates use Qiskit's ancilla-free decomposition"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: parsing of 'phases' (phi_j) and 'index_map' (j(x))",
+        "explanation": "The target diagonal is defined by the instance's level-set index map and the k distinct phase values."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_oracle and its two calls in build_circuit",
+        "explanation": "The oracle |x>|y> -> |x>|y xor j(x)> is built from X-conjugated multi-controlled X gates. It is applied, then the parity-phase layer, then the oracle again, which is its own inverse."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_walsh and the parity-rotation loop in build_circuit",
+        "explanation": "Walsh coefficients c_s of the padded phase vector give alpha_s = -2 c_s and global phase gamma = c_0. Each parity Z^s is applied as CX fan-in, Rz(alpha_s), CX fan-out."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The T-count bound is a resource statement. No Clifford+T synthesis is done, so the bound is not enforced or computed."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Per-rotation precision epsilon/k applies only to approximate Clifford+T synthesis. This module keeps exact Rz rotations."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Phases on unused index values j>=k are fixed to 0. The circuit uses up to 2^m-1 parity rotations, not k-1.",
+        "reason": "The k-1 reduction needs optimized free phases on unused indices, which the specification did not resolve. A fixed choice keeps the construction deterministic."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "No Clifford+T approximation or T-count optimization is performed. Rz gates stay exact.",
+        "reason": "Scope narrowing: the specification allows exact Rz for simulation, and no gridsynth-style synthesis is available."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "The oracle is a naive one-multi-controlled-X-per-(x, bit) construction. The instance supplies explicit phases and index_map, with the example fixed at n=3, k=3.",
+        "reason": "The paper's oracle synthesis and E(n,k) are not available, and the tiny instance size was chosen in the specification, not taken from the abstract."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The global phase gamma is applied as the circuit's global_phase instead of being ignored.",
+        "reason": "This makes the circuit equal D exactly on the ancilla-|0> subspace, including the global phase."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The index register uses m = max(1, ceil(log2 k)) qubits, so k=1 still has one index qubit.",
+        "reason": "This avoids a zero-size register."
+      }
+    ],
+    "assumptions": [
+      "Level sets and phase values are known at compile time and passed in the instance",
+      "Index and ancilla qubits start in |0>; the circuit returns them to |0>",
+      "Data qubit i corresponds to bit i of x (little-endian)",
+      "Phases on unused index values are 0",
+      "Total qubits n+m <= 12, with n <= 10"
+    ],
+    "unresolved_issues": [
+      "The paper's actual oracle synthesis and E(n,k) formula are unknown",
+      "Optimal handling of free phases on unused indices when k is not a power of 2 is not implemented",
+      "Clifford+T approximation and T-count accounting are not included",
+      "The decision boundary in (n,k,epsilon) space is not reproduced"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 5,
+    "gate_count": 407,
+    "depth": 319,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

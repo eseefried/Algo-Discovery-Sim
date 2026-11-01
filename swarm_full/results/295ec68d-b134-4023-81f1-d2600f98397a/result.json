@@ -1,0 +1,108 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "295ec68d-b134-4023-81f1-d2600f98397a",
+  "parent_run_id": "f6f41210-36c9-4056-b1dc-0046983a1f6c",
+  "created_at": "2026-10-31T21:48:49.561070+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "de51fb88b4ff2b0b60e88111a20e8fe43f496864229ce3f3258422d7c65151fb",
+  "source_specification_sha256": "ac427959d62849af0ee22df9be9db3503ac936bc4400466a2c05c14b7bbc3c97",
+  "source_python_sha256": "17968b7610432c8659ee5dd2d612332cf4040b27b3abc0d694ffe6701db9cd7c",
+  "elapsed_seconds": 21.891,
+  "usage": {
+    "input_tokens": 3938,
+    "output_tokens": 3040,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds a Grover oracle for a classical database as compute-mark-uncompute. A QROM-style memory (multi-controlled X gates) loads D_x into a data register conditioned on the index register. A multi-controlled X then marks the flag qubit when D_x equals a target value. The memory is then uncomputed. With the flag in |-> (prepared by the runner) this gives the phase (-1)^{f(x)}.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef _memory(qc, index, data, db, n, m):\n    # U_M (eq_2): |x>|y> -> |x>|y XOR D_x>; every gate is self-inverse, so the same routine uncomputes.\n    for x, v in enumerate(db):\n        for b in range(m):\n            if (v >> b) & 1:\n                zeros = [index[i] for i in range(n) if not (x >> i) & 1]\n                for q in zeros:\n                    qc.x(q)\n                qc.mcx(list(index), data[b])\n                for q in zeros:\n                    qc.x(q)\n\n\ndef _mark(qc, data, flag, target, m):\n    # predicate g(D) = [D == target] (eq_3), XORed onto the flag qubit\n    zeros = [data[i] for i in range(m) if not (target >> i) & 1]\n    for q in zeros:\n        qc.x(q)\n    qc.mcx(list(data), flag[0])\n    for q in zeros:\n        qc.x(q)\n\n\ndef build_circuit(instance):\n    \"\"\"Grover database oracle. instance: {n, m, database (2^n ints < 2^m), target (int < 2^m)}.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    m = instance.get('m')\n    db = instance.get('database')\n    target = instance.get('target')\n    if not _is_int(n) or not _is_int(m) or n < 1 or m < 1:\n        raise ValueError('n and m must be positive integers')\n    if n + m + 1 > 12:\n        raise ValueError('total qubits n+m+1 must be at most 12')\n    if not isinstance(db, list) or len(db) != 2 ** n:\n        raise ValueError('database must be a list of length 2^n')\n    for v in db:\n        if not _is_int(v) or v < 0 or v >= 2 ** m:\n            raise ValueError('database entries must be integers in [0, 2^m)')\n    if not _is_int(target) or target < 0 or target >= 2 ** m:\n        raise ValueError('target must be an integer in [0, 2^m)')\n    index = QuantumRegister(n, 'index')\n    data = QuantumRegister(m, 'data')\n    flag = QuantumRegister(1, 'flag')\n    qc = QuantumCircuit(index, data, flag)\n    _memory(qc, index, data, db, n, m)\n    _mark(qc, data, flag, target, m)\n    _memory(qc, index, data, db, n, m)\n    return qc",
+    "example_instance_json": "{\"n\":3,\"m\":2,\"database\":[0,1,2,3,1,2,0,3],\"target\":2}",
+    "register_layout": [
+      "qubits 0..n-1: index register (qubit 0 least significant address bit)",
+      "qubits n..n+m-1: data register (qubit n least significant data bit), must start in |0>",
+      "qubit n+m: flag ancilla; the runner should prepare |-> for phase kickback",
+      "Example (n=3, m=2): index=q0-q2, data=q3-q4, flag=q5"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (memory, mark, memory sequence)",
+        "explanation": "The net action is |x>|0>|b> -> |x>|0>|b XOR f(x)>. With the flag in |-> this equals the phase (-1)^{f(x)}. The |-> preparation is left to the runner."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_memory",
+        "explanation": "The classical memory is a QROM made of multi-controlled X gates that load D_x into the data register for each address x. It is applied once to compute and once to uncompute."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_mark",
+        "explanation": "The predicate g is fixed as equality with a target value, f(x) = [D_x == target], computed by a multi-controlled X onto the flag."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The predicate g is narrowed to equality with an integer target.",
+        "reason": "The specification leaves g unspecified; equality is a simple concrete choice."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "The circuit implements only the oracle. It excludes Hadamard initialization, diffusion, iteration and measurement. The flag |-> is prepared externally, so the oracle is a phase oracle only for that input.",
+        "reason": "The task requires an operation without state preparation or measurement."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The database size is restricted to N = 2^n entries.",
+        "reason": "The index register is made of qubits and needs a full address space."
+      }
+    ],
+    "assumptions": [
+      "Data register starts in |0> and is restored to |0> by uncomputation.",
+      "Entries are fixed-width m-bit integers.",
+      "Memory contents are classical parameters of the instance and are compiled into gates."
+    ],
+    "unresolved_issues": [
+      "The abstract does not give the paper's actual memory circuit; this QROM construction is an assumed realization.",
+      "The number of marked items and the Grover iteration count are not addressed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 565,
+    "depth": 421,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

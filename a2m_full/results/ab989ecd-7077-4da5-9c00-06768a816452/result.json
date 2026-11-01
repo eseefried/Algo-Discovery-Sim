@@ -1,0 +1,149 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "ab989ecd-7077-4da5-9c00-06768a816452",
+  "parent_run_id": "23431dfd-4e8d-4404-9708-f4161d41fbd2",
+  "created_at": "2026-11-01T00:23:50.708782+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "cb64efad75387acadac50cd2e23d1926b6ade6c1d783ac7f9026e99b8a617081",
+  "source_specification_sha256": "ee94cee6259c3fed2b75ba3a9dcdbb2468c8c31e30963f94c2ace9d4beb582cf",
+  "source_python_sha256": "dcec7491c8880618bb248b38d89cd0e31b10727c61f589b55439ce2ef2656ca5",
+  "elapsed_seconds": 41.105,
+  "usage": {
+    "input_tokens": 5958,
+    "output_tokens": 6139,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Digitized first-order Trotter adiabatic evolution on n data qubits from H_B=-sum X_i towards a diagonal EC3 problem Hamiltonian. Each clause on a triple (a,b,c) contributes the cost (x_a+x_b+x_c-1)^2 and is built from RZ and RZZ rotations. Each slice applies the H_P factor first and then RX(-2(1-s_k)dt) on every qubit. Slices are applied in order k=1..M. The circuit is an operation only: the runner must prepare |+>^n, and there is no measurement or ancilla.",
+    "source_python": "from qiskit import QuantumCircuit\nimport math\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef _is_num(v):\n    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)\n\n\ndef build_circuit(instance):\n    \"\"\"Trotterized AQC evolution U_M...U_1, U_k = exp(-i(1-s_k)H_B dt) exp(-i s_k H_P dt).\n    H_B=-sum X_i. H_P=sum over clauses (x_a+x_b+x_c-1)^2 = 1 - (Za+Zb+Zc)/2 + (ZaZb+ZaZc+ZbZc)/2 per clause.\n    Qubit i is variable x_i (bit i of the basis index). Input state must be prepared by the runner.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    if not _is_int(n) or n < 3 or n > 12:\n        raise ValueError('n must be an integer in [3, 12]')\n    clauses = instance.get('clauses')\n    if not isinstance(clauses, list) or len(clauses) < 1 or len(clauses) > 50:\n        raise ValueError('clauses must be a list of 1..50 triples')\n    parsed = []\n    for cl in clauses:\n        if not isinstance(cl, (list, tuple)) or len(cl) != 3:\n            raise ValueError('each clause must have 3 variable indices')\n        if not all(_is_int(v) and 0 <= v < n for v in cl):\n            raise ValueError('clause index out of range')\n        if len(set(cl)) != 3:\n            raise ValueError('clause indices must be distinct')\n        parsed.append((cl[0], cl[1], cl[2]))\n    M = instance.get('M')\n    if not _is_int(M) or M < 1 or M > 200:\n        raise ValueError('M must be an integer in [1, 200]')\n    T = instance.get('T')\n    if not _is_num(T) or T <= 0 or T > 1000:\n        raise ValueError('T must be a positive finite number <= 1000')\n    mode = instance.get('schedule', 'linear')\n    if mode == 'linear':\n        sched = [(k + 0.5) / M for k in range(M)]\n    elif mode == 'explicit':\n        sv = instance.get('s_values')\n        if not isinstance(sv, list) or len(sv) != M:\n            raise ValueError('s_values must be a list of length M')\n        if not all(_is_num(v) and 0.0 <= v <= 1.0 for v in sv):\n            raise ValueError('s_values must lie in [0, 1]')\n        sched = [float(v) for v in sv]\n    else:\n        raise ValueError('schedule must be linear or explicit')\n    h = [0.0] * n\n    J = {}\n    const = 0.0\n    for a, b, c in parsed:\n        const += 1.0\n        for q in (a, b, c):\n            h[q] -= 0.5\n        for p in ((a, b), (a, c), (b, c)):\n            key = (min(p), max(p))\n            J[key] = J.get(key, 0.0) + 0.5\n    qc = QuantumCircuit(n)\n    dt = float(T) / M\n    for sk in sched:\n        th = sk * dt\n        qc.global_phase = qc.global_phase - th * const\n        for q in range(n):\n            if h[q] != 0.0:\n                qc.rz(2.0 * th * h[q], q)\n        for key in sorted(J.keys()):\n            if J[key] != 0.0:\n                qc.rzz(2.0 * th * J[key], key[0], key[1])\n        for q in range(n):\n            qc.rx(-2.0 * (1.0 - sk) * dt, q)\n    return qc",
+    "example_instance_json": "{\"n\":4,\"clauses\":[[0,1,2],[1,2,3],[0,2,3]],\"M\":30,\"T\":10.0,\"schedule\":\"linear\"}",
+    "register_layout": [
+      "qubits 0..n-1: data variables x_0..x_{n-1}; qubit i is bit i (least significant first) of the computational-basis index",
+      "no ancilla qubit; total qubits = n <= 12",
+      "expected runner input: |+>^n (ground state of H_B), prepared outside this module; no measurements"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: the per-slice RX(-2(1-s_k)dt) layer realizes the H_B weight, and the s_k*dt scaling of the H_P rotations realizes the s weight",
+        "explanation": "The interpolation is realized through the Trotter slices. exp(-i(1-s)dt(-sum X)) = prod RX(-2(1-s)dt)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: the loop over clauses accumulating h, J, const, followed by the rz/rzz calls",
+        "explanation": "Uses the squared-sum clause cost (x_a+x_b+x_c-1)^2 = 1 - (Za+Zb+Zc)/2 + (ZaZb+ZaZc+ZbZc)/2. It is diagonal, with exp(-i th h Z)=RZ(2 th h), exp(-i th J ZZ)=RZZ(2 th J), and the constant tracked as global phase."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: the main loop over sched",
+        "explanation": "Each slice applies the H_P factor and then the H_B factor, matching U_k=e^{-i(1-s_k)H_B dt}e^{-i s_k H_P dt}. Slices run k=1..M in order (operator product U_M...U_1), with dt=T/M."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The gap-based local schedule needs classical diagonalization, which is not done in the module. The schedule is instead 'linear' (midpoint s_k=(k+0.5)/M) or user-supplied s_values, which can carry a precomputed local-adiabatic schedule."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The ancilla phase-kick filter is a sketch that reduces to the identity as written, and it is not the paper's fast-signal method. It is omitted, so no ancilla is allocated."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Readout and success probability involve measurement and post-processing, which are excluded from an operation-only circuit and are left to the runner."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The clause cost is the squared-sum form (x_a+x_b+x_c-1)^2, which gives weights 1 (two or zero ones) and 4 (three ones), not a uniform indicator penalty on forbidden triples. Clauses must be 3 distinct variables from a general n in [3,12]. The example uses n=4 with 3 clauses.",
+        "reason": "The squared-sum form is the stated alternative in the specification and expands exactly into Z and ZZ terms. A unique satisfying assignment cannot exist for n=3 with distinct-variable clauses, since a single clause on 3 variables has 3 solutions."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The gap-based local schedule is not computed. The schedule is linear midpoint or explicit.",
+        "reason": "The module must avoid operator construction and diagonalization."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The filter is dropped and there is no ancilla.",
+        "reason": "The filter is unverified and trivially the identity as written."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3",
+          "eq_6"
+        ],
+        "change": "The initial |+>^n preparation (the Hadamard step) and the measurement are removed from the circuit.",
+        "reason": "The module returns an operation only. Input states are prepared by the runner and measurement is done outside."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Narrowed to the noiseless first-order Trotter digitized AQC. The paper's fast random or regular signals, randomized Trotter formula, decoherence, and trapped-ion implementation are not represented.",
+        "reason": "These details are absent from the specification."
+      }
+    ],
+    "assumptions": [
+      "First-order Trotter with a uniform dt=T/M and the H_P factor applied before the H_B factor in each slice",
+      "The global phase from the constant clause terms is tracked in qc.global_phase",
+      "The example clause set is believed to have the unique solution x=(0,0,1,0), by hand analysis only and not verified",
+      "M<=200 and the clause count <=50 are arbitrary caps",
+      "The runner prepares |+>^n"
+    ],
+    "unresolved_issues": [
+      "The paper's fast-signal sequences and randomized Trotter formula are not reconstructed",
+      "A gap-based local-adiabatic schedule must be supplied externally through explicit s_values",
+      "The abstract does not specify the concrete EC3 instance or schedule used in the paper",
+      "Adiabatic fidelity depends on T and M, and no convergence is claimed"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 780,
+    "depth": 423,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

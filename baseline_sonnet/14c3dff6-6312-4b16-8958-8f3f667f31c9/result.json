@@ -1,0 +1,129 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "14c3dff6-6312-4b16-8958-8f3f667f31c9",
+  "parent_run_id": "c72baa13-3c28-440b-9122-5ebf999257af",
+  "created_at": "2026-10-31T22:26:54.610380+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "da105db203cb9a3309b13900017382f8924a51f907e9f81377ba77826209831d",
+  "source_specification_sha256": "a6153153d40ff3157474350e9911cb1ec35c46c042170bbbf660ce62cfc5bd21",
+  "source_python_sha256": "e8f67661796eeb5edb7f9c1c30df042d986918079fb22f7265ee1214aab0409d",
+  "elapsed_seconds": 31.538,
+  "usage": {
+    "input_tokens": 4632,
+    "output_tokens": 4680,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds a Trotterized (symmetric second-order) approximation of the continuous-time quantum-walk search unitary exp(-iHT) with H = -gamma*L - |w><w| on the complete graph K_N, N = 2^n (n <= 12 qubits). For K_N, L = N*I - N|s><s|, so H = -gamma*N*I + gamma*N|s><s| - |w><w|. The circuit uses H/X layers with multi-controlled phase gates for the |s><s| and |w><w| phase kicks, plus a global phase for the identity term. It contains no state preparation or measurement.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _is_num(x):\n    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)\n\n\ndef _is_int(x):\n    return isinstance(x, int) and not isinstance(x, bool)\n\n\ndef _phase_on_all_ones(qc, qubits, angle):\n    # diag phase exp(i*angle) on |1...1> of the given qubits\n    if len(qubits) == 1:\n        qc.p(angle, qubits[0])\n    else:\n        qc.mcp(angle, qubits[:-1], qubits[-1])\n\n\ndef _marked_phase(qc, qubits, w, angle):\n    # exp(i*angle*|w><w|); qubit i holds bit i of w (little-endian)\n    for i, q in enumerate(qubits):\n        if not (w >> i) & 1:\n            qc.x(q)\n    _phase_on_all_ones(qc, qubits, angle)\n    for i, q in enumerate(qubits):\n        if not (w >> i) & 1:\n            qc.x(q)\n\n\ndef _uniform_phase(qc, qubits, angle):\n    # exp(i*angle*|s><s|) = H^n exp(i*angle*|0><0|) H^n\n    for q in qubits:\n        qc.h(q)\n    for q in qubits:\n        qc.x(q)\n    _phase_on_all_ones(qc, qubits, angle)\n    for q in qubits:\n        qc.x(q)\n    for q in qubits:\n        qc.h(q)\n\n\ndef build_circuit(instance):\n    \"\"\"Approximate exp(-i H T), H = -gamma*L - |w><w| on K_N, N = 2^n (eq_1, eq_2).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n_qubits')\n    if not _is_int(n) or n < 1 or n > 12:\n        raise ValueError('n_qubits must be an integer in [1, 12]')\n    N = 2 ** n\n    w = instance.get('marked')\n    if not _is_int(w) or w < 0 or w >= N:\n        raise ValueError('marked must be an integer in [0, 2^n - 1]')\n    gamma = instance.get('gamma')\n    if gamma is None:\n        gamma = 1.0 / N\n    if not _is_num(gamma) or gamma < 0:\n        raise ValueError('gamma must be a finite nonnegative number')\n    T = instance.get('time')\n    if not _is_num(T) or T < 0:\n        raise ValueError('time must be a finite nonnegative number')\n    r = instance.get('trotter_steps')\n    if r is None:\n        r = 1\n    if not _is_int(r) or r < 1 or r > 1000:\n        raise ValueError('trotter_steps must be an integer in [1, 1000]')\n    gamma = float(gamma)\n    T = float(T)\n    reg = QuantumRegister(n, 'vertex')\n    qc = QuantumCircuit(reg)\n    qubits = list(range(n))\n    dt = T / r\n    # identity part of H: -gamma*N*I  ->  global phase exp(+i*gamma*N*T)\n    qc.global_phase = gamma * N * T\n    for _ in range(r):\n        # exp(+i*dt*|w><w|) half step, exp(-i*gamma*N*dt*|s><s|) full step, half step\n        _marked_phase(qc, qubits, w, dt / 2.0)\n        _uniform_phase(qc, qubits, -gamma * N * dt)\n        _marked_phase(qc, qubits, w, dt / 2.0)\n    return qc",
+    "example_instance_json": "{\"n_qubits\": 2, \"marked\": 0, \"gamma\": 0.25, \"time\": 3.0, \"trotter_steps\": 12}",
+    "register_layout": [
+      "Qubits 0..n-1 form the 'vertex' register; qubit i is bit i (2^i weight) of the vertex label v, so the computational basis state |v> is the integer v in Qiskit little-endian order.",
+      "Example: n_qubits=2 gives K_4 with vertices 0..3 on qubits 0 (LSB) and 1 (MSB); marked vertex w=0.",
+      "No ancilla qubits."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (Trotter loop and global_phase)",
+        "explanation": "The unitary exp(-iHT) is approximated by a symmetric second-order Trotter product with trotter_steps slices."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit, _marked_phase, _uniform_phase",
+        "explanation": "For K_N, H = -gamma*N*I + gamma*N|s><s| - |w><w|. The identity term becomes the global phase, the |s><s| term is _uniform_phase with angle -gamma*N*dt, and the oracle term is _marked_phase with angle +dt/2 on each side."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Initial state |s> is prepared by the runner; the operation contains no input-state preparation. The |s> projector appears only inside the evolution."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The success probability comes from measurement, which the circuit does not contain; it is computed by the runner."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Asymptotic scaling claim for d-dimensional lattices; not a circuit construction."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Exact evolution replaced by a symmetric (Strang) Trotter product of the oracle phase and the |s><s| phase; the result is approximate, with error decreasing as trotter_steps grows.",
+        "reason": "Standard gates cannot express the exact non-commuting exponential without an opaque dense unitary or operator construction."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Scope narrowed to the complete graph K_N with N = 2^n and Laplacian L = N*I - J. The paper's two example graphs and its two-stage algorithm are not implemented.",
+        "reason": "The specification does not define the paper's graphs or the gamma schedule. The spec's ceil(log2 N) register size is also restricted to exact powers of two so no padding vertices are needed."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "gamma defaults to 1/N when omitted, and time and trotter_steps are explicit instance parameters.",
+        "reason": "The specification gives no optimal gamma or T; 1/N is the known critical value for the complete graph."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The vertex register encoding is stated as Qiskit little-endian, not 'most significant bit first'. Vertex v maps to the basis state with integer value v.",
+        "reason": "The task requires qubit index 0 to be the least significant bit."
+      }
+    ],
+    "assumptions": [
+      "hbar = 1, with a time-independent single-stage Hamiltonian.",
+      "N = 2^n, with n between 1 and 12.",
+      "Marked vertex w is an integer label in [0, N-1].",
+      "Global phase exp(i*gamma*N*T) is included for exactness of the Hamiltonian's identity part."
+    ],
+    "unresolved_issues": [
+      "The paper's low-connectivity fast-search graph, high-connectivity slow-search graph and two-stage walk are not defined and not implemented.",
+      "Optimal T and gamma for any non-complete graph are unknown.",
+      "The Trotter step count needed for a target accuracy is not determined here."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 372,
+    "depth": 241,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

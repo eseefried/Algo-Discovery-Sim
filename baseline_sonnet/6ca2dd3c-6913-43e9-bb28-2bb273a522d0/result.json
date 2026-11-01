@@ -1,0 +1,113 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "6ca2dd3c-6913-43e9-bb28-2bb273a522d0",
+  "parent_run_id": "39b67fb5-8e6b-46a3-8f59-49bceb3b7a8e",
+  "created_at": "2026-10-31T22:30:33.403771+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "a5a37c5dfa4318eaa5ab91645ad81d8d0bb2db2827587766b92347388d412f49",
+  "source_specification_sha256": "76d43f28a91e7008c831f2b9702229797bb19d0cec5185b6a4080efe947888b7",
+  "source_python_sha256": "f6121153307c6a30f675c28785ba9e0221d085f95561cf108969bdc49ca73bda",
+  "elapsed_seconds": 31.825,
+  "usage": {
+    "input_tokens": 4985,
+    "output_tokens": 4815,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Exact (not Clifford+T approximate) n-qubit diagonal unitary D = sum_x exp(i theta_x)|x><x|, built as a phase polynomial. The Walsh-Hadamard transform of the phase vector gives one parity phase rotation per nonzero Walsh coefficient. Each rotation uses a CNOT parity ladder, a P gate and the ladder uncompute. Phases can be given directly per basis state or as phase classes (the eq_3 grouping). No ancillas are used. The default example is the n=2, k=2 controlled-phase instance.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\nimport numpy as np\n\n\ndef _num(v):\n    if isinstance(v, bool) or not isinstance(v, (int, float)):\n        raise ValueError('phase must be a real number')\n    v = float(v)\n    if not math.isfinite(v):\n        raise ValueError('phase must be finite')\n    return v\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 12:\n        raise ValueError('n must be an integer in 1..12')\n    N = 1 << n\n    has_theta = 'theta' in instance\n    has_classes = 'classes' in instance\n    if has_theta == has_classes:\n        raise ValueError('provide exactly one of theta or classes')\n    if has_theta:\n        th = instance['theta']\n        if not isinstance(th, list) or len(th) != N:\n            raise ValueError('theta must be a list of length 2^n')\n        arr = np.array([_num(v) for v in th], dtype=float)\n    else:\n        classes = instance['classes']\n        if not isinstance(classes, list) or len(classes) == 0:\n            raise ValueError('classes must be a nonempty list')\n        arr = np.zeros(N, dtype=float)\n        seen = [False] * N\n        for c in classes:\n            if not isinstance(c, dict):\n                raise ValueError('class must be a dict')\n            ph = _num(c.get('phase'))\n            states = c.get('states')\n            if not isinstance(states, list):\n                raise ValueError('states must be a list')\n            for s in states:\n                if isinstance(s, bool) or not isinstance(s, int) or s < 0 or s >= N or seen[s]:\n                    raise ValueError('invalid or repeated basis state')\n                seen[s] = True\n                arr[s] = ph\n        if not all(seen):\n            raise ValueError('classes must partition all basis states')\n    return n, arr\n\n\ndef _fwht(a):\n    a = np.array(a, dtype=float)\n    N = a.size\n    h = 1\n    while h < N:\n        b = a.reshape(-1, 2, h)\n        x = b[:, 0, :] + b[:, 1, :]\n        y = b[:, 0, :] - b[:, 1, :]\n        a = np.stack([x, y], axis=1).reshape(-1)\n        h *= 2\n    return a\n\n\ndef build_circuit(instance):\n    n, theta = _parse(instance)\n    N = 1 << n\n    w = _fwht(theta) / N\n    q = QuantumRegister(n, 'q')\n    qc = QuantumCircuit(q)\n    # theta(x) = theta(0) - 2 * sum_{s>0} w_s * parity(s.x)\n    qc.global_phase = float(theta[0])\n    for s in range(1, N):\n        if abs(w[s]) < 1e-12:\n            continue\n        bits = [i for i in range(n) if (s >> i) & 1]\n        tgt = bits[-1]\n        others = bits[:-1]\n        for b in others:\n            qc.cx(q[b], q[tgt])\n        qc.p(float(-2.0 * w[s]), q[tgt])\n        for b in reversed(others):\n            qc.cx(q[b], q[tgt])\n    return qc",
+    "example_instance_json": "{\"n\":2,\"classes\":[{\"phase\":0.0,\"states\":[0,1,2]},{\"phase\":1.0471975511965976,\"states\":[3]}]}",
+    "register_layout": [
+      "q[0..n-1]: system qubits, little-endian; basis index x = sum_i x_i 2^i with x_i on qubit i",
+      "No ancilla qubits; total qubits = n <= 12"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit / _parse: theta vector or classes define D; Walsh phase-polynomial synthesis",
+        "explanation": "The circuit realizes D = sum_x exp(i theta_x)|x><x| exactly (up to float precision) with CNOT-parity P gates and a global phase theta_0."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The T-count bound is an abstract-level cost statement. E(n,k) and C_0 are unspecified, and the circuit uses continuous P gates, so no T-count is computed."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_parse: 'classes' input branch",
+        "explanation": "Phase-class projectors P_j are accepted as input (a partition of the basis states with one phase each) and expanded into a theta vector. The synthesis does not use k as its cost parameter."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Clifford+T rotation synthesis to precision epsilon is not implemented. Rotations are exact P gates, and approximation is left to a downstream transpiler."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "example_instance_json",
+        "explanation": "The n=2, k=2 instance diag(1,1,1,e^{i phi}) with phi=pi/3 is provided as the example instance."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "Narrowed scope to an exact diagonal-unitary operation with continuous-angle P gates. There is no Clifford+T approximation, epsilon parameter, or T-count accounting.",
+        "reason": "The abstract does not give the paper's algorithm, E(n,k), or C_0, and Clifford+T rotation synthesis cannot be done inside the allowed imports."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "The implemented construction is a Walsh-Hadamard phase-polynomial synthesis whose rotation count equals the number of nonzero Walsh coefficients (up to 2^n-1), not a k-rotation circuit.",
+        "reason": "The paper's k-dependent decomposition is not specified. The assumed phase-class grouping is used only as an input format."
+      }
+    ],
+    "assumptions": [
+      "Little-endian basis encoding: qubit i carries bit i of x.",
+      "Phases are taken modulo 2*pi.",
+      "Walsh coefficients with magnitude below 1e-12 are skipped.",
+      "Instance has key n plus exactly one of theta (list of 2^n reals) or classes (list of {phase, states} partitioning 0..2^n-1)."
+    ],
+    "unresolved_issues": [
+      "The paper's actual decomposition algorithm, E(n,k), C_0 and decision boundary are not reconstructed.",
+      "The circuit's rotation count scales with the Walsh sparsity of the phase vector rather than with k, and no T-count is produced."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 5,
+    "depth": 4,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

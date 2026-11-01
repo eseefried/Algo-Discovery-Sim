@@ -1,0 +1,129 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "d5e31404-b797-42a2-8bbe-94566b6fc473",
+  "parent_run_id": "20be2a71-79ce-43df-83e4-cd455a06dad3",
+  "created_at": "2026-11-01T00:20:41.594570+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "f0596ccaf83e14ff86ec675f7a85506d58f24b2a629cb92159f5abc1f2bc54b1",
+  "source_specification_sha256": "16e452691fd6d16f175f91e82fcba3c22121d2f0b7549366af01de4794c0be22",
+  "source_python_sha256": "2228f84ffdbabb1049424c355dadf9d1bd28f0b91d04678e3cb42908368ffe06",
+  "elapsed_seconds": 26.378,
+  "usage": {
+    "input_tokens": 4830,
+    "output_tokens": 3850,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the ideal three-qubit Deutsch-Jozsa operation H^3 · U_f · H^3 on q0..q2 with no ancilla and one oracle query. U_f is synthesized from a user-supplied 8-entry truth table through its algebraic normal form (Moebius transform), using Z, CZ and CCZ gates plus a global phase for the constant term. The input state, measurement and class readout are left to the runner.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _anf(tt):\n    \"\"\"Moebius transform: truth table -> ANF coefficients a_S (index S is a bitmask).\"\"\"\n    a = [int(v) for v in tt]\n    for i in range(3):\n        for x in range(8):\n            if (x >> i) & 1:\n                a[x] ^= a[x ^ (1 << i)]\n    return a\n\n\ndef build_circuit(instance):\n    \"\"\"Return H^3 U_f H^3 on 3 qubits. instance: {'truth_table': [8 bits], 'include_hadamards': bool (optional)}.\n    truth_table[x] = f(x), x = x0 + 2*x1 + 4*x2, qubit i holds x_i.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    tt = instance.get('truth_table')\n    if not isinstance(tt, (list, tuple)) or len(tt) != 8:\n        raise ValueError('truth_table must be a list of 8 bits')\n    for v in tt:\n        if isinstance(v, float) or not isinstance(v, (int, bool)) or v not in (0, 1):\n            raise ValueError('truth_table entries must be 0 or 1')\n    had = instance.get('include_hadamards', True)\n    if not isinstance(had, bool):\n        raise ValueError('include_hadamards must be a bool')\n    qc = QuantumCircuit(QuantumRegister(3, 'q'))\n    if had:\n        for i in range(3):\n            qc.h(i)\n    # eq_1 / eq_4: oracle as product of Z, CZ, CCZ according to ANF\n    a = _anf(tt)\n    for s in range(8):\n        if not a[s]:\n            continue\n        qs = [i for i in range(3) if (s >> i) & 1]\n        if len(qs) == 0:\n            qc.global_phase += math.pi\n        elif len(qs) == 1:\n            qc.z(qs[0])\n        elif len(qs) == 2:\n            qc.cz(qs[0], qs[1])\n        else:\n            qc.ccz(qs[0], qs[1], qs[2])\n    if had:\n        for i in range(3):\n            qc.h(i)\n    return qc",
+    "example_instance_json": "{\"truth_table\": [0, 1, 0, 1, 0, 1, 1, 0], \"include_hadamards\": true}",
+    "register_layout": [
+      "q0 = least significant bit x0 of the function input (data qubit)",
+      "q1 = bit x1 (data qubit)",
+      "q2 = bit x2 (data qubit)",
+      "No ancilla; the runner prepares |000> and measures, and the output string s reads s2 s1 s0 in Qiskit order"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: ANF-based Z/CZ/CCZ oracle block (between the two Hadamard layers)",
+        "explanation": "The diagonal +-1 phase oracle is realized from the truth table, with entry (-1)^f(x) on |x>."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: the two Hadamard layers (include_hadamards=True)",
+        "explanation": "H^3 U_f H^3 is built, so the amplitude on |s> starting from |000> is F_hat(s). The initial state is supplied by the runner."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The constant-vs-balanced decision rule is a consequence of eq_2 and is not coded."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_anf and the ANF loop in build_circuit",
+        "explanation": "The Moebius transform gives a_S. Each S with a_S=1 yields Z (|S|=1), CZ (|S|=2) or CCZ (|S|=3), and the empty set gives a global phase of pi."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Class readout is classical post-processing of measurement results. The circuit has no measurement."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_4"
+        ],
+        "change": "The opaque oracle placeholder is made concrete as a user-supplied 8-entry truth table over 3 bits, synthesized by ANF. Only 3 qubits are supported.",
+        "reason": "A parameterized, non-opaque, unitary circuit requires an explicit f. The paper's own sequences for the 35 gates are not available."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "A standard CCZ replaces the paper's two-target controlled-phase hardware gate. The constant ANF term is applied as a circuit global phase.",
+        "reason": "The hardware gate definition is missing. The global phase makes the operator exactly equal to the ideal U_f."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The returned operation contains the Hadamard layers by default. An optional include_hadamards=False returns only U_f.",
+        "reason": "The scoped operation is the full DJ unitary H^3 U_f H^3 with no state preparation."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Measurement and Walsh-class readout are excluded from the circuit.",
+        "reason": "The circuit must be measurement-free."
+      }
+    ],
+    "assumptions": [
+      "Basis index x = x0 + 2*x1 + 4*x2, with qubit i holding x_i (Qiskit little-endian).",
+      "Qutrit and cavity hardware are abstracted to ideal qubits.",
+      "Exactly one oracle query and no ancilla.",
+      "truth_table entries are integers 0 or 1; booleans are accepted."
+    ],
+    "unresolved_issues": [
+      "The paper's explicit gate sequences for the 35 f-controlled phase gates are not reproduced.",
+      "The refined-DJ discrimination criterion among the 35 functions is not specified.",
+      "The two-target controlled-phase gate and the qutrit/cavity pulse details are not modeled."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 10,
+    "depth": 5,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

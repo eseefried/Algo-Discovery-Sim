@@ -1,0 +1,128 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "d27351e0-787c-46c5-9a4c-a5a0326ee8b6",
+  "parent_run_id": "934bd222-8bce-455d-a381-36355c3b0b64",
+  "created_at": "2026-10-31T22:25:02.415616+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "df118750a4c110074c7ab7518b4a5b482c97bc9219f1d933830a4889c87d7c53",
+  "source_specification_sha256": "a76ed5768721017c031001c77c28659715342a9a4b4a3c5653d1331a01af4628",
+  "source_python_sha256": "5bb93af25372193567409307ecf95cb003d7c230ce43e7ef7e80002d4c8955f2",
+  "elapsed_seconds": 33.079,
+  "usage": {
+    "input_tokens": 4512,
+    "output_tokens": 4499,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Two-query affine identification circuit on n+1 qubits. Query 1 is a controlled phase oracle for f(x)=a.x xor b, applied to x=|0^n> with a control qubit in |+>. Phase kickback followed by H writes b onto the control qubit. Query 2 is the standard Bernstein-Vazirani circuit H^n U_f H^n on the input register, which writes a onto it. The ideal output on |0^(n+1)> is (-1)^b |b>_c |a>_x. The incompletely-defined-function case and the 2/3 bound are out of scope.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 11:\n        raise ValueError('n must be an integer in 1..11')\n    a = instance.get('a')\n    if not isinstance(a, (list, tuple)) or len(a) != n:\n        raise ValueError('a must be a list of n bits')\n    for v in a:\n        if isinstance(v, bool) or not isinstance(v, int) or v not in (0, 1):\n            raise ValueError('a entries must be 0 or 1')\n    b = instance.get('b')\n    if isinstance(b, bool) or not isinstance(b, int) or b not in (0, 1):\n        raise ValueError('b must be 0 or 1')\n    return n, [int(v) for v in a], int(b)\n\n\ndef _phase_oracle(qc, a, b):\n    # eq_2 with eq_1: U_f|x> = (-1)^(a.x xor b)|x>; Z on each qubit with a_i=1, plus global phase (-1)^b\n    for i, ai in enumerate(a):\n        if ai:\n            qc.z(i)\n    if b:\n        qc.global_phase = qc.global_phase + math.pi\n\n\ndef _controlled_phase_oracle(qc, a, b, control):\n    # controlled-U_f: CZ(control, x_i) for a_i=1; Z on control gives the (-1)^b factor when control=1\n    for i, ai in enumerate(a):\n        if ai:\n            qc.cz(control, i)\n    if b:\n        qc.z(control)\n\n\ndef build_circuit(instance):\n    n, a, b = _parse(instance)\n    x = QuantumRegister(n, 'x')\n    c = QuantumRegister(1, 'c')\n    qc = QuantumCircuit(x, c)\n    ctrl = n\n    # Query 1 (eq_4): f(0^n)=b by phase kickback; x is still |0^n> here\n    qc.h(ctrl)\n    _controlled_phase_oracle(qc, a, b, ctrl)\n    qc.h(ctrl)\n    # Query 2 (eq_3): Bernstein-Vazirani on the input register\n    for i in range(n):\n        qc.h(i)\n    _phase_oracle(qc, a, b)\n    for i in range(n):\n        qc.h(i)\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"a\": [1, 0], \"b\": 1}",
+    "register_layout": [
+      "qubits 0..n-1: input register x; qubit i carries bit i of a (qubit 0 is least significant)",
+      "qubit n: control/offset qubit c; ends in |b>",
+      "expected ideal output on |0^(n+1)>: (-1)^b |b>_c |a>_x; for the example n=2, a=[1,0] (a_0=1), b=1, the basis state is c=1, x1=0, x0=1, i.e. index 5 in Qiskit ordering"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_parse and build_circuit (a, b parameters define f)",
+        "explanation": "The affine form is realized through the oracle gates built from a and b; b=0 gives a linear function."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_phase_oracle and _controlled_phase_oracle",
+        "explanation": "Phase oracle (-1)^{f(x)} built from Z gates (a.x part) and a global phase or control-qubit Z (b part)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit, H^n then _phase_oracle then H^n on register x",
+        "explanation": "One-query BV step yielding (-1)^b|a>; the global phase is included explicitly via circuit global_phase."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit, first block (H on control, _controlled_phase_oracle, H on control)",
+        "explanation": "The offset b=f(0^n) is read out into the control qubit by a controlled phase-oracle query on x=|0^n>."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The bounded-error 2/3 criterion concerns incompletely defined functions, which are not implemented; this circuit is deterministic for fully specified functions."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Query order reversed relative to the specification steps: the controlled offset query is applied first, while the input register is still |0^n>, and the BV query is applied second.",
+        "reason": "Evaluating f(0^n) needs x=|0^n>, but BV leaves x in |a>. The circuit must also avoid resets, so the offset query goes first."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The second-query construction is my own phase-kickback design with one extra control qubit, not the paper's two-query algorithm.",
+        "reason": "The abstract does not give the paper's construction, and the specification marked it as a placeholder."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The oracle is compiled from the parameters (a, b) into Z/CZ gates and a phase instead of a lookup table of f, and global phase (-1)^b is tracked explicitly.",
+        "reason": "The circuit must be built from standard gates without dense unitaries. Tracking the global phase keeps the ideal output state exact."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Scope narrowed to fully specified affine/linear functions; incompletely defined functions and the 2/3 bounded-error analysis are not implemented.",
+        "reason": "The classes of partial functions are not specified in the abstract."
+      }
+    ],
+    "assumptions": [
+      "Phase-oracle model with the oracle fixed by hidden a and b, supplied in the instance",
+      "Input state |0^(n+1)> is prepared by the runner",
+      "a[i] is the coefficient of qubit i, little-endian",
+      "n is limited to 1..11, so there are at most 12 qubits in total"
+    ],
+    "unresolved_issues": [
+      "The paper's actual two-query algorithm and oracle model are unknown",
+      "Incompletely defined function classes and the 2/3 success probability are not modeled"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 11,
+    "depth": 6,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

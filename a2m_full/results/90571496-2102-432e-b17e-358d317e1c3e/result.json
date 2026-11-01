@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "90571496-2102-432e-b17e-358d317e1c3e",
+  "parent_run_id": "b81bdbc2-7ac1-41a0-bab8-3efd7b175cf7",
+  "created_at": "2026-11-01T00:31:31.724245+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "ab92d832e44528a6144e6380bbe28f5b25d196ec3d02f09f3e42ee58664d9343",
+  "source_specification_sha256": "5130871ff648193ea063c3e89222f830669bbb8fad076d895875e3efdeccd4f8",
+  "source_python_sha256": "076bc556d817694bad1520c2d284a98736ac78e7dcbdca774eed83d3049852dc",
+  "elapsed_seconds": 33.377,
+  "usage": {
+    "input_tokens": 5225,
+    "output_tokens": 4907,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds a palindromic NCT circuit G = g1...gk [c] gk...g1 on n data lines (plus an optional ancilla line). The caller supplies the half-sequence of NOT/CNOT/Toffoli gates and an optional central self-inverse gate. The builder appends the half-sequence, the center, and the mirrored half-sequence, so the gate list equals its reverse by construction and the circuit is an involution. It does not synthesize a circuit from an involution table.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _int(v, lo, hi, name):\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError(name + \" out of range or not an integer\")\n    return v\n\n\ndef _parse_gate(g, nq):\n    if not isinstance(g, dict):\n        raise ValueError(\"gate must be an object\")\n    ctrls = g.get(\"controls\")\n    if not isinstance(ctrls, list) or len(ctrls) > 2:\n        raise ValueError(\"controls must be a list of at most 2 indices\")\n    cs = [_int(c, 0, nq - 1, \"control\") for c in ctrls]\n    t = _int(g.get(\"target\"), 0, nq - 1, \"target\")\n    if t in cs or len(set(cs)) != len(cs):\n        raise ValueError(\"gate qubits must be distinct\")\n    return (cs, t)\n\n\ndef _apply(qc, gate):\n    cs, t = gate\n    if len(cs) == 0:\n        qc.x(t)\n    elif len(cs) == 1:\n        qc.cx(cs[0], t)\n    else:\n        qc.ccx(cs[0], cs[1], t)\n\n\ndef build_circuit(instance):\n    \"\"\"Palindromic NCT circuit h c h^-1 (eq_2, eq_3) on n data lines + optional ancilla (eq_5).\n    instance: {\"n\":2..4, \"ancilla\":0|1, \"half\":[{\"controls\":[..],\"target\":t},..], \"center\":gate|null}\n    Qubit indices: data 0..n-1 (little-endian), ancilla = n.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be an object\")\n    n = _int(instance.get(\"n\"), 2, 4, \"n\")\n    anc = _int(instance.get(\"ancilla\", 0), 0, 1, \"ancilla\")\n    nq = n + anc\n    if nq > 12:\n        raise ValueError(\"too many qubits\")\n    raw = instance.get(\"half\", [])\n    if not isinstance(raw, list) or len(raw) > 64:\n        raise ValueError(\"half must be a list of at most 64 gates\")\n    half = [_parse_gate(g, nq) for g in raw]\n    center_raw = instance.get(\"center\")\n    center = None\n    if center_raw is not None:\n        center = _parse_gate(center_raw, nq)\n    if len(half) == 0 and center is None:\n        raise ValueError(\"empty circuit\")\n    data = QuantumRegister(n, \"data\")\n    if anc:\n        qc = QuantumCircuit(data, QuantumRegister(1, \"anc\"))\n    else:\n        qc = QuantumCircuit(data)\n    # g_1 ... g_k\n    for g in half:\n        _apply(qc, g)\n    # optional central self-inverse gate c\n    if center is not None:\n        _apply(qc, center)\n    # mirrored g_k ... g_1 (h^-1 for self-inverse gates)\n    for g in reversed(half):\n        _apply(qc, g)\n    return qc",
+    "example_instance_json": "{\"n\":3,\"ancilla\":0,\"half\":[{\"controls\":[0],\"target\":1}],\"center\":{\"controls\":[1,2],\"target\":0}}",
+    "register_layout": [
+      "qubit 0..n-1: data register, little-endian (x = sum x_i 2^i), qubit i holds bit x_i",
+      "qubit n (only if ancilla=1): ancilla line, expected |0> in and |0> out (not enforced)",
+      "example: n=3, no ancilla -> qubits 0,1,2 are data bits x0,x1,x2"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Involution/cycle structure of f is the mathematical framing. The module takes a gate list rather than a permutation table and does not decompose f or verify f(f(x))=x."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: half gates, then optional center, then reversed(half)",
+        "explanation": "The gate list is a palindrome of self-inverse NOT/CNOT/Toffoli gates, so G equals its reverse circuit and G^2 = id."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: h = half gates, c = center gate, h^-1 = reversed half",
+        "explanation": "Conjugation form G = h c h^-1 with c a single self-inverse gate (or absent, giving the identity). The mirrored half-sequence is exactly h^-1."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The parity obstruction on n>=4 lines is a known result used to motivate the ancilla. It is not checked or enforced in code."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: ancilla option (qubit n) usable in half/center gates",
+        "explanation": "Only the container is implemented: a palindromic circuit on n+1 lines whose gates may act on the extra line. The code does not construct an ancilla realization of a given f and does not verify that the ancilla is restored to 0."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to a palindrome builder. The caller supplies the half gate list and center gate, and the module does not search for or synthesize a circuit realizing a given involution table.",
+        "reason": "The abstract does not give the characterization or construction, and the task forbids simulation and searching with unverified claims. The synthesis rule is not resolvable from the available information."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Ancilla restoration to |0> is the caller's responsibility and is not validated.",
+        "reason": "Checking it would require simulating the circuit."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The controlled-V/V-dagger palindrome variant is omitted. The gate library is NCT only (up to 2 controls).",
+        "reason": "The V/V-dagger placement rule is unspecified, since the reverse of V is V-dagger."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The data-line range is restricted to 2<=n<=4, with an optional single ancilla (at most 5 qubits).",
+        "reason": "This matches the declared domain of n in the specification."
+      }
+    ],
+    "assumptions": [
+      "Gates are NOT (0 controls), CNOT (1 control) or Toffoli (2 controls), all self-inverse.",
+      "Qubit indices in instance gates are global, with data on 0..n-1 and the ancilla on n.",
+      "The central gate, if present, is a single self-inverse NCT gate.",
+      "The runner prepares inputs and reads outputs with little-endian ordering."
+    ],
+    "unresolved_issues": [
+      "No synthesis of a palindromic circuit from an arbitrary involution table is implemented.",
+      "The necessary-and-sufficient condition for palindromic realizability is not encoded.",
+      "The ancilla construction and the controlled-V/V-dagger palindrome are not implemented.",
+      "The parity obstruction and the ancilla-returns-to-0 condition are not checked in code."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 17,
+    "depth": 13,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

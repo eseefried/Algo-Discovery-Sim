@@ -1,0 +1,144 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "d9d60208-7df4-44da-b4a4-f5a48c0afc80",
+  "parent_run_id": "f65f5e7a-3b27-4402-b3d1-41bbaf893357",
+  "created_at": "2026-11-01T00:23:24.253971+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "2e1707358eba8340249b3dd3653db080ae6b44ff5509821686b65242e7fa8019",
+  "source_specification_sha256": "ea846c235c41db8575ca2382dccdb1b3175b4351239ed6db2c8ed5179cd18cd8",
+  "source_python_sha256": "a46d3627c4d815b5429f2c6ce295ed36d05bd85f76079e290ffa11ba0afbc603",
+  "elapsed_seconds": 46.06,
+  "usage": {
+    "input_tokens": 5869,
+    "output_tokens": 7069,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "build_circuit(instance) returns the unitary exp(-i H2 t) with H2 = A⊗I + I⊗A for a user-supplied symmetric 0/1 adjacency matrix (N<=8, zero-padded to 2^m vertices). It acts on two m-qubit position registers (6 qubits for m=3). A is decomposed into Pauli strings classically. Since the two single-particle terms commute, each register is evolved separately by a product-formula (Trotter, order 1 or 2) of Pauli rotations built from standard gates. The circuit preserves the antisymmetric subspace. State preparation, measurement, and TV-distance comparison are left to the runner.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\nimport numpy as np\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    try:\n        a = np.array(instance.get('adjacency'), dtype=float)\n    except Exception:\n        raise ValueError('adjacency must be a numeric square matrix')\n    if a.ndim != 2 or a.shape[0] != a.shape[1]:\n        raise ValueError('adjacency must be square')\n    n = a.shape[0]\n    if n < 2 or n > 8:\n        raise ValueError('number of vertices must be in 2..8')\n    if not np.all(np.isfinite(a)) or not np.all((a == 0) | (a == 1)):\n        raise ValueError('adjacency entries must be 0 or 1')\n    if not np.array_equal(a, a.T) or np.any(np.diag(a) != 0):\n        raise ValueError('adjacency must be symmetric with zero diagonal')\n    t = instance.get('time')\n    if isinstance(t, bool) or not isinstance(t, (int, float)) or not math.isfinite(t):\n        raise ValueError('time must be a finite real number')\n    steps = instance.get('trotter_steps', 1)\n    if isinstance(steps, bool) or not isinstance(steps, int) or steps < 1 or steps > 100:\n        raise ValueError('trotter_steps must be an integer in 1..100')\n    order = instance.get('order', 2)\n    if isinstance(order, bool) or order not in (1, 2):\n        raise ValueError('order must be 1 or 2')\n    return a, float(t), steps, order\n\n\ndef _pauli_terms(a):\n    # Classical Pauli decomposition A = sum_P c_P P of the zero-padded adjacency matrix.\n    n = a.shape[0]\n    m = max(1, int(math.ceil(math.log2(n))))\n    d = 2 ** m\n    big = np.zeros((d, d))\n    big[:n, :n] = a\n    mats = [np.eye(2), np.array([[0, 1], [1, 0]], dtype=complex),\n            np.array([[0, -1j], [1j, 0]]), np.array([[1, 0], [0, -1]], dtype=complex)]\n    terms = []\n    for code in range(1, 4 ** m):\n        digits = [(code // (4 ** k)) % 4 for k in range(m)]\n        mat = np.array([[1.0]], dtype=complex)\n        for k in range(m - 1, -1, -1):\n            mat = np.kron(mat, mats[digits[k]])\n        c = float(np.real(np.trace(mat @ big))) / d\n        if abs(c) > 1e-12:\n            terms.append((digits, c))\n    return m, terms\n\n\ndef _rot(qc, qubits, digits, theta):\n    # exp(-i theta P) for Pauli string P; digits[k] in {0:I,1:X,2:Y,3:Z} on qubits[k].\n    act = [(q, dg) for q, dg in zip(qubits, digits) if dg]\n    if not act:\n        return\n    for q, dg in act:\n        if dg == 1:\n            qc.h(q)\n        elif dg == 2:\n            qc.sdg(q)\n            qc.h(q)\n    for i in range(len(act) - 1):\n        qc.cx(act[i][0], act[i + 1][0])\n    qc.rz(2.0 * theta, act[-1][0])\n    for i in range(len(act) - 2, -1, -1):\n        qc.cx(act[i][0], act[i + 1][0])\n    for q, dg in act:\n        if dg == 1:\n            qc.h(q)\n        elif dg == 2:\n            qc.h(q)\n            qc.s(q)\n\n\ndef _evolve(qc, qubits, terms, t, steps, order):\n    # Product-formula approximation of exp(-i A t) on one position register.\n    dt = t / steps\n    for _ in range(steps):\n        if order == 1:\n            for digits, c in terms:\n                _rot(qc, qubits, digits, c * dt)\n        else:\n            for digits, c in terms:\n                _rot(qc, qubits, digits, c * dt / 2.0)\n            for digits, c in reversed(terms):\n                _rot(qc, qubits, digits, c * dt / 2.0)\n\n\ndef build_circuit(instance):\n    \"\"\"Two-fermion CTQW operation exp(-i (A x I + I x A) t) on registers r1, r2.\"\"\"\n    a, t, steps, order = _validate(instance)\n    m, terms = _pauli_terms(a)\n    r1 = QuantumRegister(m, 'r1')\n    r2 = QuantumRegister(m, 'r2')\n    qc = QuantumCircuit(r1, r2)\n    q1 = list(range(m))\n    q2 = list(range(m, 2 * m))\n    # H2 = A (x) I + I (x) A; the two terms commute, so exp(-iH2 t) = exp(-iAt)_r1 exp(-iAt)_r2.\n    _evolve(qc, q1, terms, t, steps, order)\n    _evolve(qc, q2, terms, t, steps, order)\n    return qc",
+    "example_instance_json": "{\"adjacency\": [[0,1,1,1,1,0,0,0],[1,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0]], \"time\": 0.7, \"trotter_steps\": 8, \"order\": 2}",
+    "register_layout": [
+      "Qubits 0-2: register r1 (particle 1 position), little-endian binary vertex index (qubit 0 is the least significant bit)",
+      "Qubits 3-5: register r2 (particle 2 position), little-endian binary vertex index (qubit 3 is the least significant bit)",
+      "For N<=4 vertices, m=2 and the registers are qubits 0-1 (r1) and 2-3 (r2)",
+      "No ancilla qubit is used",
+      "Vertex v is the basis state |v> in each register; vertices >= N are zero-padded and isolated"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The antisymmetric-basis matrix elements are not built explicitly. The circuit acts on the full tensor-product space, and H2 commutes with SWAP, so the antisymmetric subspace is preserved automatically. The matrix elements describe the restriction of the implemented operator to that subspace."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit / _evolve: A is Pauli-decomposed in _pauli_terms and applied to r1 and to r2",
+        "explanation": "H2 = A⊗I + I⊗A is implemented as the sum of the same single-particle Hamiltonian on each register. Because the two terms commute, the evolution factorises into two per-register evolutions."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit / _evolve / _rot (the evolution operator only)",
+        "explanation": "Only the evolution operator exp(-iH2 t) is implemented, approximated by a Trotter product formula. The antisymmetric initial state and the position-basis readout are supplied by the runner."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The total variation distance is classical post-processing of simulated distributions, not part of the unitary circuit."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The trace or moment criterion is classical spectral analysis. The equation is also incomplete as written (the exact formula is omitted), so it is not implemented."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "exp(-iH2 t) is implemented as a Pauli-rotation Trotter product formula (order 1 or 2, user-chosen number of steps) rather than exactly.",
+        "reason": "Opaque dense unitaries and operator construction are disallowed. A is not generally a sum of commuting Pauli terms, so the result is approximate with an error that shrinks as trotter_steps increases."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The circuit contains only the evolution operation. The antisymmetric initial state preparation and readout are removed from the circuit.",
+        "reason": "The task requires an operation without state preparation or measurement; the runner prepares inputs."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "H2 acts on the full N^2 (padded 2^m x 2^m) tensor space rather than being projected onto the antisymmetric subspace.",
+        "reason": "Unitary evolution by H2 preserves the antisymmetric sector, so no projection is needed in the circuit. Antisymmetry is a property of the input state."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Scope narrowed to N<=8 vertices with explicit adjacency matrices (symmetric, 0/1, zero diagonal), zero-padded to 2^m vertices. The optional Hadamard-test ancilla is omitted.",
+        "reason": "Qubit cap and the stated scope. The return-amplitude variant needs a controlled evolution, which is not implemented."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Distinguishing criteria and trace moments are not implemented.",
+        "reason": "They are classical post-processing; eq_5 is also an incompletely specified formula."
+      }
+    ],
+    "assumptions": [
+      "The adjacency matrix is given in instance['adjacency'] as a symmetric 0/1 matrix with zero diagonal and 2<=N<=8",
+      "Vertex v maps to the little-endian computational basis state |v> on each position register",
+      "Padding vertices (index >= N) are isolated and have zero rows and columns",
+      "The same graph Hamiltonian acts on both particles (noninteracting fermions)",
+      "Trotter step count and order are user parameters, with defaults 1 and 2",
+      "The global phase from the identity Pauli component is dropped; it is zero for a zero-diagonal A anyway",
+      "The example graph is the star K_{1,4} plus 3 padding vertices. Its cospectral partner (C4 plus an isolated vertex) is not given in the abstract and must be supplied by the runner"
+    ],
+    "unresolved_issues": [
+      "The abstract does not give the edge lists of G4(n;n+2), G5(n;n+2), T4 or T5, so no instance of those graphs is built in",
+      "The paper's initial state, observable and time values are unknown",
+      "Trotter error is not bounded in the code; accuracy depends on trotter_steps and t",
+      "The entanglement-entropy part of the paper is excluded"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 3200,
+    "depth": 1232,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

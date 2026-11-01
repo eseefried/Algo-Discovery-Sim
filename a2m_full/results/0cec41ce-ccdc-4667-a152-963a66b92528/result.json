@@ -1,0 +1,129 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "0cec41ce-ccdc-4667-a152-963a66b92528",
+  "parent_run_id": "47b05809-ca72-46a5-aa49-6a0e3c5c5af6",
+  "created_at": "2026-11-01T00:24:16.190179+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "350f7429637c1007b7ada8ace5c2705b5c9ae2ccc03c84e04681f90b7bf9e398",
+  "source_specification_sha256": "95104b87b6c6672ab41485c18fb585761cf13d9abc2de1ed5a33c6c21457c1ad",
+  "source_python_sha256": "2f76ba3100a3531b4161ea1e24f9efcc3b414767884a01729f186d36cf06c11b",
+  "elapsed_seconds": 24.485,
+  "usage": {
+    "input_tokens": 5550,
+    "output_tokens": 3566,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit implementation of the Trugenberger-style Hamming-distance interference stage for classification. It acts on a supplied pattern|label memory state: X gates XOR the classical query into the pattern register, H on the ancilla, controlled phases CP(-pi/n) from the ancilla onto each pattern qubit, then H on the ancilla. For a pattern at Hamming distance d, the ancilla then reads 0 with probability cos^2(pi d/(2n)). The training-state loading (eq_1) and the classical post-selection/vote (eq_5) are outside the circuit.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef build_circuit(instance):\n    \"\"\"Hamming-distance phase/interference operation.\n\n    instance: {\"n\": pattern bits, \"m\": label bits (identity on them), \"query\": list of n bits}\n    Layout: p = qubits 0..n-1 (p_j is qubit j), c = next m qubits, a = last qubit.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"n\")\n    m = instance.get(\"m\")\n    x = instance.get(\"query\")\n    if not _is_int(n) or not _is_int(m):\n        raise ValueError(\"n and m must be integers\")\n    if n < 1 or m < 0:\n        raise ValueError(\"need n>=1 and m>=0\")\n    if n + m + 1 > 12:\n        raise ValueError(\"total qubits exceed 12\")\n    if not isinstance(x, list) or len(x) != n:\n        raise ValueError(\"query must be a list of n bits\")\n    for b in x:\n        if not _is_int(b) or b not in (0, 1):\n            raise ValueError(\"query entries must be 0 or 1\")\n\n    p = QuantumRegister(n, \"p\")\n    regs = [p]\n    if m > 0:\n        c = QuantumRegister(m, \"c\")\n        regs.append(c)\n    a = QuantumRegister(1, \"a\")\n    regs.append(a)\n    qc = QuantumCircuit(*regs)\n\n    # eq_2: XOR query into pattern register; qubit j is 1 where pattern disagrees with query\n    for j in range(n):\n        if x[j] == 1:\n            qc.x(p[j])\n\n    # eq_3: ancilla superposition, then phase exp(-i*pi*d/n) on the a=1 branch\n    qc.h(a[0])\n    for j in range(n):\n        qc.cp(-math.pi / n, a[0], p[j])\n\n    # eq_4: interference so that P(a=0|k)=cos^2(pi d_k/(2n))\n    qc.h(a[0])\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"m\": 1, \"query\": [1, 0]}",
+    "register_layout": [
+      "qubit 0..n-1: pattern register p (p_j on qubit j, little-endian; becomes XOR/difference register)",
+      "qubits n..n+m-1: class label register c (untouched by the circuit, carries class labels from the prepared memory state)",
+      "qubit n+m: interference ancilla a (expected |0> on input; post-select a=0)",
+      "Example n=2,m=1: p0=q0, p1=q1, c0=q2, a=q3"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Training superposition is the input memory state. The runner prepares it on p and c, with a in |0>, so the circuit does not load it."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: X gates on p[j] where query[j]==1",
+        "explanation": "XOR with the classical query, no extra XNOR layer, so the Hamming weight of p is d_k."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: first H on a and the cp(-pi/n, a, p[j]) loop",
+        "explanation": "Gives the a=1 branch the phase exp(-i*pi*d_k/n)."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: final H on a",
+        "explanation": "The closing Hadamard gives P(a=0|k)=cos^2(pi d_k/(2n)); no measurement is included."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Post-selection on a=0, class tally and argmax are classical post-processing; the circuit has no measurement."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Fixed the per-qubit controlled-phase angle at -pi/n, ignoring eq_3's alternative half-angle (pi/(2n)) conventions.",
+        "reason": "Only a relative phase pi*d/n yields P(a=0)=cos^2(pi d/(2n)) as in eq_4. The half-angle variants in the eq_3 text would give cos^2(pi d/(4n)) and are inconsistent with eq_4."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Scope narrowed to the distance-imprinting/interference operation acting on a supplied memory state. The state-loading circuit is not implemented.",
+        "reason": "The task requires the circuit to be an operation on runner-prepared inputs, and the paper's loading scheme is unspecified."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Measurement, post-selection and the class vote are excluded.",
+        "reason": "The circuit must be measurement-free and unitary."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The query is a classical parameter in the instance, so the x register is dropped and loaded by X gates.",
+        "reason": "Matches the specification, which uses a classical query; qubit j of p corresponds to query[j] (little-endian)."
+      }
+    ],
+    "assumptions": [
+      "Input state has the ancilla in |0> and p, c holding sum_k |p_k>|c_k> with p_j on qubit j",
+      "query[j] is the bit compared against qubit j of the pattern register",
+      "m may be 0 or more; label qubits are only included for layout and are idle",
+      "n+m+1 <= 12"
+    ],
+    "unresolved_issues": [
+      "The paper's actual loading procedure, decision rule and measurement or amplification scheme are unknown",
+      "Training-set loading is not part of this circuit, so a separate preparation is needed to reproduce the full classifier",
+      "MNIST preprocessing is out of scope"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 13,
+    "depth": 10,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

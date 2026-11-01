@@ -1,0 +1,126 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "2527dd5d-1390-40cb-835c-d80f2f05d7ac",
+  "parent_run_id": "f0e81bfa-f4f3-42d9-b3d7-e37917e1b5a8",
+  "created_at": "2026-10-31T22:24:18.230629+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "5a1caba29810f2dbb2e443761eaa752d2eff53b9a6c2eeadf4878a050d38a0e3",
+  "source_specification_sha256": "d9ddb499970aacb0473e50059767ef6b7674434911a7f87a10ab57f89ceef216",
+  "source_python_sha256": "a5fa770eda08f790369109440af9a5307722ecdda9ed8ad29990851c945f056a",
+  "elapsed_seconds": 36.03,
+  "usage": {
+    "input_tokens": 4553,
+    "output_tokens": 4962,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit build_circuit for a discrete-time quantum walk on a 2^n-site circle with a 1-qubit coin. Each step applies the coin (identity or X) and then a conditional shift, done in the Fourier basis with QFTGate, phase gates and a controlled phase. A final state-independent coin (identity or X, or X^t when 'auto' with the flip coin) is applied at the end. Biased coins, Hadamard, the line walk and the general final-coin construction are out of scope. Input states and x0 are prepared by the runner.",
+    "source_python": "from qiskit import QuantumCircuit\nfrom qiskit.circuit.library import QFTGate\nimport math\n\n_COINS = (\"identity\", \"flip\")\n_FINALS = (\"auto\", \"identity\", \"flip\")\n\n\ndef _get_int(inst, key, lo, hi):\n    if key not in inst:\n        raise ValueError(\"missing parameter: \" + key)\n    v = inst[key]\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError(key + \" must be an integer\")\n    if v < lo or v > hi:\n        raise ValueError(key + \" out of range\")\n    return v\n\n\ndef _apply_coin(qc, coin_idx, kind):\n    # Coin operator C on the coin qubit (eq_2): identity or flip X.\n    if kind == \"flip\":\n        qc.x(coin_idx)\n\n\ndef _apply_shift(qc, coin_idx, pos_idx):\n    # Conditional shift S (eq_1): coin 0 -> x+1, coin 1 -> x-1 (mod 2^n).\n    # In the Fourier basis, x -> x+1 is phase exp(2*pi*i*k/N) on |k>.\n    # Per position bit j: p(theta_j) unconditionally and cp(-2*theta_j) from coin,\n    # giving +theta_j for coin 0 and -theta_j for coin 1.\n    n = len(pos_idx)\n    big_n = 2 ** n\n    qc.append(QFTGate(n), pos_idx)\n    for j, q in enumerate(pos_idx):\n        theta = 2.0 * math.pi * (2 ** j) / big_n\n        qc.p(theta, q)\n        qc.cp(-2.0 * theta, coin_idx, q)\n    qc.append(QFTGate(n).inverse(), pos_idx)\n\n\ndef build_circuit(instance):\n    \"\"\"Walk operation: (C_f on coin) * (S (C x I))^t. Qubit 0 = coin, qubits 1..n = position (qubit 1 is LSB).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = _get_int(instance, \"position_qubits\", 1, 11)\n    t = _get_int(instance, \"steps\", 0, 256)\n    coin = instance.get(\"coin\", \"flip\")\n    final = instance.get(\"final_coin\", \"auto\")\n    if coin not in _COINS:\n        raise ValueError(\"coin must be 'identity' or 'flip'\")\n    if final not in _FINALS:\n        raise ValueError(\"final_coin must be 'auto', 'identity' or 'flip'\")\n    qc = QuantumCircuit(n + 1, name=\"qwalk_circle\")\n    coin_idx = 0\n    pos_idx = list(range(1, n + 1))\n    for _ in range(t):\n        _apply_coin(qc, coin_idx, coin)\n        _apply_shift(qc, coin_idx, pos_idx)\n    # Final state-independent coin C_f (eq_3, eq_4)\n    if final == \"auto\":\n        if coin == \"flip\" and t % 2 == 1:\n            qc.x(coin_idx)\n    elif final == \"flip\":\n        qc.x(coin_idx)\n    return qc",
+    "example_instance_json": "{\"position_qubits\": 2, \"steps\": 2, \"coin\": \"flip\", \"final_coin\": \"auto\"}",
+    "register_layout": [
+      "qubit 0: coin (computational basis |0>=move right, |1>=move left)",
+      "qubits 1..n: position register, binary encoding of x in Z_{2^n}, qubit 1 is the least significant bit",
+      "example: n=2, so qubits 0 (coin), 1 and 2 (position, N=4)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_apply_shift",
+        "explanation": "Conditional shift on the circle (coin 0 -> +1, coin 1 -> -1, mod 2^n), built as QFT on the position register, per-qubit phases p(theta_j) and cp(-2*theta_j) controlled by the coin, then inverse QFT."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop with _apply_coin and _apply_shift",
+        "explanation": "U = S(C x I) is applied t times with the same coin C (identity or X). The initial state |psi>|x0> is prepared by the runner."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit, final coin block",
+        "explanation": "Only the operation (C_f x I)U^t is built, with C_f restricted to I or X. The transfer condition is a property of the output state and is not enforced or checked in the circuit."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit, final_coin == 'auto' branch",
+        "explanation": "For the flip coin, C_f = X^t is applied (X for odd t, nothing for even t). The schematic position expression in eq_4 is not implemented because it is unverified; the walker's position evolves by the actual shift circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Only the final-coin rule C_f = X^t is used. The schematic walker-position expression x0+(-1)^t... is dropped.",
+        "reason": "With U = S(C x I) and the flip coin, the coin-0 component sits at 0,-1,0,... relative positions and the coin-1 component at +1,0,+1,..., so for odd t and N>2 the components are at different sites. The schematic expression was unverified and not used."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Scope narrowed to a circle with N=2^n sites (n=1..11), identity or flip coin, and a final coin that is I or X. The line, biased and Hadamard coins, and the general final-coin construction are excluded.",
+        "reason": "The abstract does not give the explicit final coin operator for general coins or the formal transfer definition. The circle size must be a power of two to be encoded in qubits."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The initial position x0 is not part of the circuit and is set by the runner.",
+        "reason": "The task requires an operation with no state preparation."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The target position and the transfer condition are not encoded.",
+        "reason": "The target position depends on coin, t and N, and checking it is the job of the downstream software."
+      }
+    ],
+    "assumptions": [
+      "Shift convention: coin |0> moves x -> x+1, coin |1> moves x -> x-1, positions mod 2^n.",
+      "The coin is applied before the shift in each step.",
+      "The same coin is used every step.",
+      "Position uses binary encoding with qubit 1 as the least significant bit; the QFTGate index order matches that physical order and no factorized QFT index order is used.",
+      "The Fourier-basis shift is exact, since QFTGate maps |x> to a sum over k of exp(2*pi*i*x*k/N)|k>."
+    ],
+    "unresolved_issues": [
+      "The explicit additional final coin for general (biased or Hadamard) coins is not specified in the abstract and is not implemented.",
+      "The formal definition of perfect state transfer and the target positions are not given, so the circuit does not guarantee transfer for arbitrary t.",
+      "The line walk is not implemented; only the finite circle is.",
+      "The periodicity and distance-limit claims are not addressed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 66,
+    "depth": 54,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

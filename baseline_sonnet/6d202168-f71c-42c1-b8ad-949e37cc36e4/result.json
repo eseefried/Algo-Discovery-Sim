@@ -1,0 +1,122 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "6d202168-f71c-42c1-b8ad-949e37cc36e4",
+  "parent_run_id": "0e2e4bff-71f8-4a36-8cff-023f0233d43e",
+  "created_at": "2026-10-31T22:23:43.840070+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "2302abdedba44cd145422fbad25a676fbfd909d4482aea2d92505ce9e8f249d7",
+  "source_specification_sha256": "ae6cdebc912d6fd1c5d82a911ddfd0ff9e46abdc40a244c348716a26b0b1fd92",
+  "source_python_sha256": "d3f8b39fef5821b818767a164aa3b46fbd5af663a1c30b57aef87f23d3924e12",
+  "elapsed_seconds": 51.221,
+  "usage": {
+    "input_tokens": 4881,
+    "output_tokens": 7612,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "First-order Trotter circuit for a second-quantized molecular Hamiltonian under Jordan-Wigner encoding. The instance supplies sparse real one- and two-electron integrals, an evolution time and a step count r. The module maps each fermionic term to Pauli strings with its own Pauli algebra, checks that the result is Hermitian, then applies r repetitions of the product of Pauli-string exponentials exp(-i c_j t/r P_j) using H/S basis changes, CX ladders and RZ gates. No state preparation or measurement is included.",
+    "source_python": "from qiskit import QuantumCircuit\nimport math\n\n\ndef _mul(A, B):\n    t = {(1, 2): (3, 1j), (2, 1): (3, -1j), (2, 3): (1, 1j), (3, 2): (1, -1j), (3, 1): (2, 1j), (1, 3): (2, -1j)}\n    res = {}\n    for ka, ca in A.items():\n        for kb, cb in B.items():\n            ph = ca * cb\n            out = []\n            for x, y in zip(ka, kb):\n                if x == 0:\n                    out.append(y)\n                elif y == 0:\n                    out.append(x)\n                elif x == y:\n                    out.append(0)\n                else:\n                    z, f = t[(x, y)]\n                    out.append(z)\n                    ph = ph * f\n            key = tuple(out)\n            res[key] = res.get(key, 0) + ph\n    return res\n\n\ndef _ladder(n, p, dagger):\n    # Jordan-Wigner: a_p = (X_p + iY_p)/2 * Z_{<p}; a_p^dag = (X_p - iY_p)/2 * Z_{<p}\n    kx = tuple([3] * p + [1] + [0] * (n - p - 1))\n    ky = tuple([3] * p + [2] + [0] * (n - p - 1))\n    sgn = -1j if dagger else 1j\n    return {kx: 0.5 + 0j, ky: 0.5 * sgn}\n\n\ndef _scale(A, c):\n    return {k: v * c for k, v in A.items()}\n\n\ndef _add(H, A):\n    for k, v in A.items():\n        H[k] = H.get(k, 0) + v\n\n\ndef _to_int(x, lo, hi, name):\n    try:\n        f = float(x)\n    except (TypeError, ValueError):\n        raise ValueError(name + \" must be numeric\")\n    if not math.isfinite(f) or f != math.floor(f) or f < lo or f > hi:\n        raise ValueError(name + \" out of range\")\n    return int(f)\n\n\ndef _to_real(x, name):\n    try:\n        f = float(x)\n    except (TypeError, ValueError):\n        raise ValueError(name + \" must be numeric\")\n    if not math.isfinite(f):\n        raise ValueError(name + \" must be finite\")\n    return f\n\n\ndef _hamiltonian_paulis(n, one_body, two_body):\n    # eq_1: H = sum h_pq a_p^dag a_q + 1/2 sum h_pqrs a_p^dag a_q^dag a_r a_s, mapped to Pauli strings\n    H = {}\n    for e in one_body:\n        if not isinstance(e, list) or len(e) != 3:\n            raise ValueError(\"one_body entries are [p,q,value]\")\n        p = _to_int(e[0], 0, n - 1, \"p\")\n        q = _to_int(e[1], 0, n - 1, \"q\")\n        v = _to_real(e[2], \"h_pq\")\n        _add(H, _scale(_mul(_ladder(n, p, True), _ladder(n, q, False)), v))\n    for e in two_body:\n        if not isinstance(e, list) or len(e) != 5:\n            raise ValueError(\"two_body entries are [p,q,r,s,value]\")\n        p = _to_int(e[0], 0, n - 1, \"p\")\n        q = _to_int(e[1], 0, n - 1, \"q\")\n        r = _to_int(e[2], 0, n - 1, \"r\")\n        s = _to_int(e[3], 0, n - 1, \"s\")\n        v = _to_real(e[4], \"h_pqrs\")\n        op = _mul(_mul(_mul(_ladder(n, p, True), _ladder(n, q, True)), _ladder(n, r, False)), _ladder(n, s, False))\n        _add(H, _scale(op, 0.5 * v))\n    terms = []\n    const = 0.0\n    for k in sorted(H.keys()):\n        c = H[k]\n        if abs(c) < 1e-12:\n            continue\n        if abs(c.imag) > 1e-9:\n            raise ValueError(\"Hamiltonian is not Hermitian (complex Pauli coefficient)\")\n        if all(l == 0 for l in k):\n            const += c.real\n        else:\n            terms.append((k, c.real))\n    return terms, const\n\n\ndef _pauli_rotation(qc, key, coeff, dt):\n    # exp(-i coeff dt P) via basis change, CX ladder and RZ(2 coeff dt)\n    sup = [i for i, l in enumerate(key) if l != 0]\n    for i in sup:\n        if key[i] == 1:\n            qc.h(i)\n        elif key[i] == 2:\n            qc.sdg(i)\n            qc.h(i)\n    for a, b in zip(sup[:-1], sup[1:]):\n        qc.cx(a, b)\n    qc.rz(2.0 * coeff * dt, sup[-1])\n    for a, b in reversed(list(zip(sup[:-1], sup[1:]))):\n        qc.cx(a, b)\n    for i in sup:\n        if key[i] == 1:\n            qc.h(i)\n        elif key[i] == 2:\n            qc.h(i)\n            qc.s(i)\n\n\ndef build_circuit(instance):\n    \"\"\"Instance: n_orbitals, time, steps, one_body [[p,q,h]], two_body [[p,q,r,s,h]].\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = _to_int(instance.get(\"n_orbitals\"), 1, 12, \"n_orbitals\")\n    r = _to_int(instance.get(\"steps\"), 1, 50, \"steps\")\n    t = _to_real(instance.get(\"time\"), \"time\")\n    one_body = instance.get(\"one_body\", [])\n    two_body = instance.get(\"two_body\", [])\n    if not isinstance(one_body, list) or not isinstance(two_body, list):\n        raise ValueError(\"one_body and two_body must be lists\")\n    if len(one_body) > 144 or len(two_body) > 100:\n        raise ValueError(\"too many integrals\")\n    if two_body and n < 2:\n        raise ValueError(\"two-body terms need at least 2 orbitals\")\n    order = instance.get(\"order\", 1)\n    if _to_int(order, 1, 1, \"order\") != 1:\n        raise ValueError(\"only first-order Trotter is supported\")\n    terms, const = _hamiltonian_paulis(n, one_body, two_body)\n    if len(terms) > 2000:\n        raise ValueError(\"too many Pauli terms\")\n    qc = QuantumCircuit(n)\n    dt = t / r\n    # eq_2: (prod_j exp(-i H_j t/r))^r\n    for _ in range(r):\n        for key, c in terms:\n            _pauli_rotation(qc, key, c, dt)\n    qc.global_phase = -const * t\n    return qc",
+    "example_instance_json": "{\"n_orbitals\":4,\"time\":0.5,\"steps\":2,\"one_body\":[[0,0,-1.0],[1,1,-0.5],[2,2,0.3],[3,3,0.7],[0,1,0.2],[1,0,0.2],[2,3,0.15],[3,2,0.15]],\"two_body\":[[0,1,1,0,0.4],[2,3,3,2,0.2],[0,2,2,0,0.3],[0,1,3,2,0.1],[2,3,1,0,0.1]]}",
+    "register_layout": [
+      "qubit i (0..n_orbitals-1) = spin orbital i, Jordan-Wigner occupation encoding: |1> = occupied, |0> = empty",
+      "qubit 0 is the least significant bit",
+      "no ancilla qubits; total qubits = n_orbitals <= 12"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_hamiltonian_paulis (with _ladder and _mul)",
+        "explanation": "One- and two-electron terms are built as products of Jordan-Wigner ladder operators and expanded into real-coefficient Pauli strings."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop over r steps with _pauli_rotation",
+        "explanation": "First-order product formula with each Pauli string as one H_j. Each step applies exp(-i c_j t/r P_j) in sorted-key order."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "G = r*G_step is a gate-count relation. The circuit repeats the step r times, but r is an input and is not derived from epsilon."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The N^8 scaling is a reported result about random molecules, not an operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The N^6 empirical worst-case scaling is a reported result and cannot be implemented as a circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Integrals are real and given as sparse lists. The Hamiltonian must come out Hermitian (all Pauli coefficients real), otherwise ValueError is raised. Jordan-Wigner is fixed as the encoding.",
+        "reason": "The spec left the encoding open and gave no concrete molecule. Real sparse input keeps the instance small, and the Hermiticity check avoids silently changing the Hamiltonian."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Only first-order Trotter is implemented, with terms in sorted Pauli-string order (the identity term only adds a global phase). Each Pauli string is one H_j rather than each fermionic term, and r is supplied by the user.",
+        "reason": "The ordering and step-size criterion were unspecified. Pauli-string splitting is the standard concrete choice."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Gate-count analysis, error bounds, choosing r from epsilon, and the scaling claims are not implemented. The paper's alternative scheme, coalescing and the complexity-bounding method are also excluded.",
+        "reason": "They are analytic or empirical results rather than a single circuit operation, and the abstract gives insufficient detail."
+      }
+    ],
+    "assumptions": [
+      "Jordan-Wigner mapping with qubit p for spin orbital p",
+      "Real integrals",
+      "Two-body convention is H2 = 1/2 sum h_pqrs a_p^dag a_q^dag a_r a_s with no automatic symmetrization",
+      "Identity-term energy is applied as a global phase"
+    ],
+    "unresolved_issues": [
+      "No explicit Trotter error bound or criterion for r is available",
+      "The paper's alternative scheme and coalescing scheme are not reconstructed",
+      "No specific molecule or fitted exponents are given; the example is an artificial toy Hamiltonian"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 402,
+    "depth": 222,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

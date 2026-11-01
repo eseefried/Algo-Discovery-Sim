@@ -1,0 +1,149 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "f83c9e60-ea4e-4999-9cbb-77d6257eebe6",
+  "parent_run_id": "d8ed7d59-f523-4747-9de9-fef4ffb185e1",
+  "created_at": "2026-11-01T00:09:36.427803+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "af83cd8faf1d1f4ba9f9cb2f5132d556707c06a91dbb4251d7e628ff1eea2fc7",
+  "source_specification_sha256": "f808badd059ec4647d95978ea3e8e6ecc053782533df785c35fed460bbcc2c48",
+  "source_python_sha256": "e4cf6c84343add710d5d1f5cc4b019a171484fb89d89919a6b8e09d916736689",
+  "elapsed_seconds": 62.013,
+  "usage": {
+    "input_tokens": 5407,
+    "output_tokens": 9076,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements the order-finding core of Shor's algorithm for N=15 with a chosen coprime base a. The circuit has an optional Hadamard layer on the counting register, controlled U_a^(2^k) built from controlled swaps and CX gates, and an inverse QFT on the counting register. The inverse QFT is QFTGate(t).inverse() when noiseless. When epsilon or sigma is nonzero, it is a gate-level inverse QFT whose controlled-phase angles are scaled by (1+delta), with delta = epsilon (systematic), a Gaussian draw with std sigma (random), or both (combined). The runner must prepare the work register as |0001> and handle measurement.",
+    "source_python": "'''Shor order finding for N=15 with optional controlled-phase angle noise in the inverse QFT.'''\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\nimport math\nimport numpy as np\n\n\ndef _as_int(v, name):\n    if isinstance(v, bool) or not isinstance(v, (int, np.integer)):\n        raise ValueError(name + ' must be an integer')\n    return int(v)\n\n\ndef _as_float(v, name):\n    if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)):\n        raise ValueError(name + ' must be a real number')\n    x = float(v)\n    if not math.isfinite(x):\n        raise ValueError(name + ' must be finite')\n    return x\n\n\ndef _cmult(qc, ctrl, work, b):\n    # Controlled multiplication by b mod 15 on 4 work qubits (little-endian).\n    # b = 2^s is a left bit rotation by s; b = 15 - 2^s is rotation followed by bitwise complement.\n    table = {1: (0, False), 2: (1, False), 4: (2, False), 8: (3, False),\n             14: (0, True), 13: (1, True), 11: (2, True), 7: (3, True)}\n    if b not in table:\n        raise ValueError('unsupported multiplier')\n    s, comp = table[b]\n    for _ in range(s):\n        qc.cswap(ctrl, work[2], work[3])\n        qc.cswap(ctrl, work[1], work[2])\n        qc.cswap(ctrl, work[0], work[1])\n    if comp:\n        for q in work:\n            qc.cx(ctrl, q)\n\n\ndef _noisy_iqft(qc, q, eps, sigma, rng):\n    # Inverse of the Qiskit QFT circuit (H then CP per target, swaps last), with CP angles scaled by (1+delta).\n    n = len(q)\n    for i in range(n // 2):\n        qc.swap(q[i], q[n - 1 - i])\n    for j in range(n):\n        for k in reversed(range(j)):\n            theta = -math.pi * 2.0 ** (k - j)\n            delta = eps\n            if sigma > 0.0:\n                delta += float(rng.normal(0.0, sigma))\n            qc.cp(theta * (1.0 + delta), q[k], q[j])\n        qc.h(q[j])\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    allowed = {'N', 'a', 't', 'epsilon', 'sigma', 'seed', 'include_hadamards'}\n    for key in instance:\n        if key not in allowed:\n            raise ValueError('unknown key ' + str(key))\n    N = _as_int(instance.get('N', 15), 'N')\n    if N != 15:\n        raise ValueError('only N=15 is supported')\n    a = _as_int(instance.get('a', 7), 'a')\n    if a not in (2, 4, 7, 8, 11, 13, 14):\n        raise ValueError('a must be coprime to 15 and in {2,4,7,8,11,13,14}')\n    t = _as_int(instance.get('t', 8), 't')\n    if t < 1 or t > 8:\n        raise ValueError('t must be in 1..8 (total qubits t+4 <= 12)')\n    eps = _as_float(instance.get('epsilon', 0.0), 'epsilon')\n    sigma = _as_float(instance.get('sigma', 0.0), 'sigma')\n    if sigma < 0.0:\n        raise ValueError('sigma must be >= 0')\n    seed = _as_int(instance.get('seed', 0), 'seed')\n    if seed < 0:\n        raise ValueError('seed must be >= 0')\n    had = instance.get('include_hadamards', True)\n    if not isinstance(had, bool):\n        raise ValueError('include_hadamards must be a bool')\n\n    count = QuantumRegister(t, 'count')\n    work = QuantumRegister(4, 'work')\n    qc = QuantumCircuit(count, work, name='shor_order_finding_N15')\n    cq = [count[i] for i in range(t)]\n    wq = [work[i] for i in range(4)]\n\n    if had:\n        for q in cq:\n            qc.h(q)\n    for k in range(t):\n        b = pow(a, 2 ** k, 15)\n        if b != 1:\n            _cmult(qc, cq[k], wq, b)\n\n    if eps == 0.0 and sigma == 0.0:\n        qc.append(QFTGate(t).inverse(), list(range(t)))\n    else:\n        rng = np.random.default_rng(seed)\n        _noisy_iqft(qc, cq, eps, sigma, rng)\n    return qc",
+    "example_instance_json": "{\"N\":15,\"a\":7,\"t\":8,\"epsilon\":0.0,\"sigma\":0.05,\"seed\":1,\"include_hadamards\":true}",
+    "register_layout": [
+      "Qiskit qubits 0..t-1: counting register 'count' (little-endian, qubit i has weight 2^i in m; qubit k controls U_a^(2^k))",
+      "Qiskit qubits t..t+3: work register 'work' (little-endian, work[0]=qubit t is least significant bit of y); the runner must prepare |0001> (y=1)",
+      "Example (t=8): count = qubits 0-7, work = qubits 8-11, 12 qubits total",
+      "No classical bits; measurement is left to the runner"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (Hadamard layer and loop over k calling _cmult) and _cmult",
+        "explanation": "Hadamards on the counting register (optional) followed by controlled U_a^(2^k), where U_a^(2^k) is multiplication by pow(a,2^k,15) built from controlled bit-rotation swaps and optional controlled complement. The |1> work initialisation is done by the runner."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The ideal peak distribution is a property of the output state of the noiseless circuit. It is not constructed in code. For r=4 and t=8 the circuit should yield peaks at m=0,64,128,192."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_noisy_iqft (and the epsilon/sigma branch in build_circuit)",
+        "explanation": "Each controlled-phase angle in the inverse QFT is scaled by (1+delta), with delta = epsilon, a Gaussian draw with std sigma, or epsilon plus a Gaussian draw. Draws are made once at build time from numpy default_rng(seed), giving one noise realization per seed."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The success probability needs statevector probabilities, classical continued-fraction post-processing, and averaging over noise seeds. These are experiment-level actions, not part of the circuit operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The threshold scaling heuristic is a heuristic analysis of the success probability and is not a circuit construction. It is also not stated in the abstract."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Restricted to N=15 and a in {2,4,7,8,11,13,14}, with t<=8 counting qubits. U_a is implemented as a bit rotation (times 2^s) plus an optional bitwise complement (times -1 mod 15) rather than a generic modular-multiplication permutation.",
+        "reason": "Cap of 12 total qubits and a gate-level construction without dense unitaries. Complement maps 0<->15, so the unitary differs from the specified action (identity on y>=N) on y=0 and y=15. These states are unreachable from the work input y=1, so the reachable subspace is unaffected."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "The work register is not initialised to |1> inside the circuit. The Hadamard layer on the counting register is included by default and can be disabled with include_hadamards=false.",
+        "reason": "The circuit is an operation and must not prepare input states. The runner prepares work=|0001>."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The inverse QFT is QFTGate(t).inverse() on counting qubits [0..t-1] when noiseless. The noisy path is the exact gate-level inverse of Qiskit's QFT circuit (swaps first, then for j ascending: CP(-pi*2^(k-j)) for k=j-1..0 with control k and target j, then H(j)), not a copy of the factorised QFT index order.",
+        "reason": "Resolves little-endian bit order and bit-reversal so that the noiseless and noisy paths implement the same unitary at zero noise."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Noise is applied only to the inverse-QFT controlled-phase gates. The optional extra Rz(delta) and noise on Hadamards or modular multiplication are omitted. The angle of a CP gate is pi/2^(j-k) for target j and control k, scaled by (1+delta).",
+        "reason": "The sketch marks Rz as optional, and the abstract does not specify where the paper places errors, so the narrowest consistent model was chosen."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Random errors are sampled at circuit-construction time from a seeded numpy generator, giving one deterministic realization per (sigma, seed). Averaging over noise realizations is left to the runner via different seeds.",
+        "reason": "build_circuit must return a bound, unitary circuit with no stochastic runtime behavior."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Success probability, post-processing and threshold estimation are not implemented in the circuit.",
+        "reason": "They are measurement or analysis steps outside the operation, and the threshold formula is not given in the abstract."
+      }
+    ],
+    "assumptions": [
+      "N=15 only; the work register has n=4 qubits.",
+      "The runner prepares the work register in |0001> (y=1) before applying the circuit.",
+      "Counting qubit k controls multiplication by a^(2^k) mod 15.",
+      "Qiskit little-endian ordering: qubit 0 of the count register is the least significant bit of m.",
+      "The same noise shift delta applies to a gate's whole angle (relative scaling), independent of the gate's nominal angle.",
+      "If epsilon=0 and sigma=0 the circuit is the ideal Shor order-finding circuit; seed is then ignored."
+    ],
+    "unresolved_issues": [
+      "The paper's actual gate-error model, error placement, and threshold definition are not given in the abstract, so the noise model is an assumption.",
+      "The N-dependent threshold formula is not reconstructed.",
+      "General N is not supported; only N=15 is implemented.",
+      "Averaging over random noise realizations must be done externally by varying seed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 12,
+    "gate_count": 427,
+    "depth": 311,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

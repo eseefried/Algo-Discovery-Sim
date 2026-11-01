@@ -1,0 +1,151 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "42fa8be9-3a3d-4f7d-8d01-c0a5e47b9d74",
+  "parent_run_id": "e2a5f85f-aff5-4cc6-9254-7f21c8b8a094",
+  "created_at": "2026-11-01T00:25:48.597442+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "c6f31beb16db963cda9f7f168164619816fd748e1b5898b42e12d0acfcc3251f",
+  "source_specification_sha256": "53a22d7abe6af630b882bd8319e20e560b1e2ae045da2f8890ce513f61a050e3",
+  "source_python_sha256": "7ce2a7bef4399d9888d473e33a6dde7486ebde4f50e6d21bdc72b8705e310910",
+  "elapsed_seconds": 34.869,
+  "usage": {
+    "input_tokens": 5536,
+    "output_tokens": 5007,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Unitary, measurement-free Qiskit implementation of the modified Tulsi-type search iterate with a single search-qubit register S (n qubits) and one control qubit C. Each iteration applies the oracle phase flip on marked item w controlled on C=1, then Ry(theta) on C, then Grover diffusion on S. Every tau iterations the Z-basis control measurement is realised by the deferred-measurement principle, a CNOT from C onto a fresh record qubit. Tracing out the record qubits gives the outcome-averaged dephased state of eq_3, and no reset is applied. The runner prepares the input state, so there is no H layer or measurement in the circuit.",
+    "source_python": "from __future__ import annotations\nimport math\nfrom qiskit import QuantumCircuit\n\n\ndef _is_int(x):\n    return isinstance(x, int) and not isinstance(x, bool)\n\n\ndef _mcz(qc, qubits):\n    # multi-controlled Z on the given qubits (phase -1 on all-ones)\n    if len(qubits) == 1:\n        qc.z(qubits[0])\n        return\n    t = qubits[-1]\n    qc.h(t)\n    qc.mcx(list(qubits[:-1]), t)\n    qc.h(t)\n\n\ndef _oracle(qc, n, ctrl, w):\n    # Lambda_C(O_w): O_w = I - 2|w><w| on S, applied only when C=1 (eq_2)\n    zeros = [i for i in range(n) if not ((w >> i) & 1)]\n    for i in zeros:\n        qc.x(i)\n    _mcz(qc, list(range(n)) + [ctrl])\n    for i in zeros:\n        qc.x(i)\n\n\ndef _diffusion(qc, n):\n    # D = 2|s><s| - I on S (eq_2); H X mcz X H = I - 2|s><s| = -D, so add global phase pi\n    for i in range(n):\n        qc.h(i)\n        qc.x(i)\n    _mcz(qc, list(range(n)))\n    for i in range(n):\n        qc.x(i)\n        qc.h(i)\n    qc.global_phase += math.pi\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    w = instance.get('w')\n    theta = instance.get('theta')\n    tau = instance.get('tau')\n    k = instance.get('k')\n    if not _is_int(n) or n < 1 or n > 10:\n        raise ValueError('n must be an integer in [1,10]')\n    if not _is_int(w) or w < 0 or w >= 2 ** n:\n        raise ValueError('w must be an integer in [0, 2^n)')\n    if isinstance(theta, bool) or not isinstance(theta, (int, float)) or not math.isfinite(theta):\n        raise ValueError('theta must be a finite real number')\n    if tau is not None and (not _is_int(tau) or tau < 1):\n        raise ValueError('tau must be a positive integer or null')\n    if not _is_int(k) or k < 0 or k > 1000:\n        raise ValueError('k must be an integer in [0,1000]')\n    m = (k // tau) if tau is not None else 0\n    total = n + 1 + m\n    if total > 12:\n        raise ValueError('total qubits exceed 12')\n    qc = QuantumCircuit(total)\n    ctrl = n\n    rec = 0\n    for j in range(1, k + 1):\n        _oracle(qc, n, ctrl, w)\n        qc.ry(float(theta), ctrl)\n        _diffusion(qc, n)\n        if tau is not None and j % tau == 0:\n            # deferred Z measurement of C, no reset (eq_3)\n            qc.cx(ctrl, n + 1 + rec)\n            rec += 1\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"w\": 5, \"theta\": 0.6, \"tau\": 2, \"k\": 6}",
+    "register_layout": [
+      "qubits 0..n-1: search register S, little-endian (qubit i holds bit i of x)",
+      "qubit n: control qubit C",
+      "qubits n+1..n+floor(k/tau): record qubits, one per control measurement in time order (CNOT copy of C in Z basis); absent if tau is null",
+      "Example (n=3,w=5,tau=2,k=6): S=q0,q1,q2; C=q3; records=q4,q5,q6 (7 qubits)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Initial state |s>|+> is prepared by the runner; the operation contains no state preparation. Qubit order convention is described in register_layout."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop body: _oracle (controlled phase oracle), qc.ry on control, _diffusion",
+        "explanation": "G_theta = D (Ry(theta) Lambda_C(O_w)): oracle first, then Ry on the control, then diffusion on S. The global phase pi in _diffusion makes the diffusion exactly 2|s><s|-I."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: qc.cx(ctrl, n + 1 + rec) when j % tau == 0",
+        "explanation": "Dephasing of the control every tau iterations is implemented unitarily as a CNOT onto a fresh record qubit (deferred measurement). Tracing out the records gives the outcome-averaged state of eq_3; no reset is applied."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Success probability is a post-processing quantity computed by the runner on S; it is not part of the operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Mutual information is computed from reduced states by software after generation; not part of the circuit."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Scaling fit of k* over n=3..8 needs many circuits and classical post-processing; only a single circuit builder is implemented."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Mid-circuit measurement replaced by a CNOT from C to a fresh record qubit per measurement event, with no reset, no classical bits and no dynamic circuits.",
+        "reason": "The circuit must be unitary and measurement-free; deferred measurement reproduces the outcome-averaged dephased reduced state on S and C when the records are traced out."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Input state preparation (H on S, |+> on C) is omitted from the circuit.",
+        "reason": "The runner prepares inputs and the operation must not include state preparation."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The Grover diffusion is built as H X mcz X H with an explicit global phase of pi so that it equals 2|s><s|-I exactly.",
+        "reason": "The sign convention of the diffusion is fixed to match eq_2."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_6"
+        ],
+        "change": "tau = infinity is represented by tau = null, which adds no records.",
+        "reason": "JSON has no infinity value."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Scope narrowed to one circuit (fixed n, w, theta, tau, k) for the proposed stand-in iterate rather than Tulsi's exact construction. Mutual information, CCM and the order fit are not implemented.",
+        "reason": "The exact Tulsi operators, the paper's theta choice and the CCM definition are not given in the specification."
+      }
+    ],
+    "assumptions": [
+      "Single marked item w",
+      "Oracle is a phase flip on w controlled on C=1",
+      "Gate order within an iteration is oracle, Ry(theta) on C, then diffusion",
+      "theta is a free user-supplied real parameter",
+      "The Ry(theta) angle convention is Qiskit's, Ry(theta)=exp(-i theta Y/2)",
+      "Records are never reset, and the measurement count is floor(k/tau)",
+      "n is capped at 10, k at 1000, and total qubits (n+1+floor(k/tau)) at 12"
+    ],
+    "unresolved_issues": [
+      "Exact Tulsi operators and the paper's standard and alternative angular parameter are not specified",
+      "Cumulative Correlation Measure definition is missing",
+      "Tested tau values and k ranges are not specified",
+      "The paper's treatment of measurement outcomes (reset or kept) is unknown; no reset is assumed here",
+      "Many measurement events with large k exceed the 12-qubit cap, which limits tau and k combinations"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 7,
+    "gate_count": 405,
+    "depth": 229,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

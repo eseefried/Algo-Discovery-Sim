@@ -1,0 +1,126 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "7e17dde7-6aa3-47b9-9cfa-4acc2a1b3798",
+  "parent_run_id": "116eec31-7c8c-405b-94ed-97dc1eb1e832",
+  "created_at": "2026-11-01T00:23:49.434195+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "4de8fc4446e4b5d29367eb7660de53c883020ecb38c1b47d60c298f4648f4f7a",
+  "source_specification_sha256": "0d4cbe962b7d9047dbe2da0d814bf292c595c9f19f5bf8186a1c0409fe93116d",
+  "source_python_sha256": "6671df4d380e5c7c3a467976bec6e6ab1c69321b7ff0e083b4c86692a6b83716",
+  "elapsed_seconds": 74.263,
+  "usage": {
+    "input_tokens": 5192,
+    "output_tokens": 10576,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Single-qubit Pauli+V approximation of Rz(theta) to operator-norm error epsilon up to global phase. build_circuit searches levels k=0..max_k and finds integer quaternions (a,b,c,d) with norm 5^k. It solves b^2+c^2=5^k-a^2-d^2 by integer square roots and keeps candidates with |a cos(theta/2)+d sin(theta/2))|/5^(k/2) >= 1-eps^2/2, which is the operator-norm criterion up to global phase. The best candidate is factored by left-division by the six V-type quaternions 1+-2i, 1+-2j, 1+-2k into a V-word times a Pauli unit, and emitted as rx/ry/rz gates (V = R_sigma(2 atan2(+-2,1))) plus x/y/z and a global phase. The circuit has no state preparation or measurement.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit\n\n\ndef _mul(p, q):\n    a1, b1, c1, d1 = p\n    a2, b2, c2, d2 = q\n    return (a1 * a2 - b1 * b2 - c1 * c2 - d1 * d2,\n            a1 * b2 + b1 * a2 + c1 * d2 - d1 * c2,\n            a1 * c2 - b1 * d2 + c1 * a2 + d1 * b2,\n            a1 * d2 + b1 * c2 - c1 * b2 + d1 * a2)\n\n\ndef _conj(q):\n    return (q[0], -q[1], -q[2], -q[3])\n\n\ndef _gens():\n    out = []\n    for ax in (1, 2, 3):\n        for s in (1, -1):\n            v = [1, 0, 0, 0]\n            v[ax] = 2 * s\n            out.append(tuple(v))\n    return out\n\n\ndef _axis(v):\n    # eq_1: quaternion i,j,k <-> -iX,-iY,-iZ; returns (axis 1..3, sign) of the single non-real part\n    for ax in (1, 2, 3):\n        if v[ax] != 0:\n            return ax, (1 if v[ax] > 0 else -1)\n    raise ValueError('no axis')\n\n\ndef _reduce(q, k):\n    # peel V-type left factors: q = g * q', q' = conj(g) q / 5 must be integral\n    if k == 0:\n        if sum(x * x for x in q) == 1:\n            return [], q\n        return None\n    for g in _gens():\n        p = _mul(_conj(g), q)\n        if all(x % 5 == 0 for x in p):\n            r = _reduce(tuple(x // 5 for x in p), k - 1)\n            if r is not None:\n                return [g] + r[0], r[1]\n    return None\n\n\ndef _search(theta, eps, max_k):\n    ch = math.cos(theta / 2.0)  # eq_2: target quaternion direction (cos, 0, 0, sin)\n    sh = math.sin(theta / 2.0)\n    thr = 1.0 - eps * eps / 2.0  # eq_5: dist = sqrt(2-2|p|) <= eps\n    for k in range(max_k + 1):\n        n = 5 ** k\n        r = math.isqrt(n)\n        scale = math.sqrt(n)\n        found = []\n        for a in range(-r, r + 1):\n            for d in range(-r, r + 1):\n                rem = n - a * a - d * d\n                if rem < 0:\n                    continue\n                p = abs(a * ch + d * sh) / scale\n                if p < thr - 1e-12:\n                    continue\n                for b in range(-r, r + 1):\n                    t = rem - b * b  # eq_4: c^2 = 5^k - a^2 - d^2 - b^2\n                    if t < 0:\n                        continue\n                    c = math.isqrt(t)\n                    if c * c != t:\n                        continue\n                    for cc in sorted({c, -c}):\n                        found.append((-p, (a, b, cc, d)))\n        found.sort()\n        for _, q in found:\n            red = _reduce(q, k)\n            if red is not None:\n                return red\n    raise ValueError('no Pauli+V approximation found within max_k and epsilon')\n\n\ndef build_circuit(instance):\n    \"\"\"Single-qubit Pauli+V approximation of Rz(theta); instance: theta, epsilon, optional max_k (0..4).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    theta = instance.get('theta')\n    eps = instance.get('epsilon')\n    max_k = instance.get('max_k', 3)\n    for v in (theta, eps):\n        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):\n            raise ValueError('theta and epsilon must be finite numbers')\n    if not (0.0 < eps <= 2.0):\n        raise ValueError('epsilon must be in (0, 2]')\n    if isinstance(max_k, bool) or not isinstance(max_k, int) or max_k < 0 or max_k > 4:\n        raise ValueError('max_k must be an integer in 0..4')\n    word, unit = _search(float(theta), float(eps), max_k)\n    qc = QuantumCircuit(1)\n    phase = 0.0\n    # matrix U = G1 G2 ... Gk * unit, so the unit acts first and Gk ... G1 follow\n    if unit[0] != 0:\n        if unit[0] < 0:\n            phase += math.pi\n    else:\n        ax, s = _axis(unit)\n        if ax == 1:\n            qc.x(0)\n        elif ax == 2:\n            qc.y(0)\n        else:\n            qc.z(0)\n        phase -= s * math.pi / 2.0  # s*(-i sigma) = sigma times phase\n    for g in reversed(word):\n        ax, s = _axis(g)\n        ang = 2.0 * math.atan2(2.0 * s, 1.0)  # (I - i s 2 sigma)/sqrt5 = R_sigma(ang)\n        if ax == 1:\n            qc.rx(ang, 0)\n        elif ax == 2:\n            qc.ry(ang, 0)\n        else:\n            qc.rz(ang, 0)\n    qc.global_phase = phase\n    return qc",
+    "example_instance_json": "{\"theta\": 0.6283185307179586, \"epsilon\": 0.3, \"max_k\": 3}",
+    "register_layout": [
+      "qubit 0: single data qubit, computational basis, Qiskit little-endian (only one qubit)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_gens, _axis, _reduce and the gate emission loop in build_circuit",
+        "explanation": "The quaternion-to-SU(2) map i,j,k -> -iX,-iY,-iZ is used to turn V-type quaternions 1+-2e and the Pauli units into rx/ry/rz and x/y/z gates, with the global phase tracked exactly."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_search (ch, sh)",
+        "explanation": "The target Rz(theta) is the quaternion direction (cos(theta/2),0,0,sin(theta/2)). It is used in the overlap test."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The heuristic slab region is not used as an enumeration filter. The full disk a^2+d^2<=5^k is scanned and acceptance is by the direct overlap criterion of eq_5."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_search (t = rem - b*b, math.isqrt)",
+        "explanation": "For each accepted (a,d), b^2+c^2 = 5^k-a^2-d^2 is solved by brute force over b with an integer square root for c, which gives all (b,c) including signs."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "_search (thr and the p test)",
+        "explanation": "For SU(2) elements, min over global phase of the operator-norm distance equals sqrt(2-2|p|) with p=(a cos(theta/2)+d sin(theta/2))/5^(k/2). The test |p| >= 1-eps^2/2 is equivalent to distance <= eps."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Fixed the convention U_q = a I - i(bX+cY+dZ) so that V=(I+2iX)/sqrt5 corresponds to quaternion 1-2i (b=-2), not 1+2i. The six generators 1+-2i, 1+-2j, 1+-2k are all included.",
+        "reason": "The spec text was sign-ambiguous. Both signs are generators, so the group is unchanged."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The slab region is not used. Candidates are accepted only by the direct criterion of eq_5.",
+        "reason": "The spec says the slab bounds are heuristic and that the direct condition is the actual acceptance test."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to brute-force enumeration with max_k capped at 4. Within a level, accepted candidates are ordered by overlap, with ties broken by the quaternion tuple. The first one that factors into a V-word is used, and the minimal k is searched first.",
+        "reason": "This keeps enumeration tiny and deterministic. The paper's actual deterministic-search algorithm, its proofs and its depth bounds are not reproduced."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Word reduction is done by DFS left-division by the six V-type quaternions, leaving a final Lipschitz unit (+-1, +-i, +-j, +-k) that is emitted as a Pauli gate plus a global phase. Candidates that do not factor are skipped.",
+        "reason": "The spec leaves the reduction procedure open. Trial division with unit tracking is the stated primitive reduction."
+      }
+    ],
+    "assumptions": [
+      "theta, epsilon and max_k are instance parameters. The example uses theta=pi/5 and epsilon=0.3, for which the k=1 quaternion 2+k (V-word 1-2k times a Pauli Z factor) is accepted.",
+      "Error is the operator-norm distance up to global phase.",
+      "Global phase of the output circuit is set so the unitary equals the SU(2) element of the quaternion, up to the +-1 sign.",
+      "Each V gate is a single rx/ry/rz rotation by 2*atan2(+-2,1)."
+    ],
+    "unresolved_issues": [
+      "The paper's actual deterministic search procedure, the exact slab region and enumeration order, and the depth bounds are not reconstructed.",
+      "The Hurwitz half-integer case is not handled, so an accepted Lipschitz quaternion that fails integral left-division by the six generators is skipped.",
+      "No claim is made that the resulting word is globally shortest or canonical, or that the expected depth of about 3 log_5(1/epsilon) is attained."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 1,
+    "gate_count": 2,
+    "depth": 2,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

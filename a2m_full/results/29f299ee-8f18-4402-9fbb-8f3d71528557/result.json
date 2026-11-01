@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "29f299ee-8f18-4402-9fbb-8f3d71528557",
+  "parent_run_id": "09e35c11-d79d-4913-81db-96edf9e1ca7c",
+  "created_at": "2026-11-01T00:30:29.357133+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "c6bce8b0bccc8b49c609c7438bc65f445f98f49f070e1eb7775b59f3f0686140",
+  "source_specification_sha256": "f7b5cf66895f8c53b05a070369e9f8f8eec4ed66868d9192e80714089c582827",
+  "source_python_sha256": "c5d31f378a9bf21c6525dec4825ed2cf89a32429efb35de4723f7351aadfe7d9",
+  "elapsed_seconds": 58.216,
+  "usage": {
+    "input_tokens": 5806,
+    "output_tokens": 8032,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Szegedy-type unitary walk W = SWAP(node,target) * R on a cycle of 2^m nodes, with R = 2*Pi - I = U_T (2|0><0|_tgt - I) U_T^dagger. The Kraus operators are B_{i,i+1} = cos(theta) Ry(alpha) and B_{i,i-1} = sin(theta) Rz(beta), which satisfy eq_1. U_T is built from standard gates (Ry, controlled rotations, a QFT-based modular adder) with no dilation ancilla. The circuit applies W for `steps` repetitions. It contains no state preparation or measurement, and the probabilities and the spectral limit are left to the runner.",
+    "source_python": "from qiskit import QuantumCircuit\nfrom qiskit.circuit.library import QFTGate\nimport math\n\n\ndef _num(instance, key):\n    v = instance.get(key)\n    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):\n        raise ValueError(key + ' must be a finite real number')\n    return float(v)\n\n\ndef _int(instance, key, lo, hi):\n    v = instance.get(key)\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError(key + ' must be an integer in [' + str(lo) + ',' + str(hi) + ']')\n    return v\n\n\ndef _build_ut(m, theta, alpha, beta):\n    # eq_2: U_T|i>|0>|psi> = sum_j |i>|j> (x) B_ij|psi>, B_{i,i+1}=cos(theta)Ry(alpha), B_{i,i-1}=sin(theta)Rz(beta)\n    # eq_1: cos^2 + sin^2 = 1 with unitary Ry, Rz => sum_j B^dagger B = I\n    node = list(range(m))\n    tgt = list(range(m, 2 * m))\n    s = 2 * m\n    qc = QuantumCircuit(2 * m + 1)\n    # target holds 0 (direction +) or 2^m-2 (direction -), amplitudes cos/sin\n    qc.ry(2.0 * theta, tgt[1])\n    for q in tgt[2:]:\n        qc.cx(tgt[1], q)\n    # direction-controlled internal operation (control = tgt[1])\n    qc.cry(alpha, tgt[1], s, ctrl_state=0)\n    qc.crz(beta, tgt[1], s, ctrl_state=1)\n    # Draper adder: target += node + 1 (mod 2^m); value becomes i+1 or i-1\n    qc.append(QFTGate(m), tgt)\n    for q in range(m):\n        qc.p(2.0 * math.pi * (2 ** q) / (2 ** m), tgt[q])\n    for k in range(m):\n        for q in range(m):\n            if k + q < m:\n                qc.cp(2.0 * math.pi * (2 ** (k + q)) / (2 ** m), node[k], tgt[q])\n    qc.append(QFTGate(m).inverse(), tgt)\n    return qc\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    m = _int(instance, 'node_qubits', 2, 5)\n    steps = _int(instance, 'steps', 0, 64)\n    theta = _num(instance, 'theta')\n    alpha = _num(instance, 'alpha')\n    beta = _num(instance, 'beta')\n    n = 2 * m + 1\n    if n > 12:\n        raise ValueError('too many qubits')\n    node = list(range(m))\n    tgt = list(range(m, 2 * m))\n    ut = _build_ut(m, theta, alpha, beta)\n    utd = ut.inverse()\n    qc = QuantumCircuit(n)\n    for _ in range(steps):\n        # eq_3: R = U_T (2|0><0|_tgt - I) U_T^dagger = 2 Pi - I\n        qc.compose(ut, qubits=list(range(n)), inplace=True)\n        for q in tgt:\n            qc.x(q)\n        qc.h(tgt[-1])\n        qc.mcx(tgt[:-1], tgt[-1])\n        qc.h(tgt[-1])\n        for q in tgt:\n            qc.x(q)\n        qc.compose(utd, qubits=list(range(n)), inplace=True)\n        qc.global_phase = qc.global_phase + math.pi\n        # eq_3: S = SWAP(node, target)\n        for a, b in zip(node, tgt):\n            qc.swap(a, b)\n    return qc",
+    "example_instance_json": "{\"node_qubits\":2,\"theta\":0.6,\"alpha\":1.0,\"beta\":0.8,\"steps\":3}",
+    "register_layout": [
+      "qubits 0..m-1: node register |i> (little-endian, qubit 0 is the LSB); m=2 in the example, so qubits 0,1",
+      "qubits m..2m-1: target-node register |j> (little-endian, starts in |0> for T); qubits 2,3 in the example",
+      "qubit 2m: internal qubit (d=2) acted on by the Kraus operators; qubit 4 in the example",
+      "no dilation ancilla; total qubits = 2m+1 (5 in the example, max 11 allowed for m<=5)",
+      "node encoding: computational-basis integer i = sum_k 2^k * (qubit k), nodes on a cycle of 2^m sites"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_build_ut: Kraus choice B_{i,i+1}=cos(theta)Ry(alpha), B_{i,i-1}=sin(theta)Rz(beta)",
+        "explanation": "Completeness holds by construction because cos^2+sin^2=1 and Ry, Rz are unitary; it is not checked numerically in the module."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_build_ut",
+        "explanation": "U_T prepares cos(theta)|dir +> + sin(theta)|dir -> on the target, applies the direction-controlled internal rotation, and adds node+1 mod 2^m to the target. On target |0> it acts as T|i>|psi> = sum_j |i>|j> B_ij|psi>. The Kraus operators are specific instance choices."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit (reflection block, global phase, swap loop)",
+        "explanation": "Each step applies U_T, then 2|0><0|_tgt - I (X, multi-controlled Z, X, plus a pi global phase), then U_T^dagger, then SWAP of node and target. W is repeated `steps` times."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "P_t(x) and its Cesaro mean are post-processing of the circuit output. The runner prepares the initial state, and no measurement is included."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The spectral limit is a classical eigendecomposition of the circuit unitary and is not part of the circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Scope narrowed to a cycle graph with 2^m nodes (m=2..5). Kraus operators are the scaled unitaries cos(theta)Ry(alpha) for the jump to i+1 and sin(theta)Rz(beta) for the jump to i-1. This replaces the general B_ij.",
+        "reason": "A general B_ij would need opaque dense multiplexed unitaries, which are disallowed. This family is built from standard gates."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "No separate dilation ancilla is used. U_T is a concrete unitary on node, target and internal registers, and Pi is the projector onto U_T(|0>_tgt ⊗ everything else).",
+        "reason": "For these Kraus operators the target register is enough to complete T to a unitary."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "R is implemented as -(I - 2|0><0|) conjugated by U_T. The -1 is carried out as a global phase of pi per step.",
+        "reason": "X, multi-controlled Z, X gives I - 2|0><0|. The exact sign 2|0><0| - I is restored with the global phase."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Probability, Cesaro mean and spectral limit are not in the circuit.",
+        "reason": "The task requires a measurement-free operation with the state prepared by the runner."
+      }
+    ],
+    "assumptions": [
+      "Register order is |node>|target>|internal>, in that qubit-index order",
+      "Nodes are on a cycle of 2^m sites, indices mod 2^m, with m>=2 so that i+1 and i-1 are distinct",
+      "Initial target register is |0...0>, as required for T",
+      "steps is an integer from 0 to 64, and angles are finite reals",
+      "The QFTGate adder uses the convention |j> -> 2^(-m/2) sum_k exp(2 pi i j k/2^m)|k> with little-endian bits"
+    ],
+    "unresolved_issues": [
+      "The paper's exact isometry and reflection may differ from this Szegedy-style proposal",
+      "Initial internal state, initial node and the eq_4/eq_5 post-processing are left to the runner",
+      "The circuit has not been simulated or verified at this stage"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 5,
+    "gate_count": 327,
+    "depth": 240,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

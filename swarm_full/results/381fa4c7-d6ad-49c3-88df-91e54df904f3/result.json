@@ -1,0 +1,110 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "381fa4c7-d6ad-49c3-88df-91e54df904f3",
+  "parent_run_id": "e09a825c-1ef5-44dc-9296-4e43776876b8",
+  "created_at": "2026-10-31T21:45:37.728093+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "4408f24bdaff377069e2e3a9092976eeb5b8a3d5e655498cf03d15a550b1f640",
+  "source_specification_sha256": "1fe67f3ba565edb6ecc7bdd691274c55cf703ddca6ca29810d2a240547424e4f",
+  "source_python_sha256": "229131ddf5939d18fb2ef130950237874eafb816a72a9d8eaa2d644ff55e05a6",
+  "elapsed_seconds": 27.805,
+  "usage": {
+    "input_tokens": 4204,
+    "output_tokens": 4149,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Small-RBM Gibbs-amplitude encoding: Hadamards on visible and hidden qubits, then for every configuration (v,h) a multi-controlled RY on one ancilla that gives the ancilla-|1> branch amplitude proportional to exp(-E(v,h)/2). After post-selecting ancilla=1, the vis/hid registers hold probabilities P(v,h)=exp(-E)/Z. Energies are computed classically from the instance parameters, and the energy shift is the minimum energy.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import RYGate\nimport math\nimport numpy as np\n\n\ndef _is_int(x):\n    return isinstance(x, int) and not isinstance(x, bool)\n\n\ndef _energy(k, n, m, W, b, d):\n    # eq_1: E(v,h) = -sum_i b_i v_i - sum_j d_j h_j - sum_ij W_ij v_i h_j\n    v = [(k >> i) & 1 for i in range(n)]\n    h = [(k >> (n + j)) & 1 for j in range(m)]\n    e = 0.0\n    for i in range(n):\n        e -= float(b[i]) * v[i]\n    for j in range(m):\n        e -= float(d[j]) * h[j]\n    for i in range(n):\n        for j in range(m):\n            e -= float(W[i][j]) * v[i] * h[j]\n    return e\n\n\ndef build_circuit(instance):\n    \"\"\"Qubits: vis 0..n-1, hid n..n+m-1, ancilla n+m.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n_visible')\n    m = instance.get('n_hidden')\n    if not _is_int(n) or not _is_int(m) or n < 1 or m < 1:\n        raise ValueError('n_visible and n_hidden must be positive integers')\n    if n + m > 8 or n + m + 1 > 12:\n        raise ValueError('n_visible + n_hidden must be at most 8')\n    try:\n        W = np.array(instance.get('W'), dtype=float)\n        b = np.array(instance.get('b'), dtype=float)\n        d = np.array(instance.get('d'), dtype=float)\n    except Exception:\n        raise ValueError('W, b, d must be numeric arrays')\n    if W.shape != (n, m) or b.shape != (n,) or d.shape != (m,):\n        raise ValueError('shape mismatch: W is n x m, b length n, d length m')\n    if not (np.all(np.isfinite(W)) and np.all(np.isfinite(b)) and np.all(np.isfinite(d))):\n        raise ValueError('parameters must be finite')\n    N = 2 ** (n + m)\n    energies = [_energy(k, n, m, W, b, d) for k in range(N)]\n    emin = min(energies)\n    vis = QuantumRegister(n, 'vis')\n    hid = QuantumRegister(m, 'hid')\n    anc = QuantumRegister(1, 'anc')\n    qc = QuantumCircuit(vis, hid, anc)\n    data = list(vis) + list(hid)\n    for q in data:\n        qc.h(q)\n    for k in range(N):\n        # eq_2: ancilla-|1> amplitude exp(-(E-Emin)/2) -> probability prop. to exp(-E)\n        a = math.exp(-(energies[k] - emin) / 2.0)\n        a = min(1.0, a)\n        theta = 2.0 * math.asin(a)\n        if theta == 0.0:\n            continue\n        gate = RYGate(theta).control(n + m, ctrl_state=k)\n        qc.append(gate, data + [anc[0]])\n    return qc",
+    "example_instance_json": "{\"n_visible\": 2, \"n_hidden\": 1, \"W\": [[0.5], [-0.3]], \"b\": [0.1, -0.2], \"d\": [0.3]}",
+    "register_layout": [
+      "qubit 0..n-1: vis register (v_i = qubit i)",
+      "qubit n..n+m-1: hid register (h_j = qubit n+j)",
+      "qubit n+m: ancilla (post-select |1> for Gibbs-weighted amplitudes)",
+      "Example (n=2,m=1): q0=v0, q1=v1, q2=h0, q3=ancilla"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_energy",
+        "explanation": "The RBM energy is evaluated classically for each basis configuration (v,h) and used to set the rotation angles."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop over k with multi-controlled RYGate",
+        "explanation": "The ancilla rotation sets the |1> amplitude to exp(-(E-Emin)/2), so post-selected probabilities are exp(-E)/Z. Z is the normalization implied by the post-selection and is not computed in the circuit."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The likelihood gradient needs sampling, data averages and classical post-processing. The circuit has no measurement and no gradient step."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The ancilla amplitude uses a shift by the minimum energy, exp(-(E-Emin)/2), instead of exp(-E/2).",
+        "reason": "The rotation amplitude must be at most 1. The shift is a constant factor, so it only changes the ancilla-|1> success probability and leaves the post-selected distribution unchanged."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "The scope is narrowed to a small RBM with n_visible + n_hidden <= 8 and one ancilla. Each configuration is encoded by an explicit multi-controlled RY, with 2^(n+m) of them.",
+        "reason": "The abstract gives no efficient quantum algorithm. The qubit cap is 12, and the circuit size grows exponentially with n+m."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The gradient estimation is excluded.",
+        "reason": "It is a classical post-processing step on measured samples, and the operation must not contain measurements."
+      }
+    ],
+    "assumptions": [
+      "The Hadamards that make the uniform superposition are part of the operation and act on a runner-prepared |0...0> state.",
+      "Bit i of the visible register is v_i (qubit i), and bit j of the hidden register is h_j (qubit n+j).",
+      "Post-selection on ancilla=1 and sampling are done outside the circuit.",
+      "The construction is an assumed generic Gibbs-amplitude sketch, not the paper's algorithm."
+    ],
+    "unresolved_issues": [
+      "The abstract does not give the paper's actual quantum training algorithm, circuits or ancilla count.",
+      "Full Boltzmann machines and deep multi-layer models are not implemented. Only a single-layer visible-hidden energy is encoded.",
+      "The post-selection success probability is not amplified."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 467,
+    "depth": 331,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

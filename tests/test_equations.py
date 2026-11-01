@@ -47,9 +47,9 @@ def spec():
 def mock_client(spec, *, stop_reason="end_turn", status_code=200):
     def handle(request):
         payload = json.loads(request.content)
-        assert payload["model"] == "claude-fable-5-1"
+        assert payload["model"] == "claude-haiku-5-5"
         assert payload["output_config"]["format"]["type"] == "json_schema"
-        assert payload["output_config"]["effort"] == "high"
+        assert payload["output_config"]["effort"] == "medium"
         assert "tools" not in payload
         assert set(json.loads(payload["messages"][0]["content"])) == {
             "abstract",
@@ -69,7 +69,7 @@ def mock_client(spec, *, stop_reason="end_turn", status_code=200):
                 "id": "msg_test",
                 "type": "message",
                 "role": "assistant",
-                "model": "claude-fable-5-1",
+                "model": "claude-haiku-5-5",
                 "content": [{"type": "text", "text": json.dumps(spec)}],
                 "stop_reason": stop_reason,
                 "stop_sequence": None,
@@ -99,7 +99,7 @@ def test_real_sdk_contract_and_artifacts(spec, tmp_path):
     assert "not been independently verified" in render_markdown(result)
     assert json.loads(saved)["abstract_sha256"] == result.abstract_sha256
     assert result.prompt_sha256 and result.request_sha256
-    assert result.parameters.effort == "high"
+    assert result.parameters.effort == "medium"
 
 
 def test_fabricated_quote_is_rejected(spec, tmp_path):

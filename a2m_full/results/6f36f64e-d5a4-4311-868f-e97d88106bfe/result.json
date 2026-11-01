@@ -1,0 +1,122 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "6f36f64e-d5a4-4311-868f-e97d88106bfe",
+  "parent_run_id": "b654293b-3507-4494-9ac2-f8989116a24e",
+  "created_at": "2026-11-01T00:15:26.073785+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "14eac72b25e080ccea3d8b3983daf04885a1bc0a4e9cddfd1e07f559c4951b47",
+  "source_specification_sha256": "23b445ab612506a7a885f59fc522fba5aa75d6cbfa2ff8a96a65d25a939f422a",
+  "source_python_sha256": "5dda024c6976b8e5f099c5b3d16df749ce39a9f3fa327bcff1425d451215372a",
+  "elapsed_seconds": 24.729,
+  "usage": {
+    "input_tokens": 5459,
+    "output_tokens": 3611,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Scoped to a deterministic, ancilla-free, unitary single-qubit construction. A group-commutator sequence of Z and Y rotations approximates exp(-i a b X) up to third-order error, and an optional exact X-rotation shift implements additive composition. This is NOT the paper's RUS gadget: the RUS sequences, ancilla measurements and corrections are not in the specification, so none are implemented.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit\n\n\ndef _read_real(instance, key, required, fallback):\n    if key not in instance:\n        if required:\n            raise ValueError('missing parameter: ' + key)\n        return fallback\n    v = instance[key]\n    if isinstance(v, bool) or not isinstance(v, (int, float)):\n        raise ValueError(key + ' must be a real number')\n    v = float(v)\n    if not math.isfinite(v):\n        raise ValueError(key + ' must be finite')\n    return v\n\n\ndef build_circuit(instance):\n    \"\"\"Group-commutator approximation of exp(-i*(a*b + shift) X) on one qubit.\n\n    Uses e^{sA} e^{tB} e^{-sA} e^{-tB} ~ exp(st[A,B]) with A=-i a Z, B=-i b' Y,\n    [Z,Y] = -2iX and b' = -b/2, giving exp(-i a b X) up to O(|a|,|b|)^3 error.\n    Qubit 0 is the target. No ancillas, no measurement.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    a = _read_real(instance, 'a', True, 0.0)\n    b = _read_real(instance, 'b', True, 0.0)\n    shift = _read_real(instance, 'shift', False, 0.0)\n    if abs(a) > 1.0 or abs(b) > 1.0:\n        raise ValueError('|a| and |b| must be <= 1 (small-angle regime)')\n    if abs(shift) > 10.0:\n        raise ValueError('|shift| must be <= 10')\n    qc = QuantumCircuit(1, name='prod_commutator')\n    # operator order: Rz(2a) Ry(-b) Rz(-2a) Ry(b); circuit applies right-to-left\n    qc.ry(b, 0)\n    qc.rz(-2.0 * a, 0)\n    qc.ry(-b, 0)\n    qc.rz(2.0 * a, 0)\n    # additive composition (eq_4): exact commuting X rotation exp(-i shift X)\n    if shift != 0.0:\n        qc.rx(2.0 * shift, 0)\n    return qc",
+    "example_instance_json": "{\"a\": 0.1, \"b\": 0.2, \"shift\": 0.0}",
+    "register_layout": [
+      "qubit 0: target t (computational basis, little-endian; input state prepared by the runner)",
+      "no ancilla qubits; total qubits = 1"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (overall target exp(-i f X) with f = a*b + shift)",
+        "explanation": "The circuit approximates U_f for the specific function f(a,b,shift)=a*b+shift."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: ry(b), rz(-2a), ry(-b), rz(2a) block",
+        "explanation": "Product primitive realised by a unitary group-commutator, not a RUS gadget; the error is third order in the angles."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The reciprocal function is a guess in the specification and its gadget is unknown; not implemented."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: optional rx(2*shift) term",
+        "explanation": "Only the additive composition rule is implemented, as an exact commuting X rotation. Nesting of multiplication and inversion is out of scope."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "RUS success-branch post-selection and the readout <Z>=cos(2f) are experiment-side analysis; the circuit has no measurement or post-selection."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_5"
+        ],
+        "change": "Replaced the RUS product gadget (ancillas, mid-circuit measurement, post-selection) with a deterministic ancilla-free unitary commutator construction.",
+        "reason": "The RUS gate sequences and Kraus operators are not specified, and dynamic circuits and measurements are disallowed."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The effective angle ab is obtained from Z-rotation angle a and Y-rotation angle -b/2 (in the exponent), with the sign and factor fixed by [Z,Y]=-2iX.",
+        "reason": "The commutator identity gives exp(-i(-2 a b')X); choosing b'=-b/2 yields exactly exp(-i a b X) at leading order."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Scope narrowed to f = a*b + shift; the reciprocal and general nesting are not implemented.",
+        "reason": "The reciprocal function and error behaviour are unresolved in the specification."
+      }
+    ],
+    "assumptions": [
+      "Small-angle regime: |a|,|b| <= 1 enforced, with accuracy expected only for |a|,|b| << 1",
+      "The input state is prepared by the runner (e.g. target |0>)",
+      "The commutator construction is an acceptable stand-in for the product primitive's ideal action",
+      "Qiskit rx(t)=exp(-i t X/2), ry and rz similarly"
+    ],
+    "unresolved_issues": [
+      "The actual RUS circuits, ancilla count (3) and success probabilities are not reproduced",
+      "Reciprocal gadget function (arctan(c/theta) vs theta/(theta^2+c^2)) is unresolved",
+      "Error is only leading-order; no amplification or correction is included"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 1,
+    "gate_count": 4,
+    "depth": 4,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

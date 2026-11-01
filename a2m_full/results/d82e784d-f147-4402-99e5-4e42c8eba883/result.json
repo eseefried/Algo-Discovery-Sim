@@ -1,0 +1,133 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "d82e784d-f147-4402-99e5-4e42c8eba883",
+  "parent_run_id": "1a68c3aa-7dbf-46e5-b8b5-e2d38d84a339",
+  "created_at": "2026-11-01T00:21:53.566099+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "2b2de1284989102fb0cc7042555ffb7eb3081ff712555014fbcd0c85037416e6",
+  "source_specification_sha256": "9f6241fbbb874ae96f2a4a794b8b5de367e10194a7e3b7f95c2448165d09580c",
+  "source_python_sha256": "d077edabe83116f3986a1e2fc7cddf30948b2ae462d9916f719478c937223c23",
+  "elapsed_seconds": 29.631,
+  "usage": {
+    "input_tokens": 5190,
+    "output_tokens": 4425,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the unitary part of a p-layer (p=1..3) QAOA MaxCut circuit on an unweighted regular graph with one qubit per vertex and no ancillas. Each layer applies RZZ(-gamma) on every edge, then RX(2*beta) on every qubit. The initial |+>^n state and the readout are left to the runner.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _num(x):\n    if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):\n        raise ValueError('angles must be finite real numbers')\n    return float(x)\n\n\ndef _vertex(v, n):\n    if isinstance(v, bool) or not isinstance(v, int) or v < 0 or v >= n:\n        raise ValueError('edge endpoint out of range')\n    return v\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 2 or n > 12:\n        raise ValueError('n must be an integer in [2, 12]')\n    raw = instance.get('edges')\n    if not isinstance(raw, (list, tuple)) or len(raw) == 0:\n        raise ValueError('edges must be a non-empty list')\n    seen = set()\n    edges = []\n    for e in raw:\n        if not isinstance(e, (list, tuple)) or len(e) != 2:\n            raise ValueError('each edge must be a pair')\n        a = _vertex(e[0], n)\n        b = _vertex(e[1], n)\n        if a == b:\n            raise ValueError('self loops not allowed')\n        key = (min(a, b), max(a, b))\n        if key in seen:\n            raise ValueError('duplicate edge')\n        seen.add(key)\n        edges.append(key)\n    deg = [0] * n\n    for a, b in edges:\n        deg[a] += 1\n        deg[b] += 1\n    if len(set(deg)) != 1:\n        raise ValueError('graph must be regular')\n    gammas = instance.get('gammas')\n    betas = instance.get('betas')\n    if not isinstance(gammas, (list, tuple)) or not isinstance(betas, (list, tuple)):\n        raise ValueError('gammas and betas must be lists')\n    if len(gammas) != len(betas) or len(gammas) < 1 or len(gammas) > 3:\n        raise ValueError('need 1..3 layers with equal numbers of gammas and betas')\n    gammas = [_num(g) for g in gammas]\n    betas = [_num(b) for b in betas]\n    return n, edges, gammas, betas\n\n\ndef build_circuit(instance):\n    \"\"\"QAOA MaxCut operator prod_{l=p..1} exp(-i beta_l B) exp(-i gamma_l C).\n\n    The |+>^n input is prepared by the runner; no Hadamards are applied here.\n    \"\"\"\n    n, edges, gammas, betas = _parse(instance)\n    qr = QuantumRegister(n, 'q')\n    qc = QuantumCircuit(qr)\n    for g, b in zip(gammas, betas):\n        # eq_1/eq_3: exp(-i g (1-Z_i Z_j)/2) = exp(-i g/2) * RZZ(-g)_{ij}\n        for a, c in edges:\n            qc.rzz(-g, qr[a], qr[c])\n        qc.global_phase = qc.global_phase - g * len(edges) / 2.0\n        # eq_2/eq_3: mixer exp(-i b X_i) = RX(2b)\n        for i in range(n):\n            qc.rx(2.0 * b, qr[i])\n    return qc",
+    "example_instance_json": "{\"n\": 4, \"edges\": [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]], \"gammas\": [0.4, 0.7], \"betas\": [0.3, 0.2]}",
+    "register_layout": [
+      "q[i] = qubit index i = graph vertex i, for i in 0..n-1 (Qiskit little-endian, qubit 0 is the least significant bit)",
+      "No ancilla qubits; total qubits = n <= 12",
+      "Intended input state |+>^n, prepared by the runner",
+      "Bitstring readout: vertex i is bits[::-1][i] in Qiskit counts keys"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: per-edge loop over edges (each term C_ij=(1-Z_iZ_j)/2 realized as RZZ plus global phase)",
+        "explanation": "The MaxCut cost operator is exponentiated edge by edge. The edges are validated as an unweighted, simple, regular graph."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop over layers zip(gammas, betas), phase layer then RX mixer layer",
+        "explanation": "Layer 1 is applied first and layer p last, with the mixer B=sum X_i as RX(2*beta). The H^{(x)n} state preparation is omitted because inputs are prepared by the runner."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: qc.rzz(-g, a, c), qc.global_phase update, qc.rx(2*b, i)",
+        "explanation": "exp(-i g (1-ZZ)/2) = exp(-i g/2) exp(+i g ZZ/2) = exp(-i g/2) RZZ(-g). The sign is therefore -g, and the global phase -g/2 per edge is tracked exactly. The mixer is exp(-i b X) = RX(2b)."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Expectation-value estimation, sampling and best-cut selection are readout and postprocessing. The circuit is measurement-free and the runner handles readout."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The ring ratio (2p+1)/(2p+2) is a recalled literature result that could serve as a sanity check. It is not implemented, and it needs a ring with n>2p+1 and optimized angles."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The initial H^{(x)n} layer is not included. The circuit implements only the unitary prod_l exp(-i beta_l B) exp(-i gamma_l C), which the runner applies to |+>^n.",
+        "reason": "The task requires an operation with no input-state preparation."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "The edge gate is RZZ(-gamma) with an explicit global phase of -gamma/2 per edge, which makes it exactly exp(-i gamma (1-ZZ)/2). The abstract spec's 'RZZ(gamma)' was only up to sign and phase.",
+        "reason": "RZZ(theta)=exp(-i theta ZZ/2), so the sign has to be corrected to match exp(-i gamma C)."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Scope is narrowed to unweighted simple regular graphs with 2<=n<=12 and 1<=p<=3, given explicitly as an edge list, with rejection of other inputs via ValueError.",
+        "reason": "This matches the specified scope of tiny regular graphs and the 12-qubit cap."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Readout, angle optimization, and the closed-form ring and 3-regular results are not implemented.",
+        "reason": "They are classical postprocessing or background results, not part of the circuit operation."
+      }
+    ],
+    "assumptions": [
+      "Vertex i maps to qubit i.",
+      "The instance dict has keys n, edges (list of [i,j] pairs), gammas and betas (equal-length lists with length p in 1..3).",
+      "The runner prepares |+>^n as input.",
+      "Regularity is enforced as a scope restriction.",
+      "Angles are in radians."
+    ],
+    "unresolved_issues": [
+      "Optimal angles are not specified, so the caller must supply gammas and betas.",
+      "The p=1 closed-form 3-regular result, the large-p strategy, and the classical local-subgraph preprocessing are not implemented.",
+      "The optional ring-ratio sanity check was recalled from the literature and has not been verified."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 44,
+    "depth": 29,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

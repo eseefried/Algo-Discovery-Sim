@@ -1,0 +1,118 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "cd2a0981-b612-497c-b846-8dbb41515215",
+  "parent_run_id": "8dcc871b-217b-46d1-a505-0b033698c32f",
+  "created_at": "2026-10-31T21:43:54.684213+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "b566620671ea410a77cafef48d35de04fa251b2bfdfffd10336e37d01e325b57",
+  "source_specification_sha256": "0f22f01c9282af9e7cb87d562180b3bdac6a0923cdf1eb09a07a27e031d8affe",
+  "source_python_sha256": "f8821674794ffc0783520c00435773e169970da25fe9ceb3d48f7a6a952bb100",
+  "elapsed_seconds": 26.511,
+  "usage": {
+    "input_tokens": 4353,
+    "output_tokens": 3894,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Trotterized continuous-time quantum-walk search on the n-dimensional hypercube (N=2^n vertices), approximating exp(-iHt) for H = -gamma*L - |w><w|, with L = sum_j (I - X_j). Each step applies RX mixing for the Laplacian term and a phase e^{i dt} on the marked basis state. Scope is narrowed to the hypercube, a fixed single-stage rate, and a Trotter approximation.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit\n\n\ndef _num(v, name):\n    if isinstance(v, bool) or not isinstance(v, (int, float)):\n        raise ValueError(name + ' must be a real number')\n    v = float(v)\n    if not math.isfinite(v):\n        raise ValueError(name + ' must be finite')\n    return v\n\n\ndef _int(v, name, lo, hi):\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError(name + ' must be an integer')\n    if v < lo or v > hi:\n        raise ValueError(name + ' out of range')\n    return v\n\n\ndef _mark_phase(qc, n, w, angle):\n    # Applies exp(i*angle*|w><w|): phase e^{i angle} on basis state |w> only.\n    zeros = [k for k in range(n) if not (w >> k) & 1]\n    for k in zeros:\n        qc.x(k)\n    if n == 1:\n        qc.p(angle, 0)\n    else:\n        qc.mcp(angle, list(range(n - 1)), n - 1)\n    for k in zeros:\n        qc.x(k)\n\n\ndef _mix(qc, n, theta):\n    # exp(i*gamma*dt*sum_j(-X_j)) = prod_j RX(2*gamma*dt); theta is the RX angle\n    for k in range(n):\n        qc.rx(theta, k)\n\n\ndef build_circuit(instance):\n    \"\"\"Trotterized exp(-iHt), H=-gamma*L-|w><w|, L the n-cube Laplacian.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _int(instance.get('n'), 'n', 1, 12)\n    w = _int(instance.get('marked'), 'marked', 0, 2 ** n - 1)\n    gamma = _num(instance.get('gamma'), 'gamma')\n    t = _num(instance.get('time'), 't')\n    if gamma <= 0.0:\n        raise ValueError('gamma must be positive')\n    if t < 0.0:\n        raise ValueError('time must be nonnegative')\n    steps = _int(instance.get('steps'), 'steps', 1, 2000)\n    order = _int(instance.get('order', 1), 'order', 1, 2)\n    dt = t / steps\n    qc = QuantumCircuit(n, name='hypercube_ctqw_search')\n    # constant part of gamma*L: exp(i*gamma*t*n) global phase\n    qc.global_phase += gamma * n * t\n    for _ in range(steps):\n        if order == 1:\n            _mix(qc, n, 2.0 * gamma * dt)\n            _mark_phase(qc, n, w, dt)\n        else:\n            _mix(qc, n, gamma * dt)\n            _mark_phase(qc, n, w, dt)\n            _mix(qc, n, gamma * dt)\n    return qc",
+    "example_instance_json": "{\"n\":4,\"marked\":5,\"gamma\":0.25,\"time\":3.0,\"steps\":12,\"order\":2}",
+    "register_layout": [
+      "Qubits 0..n-1: vertex register of the n-dimensional hypercube; qubit k holds bit k of the vertex label (little-endian, qubit 0 least significant); vertex x = sum_k x_k 2^k",
+      "Hypercube edges connect labels that differ in exactly one bit",
+      "Marked vertex w is given as an integer label in [0, 2^n); no ancilla qubits",
+      "Input state (e.g. uniform superposition) is prepared by the runner, not by the circuit"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (Trotter loop over steps, using _mix and _mark_phase)",
+        "explanation": "exp(-iHt) is approximated by a first- or second-order product formula; the circuit is the operation only, with no state preparation."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_mix (the -gamma*L term, with the global phase set in build_circuit) and _mark_phase (the -|w><w| term)",
+        "explanation": "H = -gamma*L - |w><w| with L = sum_j (I - X_j) for the hypercube. exp(i*gamma*dt*L) becomes RX(2*gamma*dt) on each qubit plus a global phase. exp(i*dt*|w><w|) becomes a multi-controlled phase on |w>."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The O(sqrt(N)) runtime claim for cubic lattices with d>=5 is an asymptotic statement. The circuit is on hypercubes and does not implement or encode that claim."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Graph chosen as the n-dimensional hypercube (L = sum_j (I - X_j)) instead of an unspecified graph.",
+        "reason": "The abstract does not define the graphs. The hypercube is a standard highly connected search graph with an efficient gate decomposition, so the Laplacian term needs no dense unitary."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Exact evolution replaced by a Trotter product formula (order 1 or 2) with a user-chosen number of steps.",
+        "reason": "The Laplacian and oracle terms do not commute, so exact evolution has no simple gate decomposition."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Only a single-stage walk with fixed gamma is implemented. The two-stage walk with an adjusted rate is not implemented.",
+        "reason": "The abstract gives no stage details, gamma schedule, or graph for the two-stage algorithm."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Runtime claim not implemented.",
+        "reason": "Asymptotic claim about cubic lattices with d>=5, not a circuit construction."
+      }
+    ],
+    "assumptions": [
+      "Marked vertex w is a computational-basis state with little-endian bit order.",
+      "gamma > 0 and time >= 0 are real; steps is at most 2000 and n is at most 12.",
+      "The runner prepares the initial state, e.g. the uniform superposition.",
+      "Global phase gamma*n*t is included for fidelity to exp(-iHt)."
+    ],
+    "unresolved_issues": [
+      "The paper's actual graphs (low-connectivity fast-search and high-connectivity slow-search) are not reconstructed.",
+      "The two-stage walk and its walking-rate schedule are not implemented.",
+      "The Trotter error depends on the steps and order parameters; the right choice of gamma, t, and steps is not specified by the abstract."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 732,
+    "depth": 469,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

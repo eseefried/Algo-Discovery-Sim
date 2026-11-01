@@ -1,0 +1,149 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "795ae0e7-2387-4a8f-9a9b-d3b868a0dbd1",
+  "parent_run_id": "b5568342-6324-4e56-827e-e3f510756634",
+  "created_at": "2026-11-01T00:10:09.011813+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "d7268bb943944d41c0297232787e614977994fb8c1b83bbc3e4fd5cff5f1957e",
+  "source_specification_sha256": "9c02d79b5256dc8bcfb82b634409a7c12adfab72b3c87cb3883773808257bd78",
+  "source_python_sha256": "4d55924dfdafd06e6badee4b1ade5a656adf7a6253f1397737b80224492500b2",
+  "elapsed_seconds": 29.249,
+  "usage": {
+    "input_tokens": 4991,
+    "output_tokens": 4251,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Ideal Grover search (D O_w)^k on n qubits (default n=4, k=3), with the marked-state phase oracle O_w = I - 2|w><w| built explicitly from the integer w using X, H and mcx gates, and the diffusion operator D = 2|s><s| - I built as H^n X^n MCZ X^n H^n with a global phase of pi. No measurements or state preparation by default; an optional flag prepends H^n. The nuclear spin chain physics (Rabi pulses, Ising couplings, 2*pi*k condition) is not implemented.",
+    "source_python": "from qiskit import QuantumCircuit\nimport math\n\n\ndef _get_int(instance, key, lo, hi, default):\n    \"\"\"Read an integer parameter in [lo, hi]; default None means required.\"\"\"\n    if key not in instance:\n        if default is None:\n            raise ValueError(\"missing required parameter: \" + key)\n        return default\n    v = instance[key]\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError(key + \" must be an integer\")\n    if v < lo or v > hi:\n        raise ValueError(key + \" out of range\")\n    return v\n\n\ndef _mcz(qc, n):\n    \"\"\"Z on the all-ones state of n qubits: H(target), mcx, H(target).\"\"\"\n    qc.h(n - 1)\n    qc.mcx(list(range(n - 1)), n - 1)\n    qc.h(n - 1)\n\n\ndef _oracle(qc, n, w):\n    \"\"\"eq_1: O_w = I - 2|w><w| (qubit i is bit i of w).\"\"\"\n    zeros = [i for i in range(n) if not (w >> i) & 1]\n    for i in zeros:\n        qc.x(i)\n    _mcz(qc, n)\n    for i in zeros:\n        qc.x(i)\n\n\ndef _diffusion(qc, n):\n    \"\"\"eq_1: D = 2|s><s| - I = -(H^n X^n MCZ X^n H^n).\"\"\"\n    for i in range(n):\n        qc.h(i)\n    for i in range(n):\n        qc.x(i)\n    _mcz(qc, n)\n    for i in range(n):\n        qc.x(i)\n    for i in range(n):\n        qc.h(i)\n    qc.global_phase = qc.global_phase + math.pi\n\n\ndef build_circuit(instance):\n    \"\"\"Grover operation (D O_w)^k on n qubits. Parameters: n (2..12, default 4), w (required, 0..2^n-1), iterations (0..100, default floor(pi/4*sqrt(2^n))), include_uniform_layer (bool, default False; prepends H^n).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = _get_int(instance, \"n\", 2, 12, 4)\n    w = _get_int(instance, \"w\", 0, 2 ** n - 1, None)\n    k_star = int(math.floor(math.pi / 4.0 * math.sqrt(2 ** n)))  # eq_2\n    k = _get_int(instance, \"iterations\", 0, 100, k_star)\n    flag = instance.get(\"include_uniform_layer\", False)\n    if not isinstance(flag, bool):\n        raise ValueError(\"include_uniform_layer must be a bool\")\n    qc = QuantumCircuit(n, name=\"grover\")\n    if flag:\n        for i in range(n):\n            qc.h(i)\n    for _ in range(k):  # eq_3\n        _oracle(qc, n, w)\n        _diffusion(qc, n)\n    return qc",
+    "example_instance_json": "{\"n\": 4, \"w\": 11, \"iterations\": 3, \"include_uniform_layer\": false}",
+    "register_layout": [
+      "Qubits 0..n-1 (n=4 in the example): data qubits, qubit i is bit i of the marked integer w (qubit 0 least significant).",
+      "No ancilla qubits; no classical bits; no measurements.",
+      "Multi-controlled Z acts on target qubit n-1 with controls 0..n-2."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_oracle, _diffusion, _mcz",
+        "explanation": "O_w is built from X gates on the zero bits of w plus MCZ. D is H^n X^n MCZ X^n H^n with a global phase of pi added so it equals 2|s><s|-I exactly."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: k_star",
+        "explanation": "Default iteration count floor(pi/4*sqrt(N)), which is 3 for n=4. It can be overridden by the iterations parameter."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop over k iterations and optional include_uniform_layer H^n",
+        "explanation": "Applies (D O_w)^k. The initial H^n is applied only if include_uniform_layer is true, because input state preparation is normally done by the runner."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The closed form F_k = sin^2((2k+1)theta) is an analytic prediction, not a circuit operation. It is not encoded in the module."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Readout and bit-order post-processing involve measurement, which the module must not contain. The qubit i = bit i of w convention is respected in the oracle."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The oracle is an explicit, parameterized phase flip on a marked integer w, not an opaque placeholder gate.",
+        "reason": "The runner needs a concrete unitary for varying w. An opaque or dense-unitary oracle is not allowed."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "A global phase of pi is added per diffusion so the circuit equals D = 2|s><s|-I exactly rather than only up to a global phase.",
+        "reason": "The gate sequence H X MCZ X H equals -D, so the phase is corrected to match the stated equation."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Initial H^n is optional and off by default.",
+        "reason": "The operation must not include input-state preparation. The flag lets the full algorithm be reproduced if wanted."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Generalized from fixed n=4 to n in 2..12 and a configurable iteration count, with defaults reproducing n=4, k=3.",
+        "reason": "The task requires the operation to work for varying valid parameters. The default behaviour matches the specification."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Fidelity analysis and measurement/readout are excluded from the circuit.",
+        "reason": "The module must be measurement-free. The fidelity formula is analysis only."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to ideal, coupling-free Grover search. Spin-chain pulses, Ising couplings and the 2*pi*k condition are not modeled.",
+        "reason": "The specification gives no Hamiltonian, coupling strengths, Rabi frequencies or pulse decomposition."
+      }
+    ],
+    "assumptions": [
+      "Single marked basis state w, provided in the instance.",
+      "Qiskit little-endian: qubit i holds bit i of w.",
+      "Ideal gates only; no noise and no Ising coupling.",
+      "Standard gates h, x, mcx are used. Qiskit decomposes the multi-controlled X without any dense unitary.",
+      "Default iteration count follows eq_2 for the chosen n."
+    ],
+    "unresolved_issues": [
+      "The paper's marked state and pulse-level implementation are not specified.",
+      "The nuclear-spin-chain Hamiltonian, coupling strengths, Rabi frequencies and the 2*pi*k condition are not modeled.",
+      "Fidelity versus iteration (eq_4) is left to the downstream verifier."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 252,
+    "depth": 170,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

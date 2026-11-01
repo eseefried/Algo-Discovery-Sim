@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "a40ef5b5-0def-4807-8bf2-9b2f503ab22d",
+  "parent_run_id": "d94573af-a0ff-4ee7-b7bd-ce120c860698",
+  "created_at": "2026-10-31T22:21:31.352363+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "25650cd11cc5f1ed857b9c12b49d23b16a674e1d04f948fa7a6407319761e92d",
+  "source_specification_sha256": "72776f634f4dbf4a98185e87b3befa4915710f9100b6c86d1e5e507a98e0c465",
+  "source_python_sha256": "884c8ce1ae64693c7bdb1ddc784257acc1a08f270312b0c9a43fd85eb0dddf85",
+  "elapsed_seconds": 33.234,
+  "usage": {
+    "input_tokens": 4937,
+    "output_tokens": 4885,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds a 3-qubit circuit for one ancilla-controlled Trotterized time-evolution operation controlled-exp(-i H tau), where H is a user-supplied 2-qubit Pauli-sum Hamiltonian (the HeH+ minimal-basis form). It contains no state preparation, measurement or phase-estimation readout. The identity term becomes a phase gate on the ancilla and each Pauli term becomes a controlled Pauli rotation. Trotter order 1 or 2 is selectable.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    coeffs = instance.get('coefficients')\n    if not isinstance(coeffs, dict) or len(coeffs) == 0 or len(coeffs) > 16:\n        raise ValueError('coefficients must be a non-empty dict of 2-character Pauli labels')\n    terms = []\n    for label in sorted(coeffs):\n        if not isinstance(label, str) or len(label) != 2 or any(c not in 'IXYZ' for c in label):\n            raise ValueError('invalid Pauli label: %r' % (label,))\n        v = coeffs[label]\n        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):\n            raise ValueError('coefficient must be a finite real number')\n        terms.append((label, float(v)))\n    tau = instance.get('tau')\n    if isinstance(tau, bool) or not isinstance(tau, (int, float)) or not math.isfinite(tau) or tau <= 0:\n        raise ValueError('tau must be a positive finite number')\n    steps = instance.get('trotter_steps')\n    if isinstance(steps, bool) or not isinstance(steps, int) or steps < 1 or steps > 50:\n        raise ValueError('trotter_steps must be an integer in [1, 50]')\n    order = instance.get('order')\n    if isinstance(order, bool) or order not in (1, 2):\n        raise ValueError('order must be 1 or 2')\n    return terms, float(tau), steps, order\n\n\ndef _apply_term(qc, label, theta):\n    # Ancilla-controlled exp(-i theta P), P a Pauli string.\n    # Circuit qubit 0 = ancilla; label[1] -> circuit qubit 1; label[0] -> circuit qubit 2.\n    active = []\n    for k, ch in enumerate(label):\n        if ch != 'I':\n            active.append((2 - k, ch))\n    if not active:\n        qc.p(-theta, 0)\n        return\n    for q, ch in active:\n        if ch == 'X':\n            qc.h(q)\n        elif ch == 'Y':\n            qc.sdg(q)\n            qc.h(q)\n    target = active[0][0]\n    others = [q for q, _ in active[1:]]\n    for q in others:\n        qc.cx(q, target)\n    qc.crz(2.0 * theta, 0, target)\n    for q in reversed(others):\n        qc.cx(q, target)\n    for q, ch in active:\n        if ch == 'X':\n            qc.h(q)\n        elif ch == 'Y':\n            qc.h(q)\n            qc.s(q)\n\n\ndef build_circuit(instance):\n    \"\"\"Controlled Trotterized exp(-i H tau); ancilla = qubit 0, system = qubits 1,2.\"\"\"\n    terms, tau, steps, order = _parse(instance)\n    anc = QuantumRegister(1, 'anc')\n    sysr = QuantumRegister(2, 'sys')\n    qc = QuantumCircuit(anc, sysr)\n    dt = tau / steps\n    for _ in range(steps):\n        if order == 1:\n            for label, g in terms:\n                _apply_term(qc, label, g * dt)\n        else:\n            for label, g in terms:\n                _apply_term(qc, label, g * dt / 2.0)\n            for label, g in reversed(terms):\n                _apply_term(qc, label, g * dt / 2.0)\n    return qc",
+    "example_instance_json": "{\"coefficients\": {\"II\": -1.0, \"IZ\": 0.5, \"ZI\": -0.3, \"ZZ\": 0.2, \"XX\": 0.15, \"YY\": 0.15}, \"tau\": 0.5, \"trotter_steps\": 4, \"order\": 2}",
+    "register_layout": [
+      "qubit 0: ancilla (control register 'anc'), used as the phase-kickback control",
+      "qubit 1: system qubit 0 (least significant; rightmost character of a Pauli label)",
+      "qubit 2: system qubit 1 (leftmost character of a Pauli label)",
+      "Pauli label 'AB' = A on qubit 2, B on qubit 1 (Qiskit little-endian)",
+      "Coefficients are ordinary real numbers in Hartree; the example values are illustrative placeholders, not actual HeH+ data"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_parse (reads Pauli coefficients g_i) and _apply_term (one P_i term)",
+        "explanation": "H = sum_i g_i P_i is supplied through instance['coefficients'] as a dictionary of 2-qubit Pauli labels. The circuit uses it directly; the coefficients g_i(R) are not computed."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Ground-state minimization and the dissociation curve over R are classical or experimental tasks, not part of this operation."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop over Trotter steps with _apply_term",
+        "explanation": "The ancilla-controlled U(tau)=exp(-iH tau) is approximated by a first- or second-order Trotter product, with the identity term as a phase gate p(-g*dt) on the ancilla and other terms as controlled Pauli rotations."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The phase-energy relation is used only in readout and postprocessing, which the runner handles. Initial-state preparation and ancilla measurement are excluded from this operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The 1e-14 Hartree uncertainty is a reported experimental result with no derivation given, and it is not a circuit element."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "Scope is narrowed to a single controlled-U(tau) block for a user-supplied 2-qubit Pauli Hamiltonian at one bond length. The HeH+ coefficients are not supplied; the example uses illustrative placeholder values.",
+        "reason": "The abstract gives no Hamiltonian coefficients, qubit mapping or circuit details."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "exp(-iH tau) is implemented approximately by Trotter-Suzuki decomposition (order 1 or 2, up to 50 steps) rather than exactly.",
+        "reason": "Non-commuting Pauli terms cannot be exponentiated exactly with standard gates without building a dense unitary. The error is controlled by trotter_steps."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The full phase-estimation and iterative readout, state preparation and measurement are excluded. The module provides only the controlled evolution operation with a fixed ancilla qubit.",
+        "reason": "The task requires an operation without input-state preparation or measurement; the runner prepares inputs."
+      }
+    ],
+    "assumptions": [
+      "Register is 1 ancilla plus 2 system qubits, as assumed in the specification.",
+      "Pauli labels follow Qiskit little-endian ordering: the rightmost character acts on system qubit 0, which is circuit qubit 1.",
+      "tau must be positive, and tau is assumed small enough to avoid energy aliasing in downstream analysis.",
+      "The Hamiltonian includes the nuclear repulsion constant in the II coefficient if desired; it only produces a relative phase on the ancilla."
+    ],
+    "unresolved_issues": [
+      "Actual HeH+ minimal-basis Pauli coefficients g_i(R) are not provided.",
+      "The NV-center native gate set and pulse compilation are not modeled.",
+      "The actual algorithm used in the paper is not specified in the abstract."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 312,
+    "depth": 260,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

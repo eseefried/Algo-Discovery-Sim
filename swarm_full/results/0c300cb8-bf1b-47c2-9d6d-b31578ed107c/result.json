@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "0c300cb8-bf1b-47c2-9d6d-b31578ed107c",
+  "parent_run_id": "43ee3bdf-f699-44a9-8d6a-13fad38786dc",
+  "created_at": "2026-10-31T21:45:35.512923+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "90b63cf8f77449261679caa851bfee1024f566a29494bd97fe0d60ae606792ee",
+  "source_specification_sha256": "247f726eabde3748eb3f58045db2c3e4926e040e9fb2e245ca49606e98df14f3",
+  "source_python_sha256": "a49199a322846547de3866d11948645b6bc7fb83b04fa4db6de71a88928f8126",
+  "elapsed_seconds": 22.28,
+  "usage": {
+    "input_tokens": 4173,
+    "output_tokens": 3081,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Scoped to the Trugenberger-style Hamming-distance interference operation on registers prepared by the runner. A Hadamard goes on the control qubit. CNOTs write x XOR p into the memory register. A controlled phase of pi/n per differing bit follows, so the control=1 branch picks up exp(i*pi*d_H/n). The XOR is optionally undone and a final Hadamard goes on the control, giving P(control=0)=cos^2(pi*d_H/(2n)) for each memory branch. Memory superposition preparation, MNIST encoding, measurement and majority voting are excluded.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef build_circuit(instance):\n    \"\"\"Hamming-distance interference operation (Trugenberger-style template).\n\n    Layout: input qubits 0..n-1, memory qubits n..2n-1, control qubit 2n.\n    instance: {\"n\": int in 1..5, \"uncompute_xor\": bool (optional, default True)}\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"n\")\n    if isinstance(n, bool) or not isinstance(n, int):\n        raise ValueError(\"n must be an integer\")\n    if n < 1 or 2 * n + 1 > 12:\n        raise ValueError(\"n must satisfy 1 <= n <= 5\")\n    unc = instance.get(\"uncompute_xor\", True)\n    if not isinstance(unc, bool):\n        raise ValueError(\"uncompute_xor must be a bool\")\n    inp = QuantumRegister(n, \"input\")\n    mem = QuantumRegister(n, \"memory\")\n    ctl = QuantumRegister(1, \"control\")\n    qc = QuantumCircuit(inp, mem, ctl)\n    c = ctl[0]\n    # control into superposition\n    qc.h(c)\n    # eq_1: memory <- x XOR p, bitwise differences\n    for i in range(n):\n        qc.cx(inp[i], mem[i])\n    # eq_1: phase exp(i*pi*d_H/n) on the control=1 branch, d_H = number of 1s in memory\n    for i in range(n):\n        qc.cp(math.pi / n, c, mem[i])\n    if unc:\n        for i in range(n):\n            qc.cx(inp[i], mem[i])\n    # interference: P(control=0) = cos^2(pi*d_H/(2n))\n    qc.h(c)\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"uncompute_xor\": true}",
+    "register_layout": [
+      "qubits 0..n-1: input register (x_i at qubit i, little-endian, runner-prepared)",
+      "qubits n..2n-1: memory register (pattern p_k bit i at qubit n+i, runner-prepared superposition)",
+      "qubit 2n: control ancilla (starts |0>)",
+      "example n=3: input q0-q2, memory q3-q5, control q6"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: CNOT loop computing x XOR p into memory, then controlled-phase loop cp(pi/n) from the control onto each memory qubit",
+        "explanation": "The bitwise XOR is computed in the memory register. The sum over i of the XOR bits is realized as a total phase exp(i*pi*d_H/n) on the control=1 branch."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The uniform memory superposition is an input state, so the runner prepares it. The operation acts linearly on any memory state."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Memory superposition preparation is not included in the circuit; the circuit is only the Hamming-distance interference operation acting on prepared registers.",
+        "reason": "Task rules forbid input-state preparation inside build_circuit."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The abstract gives no phase angle, so a per-differing-bit phase of pi/n was chosen. The XOR is uncomputed by default (configurable) so the memory register retains p_k.",
+        "reason": "The abstract does not give gate details. This choice makes P(control=0)=cos^2(pi*d_H/(2n)), which is 1 at d_H=0 and 0 at d_H=n."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Measurement, post-selection, class labels, MNIST binarization and majority-vote postprocessing are out of scope. Pattern length is capped at n<=5 (2n+1<=12 qubits).",
+        "reason": "These are not specified in the abstract. The operation must be measurement-free and respect the 12-qubit cap."
+      }
+    ],
+    "assumptions": [
+      "The control-qubit interference template follows the Trugenberger style: H, XOR, controlled phase proportional to d_H, H.",
+      "Phase per differing bit is pi/n.",
+      "Little-endian layout; input bit i is at qubit i and memory bit i at qubit n+i."
+    ],
+    "unresolved_issues": [
+      "The authors' modifications to Trugenberger's algorithm are unknown.",
+      "Class label storage and the final decision rule are not implemented.",
+      "The MNIST encoding and shot count are unspecified."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 7,
+    "gate_count": 23,
+    "depth": 15,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

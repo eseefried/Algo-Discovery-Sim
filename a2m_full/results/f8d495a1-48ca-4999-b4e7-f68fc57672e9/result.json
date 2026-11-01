@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "f8d495a1-48ca-4999-b4e7-f68fc57672e9",
+  "parent_run_id": "e7c334d9-9c51-4139-be57-5aaea17626d0",
+  "created_at": "2026-11-01T00:28:49.594339+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "ef04203fd6e3246a02e941a8b5dec5148a28a5648bf7913f092928562dc3c1d8",
+  "source_specification_sha256": "c7000e65db1434ebad348730d8d4619a29a33995f04bfd2be3ec8d7b125b01a9",
+  "source_python_sha256": "1f22cd30cec56a098c43a32ff762ad82ce66caf794228be31602a9e298de9522",
+  "elapsed_seconds": 80.936,
+  "usage": {
+    "input_tokens": 5464,
+    "output_tokens": 11067,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Gate-level Naimark dilation of the 3-outcome trine POVM on 3 qubits. The input polarisation qubit is moved into the position register by a swap. A controlled-RY and a controlled-Hadamard conjugated by CNOTs map the input to the outcome amplitudes sqrt(2/3)<t_k|psi> on position k. An optional controlled-RY set then rotates the polarisation qubit into |t_k>, so that K_k = sqrt(2/3)|t_k><t_k|. The circuit is unitary, measurement-free and prepares no input state.",
+    "source_python": "import math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import RYGate\n\n\ndef _real(value):\n    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):\n        raise ValueError(\"frame_angle must be a finite real number\")\n    return float(value)\n\n\ndef build_circuit(instance):\n    \"\"\"Trine-POVM Naimark dilation V|psi> = sum_k |k>_pos (x) K_k|psi> on 3 qubits.\n\n    Qubit 0 = pol (input psi), qubits 1,2 = pos (start |00>, outcome k = q1 + 2*q2).\n    Instance keys (all optional): povm='trine', frame_angle (float, rotates the trine\n    frame about the Bloch y axis), restore_polarisation (bool).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    if set(instance) - {\"povm\", \"frame_angle\", \"restore_polarisation\"}:\n        raise ValueError(\"unknown instance key\")\n    if instance.get(\"povm\", \"trine\") != \"trine\":\n        raise ValueError(\"only the trine POVM is implemented\")\n    phi = _real(instance.get(\"frame_angle\", 0.0))\n    restore = instance.get(\"restore_polarisation\", True)\n    if not isinstance(restore, bool):\n        raise ValueError(\"restore_polarisation must be a bool\")\n\n    pol = QuantumRegister(1, \"pol\")\n    pos = QuantumRegister(2, \"pos\")\n    qc = QuantumCircuit(pol, pos)\n\n    # eq_2: frame rotation, <t_k(phi)|psi> = <t_k|ry(-phi)|psi>\n    qc.ry(-phi, 0)\n    # move psi into the position register (qubit 1); pol becomes |0>\n    qc.swap(0, 1)\n    # coin-like step: if q1=0 split q2 with cos(t/2)=sqrt(2/3)\n    theta = 2.0 * math.atan(1.0 / math.sqrt(2.0))\n    qc.cry(theta, 1, 2, ctrl_state=0)\n    # Hadamard on the {|10>,|01>} subspace: CX(2->1) CH(1->2) CX(2->1)\n    qc.cx(2, 1)\n    qc.ch(1, 2)\n    qc.cx(2, 1)\n    # eq_2 Kraus form: rotate pol to |t_k> conditioned on position k\n    if restore:\n        for k in range(3):\n            qc.append(RYGate(2.0 * k * math.pi / 3.0 + phi).control(2, ctrl_state=k), [1, 2, 0])\n    return qc",
+    "example_instance_json": "{\"povm\": \"trine\", \"frame_angle\": 0.0, \"restore_polarisation\": true}",
+    "register_layout": [
+      "qubit 0: pol (polarisation/coin qubit, input |psi>, little-endian LSB of the full register)",
+      "qubit 1: pos bit 0 (LSB of outcome label k)",
+      "qubit 2: pos bit 1 (MSB of outcome label k)",
+      "Outcome k = q1 + 2*q2 in {0,1,2}; k=3 has zero amplitude. Input convention: pos=|00>, pol=|psi>. Output: sum_k |k>_pos (x) K_k|psi>_pol."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Defines the POVM and Born rule. Completeness is guaranteed by the isometry construction, and probabilities are left to downstream analysis."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: ry(-phi), swap, cry, cx/ch/cx (amplitudes sqrt(2/3)<t_k|psi>) and the final controlled RYGate loop (post-state |t_k>)",
+        "explanation": "Trine elements E_k = (2/3)|t_k><t_k| with t_k = ry(2k*pi/3)|0>, optionally rotated by frame_angle."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The literal two-step coined walk S2(I(x)C2)S(I(x)C1) is not reproduced because the coin angles are unspecified. An equivalent gate-level Naimark dilation is used instead."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit (whole circuit is a unitary whose action on |00>_pos|psi> is the isometry V)",
+        "explanation": "V^dag V = I holds because the circuit is unitary. The amplitude-producing part acts as a unitary on the 3-state span and was checked analytically to give columns (sqrt(2/3),1/sqrt6,-1/sqrt6) and (0,1/sqrt2,1/sqrt2)."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "SIC and USD targets are not implemented. Only the trine is scoped."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Replaced the coined-walk form with an equivalent gate-level dilation: swap, controlled-RY, a CX-conjugated controlled-H, and controlled-RY post-rotations. The shifts are not literal beam-displacer analogues.",
+        "reason": "The paper's coin angles and shift schedule are not given. The explicit analytic decomposition avoids opaque unitaries and numerical offline solving."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "Added optional frame_angle (rotation of the trine frame about the Bloch y axis) and restore_polarisation (if false the pol qubit ends in |0>, so K_k = sqrt(2/3)|0><t_k|).",
+        "reason": "Orientation of the trine frame is unresolved in the specification. The same E_k = K_k^dag K_k is preserved in both modes."
+      },
+      {
+        "equation_ids": [
+          "eq_5",
+          "eq_3"
+        ],
+        "change": "Narrowed scope to trine only. SIC and USD are not implemented.",
+        "reason": "The task requires ONE explicitly scoped construction. The USD state pair and SIC orientation are unspecified."
+      }
+    ],
+    "assumptions": [
+      "Trine states are real, in the x-z Bloch plane, with t_0=|0>.",
+      "Outcome label k is encoded as pos value q1+2*q2, with the |00> start state on pos.",
+      "Outcomes are identified with position labels. The pol output state is |t_k> (default) or |0>.",
+      "Global phases per outcome follow the real amplitude signs of the Kraus operators."
+    ],
+    "unresolved_issues": [
+      "The paper's actual coin angles, shift schedule, and (x,p)-to-outcome mapping are not reproduced.",
+      "SIC and USD constructions are not implemented.",
+      "The circuit's validity as an exact Naimark dilation has not been simulated here and is left to downstream verification."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 96,
+    "depth": 71,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

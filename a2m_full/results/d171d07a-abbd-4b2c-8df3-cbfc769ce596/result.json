@@ -1,0 +1,144 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "d171d07a-abbd-4b2c-8df3-cbfc769ce596",
+  "parent_run_id": "deb7193d-b487-4a93-95b3-9ae792363a60",
+  "created_at": "2026-11-01T00:18:30.556739+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "6860d02614eb3d53c6370fccfe8e9ecf8336310de54c0628e307d3f9428bccf0",
+  "source_specification_sha256": "8d0fc81440703dd0c4e9073fa50242cc5f56415f39ac7d9df0478d8a3fcb61b9",
+  "source_python_sha256": "e3067505f8b8ea33427a687cae85c33e45c9d68a0760596768d6d78e27437da9",
+  "elapsed_seconds": 45.896,
+  "usage": {
+    "input_tokens": 6419,
+    "output_tokens": 6613,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit phase-estimation operation for Shor order finding: H on t control qubits, controlled multiplication by a^(2^j) mod N on the work register (synthesized as cycles of basis-state transpositions using multi-controlled X gates), then inverse QFTGate on the control register. Input state (work=|1>, control=|0>) and measurement are left to the runner. Classical post-processing is not part of the circuit.",
+    "source_python": "from __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\n\n\ndef _as_int(v):\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError('parameters must be integers')\n    return v\n\n\ndef _cycles(m, N):\n    # cycles of the permutation x -> m*x mod N on 0..N-1 (identity beyond N)\n    seen = [False] * N\n    out = []\n    for s in range(N):\n        if seen[s]:\n            continue\n        cyc = []\n        x = s\n        while not seen[x]:\n            seen[x] = True\n            cyc.append(x)\n            x = (m * x) % N\n        if len(cyc) > 1:\n            out.append(cyc)\n    return out\n\n\ndef _transposition(qc, ctrl, work, x, y):\n    # controlled swap of basis states |x> and |y> on the work register\n    n = len(work)\n    d = x ^ y\n    k = (d & -d).bit_length() - 1\n    others = [j for j in range(n) if ((d >> j) & 1) and j != k]\n    for j in others:\n        qc.cx(work[k], work[j])\n    lx = x\n    if (x >> k) & 1:\n        for j in others:\n            lx ^= 1 << j\n    ctrl_bits = [j for j in range(n) if j != k]\n    zeros = [work[j] for j in ctrl_bits if not ((lx >> j) & 1)]\n    for q in zeros:\n        qc.x(q)\n    qc.mcx([ctrl] + [work[j] for j in ctrl_bits], work[k])\n    for q in zeros:\n        qc.x(q)\n    for j in reversed(others):\n        qc.cx(work[k], work[j])\n\n\ndef _controlled_mult(qc, ctrl, work, m, N):\n    # controlled |x> -> |m x mod N> (identity for x >= N)\n    for cyc in _cycles(m, N):\n        L = len(cyc)\n        for i in range(L - 2, -1, -1):\n            _transposition(qc, ctrl, work, cyc[i], cyc[i + 1])\n\n\ndef build_circuit(instance):\n    \"\"\"Order-finding phase estimation operation. instance: {'N':int,'a':int,'t':int (optional)}.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    N = _as_int(instance.get('N'))\n    a = _as_int(instance.get('a'))\n    if N < 3 or not (1 < a < N) or math.gcd(a, N) != 1:\n        raise ValueError('need N>=3, 1<a<N, gcd(a,N)=1')\n    n = (N - 1).bit_length()\n    if n >= 12:\n        raise ValueError('too many qubits')\n    t = instance.get('t')\n    if t is None:\n        t = min(2 * n, 12 - n)\n    t = _as_int(t)\n    if t < 1 or t + n > 12:\n        raise ValueError('invalid control register size')\n    ctl = QuantumRegister(t, 'control')\n    wrk = QuantumRegister(n, 'work')\n    qc = QuantumCircuit(ctl, wrk)\n    for j in range(t):\n        qc.h(ctl[j])\n    work = [wrk[i] for i in range(n)]\n    for j in range(t):\n        m = pow(a, 2 ** j, N)\n        if m != 1:\n            _controlled_mult(qc, ctl[j], work, m, N)\n    qc.append(QFTGate(t).inverse(), list(range(t)))\n    return qc",
+    "example_instance_json": "{\"N\": 21, \"a\": 4, \"t\": 6}",
+    "register_layout": [
+      "qubits 0..t-1: control register, little-endian (qubit j has weight 2^j in y); controls controlled-U^(2^j)",
+      "qubits t..t+n-1: work register, n=ceil(log2 N), little-endian; work bit 0 is qubit t; runner should prepare |1> (qubit t set to 1)",
+      "example N=21,a=4,t=6: control qubits 0-5, work qubits 6-10 (11 qubits total)",
+      "control output after inverse QFT encodes y with y/2^t ≈ s/r"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": "_controlled_mult / build_circuit: multiplier pow(a, 2**j, N)",
+        "explanation": "Order definition is the property the circuit's eigenphases encode; r is not computed in the circuit, and the code only requires gcd(a,N)=1."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical gcd post-processing of even orders; not part of the circuit operation."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: H layer, controlled-U^(2^j) loop via _controlled_mult, QFTGate(t).inverse() on control qubits",
+        "explanation": "Phase-estimation circuit whose measured control outcome has distribution P(y). Measurement and continued fractions are left to the runner and post-processing."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical odd-order gcd rule for square a using b^r; no quantum content."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical relation between orders of a and sqrt(a); the paper's procedure is not specified."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical square-root-of-unity gcd check."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The circuit contains only the phase-estimation operation (H on controls, controlled modular multiplications, inverse QFT). Work-register |1> preparation, measurement, and continued fractions are excluded.",
+        "reason": "Task requires an operation without state prep or measurement; the runner prepares inputs."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The U_a black box is synthesized with standard gates: the permutation x -> m x mod N is split into cycles, then transpositions realized by CX conjugation and a multi-controlled X, instead of an opaque oracle. It acts as the identity on x >= N.",
+        "reason": "Opaque dense unitaries are forbidden; this keeps the construction explicit and unitary."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Control-register size t defaults to min(2n, 12-n) and is user-selectable, so for N=21 it is at most 7 rather than about 2n.",
+        "reason": "12-qubit cap."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The inverse QFT is QFTGate(t).inverse() on qubits 0..t-1, with no manual index reordering.",
+        "reason": "Little-endian control encoding y=sum c_i 2^i makes QFTGate's bit-reversal convention match directly; no factorized-QFT index conflict arises."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_4",
+          "eq_5",
+          "eq_6"
+        ],
+        "change": "Scope is narrowed to the quantum order-finding circuit for any valid (N,a,t); odd-order/square-coprime classical rules and relation combining are not implemented.",
+        "reason": "They are classical post-processing and the paper's exact technique is not given."
+      }
+    ],
+    "assumptions": [
+      "N>=3, 1<a<N, gcd(a,N)=1; n=ceil(log2 N) work qubits and t+n<=12.",
+      "The runner prepares the work register in |1> (qubit t = 1) and the controls in |0>.",
+      "Controlled U^(2^j) uses multiplier a^(2^j) mod N, skipped when it equals 1.",
+      "N need not be the product of two primes for the circuit itself."
+    ],
+    "unresolved_issues": [
+      "Gate count grows with the number of cycles and may be large for larger N (still within the 12-qubit cap).",
+      "The paper's two-run relation-combining technique is not reconstructed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 11,
+    "gate_count": 5976,
+    "depth": 5319,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

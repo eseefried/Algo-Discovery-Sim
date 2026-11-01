@@ -4,6 +4,8 @@ Evaluator-only: reads data/.../equations/ (never shown to the agent) after the r
 Scores are lexical/structural LaTeX similarity, not proof of mathematical equivalence.
 Unrelated equations share generic tokens (=, |, \\frac) and score ~0.45, so the headline
 math_score is chance-adjusted against the same agent equations scored on unrelated papers.
+Recall targets the paper's main equations (evaluation/main_equations.json) where labelled,
+matched one-to-one so a single agent equation cannot claim several paper equations.
 """
 
 import argparse
@@ -15,13 +17,15 @@ import re
 import statistics
 from collections import Counter, defaultdict
 from difflib import SequenceMatcher
+from functools import cache
 from pathlib import Path
 
 DATASET = Path("data/circuit_dataset_300_v1")
+MAIN_EQUATIONS = Path("evaluation/main_equations.json")
 # Calibrated by inspection: >=0.7 is usually the same equation idea, >=0.85 near-identical.
 MATCH_THRESHOLD = 0.7
 STRONG_THRESHOLD = 0.85
-CONTROL_PAPERS = 5
+CONTROL_PAPERS = 20
 MAX_TOKENS = 200
 
 SKIP_SECTIONS = re.compile(r"reference|bibliograph|acknowledg", re.IGNORECASE)
@@ -54,9 +58,7 @@ def tokens(latex: str) -> list[str]:
 
 def skeleton(toks: list[str]) -> list[str]:
     """Mask variable names so renamed notation still matches structurally."""
-    return [
-        "v" if (len(t) == 1 and t.isalpha()) or t.lstrip("\\") in GREEK else t for t in toks
-    ]
+    return ["v" if (len(t) == 1 and t.isalpha()) or t.lstrip("\\") in GREEK else t for t in toks]
 
 
 class Candidate:
@@ -67,9 +69,22 @@ class Candidate:
         self.skel = skeleton(self.toks)
 
 
+def sides(latex: str) -> list[str]:
+    """Split a chained equality A = B = C at top-level '=' signs (outside braces)."""
+    parts, depth, start = [], 0, 0
+    for i, char in enumerate(latex):
+        depth += {"{": 1, "}": -1}.get(char, 0)
+        if char == "=" and depth == 0:
+            parts.append(latex[start:i])
+            start = i + 1
+    return parts + [latex[start:]] if parts else []
+
+
 def pieces(latex: str, parent: str) -> list[Candidate]:
-    """The whole expression plus each row/clause, so combined lines can match singly."""
-    parts = [latex] + [p for p in SPLIT.split(latex) if p.strip()]
+    """The whole expression plus each row/clause and each side of a chained equality,
+    so combined lines like 'S = sum_j w_j x_j = w.x' can match a paper's single term."""
+    clauses = [p for p in SPLIT.split(latex) if p.strip()]
+    parts = [latex] + clauses + [side for c in clauses for side in sides(c)]
     found = [Candidate(p, parent) for p in dict.fromkeys(parts)]
     return [c for c in found if len(c.toks) >= 4]
 
@@ -87,6 +102,36 @@ def best(agent: list[Candidate], paper: list[Candidate], idf) -> tuple[float, Ca
     return max(pairs, key=lambda pair: pair[0], default=(0.0, None))
 
 
+def best_score(agent: list[Candidate], paper: list[Candidate], idf) -> float:
+    return best(agent, paper, idf)[0]
+
+
+def one_to_one(targets: list[list[Candidate]], agent: list[list[Candidate]], idf) -> list[float]:
+    """Greedy assignment: each agent equation can recover at most one target equation."""
+    pairs = sorted(
+        (
+            (best_score(a, t, idf), ti, ai)
+            for ti, t in enumerate(targets)
+            for ai, a in enumerate(agent)
+        ),
+        reverse=True,
+    )
+    scores, used_t, used_a = [0.0] * len(targets), set(), set()
+    for score, ti, ai in pairs:
+        if ti not in used_t and ai not in used_a:
+            scores[ti] = score
+            used_t.add(ti)
+            used_a.add(ai)
+    return scores
+
+
+@cache
+def main_labels() -> dict[str, list[str]]:
+    if not MAIN_EQUATIONS.exists():
+        return {}
+    return json.loads(MAIN_EQUATIONS.read_text(encoding="utf-8"))["papers"]
+
+
 def paper_equations(arxiv_id: str) -> list[dict]:
     path = DATASET / "equations" / f"arxiv-{arxiv_id}.jsonl"
     records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
@@ -97,17 +142,22 @@ def paper_equations(arxiv_id: str) -> list[dict]:
     ]
 
 
-def score_paper(agent_eqs: list[dict], paper_eqs: list[dict], idf) -> dict:
+def score_paper(
+    agent_eqs: list[dict], paper_eqs: list[dict], idf, main_ids: list[str] | None = None
+) -> dict:
     paper_cands = [c for r in paper_eqs for c in pieces(r["latex"], r["id"])]
     agent_cands = {e["id"]: pieces(e["latex"], e["id"]) for e in agent_eqs}
     matches = []
     for eq in agent_eqs:
         score, hit = best(agent_cands[eq["id"]], paper_cands, idf)
         matches.append({"agent_equation": eq, "score": score, "paper_id": hit and hit.parent})
-    # Recall over numbered (core) paper equations, falling back to all displayed ones.
-    core = [r for r in paper_eqs if r.get("equation_number")] or paper_eqs
-    flat_agent = [c for cands in agent_cands.values() for c in cands]
-    recall_scores = [best(flat_agent, pieces(r["latex"], r["id"]), idf)[0] for r in core]
+    # Recall over labelled main equations; otherwise numbered, then all displayed ones.
+    main = [r for r in paper_eqs if r["id"] in set(main_ids or ())]
+    source = "labelled" if main else "numbered_fallback"
+    main = main or [r for r in paper_eqs if r.get("equation_number")] or paper_eqs
+    recall_scores = one_to_one(
+        [pieces(r["latex"], r["id"]) for r in main], list(agent_cands.values()), idf
+    )
     precision = statistics.fmean(m["score"] for m in matches) if matches else 0.0
     recall = statistics.fmean(recall_scores) if recall_scores else 0.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
@@ -115,8 +165,9 @@ def score_paper(agent_eqs: list[dict], paper_eqs: list[dict], idf) -> dict:
         "precision": precision,
         "recall": recall,
         "f1": f1,
-        "core_paper_equations": len(core),
-        "core_equations_recovered": sum(score >= MATCH_THRESHOLD for score in recall_scores),
+        "main_equation_source": source,
+        "main_paper_equations": len(main),
+        "main_equations_recovered": sum(score >= MATCH_THRESHOLD for score in recall_scores),
         "matched_agent_equations": sum(m["score"] >= MATCH_THRESHOLD for m in matches),
         "strong_agent_matches": sum(m["score"] >= STRONG_THRESHOLD for m in matches),
         "matches": matches,
@@ -162,6 +213,7 @@ def main() -> int:
     scored = [r for r in runs if r["equations"]]
     idf = build_idf(list(catalog))
     rng = random.Random(args.seed)
+    labels = main_labels()
     print(f"Scoring {len(scored)} papers with agent equations ({len(runs)} finished runs).")
 
     rows, match_lines = [], []
@@ -169,11 +221,14 @@ def main() -> int:
     for index, run in enumerate(scored, 1):
         arxiv_id, summary = run["arxiv_id"], run["summary"]
         paper_eqs = paper_equations(arxiv_id)
-        result = score_paper(run["equations"], paper_eqs, idf)
-        # Control: the same agent equations against unrelated papers.
-        others = rng.sample([i for i in catalog if i != arxiv_id], CONTROL_PAPERS)
+        result = score_paper(run["equations"], paper_eqs, idf, labels.get(arxiv_id))
+        # Control: the same agent equations against unrelated papers, drawn from the
+        # labelled pool when this paper is labelled so recall is measured the same way.
+        pool = [i for i in (labels if arxiv_id in labels else catalog) if i != arxiv_id]
+        others = rng.sample(pool, min(CONTROL_PAPERS, len(pool)))
         control = statistics.fmean(
-            score_paper(run["equations"], paper_equations(o), idf)["f1"] for o in others
+            score_paper(run["equations"], paper_equations(o), idf, labels.get(o))["f1"]
+            for o in others
         )
         # 0 = no better than unrelated papers, 1 = perfect; negative = worse than chance.
         math_score = (result["f1"] - control) / (1 - control) if control < 1 else 0.0
@@ -188,8 +243,11 @@ def main() -> int:
                     "provenance": eq["provenance"],
                     "agent_latex": eq["latex"],
                     "score": round(m["score"], 4),
-                    "match": "strong" if m["score"] >= STRONG_THRESHOLD
-                    else "match" if m["score"] >= MATCH_THRESHOLD else "none",
+                    "match": "strong"
+                    if m["score"] >= STRONG_THRESHOLD
+                    else "match"
+                    if m["score"] >= MATCH_THRESHOLD
+                    else "none",
                     "paper_equation_id": m["paper_id"],
                     "paper_latex": paper_latex.get(m["paper_id"]),
                 }
@@ -210,8 +268,9 @@ def main() -> int:
                 "agent_equations": len(run["equations"]),
                 "matched_agent_equations": result["matched_agent_equations"],
                 "strong_agent_matches": result["strong_agent_matches"],
-                "core_paper_equations": result["core_paper_equations"],
-                "core_equations_recovered": result["core_equations_recovered"],
+                "main_equation_source": result["main_equation_source"],
+                "main_paper_equations": result["main_paper_equations"],
+                "main_equations_recovered": result["main_equations_recovered"],
                 "precision": round(result["precision"], 4),
                 "recall": round(result["recall"], 4),
                 "f1": round(result["f1"], 4),
@@ -240,7 +299,8 @@ def main() -> int:
         "papers_scored": len(rows),
         "run_summaries": len(runs),
         "method": "pair similarity = 0.5 * IDF-weighted token Dice + 0.5 * variable-masked "
-        "sequence ratio; precision = agent->paper best match, recall = numbered paper eqs->agent; "
+        "sequence ratio; precision = agent->paper best match over all displayed equations; "
+        "recall = one-to-one match of the paper's main equations (labelled, else numbered); "
         "math_score = (F1 - control F1) / (1 - control F1), control = same agent equations vs "
         f"{CONTROL_PAPERS} random other papers. Lexical/structural similarity, not equivalence.",
         "match_threshold": MATCH_THRESHOLD,
@@ -253,8 +313,11 @@ def main() -> int:
         "agent_equations": sum(r["agent_equations"] for r in rows),
         "agent_equations_matched": sum(r["matched_agent_equations"] for r in rows),
         "agent_equations_strong": sum(r["strong_agent_matches"] for r in rows),
-        "core_paper_equations": sum(r["core_paper_equations"] for r in rows),
-        "core_paper_equations_recovered": sum(r["core_equations_recovered"] for r in rows),
+        "papers_with_labelled_main_equations": sum(
+            r["main_equation_source"] == "labelled" for r in rows
+        ),
+        "main_paper_equations": sum(r["main_paper_equations"] for r in rows),
+        "main_paper_equations_recovered": sum(r["main_equations_recovered"] for r in rows),
         "reached_simulation": sum(r["simulation_status"] in {"simulated", "reference_passed"} for r in rows),
         "exact_correctness": "not scored: the dataset has no ground-truth circuits or outputs",
         "by_provenance": {

@@ -1,0 +1,107 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "2bbbb0c7-0037-4726-afd0-48d1dccfcef8",
+  "parent_run_id": "08d85f16-46e9-4f63-9452-9f7c67d15bd6",
+  "created_at": "2026-10-31T20:43:15.234123+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "58bb332be0ac67f425df98cff176cb0d4cd3978cf7eb3963684fa585452a276b",
+  "source_specification_sha256": "29ba4c56b20fff240f155b44d81ac071d1a9e254031a1bcdb8dd100d742d6759",
+  "source_python_sha256": "46161ea6a3445fb4b10d82d043e7cbca9a7e02a81ba10f2ab7ff402fabbfa795",
+  "elapsed_seconds": 19.959,
+  "usage": {
+    "input_tokens": 4907,
+    "output_tokens": 3015,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds a Draper QFT adder for a classical constant a on an n-qubit register: QFTGate, then per-qubit phase gates implementing exp(2*pi*i*a*k/2^n), then the inverse QFTGate. This maps |x> to |x+a mod 2^n>. An optional control qubit turns the phase gates into controlled-phase gates, giving a controlled constant adder. The weighted-average and inner-product constructions are not implemented.",
+    "source_python": "from qiskit import QuantumCircuit\nfrom qiskit.circuit.library import QFTGate\nimport math\n\n\ndef build_circuit(instance):\n    \"\"\"Draper QFT constant adder |x> -> |x+a mod 2^n>, optionally controlled.\n\n    instance: {\"n\": int, \"a\": int, \"controlled\": bool (optional)}\n    Qubits 0..n-1: data register (qubit 0 least significant).\n    Qubit n (only if controlled): control qubit.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"n\")\n    a = instance.get(\"a\")\n    controlled = instance.get(\"controlled\", False)\n    if isinstance(n, bool) or not isinstance(n, int):\n        raise ValueError(\"n must be an integer\")\n    if isinstance(a, bool) or not isinstance(a, int):\n        raise ValueError(\"a must be an integer\")\n    if not isinstance(controlled, bool):\n        raise ValueError(\"controlled must be a boolean\")\n    extra = 1 if controlled else 0\n    if n < 1 or n + extra > 12:\n        raise ValueError(\"n must satisfy 1 <= n and n + control qubit <= 12\")\n    dim = 2 ** n\n    if a < 0 or a >= dim:\n        raise ValueError(\"a must satisfy 0 <= a < 2^n\")\n\n    qc = QuantumCircuit(n + extra)\n    targets = list(range(n))\n    # eq_1: QFT on the data register (QFTGate includes bit reversal, so Fourier index k has qubit q with weight 2^q)\n    qc.append(QFTGate(n), targets)\n    # eq_2: phase exp(2*pi*i*a*k/2^n) = product over qubits q of exp(2*pi*i*a*2^q*k_q/2^n)\n    for q in range(n):\n        angle = 2.0 * math.pi * ((a * (2 ** q)) % dim) / dim\n        if controlled:\n            qc.cp(angle, n, q)\n        else:\n            qc.p(angle, q)\n    # eq_2: inverse QFT back to the computational basis\n    qc.append(QFTGate(n).inverse(), targets)\n    return qc",
+    "example_instance_json": "{\"n\": 4, \"a\": 5, \"controlled\": false}",
+    "register_layout": [
+      "qubits 0..n-1: data register x, little-endian (qubit 0 is the least significant bit), integer x = sum_q x_q 2^q",
+      "qubit n (present only when controlled=true): control qubit; the addition is applied only when it is |1>"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: qc.append(QFTGate(n), targets)",
+        "explanation": "The QFT on the data register uses QFTGate, which matches the stated basis-state action including bit reversal."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: phase loop (qc.p / qc.cp) between QFTGate(n) and QFTGate(n).inverse()",
+        "explanation": "The Fourier-domain phase exp(2*pi*i*a*k/N) is factorized into single-qubit phases of angle 2*pi*a*2^q/N, followed by the inverse QFT, giving addition of a mod N."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The classical weighted-average formula is not implemented, because the abstract does not specify its quantum circuit."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The inner-product formula is not implemented. A controlled weighted sum needs a multi-register encoding that the abstract does not specify."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Scope narrowed to the QFT constant adder (eq_1, eq_2), with an optional control qubit. The weighted-average and inner-product circuits are not built.",
+        "reason": "The abstract and specification give no circuit constructions or encodings for these, so any implementation would be invented."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The addend a is a classical parameter restricted to 0 <= a < 2^n. Only modular (mod 2^n) unsigned addition is implemented. The optional control qubit makes the addition a controlled constant adder.",
+        "reason": "The signed-integer and non-modular variants are not specified. The control qubit follows the specification's assumed ctrl register."
+      }
+    ],
+    "assumptions": [
+      "N = 2^n",
+      "The addend is a classical constant, not a quantum register",
+      "The control qubit, when used, is placed at index n, and the runner prepares the inputs (x on the data register, control state)",
+      "The Fourier-domain phase uses the integer index k with qubit q weighted 2^q, which holds because QFTGate includes the swaps"
+    ],
+    "unresolved_issues": [
+      "Weighted-average and inner-product circuits are not implemented",
+      "Multipliers, signed-integer encodings and non-modular arithmetic are not implemented",
+      "Adding a quantum-register addend (a controlled weighted sum) would need a specification that is not available"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 84,
+    "depth": 51,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

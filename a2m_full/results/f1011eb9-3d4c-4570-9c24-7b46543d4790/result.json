@@ -1,0 +1,146 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "f1011eb9-3d4c-4570-9c24-7b46543d4790",
+  "parent_run_id": "7d89cd56-e408-4396-9d67-85b74378e6af",
+  "created_at": "2026-11-01T00:25:38.410665+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "b5edaaa4dd0b5714fd1469e0dbab9bba3c8c16c132937469d1b43ed792d801a0",
+  "source_specification_sha256": "f8fe34011656b6004f9824ad45b33d2bc48aa241b6e1f719293cf6cc59a59bde",
+  "source_python_sha256": "44371f1df844748b1d1d645bf1ec56033a5bef61119ceed832bbdcebfb8e4348",
+  "elapsed_seconds": 36.009,
+  "usage": {
+    "input_tokens": 5777,
+    "output_tokens": 5294,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Operation-only circuit for the continuous-time quantum-walk search evolution U ~ exp(-i H t) on the complete graph K_N (N=2^n, n<=12), with H = -gamma*A - |w><w| and A = N|s><s| - I. It uses a Trotter product (first or second order) of two exactly implementable phase-projector exponentials, exp(i*gamma*N*t/r |s><s|) and exp(i*t/r |w><w|). No state preparation, measurement, Lanczos or t* search is included.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef build_circuit(instance):\n    \"\"\"Trotterized exp(-i H t), H=-gamma*(N|s><s|-I)-|w><w|, on n qubits (little-endian vertex index).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n\n    def is_num(x):\n        return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)\n\n    def is_int(x):\n        return isinstance(x, int) and not isinstance(x, bool)\n\n    n = instance.get('n')\n    w = instance.get('w')\n    t = instance.get('t')\n    if not is_int(n) or n < 1 or n > 12:\n        raise ValueError('n must be an integer in [1, 12]')\n    size = 2 ** n\n    if not is_int(w) or w < 0 or w >= size:\n        raise ValueError('w must be an integer in [0, 2^n)')\n    if not is_num(t) or t < 0:\n        raise ValueError('t must be a finite non-negative number')\n    gamma = instance.get('gamma', 1.0 / size)\n    if not is_num(gamma) or gamma <= 0:\n        raise ValueError('gamma must be a finite positive number')\n    steps = instance.get('steps', 8)\n    if not is_int(steps) or steps < 1 or steps > 200:\n        raise ValueError('steps must be an integer in [1, 200]')\n    order = instance.get('order', 2)\n    if not is_int(order) or order not in (1, 2):\n        raise ValueError('order must be 1 or 2')\n\n    reg = QuantumRegister(n, 'q')\n    qc = QuantumCircuit(reg, name='ctqw_search_Kn')\n    qubits = list(reg)\n\n    def phase_on_pattern(bits, theta):\n        # diag phase exp(i*theta) on the basis state whose bit i (qubit i) is bits[i]\n        zeros = [qubits[i] for i in range(n) if bits[i] == 0]\n        for q in zeros:\n            qc.x(q)\n        if n == 1:\n            qc.p(theta, qubits[0])\n        else:\n            qc.mcp(theta, qubits[:-1], qubits[-1])\n        for q in zeros:\n            qc.x(q)\n\n    def apply_s(phi):\n        # exp(i*phi*|s><s|) = H^n exp(i*phi*|0><0|) H^n\n        for q in qubits:\n            qc.h(q)\n        phase_on_pattern([0] * n, phi)\n        for q in qubits:\n            qc.h(q)\n\n    wbits = [(w >> i) & 1 for i in range(n)]\n    a = gamma * size * t / steps\n    b = t / steps\n    for _ in range(steps):\n        if order == 1:\n            apply_s(a)\n            phase_on_pattern(wbits, b)\n        else:\n            apply_s(a / 2.0)\n            phase_on_pattern(wbits, b)\n            apply_s(a / 2.0)\n    # identity term +gamma*I in H gives exp(-i*gamma*t) global phase\n    qc.global_phase = -gamma * t\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"w\": 5, \"gamma\": 0.125, \"t\": 4.442882938158366, \"steps\": 40, \"order\": 2}",
+    "register_layout": [
+      "Single register 'q' of n qubits (example n=3): qubit i = bit i of the vertex index (little-endian, index = sum q_i 2^i)",
+      "Marked vertex w=5 = binary 101: qubit0=1, qubit1=0, qubit2=1",
+      "No ancilla qubits",
+      "Input state (e.g. uniform superposition |s> via Hadamards) is prepared by the runner, not by this circuit"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: the two Trotter factors apply_s(a) and phase_on_pattern(wbits, b), plus qc.global_phase",
+        "explanation": "The circuit approximates exp(-iHt) for H=-gamma*A-|w><w|; the oracle term enters via the |w><w| phase, the adjacency term via the |s><s| phase."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: apply_s (H^n, phase on |0..0>, H^n) and the global_phase line",
+        "explanation": "A=N|s><s|-I makes the adjacency term a rank-one projector exponential; the +gamma*I part becomes the global phase -gamma*t."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Classical Lanczos recursion used offline to understand the invariant subspace; not part of the quantum operation."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Asymptotic resonance gamma=1/N and t~(pi/2)sqrt(N) are only used to choose example gamma and t; they are supplied as instance parameters, not computed in the circuit."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Success probability and t* maximization are classical post-processing/comparison done by the runner on the circuit output; no measurement is included."
+      },
+      {
+        "equation_id": "eq_6",
+        "disposition": "implemented",
+        "code_location": "build_circuit: Trotter loop over 'steps' with 'order' 1 or 2",
+        "explanation": "Product-formula realization of exp(-iHt) = e^{-i gamma t} e^{i gamma N t|s><s|} e^{i t|w><w|} (non-commuting projectors, so Trotterized). The |s><s| exponential is H^n conjugation of a multi-controlled phase; |w><w| is a multi-controlled phase with X conjugation on zero bits of w."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "Used a Trotter product (first or second order, selectable via 'order' and 'steps') of exact projector exponentials instead of exact PauliEvolutionGate evolution.",
+        "reason": "PauliEvolutionGate requires SparsePauliOp from qiskit.quantum_info, which is not an allowed import; the two projectors do not commute so the product is approximate with error vanishing as steps grows."
+      },
+      {
+        "equation_ids": [
+          "eq_6"
+        ],
+        "change": "Corrected the equation: the displayed factorization is exact only up to Trotter error; the sign of the |s><s| exponent is +i*gamma*N*t because H contains -gamma*N|s><s|.",
+        "reason": "Consistency with eq_2 and the non-commutation of the projectors."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_6"
+        ],
+        "change": "Scope narrowed to the generic complete graph K_N with N=2^n (n up to 12) and arbitrary marked vertex w, with t, gamma, steps supplied by the instance; the spec's fixed instance N=8, w=5 appears only as the example.",
+        "reason": "Operation must work for varying valid parameters; star graphs, broken-link graphs, transport and XY-chain bound are out of scope."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Lanczos reduction, t* optimization, initial |s> preparation (Hadamards) and measurement are excluded from the circuit.",
+        "reason": "The circuit must be a pure operation with no input preparation or measurement; the classical steps are background."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Gamma defaults to 1/N when omitted from the instance.",
+        "reason": "Resonance value from eq_4 gives a sensible default."
+      }
+    ],
+    "assumptions": [
+      "Adjacency (not Laplacian) form of H on the complete graph without broken links",
+      "Vertex index is little-endian: qubit i holds bit i of the vertex label",
+      "Global phase exp(-i*gamma*t) is included via qc.global_phase",
+      "Time t is non-negative; steps capped at 200 and order in {1,2}",
+      "The runner prepares |s> (or any other input) and handles measurement and comparison"
+    ],
+    "unresolved_issues": [
+      "Trotter error at finite N=8 and chosen steps is unquantified; accuracy depends on 'steps' and 'order'",
+      "For N=8 the optimal t* and gamma differ from asymptotic values; the example t=(pi/2)sqrt(8) is only approximate",
+      "The paper's graph families (star, broken links, XY chain, transport) are not implemented"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 2600,
+    "depth": 1760,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

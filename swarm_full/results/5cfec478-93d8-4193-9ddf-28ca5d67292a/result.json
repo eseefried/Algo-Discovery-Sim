@@ -1,0 +1,106 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "5cfec478-93d8-4193-9ddf-28ca5d67292a",
+  "parent_run_id": "6338ed86-b35d-4935-a8d1-0ae0210358af",
+  "created_at": "2026-10-31T21:47:59.440606+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "407b0879a96adecd63e946186a71b19d33b6c0d58818cc5937fa5bd7483d543c",
+  "source_specification_sha256": "a1a36aca38a1035a0f75505ceea4e3541e0e13fe9618e02ebcabb658126584ef",
+  "source_python_sha256": "856d703be9324ddbaed3a473a6165d619d4dd3ae3d824ff84238d5606a39c587",
+  "elapsed_seconds": 24.664,
+  "usage": {
+    "input_tokens": 4291,
+    "output_tokens": 3467,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Single-qubit operation implementing the k-fold repeated coherent systematic-rotation gate U^k = exp(-i k phi n.sigma/2) from eq_2. The gate is applied as k literal repetitions of a standard-gate decomposition of a rotation by phi about a user-specified axis n. An optional unitary basis-change (Z, X or Y) is appended so a later computational-basis measurement would give the quadrature probabilities. There is no state preparation, measurement or estimation.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit\n\n\ndef build_circuit(instance):\n    \"\"\"Apply U^k with U = exp(-i*phi*n.sigma/2) on one qubit, then an optional basis change.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    for key in ('phi', 'k', 'axis', 'basis'):\n        if key not in instance:\n            raise ValueError('missing key: ' + key)\n    phi = instance['phi']\n    k = instance['k']\n    axis = instance['axis']\n    basis = instance['basis']\n    if isinstance(phi, bool) or not isinstance(phi, (int, float)) or not math.isfinite(phi):\n        raise ValueError('phi must be a finite real number')\n    if isinstance(k, bool) or not isinstance(k, int) or k < 0 or k > 1024:\n        raise ValueError('k must be an integer in [0, 1024]')\n    if not isinstance(axis, (list, tuple)) or len(axis) != 3:\n        raise ValueError('axis must have 3 components')\n    comps = []\n    for a in axis:\n        if isinstance(a, bool) or not isinstance(a, (int, float)) or not math.isfinite(a):\n            raise ValueError('axis components must be finite reals')\n        comps.append(float(a))\n    nrm = math.sqrt(comps[0] ** 2 + comps[1] ** 2 + comps[2] ** 2)\n    if nrm < 1e-12:\n        raise ValueError('axis must be nonzero')\n    if basis not in ('Z', 'X', 'Y'):\n        raise ValueError('basis must be Z, X or Y')\n    nx, ny, nz = comps[0] / nrm, comps[1] / nrm, comps[2] / nrm\n    theta = math.acos(max(-1.0, min(1.0, nz)))\n    az = math.atan2(ny, nx) if (abs(nx) > 1e-15 or abs(ny) > 1e-15) else 0.0\n    qc = QuantumCircuit(1, name='repeated_gate')\n    # eq_2: k literal repetitions of U = Rz(az) Ry(theta) Rz(phi) Ry(-theta) Rz(-az)\n    for _ in range(k):\n        qc.rz(-az, 0)\n        qc.ry(-theta, 0)\n        qc.rz(float(phi), 0)\n        qc.ry(theta, 0)\n        qc.rz(az, 0)\n    # basis change before a computational-basis readout (done by the runner)\n    if basis == 'X':\n        qc.h(0)\n    elif basis == 'Y':\n        qc.sdg(0)\n        qc.h(0)\n    return qc",
+    "example_instance_json": "{\"phi\": 0.1, \"k\": 4, \"axis\": [1, 0, 0], \"basis\": \"Z\"}",
+    "register_layout": [
+      "qubit 0: the single qubit q on which the gate under test is repeated k times (Qiskit index 0, little-endian irrelevant for one qubit); input state prepared by the runner, no classical bits"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Heisenberg scaling epsilon=O(1/N) is a statistical property of the whole estimation protocol (choice of k sequence, shots, estimator), not of a single unitary circuit."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop of k repetitions of the Rz/Ry decomposition of exp(-i*phi*n.sigma/2)",
+        "explanation": "Each repetition is a rotation by phi about unit axis n, built as Rz(az)Ry(theta)Rz(phi)Ry(-theta)Rz(-az); k repetitions give U^k = exp(-i k phi n.sigma/2)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "P(0|k)=cos^2(k phi/2) is the outcome statistic the runner would see for input |0>, axis along x and basis Z; it is not constructed in code. The circuit only supplies the unitary, and the optional basis change selects the measured quadrature."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "Scope narrowed to the unitary part of one experiment: k-fold gate plus optional basis-change rotation. Measurement, shot sampling, multiple k values, phase unwrapping and the robust estimator are excluded.",
+        "reason": "The task requires an operation without measurement or sampling, and the abstract does not specify the estimator."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The rotation axis n is an instance parameter (normalized internally), and k is capped at 1024. The error model is the illustrative coherent rotation, not the paper's actual amplitude/off-resonance gate-set model.",
+        "reason": "The abstract gives no explicit error model; the axis choice lets the same circuit cover an amplitude-like or off-resonance-like tilted rotation, and the cap bounds circuit size."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The basis-change rotation is limited to the Z (identity), X (H) and Y (Sdg then H) bases.",
+        "reason": "The abstract does not specify the basis-change rotation, and these are the standard quadrature choices."
+      }
+    ],
+    "assumptions": [
+      "The gate under test is a coherent rotation by angle phi about a fixed axis (illustrative model).",
+      "The gate is applied as k explicit repetitions, not merged into a single rotation by k*phi.",
+      "Input state preparation (e.g. |0>) and measurement are done by the runner.",
+      "Global phase is ignored."
+    ],
+    "unresolved_issues": [
+      "The paper's actual gate-set and error parametrization (amplitude and off-resonance errors) are not reconstructed.",
+      "The robust phase estimation procedure, choice of k sequence and Heisenberg-scaling error analysis are not implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 1,
+    "gate_count": 20,
+    "depth": 20,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

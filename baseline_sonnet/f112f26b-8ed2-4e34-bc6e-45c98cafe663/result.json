@@ -1,0 +1,122 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "f112f26b-8ed2-4e34-bc6e-45c98cafe663",
+  "parent_run_id": "643cf37c-6c2a-4e34-b6cc-f820fa8fcdef",
+  "created_at": "2026-10-31T22:20:48.075160+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "2fff477ee067f031675e2ed9155428e0d14ec0cc0ffd24defbf0730bea733a7f",
+  "source_specification_sha256": "be4706f02aef307fee6cbabf1ffeba58e3c9a679b6bcc1ee22cfdcdd199e3097",
+  "source_python_sha256": "34147c957b4bb55e02d169987cd26a2724d8237e48022c12a49ae36f273314d5",
+  "elapsed_seconds": 26.331,
+  "usage": {
+    "input_tokens": 4845,
+    "output_tokens": 3694,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Single-qubit unitary for the piecewise-constant control Hamiltonian H=1/2[u_x X+(u_z+beta) Z] with a fixed quasi-static dephasing offset beta (default 0). Each segment is the exact rotation exp(-i dt/2 (u_x X+(u_z+beta) Z)), built as Ry(phi) Rz(angle) Ry(-phi). The example is a CORPSE-like pi rotation about X. No numerical search or cancellation analysis is implemented.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef build_circuit(instance):\n    \"\"\"Piecewise-constant single-qubit propagator for H=1/2[ux X + (uz+beta) Z] (eq_1).\n\n    instance: {\"controls\": [[ux, uz, dt], ...], \"beta\": float (optional, quasi-static offset)}\n    Segments are applied in list order (first entry acts first).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    segs = instance.get('controls')\n    if not isinstance(segs, list) or len(segs) < 1 or len(segs) > 200:\n        raise ValueError('controls must be a list with 1..200 segments')\n    beta = instance.get('beta', 0.0)\n    if isinstance(beta, bool) or not isinstance(beta, (int, float)) or not math.isfinite(beta):\n        raise ValueError('beta must be a finite number')\n    parsed = []\n    for s in segs:\n        if not isinstance(s, (list, tuple)) or len(s) != 3:\n            raise ValueError('each segment must be [ux, uz, dt]')\n        for v in s:\n            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):\n                raise ValueError('segment entries must be finite numbers')\n        if s[2] < 0:\n            raise ValueError('duration must be nonnegative')\n        parsed.append((float(s[0]), float(s[1]), float(s[2])))\n    q = QuantumRegister(1, 'q')\n    qc = QuantumCircuit(q)\n    for ux, uz, dt in parsed:\n        hz = uz + float(beta)\n        omega = math.sqrt(ux * ux + hz * hz)\n        angle = dt * omega\n        if omega == 0.0 or angle == 0.0:\n            continue\n        phi = math.atan2(ux, hz)\n        # exp(-i angle/2 n.sigma) with n=(sin phi,0,cos phi) = Ry(phi) Rz(angle) Ry(-phi)\n        qc.ry(-phi, q[0])\n        qc.rz(angle, q[0])\n        qc.ry(phi, q[0])\n    return qc",
+    "example_instance_json": "{\"controls\": [[1.0, 0.0, 7.330382858376184], [-1.0, 0.0, 5.235987755982989], [1.0, 0.0, 1.0471975511965976]], \"beta\": 0.0}",
+    "register_layout": [
+      "qubit 0: effective singlet-triplet logical qubit (computational basis; Qiskit index 0 is the least significant bit)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: per-segment rotation about axis (ux,0,uz+beta) with angle dt*sqrt(ux^2+(uz+beta)^2)",
+        "explanation": "Exact propagator of the piecewise-constant noisy Hamiltonian with a fixed quasi-static beta. Setting beta=0 gives the ideal U_0(T)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "First-order Magnus/toggling-frame approximation used to analyse errors. The circuit applies the exact product of segment rotations, so this approximation is not used."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Cancellation condition is a classical analysis of the control sequence and is not checked in the circuit builder."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Target-gate constraint is a property the chosen controls should satisfy. The builder does not enforce it. The example sequence is chosen to give an X pi rotation up to global phase at beta=0."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Numerical optimization of the cost function is classical search and is not part of the circuit operation. Its output (controls) is supplied as instance data."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Narrowed to implementing the propagator of piecewise-constant controls with an optional fixed quasi-static beta, taking [ux,uz,dt] segments as input. Pulse shapes, bounds and the singlet-triplet Hamiltonian are not included.",
+        "reason": "The specification gives only a generic assumed model, and the paper's actual Hamiltonian and constraints are missing."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_5"
+        ],
+        "change": "Error-cancellation analysis and numerical search are excluded from the circuit.",
+        "reason": "They are classical computations that do not belong in a measurement-free unitary operation."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The target gate is not enforced or validated.",
+        "reason": "The builder returns the operation for any valid controls; the controls are supplied by the caller."
+      }
+    ],
+    "assumptions": [
+      "Control amplitudes are in angular-frequency units so that a segment rotates by angle dt*|(ux,uz+beta)|.",
+      "The Hamiltonian is H=1/2[ux X+(uz+beta) Z] with no hbar factor.",
+      "Segments are applied in list order.",
+      "beta is a single quasi-static value shared by all segments and defaults to 0.",
+      "The example is a CORPSE-like sequence of rotations 420, 300 and 60 degrees with alternating sign of ux. It is only an illustrative instance, not a result from the paper."
+    ],
+    "unresolved_issues": [
+      "The actual singlet-triplet Hamiltonian and control constraints are not available.",
+      "The non-Markovian noise models and the paper's perturbative formalism are not reconstructed.",
+      "The paper's explicit pulse sequences are not reproduced.",
+      "Control-noise terms are not modeled beyond the single beta offset."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 1,
+    "gate_count": 9,
+    "depth": 9,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

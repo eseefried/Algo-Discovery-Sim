@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "2ab9a308-4bdf-4eed-a8e9-26d3ab5f5439",
+  "parent_run_id": "48509c7f-b9f8-4fd7-9474-575a9980bb4a",
+  "created_at": "2026-11-01T00:19:05.314184+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "a73acdb5a13fc297bdd7253f144be0c515a699f0faf71883443c858762b0651b",
+  "source_specification_sha256": "dbbb1ba35c0bb0f268f26e263daccae4a666256f900d7d01245a69e1f1905522",
+  "source_python_sha256": "dc1c0e769bf9782704571dcd968772d23a1c5591cf31684534e39290c6bc1b50",
+  "elapsed_seconds": 110.547,
+  "usage": {
+    "input_tokens": 5174,
+    "output_tokens": 15700,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "build_circuit(instance) takes a small explicit unitary U on n=1..4 qubits and returns W = Q^T P^T C_U' P Q as an ancilla-free, measurement-free circuit. Q is an XOR-mask basis permutation (X gates). P is a product of basis transpositions found by a greedy search that minimizes a nonzero-off-diagonal-count proxy plus a permutation cost. U' = (PQ)U(PQ)^T is compiled exactly by a two-level (Givens) decomposition into Gray-code-style CX conjugations, multi-controlled U gates and multi-controlled phases. The permutations are compiled to X, CX and multi-controlled X gates. No input state is prepared and nothing is measured.",
+    "source_python": "import math\nimport numpy as np\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import UGate\n\n_TOL = 1e-9\n_MAX_N = 4\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > _MAX_N:\n        raise ValueError('n must be an integer in 1..4')\n    dim = 1 << n\n    try:\n        re = np.array(instance['unitary_real'], dtype=float)\n        if 'unitary_imag' in instance:\n            im = np.array(instance['unitary_imag'], dtype=float)\n        else:\n            im = np.zeros((dim, dim))\n    except (KeyError, TypeError, ValueError):\n        raise ValueError('unitary_real/unitary_imag must be numeric dim x dim arrays')\n    if re.shape != (dim, dim) or im.shape != (dim, dim):\n        raise ValueError('unitary must have shape (2^n, 2^n)')\n    u = re + 1j * im\n    if not np.all(np.isfinite(u)):\n        raise ValueError('unitary entries must be finite')\n    if not np.allclose(u.conj().T @ u, np.eye(dim), atol=1e-8):\n        raise ValueError('matrix is not unitary')\n    return n, u\n\n\ndef _cost(a):\n    # eq_3 proxy c(.): number of non-negligible off-diagonal entries\n    nz = np.abs(a) > _TOL\n    return int(nz.sum() - np.count_nonzero(np.diag(nz)))\n\n\ndef _search(u, n):\n    # eq_2/eq_3: greedy heuristic for Q (XOR mask) then P (transpositions)\n    dim = 1 << n\n    idx = np.arange(dim)\n    best_m = 0\n    best_c = _cost(u)\n    for m in range(1, dim):\n        perm = idx ^ m\n        c = _cost(u[np.ix_(perm, perm)]) + bin(m).count('1')\n        if c < best_c:\n            best_c = c\n            best_m = m\n    perm = idx ^ best_m\n    a = u[np.ix_(perm, perm)]\n    swaps = []\n    cur = _cost(a)\n    for _ in range(dim * dim):\n        found = None\n        limit = cur\n        for x in range(dim):\n            for y in range(x + 1, dim):\n                p = idx.copy()\n                p[x] = y\n                p[y] = x\n                b = a[np.ix_(p, p)]\n                c = _cost(b)\n                if c + 1 < limit:\n                    limit = c + 1\n                    found = (x, y, b, c)\n        if found is None:\n            break\n        swaps.append((found[0], found[1]))\n        a = found[2]\n        cur = found[3]\n    return best_m, swaps, a\n\n\ndef _decompose(a):\n    # two-level (Givens) elimination: G_m...G_1 A = D\n    dim = a.shape[0]\n    a = a.astype(complex).copy()\n    gates = []\n    for c in range(dim - 1):\n        for r in range(c + 1, dim):\n            b = a[r, c]\n            if abs(b) < 1e-12:\n                continue\n            x = a[c, c]\n            nr = math.sqrt(abs(x) ** 2 + abs(b) ** 2)\n            g = np.array([[np.conj(x), np.conj(b)], [-b, x]]) / nr\n            rows = a[[c, r], :]\n            a[[c, r], :] = g @ rows\n            gates.append((c, r, g))\n    return gates, np.angle(np.diag(a))\n\n\ndef _apply_1q(qc, ctrls, t, v):\n    # apply 2x2 unitary v (exactly, incl. phase) to qubit t under all-ones controls\n    a, b, c, d = v[0, 0], v[0, 1], v[1, 0], v[1, 1]\n    th = 2.0 * math.atan2(abs(c), abs(a))\n    if abs(c) < 1e-12:\n        g = float(np.angle(a))\n        ph = 0.0\n        lam = float(np.angle(d)) - g\n    elif abs(a) < 1e-12:\n        g = 0.0\n        ph = float(np.angle(c))\n        lam = float(np.angle(-b))\n    else:\n        g = float(np.angle(a))\n        ph = float(np.angle(c)) - g\n        lam = float(np.angle(-b)) - g\n    if ctrls:\n        qc.append(UGate(th, ph, lam).control(len(ctrls)), list(ctrls) + [t])\n        if abs(g) > 1e-12:\n            if len(ctrls) == 1:\n                qc.p(g, ctrls[0])\n            else:\n                qc.mcp(g, list(ctrls[:-1]), ctrls[-1])\n    else:\n        qc.u(th, ph, lam, t)\n        qc.global_phase += g\n\n\ndef _emit(qc, q, n, i, j, m, use_x):\n    # act with 2x2 matrix m on span{|i>,|j>} (basis order i, j); identity elsewhere\n    diff = i ^ j\n    t = (diff & -diff).bit_length() - 1\n    others = [d for d in range(n) if d != t]\n    flips = [d for d in others if (diff >> d) & 1]\n    it = (i >> t) & 1\n    for d in flips:\n        qc.cx(q[t], q[d], ctrl_state=1 - it)\n    zeros = [d for d in others if not (i >> d) & 1]\n    for d in zeros:\n        qc.x(q[d])\n    ctrls = [q[d] for d in others]\n    if use_x:\n        if ctrls:\n            qc.mcx(ctrls, q[t])\n        else:\n            qc.x(q[t])\n    else:\n        v = m if it == 0 else m[::-1, ::-1]\n        _apply_1q(qc, ctrls, q[t], v)\n    for d in zeros:\n        qc.x(q[d])\n    for d in reversed(flips):\n        qc.cx(q[t], q[d], ctrl_state=1 - it)\n\n\ndef _diag(qc, q, n, phases):\n    for k in range(1 << n):\n        ph = float(phases[k])\n        if abs(ph) < 1e-12:\n            continue\n        zeros = [d for d in range(n) if not (k >> d) & 1]\n        for d in zeros:\n            qc.x(q[d])\n        if n == 1:\n            qc.p(ph, q[0])\n        else:\n            qc.mcp(ph, [q[d] for d in range(1, n)], q[0])\n        for d in zeros:\n            qc.x(q[d])\n\n\ndef _xor_mask(qc, q, n, mask):\n    for d in range(n):\n        if (mask >> d) & 1:\n            qc.x(q[d])\n\n\ndef build_circuit(instance):\n    \"\"\"Return W = Q^T P^T C_U' P Q (time order Q, P, C_U', P^T, Q^T) for the given U.\"\"\"\n    n, u = _parse(instance)\n    mask, swaps, up = _search(u, n)\n    gates, phases = _decompose(up)\n    q = QuantumRegister(n, 'q')\n    qc = QuantumCircuit(q)\n    xm = np.array([[0, 1], [1, 0]], dtype=complex)\n    # Q (first in time)\n    _xor_mask(qc, q, n, mask)\n    # P = T_s ... T_1, so T_1 acts first\n    for (x, y) in swaps:\n        _emit(qc, q, n, x, y, xm, True)\n    # C_U': U' = G_1^dag ... G_m^dag D, so D first then G_m^dag ... G_1^dag\n    _diag(qc, q, n, phases)\n    for (c, r, g) in reversed(gates):\n        _emit(qc, q, n, c, r, g.conj().T, False)\n    # P^T = T_1 ... T_s, so T_s acts first\n    for (x, y) in reversed(swaps):\n        _emit(qc, q, n, x, y, xm, True)\n    # Q^T = Q (XOR involution)\n    _xor_mask(qc, q, n, mask)\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"unitary_real\": [[0.7071067811865476, 0, 0, 0.7071067811865476], [0, 1, 0, 0], [0, 0, 1, 0], [0.7071067811865476, 0, 0, -0.7071067811865476]], \"unitary_imag\": [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]}",
+    "register_layout": [
+      "q[0..n-1]: system qubits, little-endian (qubit j holds bit j of basis index k = sum_j b_j 2^j)",
+      "Example n=2: q[0] = least significant bit, q[1] = most significant bit",
+      "No ancilla qubits; no classical bits"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (assembly Q^T P^T C_U' P Q)",
+        "explanation": "The circuit is the factorization U = Q^T P^T U' P Q, with Q, P and U' obtained from _search and compiled exactly."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_search (the returned matrix up = U')",
+        "explanation": "U' = (PQ) U (PQ)^T is computed by successive basis-permutation conjugations: first the Q XOR mask, then the P transpositions."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_cost and _search",
+        "explanation": "A greedy heuristic, not an exact argmin: the entry-count proxy plus a permutation cost (popcount of the XOR mask, 1 per transposition). Q is searched over XOR masks and P over transpositions."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit (gate ordering) and _decompose/_emit/_diag (C_U')",
+        "explanation": "Time order is Q, P (T_1..T_s), C_U', P^T (T_s..T_1), Q^T. C_U' is an exact two-level decomposition: the diagonal first, then G_m^dag ... G_1^dag."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The |0...0> input is prepared by the runner, and the global-phase comparison with U is a validation criterion. The circuit itself is a bare operation with no state preparation. The little-endian convention is used in all index arithmetic."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Q is restricted to XOR-mask permutations k -> k XOR m (cost popcount(m)). P is a sequence of basis transpositions found greedily, each costing 1, and a swap is accepted only if the entry count drops by at least 2. The search is not an exact minimization.",
+        "reason": "The abstract gives no explicit search or cost. A cheap, well-defined heuristic stands in for OptQC."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_1"
+        ],
+        "change": "U' is compiled by a two-level Givens decomposition with multi-controlled U/phase gates instead of the Qcompiler decomposition.",
+        "reason": "The Qcompiler internals are unspecified and the circuit must use only standard gates, with no opaque dense unitary."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope is narrowed to n in 1..4 qubits with an explicit unitary supplied as instance fields n, unitary_real and optional unitary_imag. No gate-count savings are claimed. MPI parallelism and the 'each matrix component separately' idea are not implemented.",
+        "reason": "The dense classical processing grows as 4^n and the specification only requires tiny instances."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The initial state |0...0> is not prepared and no measurement is performed.",
+        "reason": "The task requires an operation only. The runner prepares inputs and compares the unitary or statevector with U up to global phase."
+      }
+    ],
+    "assumptions": [
+      "The instance supplies U explicitly and it is unitary to within 1e-8.",
+      "Little-endian basis index convention: qubit j holds bit j of the basis index.",
+      "Qiskit controlled-UGate and mcp implement the intended controlled operations, including the separately applied controlled global phase of each 2x2 block.",
+      "The cost proxy counts off-diagonal entries with magnitude above 1e-9, and the Givens elimination skips entries below 1e-12.",
+      "P = Q = I is possible (no swaps and a zero mask) when the greedy search finds no improvement."
+    ],
+    "unresolved_issues": [
+      "The exact OptQC search algorithm and cost function remain unknown, so the permutations found may differ from the paper's.",
+      "The Qcompiler decomposition is replaced by a generic Givens decomposition whose gate count is not optimized.",
+      "The precise meaning of 'equivalent up to a permutation' and 'components considered separately' beyond the similarity form is not modeled.",
+      "Cost grows quickly with n, so only n<=4 is allowed, and no numerical verification has been performed at generation time."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 16,
+    "depth": 14,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

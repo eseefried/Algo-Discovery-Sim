@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "850877a1-62fd-42f0-a093-97f52fcf11d5",
+  "parent_run_id": "ab7d21ea-c2a3-4661-ba0e-e65c7cb6ebd6",
+  "created_at": "2026-10-31T22:26:08.626662+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "0663afb483805f989e950243c16feec4e9f24cc69ea9d201cd0ae25838f4aa0f",
+  "source_specification_sha256": "2de84a2d332549058b48b68932edfde838f4430f5944ee1704bbad54820f629b",
+  "source_python_sha256": "15d50effa03c1ef5dccc6ef3b8139cc9dfd83169d6c2c379ac04e0f8671a7773",
+  "elapsed_seconds": 62.886,
+  "usage": {
+    "input_tokens": 5754,
+    "output_tokens": 8904,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit construction of the quantum order-finding (phase-estimation) operation for a given N and coprime a. For each counting qubit k it applies a controlled multiplication by a^(2^k) mod N on the work register. The controlled multiplication is built from standard multi-controlled X gates (cycle decomposition of the permutation), with no dense unitaries. An inverse QFTGate then acts on the counting register. Hadamards on the counting register and preparing the work register in |1> are left to the runner. Classical post-processing (continued fractions, gcds, odd-order square-coprime logic) is out of scope.",
+    "source_python": "from math import gcd\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef _swap_adjacent(qc, ctrl, work, m, s, t):\n    # Swap basis states s,t (differing in exactly one bit) of the work register, controlled on ctrl.\n    d = (s ^ t).bit_length() - 1\n    others = [i for i in range(m) if i != d]\n    zeros = [work[i] for i in others if not ((s >> i) & 1)]\n    for q in zeros:\n        qc.x(q)\n    qc.mcx([ctrl] + [work[i] for i in others], work[d])\n    for q in zeros:\n        qc.x(q)\n\n\ndef _transposition(qc, ctrl, work, m, u, v):\n    # Transposition (u v) as a Gray-type path of adjacent swaps: A, M, A^-1.\n    diff = [i for i in range(m) if ((u ^ v) >> i) & 1]\n    path = [u]\n    for i in diff:\n        path.append(path[-1] ^ (1 << i))\n    k = len(diff)\n    for i in range(k):\n        _swap_adjacent(qc, ctrl, work, m, path[i], path[i + 1])\n    for i in range(k - 2, -1, -1):\n        _swap_adjacent(qc, ctrl, work, m, path[i], path[i + 1])\n\n\ndef _controlled_mult(qc, ctrl, work, m, N, c):\n    # Controlled |y> -> |c*y mod N> for y<N, identity for y>=N (eq_4 modular exponentiation step).\n    size = 1 << m\n    f = [(c * y) % N if y < N else y for y in range(size)]\n    seen = [False] * size\n    for start in range(size):\n        if seen[start]:\n            continue\n        cyc = [start]\n        seen[start] = True\n        y = f[start]\n        while y != start:\n            cyc.append(y)\n            seen[y] = True\n            y = f[y]\n        # cycle c0->c1->...: time-ordered transpositions (c_{L-2},c_{L-1}), ..., (c_0,c_1)\n        for j in range(len(cyc) - 2, -1, -1):\n            _transposition(qc, ctrl, work, m, cyc[j], cyc[j + 1])\n\n\ndef build_circuit(instance):\n    \"\"\"Order-finding operation: controlled U_a^(2^k) on counting qubit k, then inverse QFT on counting register.\n    instance: {\"N\": int>=3, \"a\": int with 1<a<N, gcd(a,N)=1, optional \"n\": counting qubits (default smallest with 2^n>=N^2)}.\n    Layout: qubits 0..n-1 counting (little-endian x), qubits n..n+m-1 work (little-endian), m=ceil(log2 N).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    N = instance.get(\"N\")\n    a = instance.get(\"a\")\n    if not _is_int(N) or not _is_int(a) or N < 3 or N > 4096:\n        raise ValueError(\"N and a must be integers with 3 <= N <= 4096\")\n    if not (1 < a < N) or gcd(a, N) != 1:\n        raise ValueError(\"a must satisfy 1<a<N and gcd(a,N)=1\")\n    m = (N - 1).bit_length()\n    n = instance.get(\"n\")\n    if n is None:\n        n = max(1, (N * N - 1).bit_length())\n    if not _is_int(n) or n < 1:\n        raise ValueError(\"n must be a positive integer\")\n    if n + m > 12:\n        raise ValueError(\"total qubits n + ceil(log2 N) must be <= 12\")\n    cnt = QuantumRegister(n, \"count\")\n    wrk = QuantumRegister(m, \"work\")\n    qc = QuantumCircuit(cnt, wrk)\n    for k in range(n):\n        c = pow(a, 2 ** k, N)\n        if c != 1:\n            _controlled_mult(qc, cnt[k], wrk, m, N, c)\n    qc.append(QFTGate(n).inverse(), list(range(n)))\n    return qc",
+    "example_instance_json": "{\"N\": 15, \"a\": 4, \"n\": 5}",
+    "register_layout": [
+      "qubits 0..n-1: counting register 'count', little-endian (qubit k controls multiplication by a^(2^k) mod N); after the inverse QFT it holds y with y/2^n ≈ s/r",
+      "qubits n..n+m-1: work register 'work', m=ceil(log2 N), little-endian encoding of an integer in [0,2^m); the runner should prepare |1> (qubit n = 1)",
+      "for the example N=15, a=4, n=5: count = qubits 0-4, work = qubits 5-8"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Order definition; it is the quantity encoded in the eigenphases of U_a but is not computed in the circuit."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical gcd factor extraction from even r; not part of a unitary circuit."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical odd-order/square-coprime gcd relation; the paper's odd-order techniques are not reconstructed."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit (loop over counting qubits calling _controlled_mult, then QFTGate(n).inverse())",
+        "explanation": "Controlled modular exponentiation (controlled |y> -> |a^(2^k) y mod N>) followed by the QFT on the counting register, giving the phase-estimation peaks y/2^n ≈ s/r. The inverse QFT sign convention is used (see specification_changes)."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical continued-fraction post-processing of the measured y."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Apply the inverse QFT (QFTGate(n).inverse()) to the counting register instead of a literal +2*pi*i*x*y/2^n forward QFT.",
+        "reason": "With U|u_s>=exp(2*pi*i*s/r)|u_s> the inverse QFT gives y/2^n ≈ s/r, matching the step list ('apply inverse QFT'). The literal + sign of eq_4 would peak at y/2^n ≈ -s/r mod 1, which is the same up to relabeling s->r-s, so r is recovered equally."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The circuit contains only controlled modular multiplications and the inverse QFT. Hadamards on the counting register and the work-register preparation |1> are omitted.",
+        "reason": "The task requires the circuit to be an operation with the input state prepared by the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to the quantum order-finding unitary. Classical order verification, gcd steps, odd-order handling and the paper's two techniques are not implemented.",
+        "reason": "They are classical post-processing or are not specified in the abstract."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Controlled modular multiplication acts as the identity on work basis states y>=N, and the work register uses m=ceil(log2 N) qubits, with the counting size n allowed to be overridden. The default is the smallest n with 2^n>=N^2.",
+        "reason": "This gives a well-defined unitary permutation on the full register. The 12-qubit cap means N=15 is the largest default-n case, and larger N needs a smaller explicit n."
+      }
+    ],
+    "assumptions": [
+      "The runner prepares the counting register in a uniform superposition (Hadamards) and the work register in |1>.",
+      "Little-endian bit order is used in both registers, consistent with Qiskit and QFTGate.",
+      "N must be at least 3 and a must satisfy 1<a<N with gcd(a,N)=1; N need not be checked for compositeness.",
+      "Controlled multiplications by a^(2^k) mod N that equal 1 are skipped, since they are the identity.",
+      "The multiplication by c is implemented as a permutation decomposed into transpositions, each realized with multi-controlled X gates and X conjugations."
+    ],
+    "unresolved_issues": [
+      "The circuit is not optimized: multi-controlled X gate count grows quickly with m, which is acceptable only for tiny instances.",
+      "The paper's odd-order retrieval and new-relation techniques are not reconstructed and are not included.",
+      "With the 12-qubit cap, the default n=ceil(log2 N^2) is only feasible for small N (up to 15)."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 9,
+    "gate_count": 1543,
+    "depth": 1176,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

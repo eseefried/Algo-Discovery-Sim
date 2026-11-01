@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "b1e8419b-d56a-4a7a-b203-1776d4a13de1",
+  "parent_run_id": "3d82378d-f8f9-40eb-ad55-08171c3d268d",
+  "created_at": "2026-10-31T21:46:49.383512+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "e2a81af17da89f9063edda267a601f9c1e95221ab0bcbf38186fc1a03d82600b",
+  "source_specification_sha256": "0f994c3abae8930ad886a4279bb00baedaa780ae682d1ecc6fbb7b0d955b6aca",
+  "source_python_sha256": "480ee9478c10c84d4ce004206342929121309a90d1e782a7b349902a50fa38aa",
+  "elapsed_seconds": 24.875,
+  "usage": {
+    "input_tokens": 4028,
+    "output_tokens": 3690,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Scope-narrowed construction: k iterations of a Grover-type search iteration on an n-qubit search register (N=2^n), with both phase inversions replaced by a phase e^{i(pi+beta)} that carries a systematic error beta. It is the Grover baseline with phase errors, NOT the paper's optimized quantum random-walk search, whose operators the abstract does not give. Inputs such as the uniform superposition are prepared by the runner, and no measurement is included.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _as_int(value, name):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(name + ' must be an integer')\n    return value\n\n\ndef _phase_on_state(qc, qubits, state, phi):\n    # Multiply the computational basis state |state> by exp(i*phi); all other basis states are unchanged.\n    n = len(qubits)\n    flips = [q for i, q in enumerate(qubits) if not (state >> i) & 1]\n    for q in flips:\n        qc.x(q)\n    if n == 1:\n        qc.p(phi, qubits[0])\n    else:\n        qc.mcp(phi, list(qubits[:-1]), qubits[-1])\n    for q in flips:\n        qc.x(q)\n\n\ndef build_circuit(instance):\n    \"\"\"Grover-type iteration with systematic phase error beta (baseline, eq_2 with beta perturbation).\n    instance: {n_qubits, marked, iterations, beta}\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    for key in ('n_qubits', 'marked', 'iterations', 'beta'):\n        if key not in instance:\n            raise ValueError('missing key ' + key)\n    n = _as_int(instance['n_qubits'], 'n_qubits')\n    marked = _as_int(instance['marked'], 'marked')\n    iters = _as_int(instance['iterations'], 'iterations')\n    beta = instance['beta']\n    if isinstance(beta, bool) or not isinstance(beta, (int, float)):\n        raise ValueError('beta must be a real number')\n    beta = float(beta)\n    if not math.isfinite(beta):\n        raise ValueError('beta must be finite')\n    if n < 1 or n > 12:\n        raise ValueError('n_qubits must be in 1..12')\n    if marked < 0 or marked >= 2 ** n:\n        raise ValueError('marked out of range')\n    if iters < 0 or iters > 200:\n        raise ValueError('iterations must be in 0..200')\n    phi = math.pi + beta\n    reg = QuantumRegister(n, 'search')\n    qc = QuantumCircuit(reg)\n    qubits = list(range(n))\n    for _ in range(iters):\n        # Oracle phase inversion with error: |marked> -> exp(i(pi+beta))|marked>\n        _phase_on_state(qc, qubits, marked, phi)\n        # Inversion about the uniform state with error: |s> -> exp(i(pi+beta))|s>\n        for q in qubits:\n            qc.h(q)\n        _phase_on_state(qc, qubits, 0, phi)\n        for q in qubits:\n            qc.h(q)\n    return qc",
+    "example_instance_json": "{\"n_qubits\": 3, \"marked\": 5, \"iterations\": 2, \"beta\": 0.1}",
+    "register_layout": [
+      "Qubits 0..n-1: search register 'search', little-endian (qubit 0 is the least significant bit of the database index; marked item bit i is on qubit i)",
+      "No coin or ancilla qubits; total qubits = n_qubits <= 12",
+      "Runner is expected to prepare the uniform superposition on the search register before the operation"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The abstract gives no explicit formula for P_k(N,k,beta). The circuit only provides a dependence on N, k and beta through its parameters, and the success rate is obtained later by simulation. No closed form is coded."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: the loop over iterations (oracle and diffusion phase inversions); beta=0 reproduces the ideal Grover iteration whose success probability is sin^2((2k+1)theta)",
+        "explanation": "Implements the ideal Grover iteration baseline underlying eq_2 for N=2^n. With beta=0 the oracle and diffusion operators match the ideal ones up to a global phase. The probability formula is not coded."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Scope narrowed to the Grover-type baseline iteration with phase errors. The optimized quantum random-walk search operator is not implemented.",
+        "reason": "The abstract and the specification do not give the optimized random-walk operators, so they cannot be reconstructed without fabricating them."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The phase error model is assumed: both phase inversions use phase pi+beta instead of pi, with the same beta in each. This is the standard modeling choice but is not taken from the paper.",
+        "reason": "The abstract only mentions systematic phase inversion errors without a definition."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Database size is restricted to N=2^n with a single marked item. Only the operation is built, with no state preparation or measurement.",
+        "reason": "The register is an n-qubit register, and the runner prepares inputs."
+      }
+    ],
+    "assumptions": [
+      "Search register has n qubits and N=2^n; one marked item given as an integer.",
+      "Phase inversions are generalized to exp(i(pi+beta)) for both the oracle and the inversion about the uniform state.",
+      "The initial uniform superposition is prepared externally by the runner.",
+      "Iterations capped at 200 and n_qubits capped at 12."
+    ],
+    "unresolved_issues": [
+      "The optimized quantum random-walk search operators, coin register and optimal iteration formula are not specified in the abstract.",
+      "The paper's exact phase error model may differ from the assumed one.",
+      "Robustness comparison against the optimized algorithm cannot be made, because only the Grover baseline is built."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 80,
+    "depth": 56,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

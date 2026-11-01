@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "ec28d0a9-0c80-490c-afec-28138dc20bd4",
+  "parent_run_id": "5f0b0f1a-4a7a-489a-a280-965dbe45f0ac",
+  "created_at": "2026-10-31T22:33:47.748384+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "7b10d099c87c602fd9b2d6096d5de992d14283c03cc382fbbb071af9c75c682d",
+  "source_specification_sha256": "64e9f451e646e41f1640cae84bb3ce0d413d8e5f8d6d812c2935a28d5c80d928",
+  "source_python_sha256": "b8dc1b117e31ae87b2ce9f3f446c3f31ccaa7855719d850af575932f72a42aad",
+  "elapsed_seconds": 92.004,
+  "usage": {
+    "input_tokens": 4972,
+    "output_tokens": 12698,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Single-qubit Trine POVM as a Naimark-type isometric dilation: one polarisation qubit plus a 3-site walker position encoded in 2 qubits. The circuit applies Rx(pi/2) on the input, a SWAP, and a real orthogonal 4x4 operator built from Givens-rotation controlled-Ry gates. After the circuit, the polarisation qubit is |0> and the position register holds amplitudes a_k = sqrt(2/3)<psi_k|phi>, so p_k = Tr(E_k rho). The optical walk layout, SIC and USD POVMs are not implemented.",
+    "source_python": "from __future__ import annotations\n\nimport math\n\nimport numpy as np\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    for key in instance:\n        if key != 'phase_offset':\n            raise ValueError('unknown instance key: %s' % key)\n    off = instance.get('phase_offset', 0.0)\n    if isinstance(off, bool) or not isinstance(off, (int, float)) or not math.isfinite(off):\n        raise ValueError('phase_offset must be a finite real number')\n    return float(off)\n\n\ndef _isometry_columns(off):\n    # eq_2: Trine elements E_k = (2/3)|psi_k><psi_k|, Bloch vector (cos t_k, sin t_k, 0), t_k = off + 2 pi k/3.\n    # Rotated frame: |psi_k> = Rx(-pi/2)|psi'_k>, psi' real with Bloch polar angle alpha_k = pi/2 - t_k.\n    # Kraus row k of the isometry: sqrt(2/3) <psi'_k| (real). Returned as a 4x2 matrix (4th row zero).\n    m = np.zeros((4, 2))\n    for k in range(3):\n        t = off + 2.0 * math.pi * k / 3.0\n        alpha = math.pi / 2.0 - t\n        m[k, 0] = math.sqrt(2.0 / 3.0) * math.cos(alpha / 2.0)\n        m[k, 1] = math.sqrt(2.0 / 3.0) * math.sin(alpha / 2.0)\n    return m\n\n\ndef _givens_sequence(m):\n    # Givens rotations (only between basis states differing in one bit) with G m = [e0, e1].\n    mm = m.copy()\n    seq = []\n    for (i, j, col) in [(1, 3, 0), (0, 2, 0), (0, 1, 0), (3, 2, 1), (1, 3, 1)]:\n        th = math.atan2(mm[j, col], mm[i, col])\n        c = math.cos(th)\n        s = math.sin(th)\n        ri = mm[i].copy()\n        rj = mm[j].copy()\n        mm[i] = c * ri + s * rj\n        mm[j] = -s * ri + c * rj\n        seq.append((i, j, th))\n    return seq\n\n\ndef _inverse_givens_gate(qc, i, j, th):\n    # Append G^T for G = [[c, s], [-s, c]] on (i, j); position bit b is qubit 1 + b.\n    if abs(th) < 1e-13:\n        return\n    diff = i ^ j\n    t = diff.bit_length() - 1\n    o = 1 - t\n    i_low = ((i >> t) & 1) == 0\n    phi = -2.0 * th if i_low else 2.0 * th\n    angle = -phi\n    val = (i >> o) & 1\n    ctrl = 1 + o\n    tgt = 1 + t\n    if val == 0:\n        qc.x(ctrl)\n    qc.cry(angle, ctrl, tgt)\n    if val == 0:\n        qc.x(ctrl)\n\n\ndef build_circuit(instance):\n    \"\"\"Trine-POVM dilation. Qubit 0 = polarisation (input), qubits 1,2 = position x = q1 + 2*q2 (input |00>).\n    Output: pol |0>, position sum_k sqrt(2/3)<psi_k|phi> |k>, k in {0,1,2}.\"\"\"\n    off = _parse(instance)\n    pol = QuantumRegister(1, 'pol')\n    pos = QuantumRegister(2, 'pos')\n    qc = QuantumCircuit(pol, pos)\n    seq = _givens_sequence(_isometry_columns(off))\n    # eq_3 (modified): V = sum_k sqrt(2/3)|0><psi_k| (x) |k>; frame change R^dagger = Rx(pi/2)\n    qc.rx(math.pi / 2.0, 0)\n    # move the input qubit into the position register (pol ends in |0>)\n    qc.swap(0, 1)\n    # real orthogonal Q on position qubits with Q e0 = u0, Q e1 = u1 (Q = G_1^T ... G_m^T)\n    for (i, j, th) in reversed(seq):\n        _inverse_givens_gate(qc, i, j, th)\n    return qc",
+    "example_instance_json": "{\"phase_offset\": 0.0}",
+    "register_layout": [
+      "qubit 0: pol (polarisation, |0>=|H>, |1>=|V>); input state qubit; ends in |0>",
+      "qubit 1: pos bit 0 (least significant bit of position x), input |0>",
+      "qubit 2: pos bit 1 (x = q1 + 2*q2); outcome k=x in {0,1,2}, x=3 has zero probability",
+      "Input: |phi> on qubit 0, |00> on qubits 1,2. Output outcome read from qubits 1,2 (little-endian integer x)."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "General POVM definition and Born rule. The circuit's position-register statistics are intended to reproduce p_k = Tr(E_k rho); completeness holds because sum E_k = I for equally spaced equatorial elements."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_isometry_columns (Trine elements through rows sqrt(2/3)<psi'_k|) and the Rx(pi/2) frame change in build_circuit",
+        "explanation": "E_k = (2/3)|psi_k><psi_k| with theta_k = phase_offset + 2 pi k/3. The equatorial xy-plane trine is mapped to a real xz-plane trine by Rx(-pi/2) so the isometry can be built from real rotations."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit (rx, swap, controlled-Ry Givens network via _givens_sequence/_inverse_givens_gate)",
+        "explanation": "Dilation isometry realised with Kraus operators M_k = sqrt(2/3)|0><psi_k|, so M_k^dagger M_k = E_k and sum M_k^dagger M_k = I. The output polarisation is fixed to |0> rather than sqrt(E_k)|phi>; see specification_changes."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The walk structure (wave-plate coins and displacer shifts) is not implemented. Coin angles and step counts are unspecified, so the dilation is built directly from Givens rotations instead."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Used Kraus operators M_k = U_k sqrt(E_k) with U_k sending the polarisation output to the fixed state |0>, i.e. M_k = sqrt(2/3)|0><psi_k|, instead of M_k = sqrt(E_k) = sqrt(2/3)|psi_k><psi_k|.",
+        "reason": "Both have M_k^dagger M_k = E_k, so the outcome statistics are identical. The chosen form lets the circuit be a 2-qubit real orthogonal operator on the position register after a SWAP, and the polarisation is not read out."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The alternating coin/shift walk is replaced by a direct gate decomposition (Rx, SWAP, controlled-Ry from Givens rotations); no walk steps appear.",
+        "reason": "The coin angles and step count are not specified, and the walk is only one possible realisation of the dilation."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The position register uses a binary encoding of 3 sites in 2 qubits (x = q1 + 2*q2); site 3 is unused. An optional phase_offset parameter rotates the trine about the Bloch z axis.",
+        "reason": "Qubit encoding requirement; the offset is a convention-preserving generalisation and defaults to 0 (theta_k = 2 pi k/3)."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Only the Trine POVM is implemented; SIC and USD are excluded.",
+        "reason": "Scope narrowing: the specification gives no explicit SIC/USD elements or parameters."
+      }
+    ],
+    "assumptions": [
+      "Three equal-weight elements on the xy equator with theta_k = phase_offset + 2 pi k/3.",
+      "Rx(phi) = exp(-i phi X/2) rotates the Bloch vector by phi about x, so psi_k = Rx(-pi/2) psi'_k and the circuit applies Rx(+pi/2) to the input.",
+      "The input is |phi> on qubit 0 and |00> on qubits 1 and 2, prepared by the runner.",
+      "Global phases are irrelevant."
+    ],
+    "unresolved_issues": [
+      "The mapping to the experiment's actual wave-plate angles and displacer geometry is not reconstructed.",
+      "SIC and USD POVMs are not covered.",
+      "Numerical correctness of the Givens decomposition and the frame-change sign convention rely on downstream verification."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 24,
+    "depth": 21,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

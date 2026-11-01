@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "92c0e9e3-6a8e-4c39-833f-1a0bbf40a82e",
+  "parent_run_id": "2b8c6d84-67e5-4208-83a0-349cd3ab9165",
+  "created_at": "2026-11-01T00:32:54.847321+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "6eb49b1529e5ca8c6169d1463b4cad26709e7b39e6879ffaa6df757e69dd5846",
+  "source_specification_sha256": "238ac081ca76b582eac4bbf8ab53cbaccc6fce585615c2407000251eb078a123",
+  "source_python_sha256": "ca880dfa3d2377640fb57db3d500653aec5f0070fc884102c7ab9110f0478b5d",
+  "elapsed_seconds": 46.197,
+  "usage": {
+    "input_tokens": 6034,
+    "output_tokens": 6546,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "build_circuit(instance) returns the unitary second-order Strang split-step circuit for the 1D QHO, H=p^2/2+x^2/2, on an n-qubit centered periodic grid. The grid is x_j=(j-N/2)dx with dx^2=2*pi/N and little-endian j. The potential and kinetic phases are RZ/RZZ quadratic forms, and the position-to-momentum change of basis is QFTGate conjugated by Z on qubit 0 to handle the centered-grid shift. The circuit has no state preparation or measurement. With t=theta it approximates the fractional Fourier transform up to a global phase.",
+    "source_python": "\"\"\"Split-step Strang Trotter circuit for the 1D quantum harmonic oscillator on a 2^n grid.\"\"\"\nimport math\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\n\n\ndef _diag(qc, n, theta):\n    # Applies exp(-i*theta*s^2) up to global phase, where s=(j-N/2) and\n    # s = -(1/2 + sum_i 2^(i-1) z_i), so s^2 = const + sum a_i z_i + 2 sum_{i<k} a_i a_k z_i z_k.\n    for i in range(n):\n        qc.rz(2.0 * theta * 2.0 ** (i - 1), i)\n    for i in range(n):\n        for k in range(i + 1, n):\n            qc.rzz(4.0 * theta * 2.0 ** (i - 1) * 2.0 ** (k - 1), i, k)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"n\")\n    t = instance.get(\"t\")\n    r = instance.get(\"r\")\n    if isinstance(n, bool) or not isinstance(n, int) or n < 2 or n > 12:\n        raise ValueError(\"n must be an integer in [2, 12]\")\n    if isinstance(r, bool) or not isinstance(r, int) or r < 1 or r > 1000:\n        raise ValueError(\"r must be an integer in [1, 1000]\")\n    if isinstance(t, bool) or not isinstance(t, (int, float)) or not math.isfinite(t):\n        raise ValueError(\"t must be a finite real number\")\n    t = float(t)\n    N = 2 ** n\n    dt = t / r\n    c = 2.0 * math.pi / N  # dx^2\n    qr = QuantumRegister(n, \"pos\")\n    qc = QuantumCircuit(qr)\n    idx = list(range(n))\n    # first potential half step exp(-i V dt/2), V=x^2/2 -> theta = dt*dx^2/4\n    _diag(qc, n, dt * c / 4.0)\n    for s in range(r):\n        # kinetic step: centered DFT = Z0 . QFT . Z0; the inner Z0 factors commute with the diagonal and cancel\n        qc.z(0)\n        qc.append(QFTGate(n), idx)\n        _diag(qc, n, dt * c / 2.0)  # exp(-i p^2 dt/2), p_k=(k-N/2)dx\n        qc.append(QFTGate(n).inverse(), idx)\n        qc.z(0)\n        # potential: full step merged between repetitions, half step at the end\n        _diag(qc, n, dt * c / 4.0 if s == r - 1 else dt * c / 2.0)\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"t\": 0.7, \"r\": 2}",
+    "register_layout": [
+      "Qubits 0..n-1: register 'pos', little-endian grid index j=sum_i 2^i b_i (qubit 0 is least significant)",
+      "Grid position x_j=(j-N/2)*dx with N=2^n and dx=sqrt(2*pi/N)",
+      "Momentum register after the QFT uses the same layout, with p_k=(k-N/2)*dx",
+      "No ancilla qubits"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Definition of H=T+V with hbar=m=omega=1. It is realized only through the split into the potential and kinetic phase layers."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: initial _diag half step, then the loop over r (Z0, QFTGate, _diag, inverse QFTGate, Z0, _diag)",
+        "explanation": "Second-order Strang step U(dt)=e^{-iVdt/2} F^dag e^{-iT dt} F e^{-iVdt/2}, repeated r times. Adjacent half-steps are merged into full potential steps between repetitions, which equals U(dt)^r exactly."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_diag",
+        "explanation": "The affine map x/dx=-(1/2+sum 2^(i-1) z_i) makes x^2 a quadratic form, implemented with RZ and RZZ gates. The same form gives p^2 after the shifted QFT, because the signed momentum index (k-N/2) has the same affine structure."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Continuum su(1,1) commutation relations. They motivate the Lie-algebraic analysis but are not part of the circuit. The discretized circuit does not use them."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit with t set to the fractional Fourier angle theta",
+        "explanation": "The circuit approximates exp(-i*theta*H) on the grid, which is the fractional Fourier transform up to a convention-dependent global phase. The global phase is dropped. No separate FrFT routine exists."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The position-to-momentum transform is implemented as Z(qubit0) . QFTGate . Z(qubit0), instead of a bare QFTGate. The inner Z(qubit0) factors cancel against the diagonal kinetic phase, so the circuit applies Z0, QFT, diagonal, QFT^dagger, Z0.",
+        "reason": "For centered grids x_j=(j-N/2)dx and p_k=(k-N/2)dx with dx^2=2*pi/N, e^{i x_j p_k}=e^{2 pi i jk/N}(-1)^(j+k) up to a global phase. This resolves the shift convention the specification left open, and it gives a signed p^2 that is quadratic in the bits."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The half-step potential layers are merged across repetitions: half step, then r times (kinetic, full potential), with the last potential layer a half step.",
+        "reason": "This is algebraically identical to U(dt)^r and uses fewer gates."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The circuit is the bare evolution operation. It has no initial Gaussian or state preparation and no measurement. Global phases from the dropped constants are not tracked.",
+        "reason": "The runner prepares inputs. Global phases are unobservable."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope is narrowed to fixed second-order Strang splitting. The high-order Suzuki and Lie-algebra error scheduling, Hermite eigenstate preparation, quartic potential, and general complex 1D systems are not implemented. The abstract's epsilon and the choice of r from epsilon are left to the caller, and r is an explicit input.",
+        "reason": "The specification supplies no concrete formulas for these. They go beyond one explicitly scoped construction."
+      }
+    ],
+    "assumptions": [
+      "Units hbar=m=omega=1",
+      "dx=sqrt(2*pi/N) so the position and momentum grid spacings are equal",
+      "Periodic grid with signed momentum index in [-N/2, N/2-1]",
+      "Instance keys: n (integer, 2 to 12), t (finite real), r (integer, 1 to 1000)",
+      "QFTGate sign convention is irrelevant here because the kinetic diagonal is even in p, including at k=0"
+    ],
+    "unresolved_issues": [
+      "No public validation contract was supplied, so the choice of r for a target precision is left to the caller",
+      "Exact agreement with the paper's QHO or fractional Fourier transform conventions is not established, and the global phase is not matched",
+      "Discretization error of the periodic grid versus the continuum QHO is not analyzed"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 148,
+    "depth": 118,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

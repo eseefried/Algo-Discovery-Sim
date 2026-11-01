@@ -1,0 +1,135 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "fd44e778-8ed0-4880-96b9-0a9fe4e62385",
+  "parent_run_id": "d9b138af-793f-4b08-a9e4-2e2c68de785d",
+  "created_at": "2026-10-31T22:37:51.201372+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "257160cc07e163590d54960d03f0eebffcd1273c8e6450762ec6c0ceb51d288b",
+  "source_specification_sha256": "6ed88c0fc7f6247b99b5643de330f79376b0655a4fc4519d740d55d294adc3de",
+  "source_python_sha256": "a715da552999cac0be439e9c2c13966a6e908c82d014dba49417f49148b60553",
+  "elapsed_seconds": 122.126,
+  "usage": {
+    "input_tokens": 4956,
+    "output_tokens": 13529,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Hybrid-qudit QFT on one qutrit (encoded in 2 qubits) plus n qubits (n=2 gives dimension N=12). It uses the Cooley-Tukey split N=3*2^n: a generalized (3-dimensional) Hadamard on the qutrit, generalized controlled-phase twiddles omega_N^(x_l*y') between the qubits and the qutrit, then a qubit QFT (QFTGate) on the qubit digits. The qutrit DFT is built from standard controlled gates by an exact two-level decomposition, with no dense unitary. Output digits are in the Cooley-Tukey order y = y_q + 3*y_r, where y_q is the qutrit digit and y_r is the qubit-register value, with no final reordering permutation.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\nimport math\n\n\ndef _qutrit_dft(qc, lo, hi):\n    \"\"\"3x3 DFT H_3 on qutrit levels 0=|hi0,lo0>, 1=|hi0,lo1>, 2=|hi1,lo1>.\n    H_3 = H_{12} . R01 . S_{12} . H_{12} (time order H, S, R01, H); |hi1,lo0> is untouched.\"\"\"\n    qc.ch(lo, hi)\n    qc.cp(math.pi / 2, lo, hi)\n    qc.x(hi)\n    qc.cz(hi, lo)\n    qc.cry(2.0 * math.acos(1.0 / math.sqrt(3.0)), hi, lo)\n    qc.x(hi)\n    qc.ch(lo, hi)\n\n\ndef _twiddle(qc, lo, hi, digits, n):\n    \"\"\"Generalized controlled phase exp(2 pi i x_l y'/N), x_l=sum 2^k x_k, y'=lo+lo*hi in {0,1,2}.\"\"\"\n    big_n = 3 * (2 ** n)\n    for k in range(n):\n        theta = 2.0 * math.pi * (2 ** k) / big_n\n        qc.cp(theta, digits[k], lo)\n        qc.mcp(theta, [digits[k], lo], hi)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be an object')\n    for key in instance:\n        if key not in ('n_qubits', 'inverse'):\n            raise ValueError('unknown key ' + str(key))\n    n = instance.get('n_qubits')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 10:\n        raise ValueError('n_qubits must be an integer in 1..10')\n    inv = instance.get('inverse', False)\n    if not isinstance(inv, bool):\n        raise ValueError('inverse must be a boolean')\n    qutrit = QuantumRegister(2, 'qutrit')\n    digits = QuantumRegister(n, 'qubits')\n    qc = QuantumCircuit(qutrit, digits)\n    lo = qutrit[0]\n    hi = qutrit[1]\n    dig = list(digits)\n    _qutrit_dft(qc, lo, hi)\n    _twiddle(qc, lo, hi, dig, n)\n    qc.append(QFTGate(n), dig)\n    if inv:\n        return qc.inverse()\n    return qc",
+    "example_instance_json": "{\"n_qubits\":2,\"inverse\":false}",
+    "register_layout": [
+      "qubit 0: qutrit 'lo' bit",
+      "qubit 1: qutrit 'hi' bit",
+      "qutrit encoding: level 0=|hi=0,lo=0>, level 1=|hi=0,lo=1>, level 2=|hi=1,lo=1>; |hi=1,lo=0> is unused and left invariant",
+      "qubit 2: qubit digit x_0 (least significant bit of x_l)",
+      "qubit 2+k: qubit digit x_k, k=0..n_qubits-1 (n=2 example: qubits 2,3)",
+      "input integer x = 2^n * x_qutrit + x_l, x_l = sum_k 2^k x_k",
+      "output: qutrit register holds y mod 3; qubit register holds floor(y/3), in little-endian binary"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (whole circuit)",
+        "explanation": "The full circuit realizes F_N with N=3*2^n via Cooley-Tukey factorization N=3*2^n. The output digit order is permuted (y mod 3 in the qutrit, y//3 in the qubits) and no final reordering is applied."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_qutrit_dft (d=3); QFTGate (qubit digits, d=2 Hadamards inside the qubit QFT)",
+        "explanation": "H_3 with matrix entries omega_3^(kl)/sqrt3 is built from controlled-H, controlled-phase, CZ and CRY gates by an exact two-level decomposition. The qubit Hadamards are inside QFTGate."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "register layout; build_circuit",
+        "explanation": "Input is a mixed-radix integer with the qutrit as the most significant digit: x = 2^n x_q + x_l (for n=2, x=4x_0+2x_1+x_2). The qutrit is embedded in two qubits with a non-binary level encoding chosen so that every two-level rotation is a singly controlled gate."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_twiddle",
+        "explanation": "The generalized controlled phase has the derived form omega_N^(x_l*y') with N=3*2^n. For each qubit k it applies angle 2 pi 2^k/N times y'=lo+lo*hi, using cp(qubit,lo) and mcp(qubit,lo; hi). The denominators are derived from the factorization, not guessed."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit ordering: _qutrit_dft, _twiddle, QFTGate",
+        "explanation": "The decomposition is H_3 on the qutrit, then the controlled-phase twiddles, then the qubit QFT. The QFTGate includes its own bit-reversal swaps."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_5",
+          "eq_1"
+        ],
+        "change": "The schematic 'SWAP/reorder . prod(H prod CP)' is replaced by the concrete Cooley-Tukey order (qutrit H_3, twiddle phases, qubit QFT) with no final digit-reordering permutation. The circuit equals F_N only up to the output relabeling y = y_q + 3*y_r.",
+        "reason": "The abstract's decomposition is not specified. The direct digit-by-digit radix-(3,2,2) factorization does not exist with the qutrit as most significant output digit, because the phase x*y/12 does not factor over digits. The Cooley-Tukey form is exact."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The qutrit is embedded in two qubits with levels 0,1,2 mapped to |00>,|01>,|11> (hi,lo), and generalized to n qubit digits (n up to 10) with a total qubit cap of 12. An optional 'inverse' flag is added.",
+        "reason": "A qubit-based circuit needs an encoding of d=3. This one makes the two-level rotations controlled single-qubit gates."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The generic phase 2 pi k_a k_b/m is specialized to angles 2 pi 2^k y'/N.",
+        "reason": "These angles are required by the factorization."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Narrowed scope: the NMR selective-rotation pulses, the four-qubit qutrit emulation of the paper, and the experimental results are not implemented.",
+        "reason": "The abstract gives no details."
+      }
+    ],
+    "assumptions": [
+      "The qutrit occupies the most significant input digit, and the DFT sign convention is exp(+2 pi i kl/d).",
+      "The input state must lie in the valid qutrit subspace (levels 0,1,2). The unused state |hi=1,lo=0> is not acted on by any gate except where it is merely a control, and stays invariant.",
+      "QFTGate(n) on the qubit digits uses little-endian order with qubit 2 as the least significant bit."
+    ],
+    "unresolved_issues": [
+      "The paper's actual gate decomposition, phase schedule, and output ordering are unknown.",
+      "No reordering permutation is applied, so the output digits are in Cooley-Tukey order rather than the natural mixed-radix order.",
+      "Correctness is not verified here; software will do that."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 74,
+    "depth": 62,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

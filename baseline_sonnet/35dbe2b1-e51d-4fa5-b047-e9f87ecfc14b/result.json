@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "35dbe2b1-e51d-4fa5-b047-e9f87ecfc14b",
+  "parent_run_id": "9f806aac-6747-435e-9538-3e5e4eabcf20",
+  "created_at": "2026-10-31T22:27:46.968022+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "9b6188a79e206d68bcaecc4ec76329575c0c5d862796ea19d53878ed8f8d0e6d",
+  "source_specification_sha256": "9a4aac1e42b5644e815e8223ecadd87b5a58d72f69b3f8d981c2d2950a2a97a4",
+  "source_python_sha256": "210ab3706d3b281ffc91394488ce2bbffe5b7ae1207ce0cb738c12ff90c08597",
+  "elapsed_seconds": 33.202,
+  "usage": {
+    "input_tokens": 4878,
+    "output_tokens": 5229,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds r steps of the first-order Trotter product formula S_1(t/r)^r = (prod_j exp(-i c_j P_j t/r))^r for a Hamiltonian H = sum_j c_j P_j given as a weighted Pauli sum, i.e. already Jordan-Wigner encoded. Each Pauli exponential uses basis changes, a CNOT parity ladder and one RZ. Term order is the input list order. No state preparation or measurement is included.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _as_int(v, name, lo, hi):\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError(name + ' must be an integer in [' + str(lo) + ', ' + str(hi) + ']')\n    return v\n\n\ndef _as_real(v, name):\n    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):\n        raise ValueError(name + ' must be a finite real number')\n    return float(v)\n\n\ndef _term_step(qc, pauli, angle):\n    # Implements exp(-i * angle * P) for a Pauli string P (eq_1 factor e^{-i H_j tau}, angle = c_j * tau).\n    # Leftmost character acts on the highest qubit index (Qiskit label convention).\n    n = len(pauli)\n    active = [(n - 1 - i, ch) for i, ch in enumerate(pauli) if ch != 'I']\n    if not active:\n        qc.global_phase -= angle\n        return\n    for q, ch in active:\n        if ch == 'X':\n            qc.h(q)\n        elif ch == 'Y':\n            qc.sdg(q)\n            qc.h(q)\n    qubits = [q for q, _ in active]\n    for a, b in zip(qubits[:-1], qubits[1:]):\n        qc.cx(a, b)\n    qc.rz(2.0 * angle, qubits[-1])\n    for a, b in reversed(list(zip(qubits[:-1], qubits[1:]))):\n        qc.cx(a, b)\n    for q, ch in active:\n        if ch == 'X':\n            qc.h(q)\n        elif ch == 'Y':\n            qc.h(q)\n            qc.s(q)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _as_int(instance.get('num_qubits'), 'num_qubits', 1, 12)\n    t = _as_real(instance.get('time'), 'time')\n    r = _as_int(instance.get('steps'), 'steps', 1, 1000)\n    terms = instance.get('terms')\n    if not isinstance(terms, list) or len(terms) == 0 or len(terms) > 500:\n        raise ValueError('terms must be a list of 1 to 500 entries')\n    parsed = []\n    for term in terms:\n        if not isinstance(term, dict):\n            raise ValueError('each term must be a dict')\n        p = term.get('pauli')\n        if not isinstance(p, str) or len(p) != n or any(ch not in 'IXYZ' for ch in p):\n            raise ValueError('pauli must be a length-num_qubits string over IXYZ')\n        c = _as_real(term.get('coeff'), 'coeff')\n        parsed.append((p, c))\n    if r * len(parsed) > 5000:\n        raise ValueError('steps * number of terms too large')\n    qc = QuantumCircuit(QuantumRegister(n, 'system'))\n    tau = t / r\n    for _ in range(r):\n        for p, c in parsed:\n            _term_step(qc, p, c * tau)\n    return qc",
+    "example_instance_json": "{\"num_qubits\": 4, \"time\": 0.5, \"steps\": 3, \"terms\": [{\"pauli\": \"IIIZ\", \"coeff\": 0.8}, {\"pauli\": \"IIZI\", \"coeff\": -0.4}, {\"pauli\": \"IZZI\", \"coeff\": 0.25}, {\"pauli\": \"XXII\", \"coeff\": 0.15}, {\"pauli\": \"IYYI\", \"coeff\": 0.15}, {\"pauli\": \"XZZX\", \"coeff\": 0.05}]}",
+    "register_layout": [
+      "Single register 'system' with num_qubits qubits; qubit i is spin orbital i under an assumed Jordan-Wigner encoding (supplied by the caller through the Pauli terms).",
+      "Qubit 0 is the least significant bit. In each Pauli label the leftmost character acts on qubit n-1 and the rightmost on qubit 0.",
+      "No ancilla qubits. The input state is prepared by the runner."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (loop over r steps and ordered terms) and _term_step (exp(-i c_j P_j tau))",
+        "explanation": "The ordered product of exponentials of the Pauli-decomposed Hamiltonian terms, applied r times with tau = t/r. The circuit is therefore S_1(t/r)^r."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The operator-norm error compares against exact evolution exp(-iHt), a classical analysis that the circuit builder must not perform."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The commutator bound is a theoretical error bound. It motivates choosing r but does not enter the circuit."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The state-specific error needs an input state and exact evolution for comparison, both of which are experiment and verification tasks outside the operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The Hamiltonian is taken as a weighted sum of Pauli strings supplied in the instance. The terms H_j are c_j P_j, and their order is the list order.",
+        "reason": "The abstract gives no molecule, no integrals and no term ordering. A generic Pauli-sum input keeps the Trotter construction meaningful for varying valid instances without a fermion-to-qubit mapper in the module."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The Jordan-Wigner transformation is not performed inside the module. The caller must supply already-mapped Pauli terms.",
+        "reason": "This narrows the scope to the product-formula circuit. The chemistry-specific mapping is not specified in the abstract."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "A Pauli string with all identities is implemented as a global phase.",
+        "reason": "exp(-i c tau I) is a scalar phase."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Instance sizes are capped: at most 12 qubits, 1000 steps, 500 terms, and 5000 total term applications.",
+        "reason": "This follows the required resource limits and avoids oversized circuits."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The error analysis, the commutator bound and the state-specific error comparison are excluded from the circuit.",
+        "reason": "They are classical evaluation quantities, not part of the unitary operation. The paper's chemical-property scaling, step-size strategies and state-preparation methods are also out of scope."
+      }
+    ],
+    "assumptions": [
+      "The first-order product formula is the chosen construction, since the abstract does not specify the order.",
+      "The Hamiltonian coefficients are real, so every term is Hermitian.",
+      "Term ordering follows the order of the list in the instance.",
+      "The Pauli label convention follows Qiskit: the rightmost character acts on qubit 0.",
+      "The runner prepares any input state, such as a Hartree-Fock state."
+    ],
+    "unresolved_issues": [
+      "The paper's actual error bounds and their dependence on maximum nuclear charge and filling fraction are not available in the abstract.",
+      "The paper's term ordering and product-formula order are unknown.",
+      "No molecular Hamiltonian is included, so the example is a small generic Pauli-sum, not a real molecule.",
+      "The classical step-size strategies and improved state-preparation methods are not implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 102,
+    "depth": 68,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

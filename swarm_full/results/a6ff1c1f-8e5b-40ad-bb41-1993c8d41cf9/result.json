@@ -1,0 +1,111 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "a6ff1c1f-8e5b-40ad-bb41-1993c8d41cf9",
+  "parent_run_id": "9c0468a1-7050-4182-ada9-6bc519f6c2d0",
+  "created_at": "2026-10-31T21:38:50.063754+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "5018856bc76a61518aba9886ae1bd34c39a48469ad11d420f16e8c8c88010caf",
+  "source_specification_sha256": "42342930e6117bbb50b8260c82033d3898d1fc99a260f2164005860b6369cfe7",
+  "source_python_sha256": "b07f7bbaf2c3fc3122d260b103b39a830b52dc6422969d1a8f48fe35d209ebc4",
+  "elapsed_seconds": 43.762,
+  "usage": {
+    "input_tokens": 4405,
+    "output_tokens": 6347,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Trotterized quantum phase estimation of U=exp(iAt) for a user-supplied weighted bipartite graph. The vertex register uses n qubits, with vertex v encoded as binary basis state |v>. Each edge term exp(i w tau (|a><b|+|b><a|)) is a CX-conjugated, multi-controlled RX gate that is also controlled on a phase qubit. The circuit applies H to the phase qubits, controlled U^(2^k) with first-order Trotterization, then QFTGate inverse on the phase register. The runner prepares the vertex input state. No measurement is included.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate, RXGate\nimport math\n\n\ndef _is_int(x):\n    return isinstance(x, int) and not isinstance(x, bool)\n\n\ndef _is_num(x):\n    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)\n\n\ndef _parse(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('num_vertex_qubits')\n    m = instance.get('num_phase_qubits')\n    steps = instance.get('trotter_steps')\n    t = instance.get('time')\n    edges = instance.get('edges')\n    if not (_is_int(n) and _is_int(m) and _is_int(steps)):\n        raise ValueError('num_vertex_qubits, num_phase_qubits, trotter_steps must be integers')\n    if n < 1 or m < 1 or n + m > 12:\n        raise ValueError('need n>=1, m>=1 and n+m<=12')\n    if steps < 1 or steps > 64:\n        raise ValueError('trotter_steps must be in 1..64')\n    if not _is_num(t):\n        raise ValueError('time must be a finite real number')\n    if not isinstance(edges, list) or len(edges) < 1 or len(edges) > 64:\n        raise ValueError('edges must be a list of 1..64 entries')\n    clean = []\n    for e in edges:\n        if not isinstance(e, (list, tuple)) or len(e) != 3:\n            raise ValueError('each edge must be [a, b, weight]')\n        a, b, w = e\n        if not (_is_int(a) and _is_int(b)):\n            raise ValueError('edge endpoints must be integers')\n        if a < 0 or b < 0 or a >= 2 ** n or b >= 2 ** n or a == b:\n            raise ValueError('invalid edge endpoints')\n        if not _is_num(w):\n            raise ValueError('edge weight must be a finite real number')\n        clean.append((a, b, float(w)))\n    return n, m, steps, float(t), clean\n\n\ndef _check_bipartite(edges):\n    adj = {}\n    for a, b, _ in edges:\n        adj.setdefault(a, []).append(b)\n        adj.setdefault(b, []).append(a)\n    color = {}\n    for s in adj:\n        if s in color:\n            continue\n        color[s] = 0\n        stack = [s]\n        while stack:\n            u = stack.pop()\n            for v in adj[u]:\n                if v not in color:\n                    color[v] = 1 - color[u]\n                    stack.append(v)\n                elif color[v] == color[u]:\n                    raise ValueError('graph is not bipartite')\n\n\ndef _controlled_edge(qc, ctrl, vq, a, b, theta):\n    # Implements controlled exp(i*phi*(|a><b|+|b><a|)) with theta=-2*phi (RX(theta)=exp(-i theta X/2)).\n    n = len(vq)\n    diff = a ^ b\n    bits = [i for i in range(n) if (diff >> i) & 1]\n    p = bits[0]\n    others = bits[1:]\n    for d in others:\n        qc.cx(vq[p], vq[d])\n    ap = (a >> p) & 1\n    flips = []\n    controls = [ctrl]\n    for q in range(n):\n        if q == p:\n            continue\n        bit = (a >> q) & 1\n        if q in others:\n            bit ^= ap\n        if bit == 0:\n            flips.append(vq[q])\n        controls.append(vq[q])\n    for f in flips:\n        qc.x(f)\n    qc.append(RXGate(theta).control(len(controls)), controls + [vq[p]])\n    for f in flips:\n        qc.x(f)\n    for d in reversed(others):\n        qc.cx(vq[p], vq[d])\n\n\ndef build_circuit(instance):\n    \"\"\"Trotterized phase estimation of exp(iAt) for a weighted bipartite graph.\n\n    Qubits: vertex register 0..n-1 (little endian vertex label), phase register n..n+m-1.\n    Phase qubit k controls U^(2^k); output integer j on the phase register ~ eigenphase j/2^m of U.\n    \"\"\"\n    n, m, steps, t, edges = _parse(instance)\n    _check_bipartite(edges)\n    vreg = QuantumRegister(n, 'vertex')\n    preg = QuantumRegister(m, 'phase')\n    qc = QuantumCircuit(vreg, preg)\n    vq = list(range(n))\n    pq = list(range(n, n + m))\n    for q in pq:\n        qc.h(q)\n    for k in range(m):\n        tau = t * (2 ** k) / steps\n        for _ in range(steps):\n            for a, b, w in edges:\n                _controlled_edge(qc, pq[k], vq, a, b, -2.0 * w * tau)\n    qc.append(QFTGate(m).inverse(), pq)\n    return qc",
+    "example_instance_json": "{\"num_vertex_qubits\": 2, \"num_phase_qubits\": 4, \"time\": 0.5, \"trotter_steps\": 2, \"edges\": [[0, 1, 1.0], [0, 2, 1.0]]}",
+    "register_layout": [
+      "qubits 0..n-1: vertex register, little-endian binary label of graph vertex (qubit 0 is least significant)",
+      "qubits n..n+m-1: phase register; phase qubit n+k controls U^(2^k), where U=exp(iAt)",
+      "example: qubits 0,1 = vertex register (vertices 0..3, edges 0-1 and 0-2); qubits 2,3,4,5 = phase register",
+      "phase register readout (by runner) is the integer j with eigenphase of U about j/2^m, after QFTGate(m).inverse() on the phase qubits"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The span-program/zero-eigenvector correspondence is a schematic statement. It is not a circuit. The code takes the graph G_P(x) as explicit edge data in the instance, so no span-program-to-graph construction is implemented."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit and _controlled_edge",
+        "explanation": "Phase estimation of U=exp(iAt) with A the weighted adjacency operator. U^(2^k) is approximated by first-order Trotter products of per-edge exponentials, each controlled on phase qubit k. The circuit then applies the inverse QFT."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "exp(iAt) is approximated by a first-order Trotter product over edges (steps per power of two), not applied exactly.",
+        "reason": "Only standard gates are allowed, with no dense unitaries or operator construction. Edge terms do not commute in general, so the result is approximate."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Scope narrowed to an explicitly supplied weighted bipartite graph on at most 11 vertex qubits. Bipartiteness is validated. The gate-specific span programs, weights, and the input-dependent oracle for G_P(x) are not constructed.",
+        "reason": "The abstract does not provide the weights or graph construction."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The circuit includes the phase-register Hadamards, the controlled evolutions, and the inverse QFT. It excludes preparation of the vertex input vertex, the zero-vs-nonzero threshold decision, repetition, and majority voting.",
+        "reason": "The task asks for an operation only, without input preparation, measurement or classical postprocessing."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Sign and phase convention fixed to U|psi>=exp(2 pi i theta)|psi> with theta=j/2^m. The inverse QFT is applied to the phase qubits in their natural index order.",
+        "reason": "This matches the QFTGate convention and resolves the order ambiguity."
+      }
+    ],
+    "assumptions": [
+      "Vertices are labeled by integers in [0, 2^n); unused labels are isolated vertices.",
+      "Weights are real, so A is real symmetric and Hermitian.",
+      "Duplicate edges are allowed and their weights add to first order in the Trotter product.",
+      "Time t and Trotter steps are chosen by the instance so that t*||A|| is small enough for the approximation to be meaningful."
+    ],
+    "unresolved_issues": [
+      "No span-program-derived graph weights or gate-specific constructions are available from the abstract.",
+      "Trotter error is not controlled or validated here; the spectral gap and the readout threshold are unspecified.",
+      "The 0/1 convention for f(x) and the support condition for the zero eigenvector are unresolved."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 444,
+    "depth": 327,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

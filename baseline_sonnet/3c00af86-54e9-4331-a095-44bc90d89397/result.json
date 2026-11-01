@@ -1,0 +1,124 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "3c00af86-54e9-4331-a095-44bc90d89397",
+  "parent_run_id": "47dc35a4-7181-46a1-9b7c-2b48b8ad0a35",
+  "created_at": "2026-10-31T22:22:18.743052+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "b0e6b9890f71d16fcf41cf8ab6772560fec4d4d8baba8b8ff7c9097160b3b28a",
+  "source_specification_sha256": "4b6daf64387cfdcd38525c4d704a89880e00e9fdcc382e800fd37a218a67b560",
+  "source_python_sha256": "906679e56e7118097ffd622af230e5bc5a0881e562f713cce8aa8904e14fec83",
+  "elapsed_seconds": 31.229,
+  "usage": {
+    "input_tokens": 4924,
+    "output_tokens": 4653,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Narrowed construction: Lie-Trotter-sliced simulation of a qubit semigroup e^{tL} with L = gamma*D[sigma_-] + kappa*(Z.Z - id), each slice realised as an exact Stinespring dilation using fresh ancillas. Amplitude damping uses a controlled-Ry and a CNOT. Dephasing uses an Ry and a CZ. This is not the paper's algorithm.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _nonneg(instance, key):\n    if key not in instance:\n        raise ValueError('missing key: ' + key)\n    v = instance[key]\n    if isinstance(v, bool) or not isinstance(v, (int, float)):\n        raise ValueError(key + ' must be a real number')\n    f = float(v)\n    if not math.isfinite(f) or f < 0.0:\n        raise ValueError(key + ' must be finite and >= 0')\n    return f\n\n\ndef build_circuit(instance):\n    \"\"\"System qubit 0; slice k uses ancillas 1+2k (damping) and 2+2k (dephasing).\n\n    Generator (eq_1): L = gamma*(s- rho s+ - 1/2{s+ s-, rho}) + kappa*(Z rho Z - rho).\n    Gates implement T_t = (e^{(t/r)L_a} e^{(t/r)L_d})^r (eq_4), each factor a dilation (eq_5).\n    Ancillas are fresh per slice (no reset), so the circuit is unitary.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    gamma = _nonneg(instance, 'gamma')\n    kappa = _nonneg(instance, 'kappa')\n    t = _nonneg(instance, 't')\n    r = instance.get('r')\n    if isinstance(r, bool) or not isinstance(r, int) or r < 1:\n        raise ValueError('r must be a positive integer')\n    if 1 + 2 * r > 12:\n        raise ValueError('total qubits 1+2r must be <= 12')\n    s = t / r\n    # amplitude damping: excited population decays by exp(-gamma*s)\n    q_a = min(1.0, max(0.0, 1.0 - math.exp(-gamma * s)))\n    theta_a = 2.0 * math.asin(math.sqrt(q_a))\n    # dephasing: rho -> (1-p) rho + p Z rho Z, p=(1-exp(-2 kappa s))/2\n    p = min(0.5, max(0.0, 0.5 * (1.0 - math.exp(-2.0 * kappa * s))))\n    theta_p = 2.0 * math.asin(math.sqrt(p))\n    qs = QuantumRegister(1, 'S')\n    qa = QuantumRegister(2 * r, 'A')\n    qc = QuantumCircuit(qs, qa)\n    for k in range(r):\n        anc_d = 1 + 2 * k\n        anc_p = 2 + 2 * k\n        # amplitude damping dilation: K0=|0><0|+cos|1><1|, K1=sin|0><1|\n        qc.cry(theta_a, 0, anc_d)\n        qc.cx(anc_d, 0)\n        # dephasing dilation: K0=sqrt(1-p) I, K1=sqrt(p) Z\n        qc.ry(theta_p, anc_p)\n        qc.cz(anc_p, 0)\n    return qc",
+    "example_instance_json": "{\"gamma\": 1.0, \"kappa\": 0.3, \"t\": 0.8, \"r\": 3}",
+    "register_layout": [
+      "qubit 0: system S (input state rho, computational basis |0>,|1>; sigma_- maps |1> to |0>)",
+      "qubits 1+2k (k=0..r-1): fresh ancilla for amplitude-damping dilation of slice k, input |0>",
+      "qubits 2+2k (k=0..r-1): fresh ancilla for dephasing dilation of slice k, input |0>",
+      "output channel: trace out all ancillas (qubits 1..2r)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: gate parameters theta_a, theta_p derived from gamma, kappa, t",
+        "explanation": "The target semigroup channel is implemented for one explicit Lindbladian (amplitude damping plus dephasing), not for an arbitrary L."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Asymptotic gate-count scaling of the paper is not reproduced. This circuit uses 4r gates (3r for the slice dilations plus one CNOT/CZ pair), with no relation to the stated bound."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The accuracy requirement is a property to be checked externally. The two generator pieces commute, so the sliced product equals e^{tL} exactly, and no epsilon parameter is used."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop over k in range(r) with s = t/r",
+        "explanation": "Semigroup slicing into r equal slices and a product over the generator pieces (L = L_a + L_d)."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: cry+cx (damping) and ry+cz (dephasing) per slice",
+        "explanation": "Stinespring dilations of each elementary channel with one ancilla qubit per elementary channel, ancilla initial state |0>."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_4"
+        ],
+        "change": "Narrowed from an arbitrary qubit generator L to a fixed two-term family: amplitude damping with rate gamma plus Z-dephasing with rate kappa. The decomposition is L = L_a + L_d.",
+        "reason": "The paper's decomposition and recombination rule for general L is not given in the specification."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Uses a fresh ancilla per elementary channel per slice (2r ancillas in total) instead of a single reused ancilla. Total qubits are capped at 12, so r <= 5.",
+        "reason": "Reset and dynamic circuits are disallowed, so a single ancilla cannot be reused across slices. This departs from the paper's single-ancilla claim."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "No gate-count optimality or epsilon-driven slice-count selection. r is a user parameter. The Trotter error is zero because L_a and L_d commute.",
+        "reason": "The paper's channel approximation method and the error norm are unspecified."
+      }
+    ],
+    "assumptions": [
+      "Amplitude damping is L_a(rho)=gamma(s- rho s+ - 1/2{s+ s-,rho}) with s-=|0><1|.",
+      "Dephasing is L_d(rho)=kappa(Z rho Z - rho).",
+      "The runner prepares the system in qubit 0 and all ancillas in |0>, and traces out the ancillas to obtain the channel output.",
+      "Time slices are equal, with s = t/r."
+    ],
+    "unresolved_issues": [
+      "The paper's actual decomposition of L, its recombination rule and its channel-approximation circuits are not reconstructed.",
+      "The single-ancilla property is not achieved.",
+      "The gate-count scaling O((||L|| t)^{3/2}/epsilon^{1/2}) is not implemented.",
+      "The error norm for epsilon remains unspecified."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 7,
+    "gate_count": 27,
+    "depth": 22,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

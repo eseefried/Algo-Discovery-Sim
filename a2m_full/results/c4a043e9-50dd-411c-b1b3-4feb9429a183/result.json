@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "c4a043e9-50dd-411c-b1b3-4feb9429a183",
+  "parent_run_id": "ab10ddc0-e9fd-4274-a87b-46b23f5972c8",
+  "created_at": "2026-11-01T00:21:20.691248+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "085e8c0401058ccd5a4cb24c30581a6a6d445f7e11ecc94f3dbdea69b675d9c4",
+  "source_specification_sha256": "a6cb1f849b81dc361c7aaa32a5e8bedd029653c48ee2b9f53cccf4293a38301c",
+  "source_python_sha256": "26eaae3a89a577c78988ba0639296559dd0ac2263b5bcbd1dcb6a5b923478b17",
+  "elapsed_seconds": 26.488,
+  "usage": {
+    "input_tokens": 4884,
+    "output_tokens": 3881,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Measurement-free circuit for r second-order Trotter steps of e^{-iHT} for the search Hamiltonian H=-gamma*A-|w><w|. A is the hypercube adjacency, the sum of X_i on n qubits. Each step is an RX(-gamma*dt) layer, a phase e^{i dt} on the marked basis state |w>, then another RX(-gamma*dt) layer. The marked-state phase uses X conjugation and a multi-controlled phase gate, so no ancilla is needed. State preparation (Hadamards) and readout are left to the runner.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _as_int(v, name):\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError(name + ' must be an integer')\n    return v\n\n\ndef _as_float(v, name):\n    if isinstance(v, bool) or not isinstance(v, (int, float)):\n        raise ValueError(name + ' must be a real number')\n    v = float(v)\n    if not math.isfinite(v):\n        raise ValueError(name + ' must be finite')\n    return v\n\n\ndef _marked_phase(qc, n, w, phi):\n    # eq_2: e^{i phi |w><w|} = diag with phase e^{i phi} on |w> only.\n    # Flip qubits where bit i of w is 0, apply multi-controlled phase on all-ones, unflip.\n    zeros = [i for i in range(n) if ((w >> i) & 1) == 0]\n    for i in zeros:\n        qc.x(i)\n    qc.mcp(phi, list(range(n - 1)), n - 1)\n    for i in zeros:\n        qc.x(i)\n\n\ndef _hop_half(qc, n, gamma, dt):\n    # eq_3: e^{i gamma A dt/2} = tensor_i RX(-gamma*dt)\n    for i in range(n):\n        qc.rx(-gamma * dt, i)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _as_int(instance.get('n'), 'n')\n    marked = _as_int(instance.get('marked'), 'marked')\n    r = _as_int(instance.get('steps'), 'steps')\n    gamma = _as_float(instance.get('gamma'), 'gamma')\n    T = _as_float(instance.get('T'), 'T')\n    if n < 2 or n > 12:\n        raise ValueError('n must be in 2..12')\n    if marked < 0 or marked >= 2 ** n:\n        raise ValueError('marked must be in [0, 2^n)')\n    if r < 1 or r > 500:\n        raise ValueError('steps must be in 1..500')\n    if gamma <= 0.0:\n        raise ValueError('gamma must be positive')\n    if T <= 0.0:\n        raise ValueError('T must be positive')\n    dt = T / r\n    v = QuantumRegister(n, 'v')\n    qc = QuantumCircuit(v)\n    for _ in range(r):\n        _hop_half(qc, n, gamma, dt)\n        _marked_phase(qc, n, marked, dt)\n        _hop_half(qc, n, gamma, dt)\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"marked\": 5, \"gamma\": 0.3, \"T\": 4.443, \"steps\": 20}",
+    "register_layout": [
+      "Qubits 0..n-1: vertex register 'v', little-endian: qubit i holds bit i of vertex index x (qubit 0 is least significant).",
+      "Marked vertex w is an integer; bit i of w is the target value on qubit i.",
+      "No ancilla qubit. Total qubits = n (<= 12)."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Target Hamiltonian H=-gamma*A-|w><w|. It is not applied directly; it is approximated by the product formula in eq_3. Self-loop weights are zero."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_marked_phase",
+        "explanation": "The oracle factor e^{i dt |w><w|} is a phase e^{i dt} on |w>. It is built from X gates on the zero bits of w and a multi-controlled phase gate, so it needs no controlled oracle or ancilla. The global-phase decomposition is not used."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_hop_half and build_circuit loop",
+        "explanation": "Each Trotter step is RX(-gamma*dt) on every qubit, then the marked-state phase, then RX(-gamma*dt) on every qubit, repeated r times with dt=T/r."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Preparing |s> with Hadamards is an input-state preparation, which the runner does. The circuit is only the evolution operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Success probability is a measurement and post-processing quantity. The circuit has no measurements."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The oracle step is a direct multi-controlled phase gate on the known marked string, not a controlled-O_w call with an ancilla. The circuit uses n qubits, not n+1.",
+        "reason": "No opaque oracle is supplied and the marked string is a parameter. The direct gate gives exactly e^{i dt |w><w|} without a controlled oracle or a global-phase correction."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Initial-state preparation and readout are excluded from the circuit.",
+        "reason": "The task requires an operation only, with inputs prepared and outputs read by the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "Scope is the hypercube with zero loop weights, and n is allowed from 2 to 12, wider than the specification's 2 or 3. gamma, T, steps and the marked vertex are instance parameters.",
+        "reason": "The paper's weighted self-loop graphs and diagrammatic method are not reconstructable from the abstract."
+      }
+    ],
+    "assumptions": [
+      "Hypercube adjacency A=sum_i X_i with zero self-loop weights stands in for the paper's graphs.",
+      "The sign convention is U=e^{-iHT} with H=-gamma*A-|w><w|, so the hopping layers are RX(-gamma*dt) and the marked phase is +dt.",
+      "The example gamma=0.3 and T near pi*sqrt(8)/2 are illustrative, not verified optimal.",
+      "The marked vertex is given as an integer with little-endian bit order.",
+      "Steps are capped at 500 to bound circuit size."
+    ],
+    "unresolved_issues": [
+      "The paper's actual graphs, loop weights, and critical gamma are not reconstructed.",
+      "The diagrammatic perturbation-theory method and the growing-dimension subspace argument are not implemented.",
+      "Optimal gamma and T and the Trotter error are left to numerical scanning by the runner."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 420,
+    "depth": 280,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

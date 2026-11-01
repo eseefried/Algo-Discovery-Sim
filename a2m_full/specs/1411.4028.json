@@ -1,0 +1,155 @@
+{
+  "source": "a2m_swarm",
+  "arxiv_id": "1411.4028",
+  "abstract": null,
+  "experiment_scope": null,
+  "specification": {
+    "status": "partial",
+    "problem": "Approximate MaxCut on small unweighted regular graphs G=(V,E), n=|V|, m=|E|, using p-layer QAOA with parameters (gamma,beta) and Z-basis readout.",
+    "reconstruction_scope": "Build the p-layer QAOA circuit (p=1..3) on n qubits for a tiny explicit instance (for example the 3-regular K4 graph or a 2-regular ring), with no ancillas. Compute <C> from the statevector or counts, and take the best sampled cut. Out of scope: the proof of the 0.6924 bound, the closed-form p=1 edge expectation for 3-regular graphs, the large-p strategy, and the explicit classical preprocessing based on local subgraphs for large graphs.",
+    "symbols": [
+      {
+        "symbol": "G=(V,E)",
+        "meaning": "unweighted graph, vertex i maps to qubit i",
+        "domain": "n=|V| small, m=|E|"
+      },
+      {
+        "symbol": "p",
+        "meaning": "number of QAOA layers",
+        "domain": "integer >=1"
+      },
+      {
+        "symbol": "\\gamma_l,\\beta_l",
+        "meaning": "phase-separator and mixer angles of layer l",
+        "domain": "real numbers"
+      },
+      {
+        "symbol": "C",
+        "meaning": "MaxCut objective operator, diagonal in the Z basis",
+        "domain": "Hermitian operator on n qubits"
+      },
+      {
+        "symbol": "B",
+        "meaning": "mixer Hamiltonian, the sum of X_i",
+        "domain": "Hermitian operator on n qubits"
+      },
+      {
+        "symbol": "z",
+        "meaning": "bitstring, with z_i the bit of vertex i",
+        "domain": "{0,1}^n"
+      }
+    ],
+    "equations": [
+      {
+        "id": "eq_1",
+        "label": "MaxCut objective",
+        "latex": "C=\\sum_{(i,j)\\in E}\\frac{1-Z_iZ_j}{2},\\quad C(z)=\\sum_{(i,j)\\in E}[z_i\\ne z_j]",
+        "description": "C counts the cut edges. Each term acts on 2 qubits.",
+        "provenance": "standard_background",
+        "abstract_quote": null,
+        "justification": "Standard MaxCut Hamiltonian. The abstract only says the gate locality is at most that of the objective.",
+        "assumptions": [
+          "unweighted graph"
+        ]
+      },
+      {
+        "id": "eq_2",
+        "label": "QAOA state",
+        "latex": "|\\gamma,\\beta\\rangle=\\prod_{l=p}^{1}e^{-i\\beta_l B}e^{-i\\gamma_l C}\\,H^{\\otimes n}|0\\rangle^{\\otimes n}",
+        "description": "Start from |+>^n. Layer l applies the phase separator and then the mixer, with layer 1 applied first.",
+        "provenance": "standard_background",
+        "abstract_quote": null,
+        "justification": "Standard QAOA ansatz, consistent with the abstract's integer p and its circuit of local unitaries.",
+        "assumptions": [
+          "B=\\sum_i X_i"
+        ]
+      },
+      {
+        "id": "eq_3",
+        "label": "Gate decomposition",
+        "latex": "e^{-i\\gamma(1-Z_iZ_j)/2}\\simeq \\mathrm{RZZ}(\\gamma)_{ij}=CX_{ij}\\,RZ_j(\\gamma)\\,CX_{ij}\\ (\\text{up to global phase});\\quad e^{-i\\beta X_i}=RX_i(2\\beta)",
+        "description": "Qiskit gates for each edge term and each mixer term. RZZ(theta)=exp(-i theta ZZ/2), so the e^{-i gamma C} edge term gives RZZ(-gamma) up to a global phase. The sign of the angle depends on the convention, so the angle sign must be checked in the builder.",
+        "provenance": "standard_background",
+        "abstract_quote": null,
+        "justification": "The gate count is O(p*m), which matches the abstract's claim that depth is linear in p times the number of constraints.",
+        "assumptions": [
+          "The sign convention is fixed so that maximizing <C> gives the largest cut"
+        ]
+      },
+      {
+        "id": "eq_4",
+        "label": "Expected cut and readout",
+        "latex": "F_p(\\gamma,\\beta)=\\langle\\gamma,\\beta|C|\\gamma,\\beta\\rangle=\\sum_{(i,j)\\in E}\\frac{1-\\langle Z_iZ_j\\rangle}{2},\\quad \\text{best}=\\max_{z\\in\\text{samples}}C(z)",
+        "description": "Estimate <C> from the statevector or from counts, or keep the best sampled cut. In a Qiskit counts key, vertex i is bits[::-1][i].",
+        "provenance": "abstract_inferred",
+        "abstract_quote": "The algorithm depends on an integer $p\\geq 1$ and the quality of the approximation improves as $p$ is increased.",
+        "justification": "The abstract implies an approximation quality measured by the objective. The estimator itself is the standard one.",
+        "assumptions": [
+          "Z-basis measurement"
+        ]
+      },
+      {
+        "id": "eq_5",
+        "label": "2-regular ring ratio",
+        "latex": "\\frac{\\langle C\\rangle}{m}=\\frac{2p+1}{2p+2}",
+        "description": "Known result for rings of large girth, recalled from background. It is not stated in the abstract and can serve as a sanity check for a large ring.",
+        "provenance": "standard_background",
+        "abstract_quote": null,
+        "justification": "Recalled from the QAOA literature, not verified. It holds for rings with n>2p+1.",
+        "assumptions": [
+          "ring length n>2p+1"
+        ]
+      }
+    ],
+    "registers": [
+      {
+        "name": "q",
+        "size": "n",
+        "role": "one qubit per vertex, no ancillas"
+      }
+    ],
+    "initial_state": "|0>^n, then H on every qubit, giving |+>^n",
+    "steps": [
+      {
+        "description": "Apply H to every qubit.",
+        "equation_ids": [
+          "eq_2"
+        ]
+      },
+      {
+        "description": "For l=1..p, apply RZZ-type phase gates on every edge using gamma_l.",
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ]
+      },
+      {
+        "description": "For l=1..p, apply RX(2*beta_l) on every qubit after the phase layer.",
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ]
+      },
+      {
+        "description": "Read the statevector or measure all qubits. Compute <C> or the best sampled cut. The angles come from a classical grid search or optimization on F_p.",
+        "equation_ids": [
+          "eq_4"
+        ]
+      }
+    ],
+    "measurement": "Measure all n qubits in the Z basis only if counts are required. Otherwise read the statevector without measurements. Qiskit little-endian order applies, so vertex i is bits[::-1][i].",
+    "classical_postprocessing": "Evaluate the cut of each sampled bitstring and keep the maximum, or compute F_p. Optimize (gamma, beta) by a classical grid search, using the full small-graph simulation as a stand-in for the local-subgraph evaluation.",
+    "assumptions": [
+      "The instance is a tiny unweighted regular graph, chosen by the builder.",
+      "p is between 1 and 3.",
+      "The angle sign and RZZ convention are fixed by the builder so that maximizing <C> gives the largest cut.",
+      "n is within the qubit cap."
+    ],
+    "missing_information": [
+      "The explicit p=1 closed-form edge expectation for 3-regular graphs is not given.",
+      "The optimal angles are not given.",
+      "The large-p strategy is not specified.",
+      "The detailed classical preprocessing method is not specified."
+    ]
+  }
+}

@@ -1,0 +1,129 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "85a44c28-c9a2-4e55-89e2-cf92b7e4fe22",
+  "parent_run_id": "1a4663bb-c9d6-4466-bf78-9126945c606e",
+  "created_at": "2026-11-01T00:22:27.911554+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "de69ab5999066fb6f09f82d38455b02855f54f08439a6102b3d6a8d5d052ef92",
+  "source_specification_sha256": "1b5aa47ea25906e2a909681e1d9f2baf59bc9ef83f773e3b42d6f811e835955d",
+  "source_python_sha256": "8f27b22ac90de36285b9e5b82111e212251ac9a48203cafeb2a1a7dbae303a67",
+  "elapsed_seconds": 69.516,
+  "usage": {
+    "input_tokens": 5381,
+    "output_tokens": 9687,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds T steps of a disordered 2D split-step discrete-time quantum walk on a periodic 2^n x 2^n lattice (default 4x4, 2n+2 qubits). Each step applies a seeded site-dependent Ry coin on each axis coin qubit, a coin-controlled x shift, a unitary reflection on the cut horizontal links of one row (an optional cut), and a coin-controlled y shift. The cut and uncut circuits share the same disorder angles for the same seed. Input preparation and measurement are left to the runner.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import RYGate\nimport math\nimport numpy as np\n\n\ndef _get(inst, key, lo, hi):\n    v = inst.get(key)\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError('invalid or missing parameter ' + key)\n    return v\n\n\ndef _inc(qc, reg, ctrl, forward):\n    # +1 (forward) or -1 (inverse) mod 2^len(reg), controlled on ctrl being 1\n    n = len(reg)\n    order = range(n - 1, -1, -1) if forward else range(n)\n    for i in order:\n        qc.mcx([ctrl] + list(reg[:i]), reg[i])\n\n\ndef _shift(qc, reg, ctrl):\n    # eq_2: coin 0 -> +1, coin 1 -> -1 (mod 2^n)\n    qc.x(ctrl)\n    _inc(qc, reg, ctrl, True)\n    qc.x(ctrl)\n    _inc(qc, reg, ctrl, False)\n\n\ndef _coin(qc, pos, targets, theta, N):\n    # eq_1: multiplexed exp(-i theta Y) = Ry(2 theta), controlled on the site index\n    for a, t in enumerate(targets):\n        for s in range(N * N):\n            g = RYGate(2.0 * float(theta[a][s])).control(len(pos), ctrl_state=s)\n            qc.append(g, list(pos) + [t])\n\n\ndef _swap_states(qc, a, b):\n    # transposition of two basis states given as {qubit: bit} over the same qubit set\n    diff = [q for q in a if a[q] != b[q]]\n    p = diff[0]\n    others = diff[1:]\n    for q in others:\n        qc.cx(p, q)\n    ap = dict(a)\n    for q in others:\n        ap[q] = a[q] ^ a[p]\n    ctrls = [q for q in a if q != p]\n    zeros = [q for q in ctrls if ap[q] == 0]\n    for q in zeros:\n        qc.x(q)\n    qc.mcx(ctrls, p)\n    for q in zeros:\n        qc.x(q)\n    for q in reversed(others):\n        qc.cx(p, q)\n\n\ndef _reflect(qc, n, cxq, row, xs, xe):\n    # eq_3: applied right after the x shift. For each cut link (x,x+1) on the row,\n    # swap |x+1,c=0> and |x,c=1> so the walker that tried to cross is returned to its\n    # origin site with flipped coin. The y coin qubit is untouched.\n    for x in range(xs, xe):\n        a = {}\n        b = {}\n        for i in range(n):\n            a[i] = (x >> i) & 1\n            b[i] = ((x + 1) >> i) & 1\n            a[n + i] = (row >> i) & 1\n            b[n + i] = (row >> i) & 1\n        a[cxq] = 1\n        b[cxq] = 0\n        _swap_states(qc, a, b)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _get(instance, 'n_bits', 2, 3)\n    T = _get(instance, 'steps', 1, 32)\n    seed = _get(instance, 'seed', 0, 2 ** 31 - 1)\n    cut = instance.get('cut')\n    if not isinstance(cut, bool):\n        raise ValueError('cut must be a bool')\n    N = 1 << n\n    row = _get(instance, 'cut_row', 0, N - 1)\n    xs = _get(instance, 'cut_x_start', 0, N - 2)\n    xe = _get(instance, 'cut_x_end', 1, N - 1)\n    if xe <= xs:\n        raise ValueError('cut_x_end must exceed cut_x_start')\n    qx = QuantumRegister(n, 'x')\n    qy = QuantumRegister(n, 'y')\n    qcn = QuantumRegister(2, 'coin')\n    qc = QuantumCircuit(qx, qy, qcn)\n    xr = list(range(n))\n    yr = list(range(n, 2 * n))\n    pos = xr + yr\n    cxq = 2 * n\n    cyq = 2 * n + 1\n    rng = np.random.default_rng(seed)\n    theta = rng.uniform(0.0, 2.0 * math.pi, size=(2, N * N))\n    for _ in range(T):\n        _coin(qc, pos, [cxq, cyq], theta, N)\n        _shift(qc, xr, cxq)\n        if cut:\n            _reflect(qc, n, cxq, row, xs, xe)\n        _shift(qc, yr, cyq)\n    return qc",
+    "example_instance_json": "{\"n_bits\":2,\"steps\":4,\"seed\":7,\"cut\":true,\"cut_row\":0,\"cut_x_start\":0,\"cut_x_end\":2}",
+    "register_layout": [
+      "qubits 0..n-1: x position, little-endian (qubit 0 = LSB)",
+      "qubits n..2n-1: y position, little-endian",
+      "qubit 2n: coin c_x (0 means +1 hop, 1 means -1 hop)",
+      "qubit 2n+1: coin c_y (0 means +1 hop, 1 means -1 hop)",
+      "default n_bits=2: x=q0,q1; y=q2,q3; c_x=q4; c_y=q5; A=(0,0), B=(2,0)",
+      "site index for the disorder table is x + 2^n * y"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_coin",
+        "explanation": "Per-site, per-axis multiplexed Ry(2*theta) (= exp(-i theta Y)) on each coin qubit. Each is controlled on the position register through ctrl_state=site index. Angles are uniform in [0,2pi) from numpy default_rng(seed)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_shift (with _inc)",
+        "explanation": "Coin-controlled modular increment (coin 0) or decrement (coin 1) built from cascaded multi-controlled X gates. It is applied per axis in sequence (split-step) rather than as a simultaneous diagonal hop."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_reflect (with _swap_states), called in build_circuit when cut is true",
+        "explanation": "Unitary reflecting links on the chosen row between x=cut_x_start and x=cut_x_end. After the x shift, the basis states |x+1,c_x=0> and |x,c_x=1> are swapped for each cut link. This is equivalent to flipping the coin and skipping the hop (reflection)."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "U^T applied to |A>|c0> is realised by the T-step loop in build_circuit. The initial state |0,0>|00> is prepared by the runner, so no state preparation appears in the circuit."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The arrival-probability readout is a measurement or statevector post-processing step. The circuit is measurement-free."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Replaced the simultaneous diagonal shift S with a split-step shift: an x shift (with reflection on cut links) followed by a y shift. The step is U = S_y S_x' C.",
+        "reason": "With a simultaneous x and y hop, a horizontal link cut cannot be applied unambiguously, because the walker would also move in y. The split-step ordering is listed as missing information in the specification."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The reflection R is implemented as a post-shift transposition of basis states |x+1,c_x=0> and |x,c_x=1>, instead of a pre-shift coin flip followed by a shift S' restricted to non-reflected components.",
+        "reason": "This gives the same permutation (reflected walker stays at its site with flipped coin) and is manifestly unitary and bijective."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Generalised the lattice to a parameterised 2^n x 2^n lattice with n_bits in {2,3}, steps 1..32, an optional cut, and a configurable cut row and x-range. The default is the 4x4 instance. Link (x,x+1) is cut for x in [cut_x_start, cut_x_end-1], with no wrap-around links.",
+        "reason": "Satisfies the requirement to accept varying valid instance parameters while staying within the 12-qubit cap and the gate-count budget."
+      }
+    ],
+    "assumptions": [
+      "Disorder is a fixed seeded uniform [0,2pi) angle per site and per coin axis, identical for cut and uncut circuits with the same seed",
+      "The initial state (walker at A, coin 00) is prepared by the runner",
+      "Cut links are horizontal links on a single row and do not include periodic wrap-around links",
+      "exp(-i theta Y) is implemented as Ry(2*theta)",
+      "Coin qubit value 0 means +1 hop and 1 means -1 hop"
+    ],
+    "unresolved_issues": [
+      "The paper's exact coin and shift definitions and split-step ordering are unknown, so this is a plausible concrete model rather than a verified reproduction",
+      "The disorder distribution and cut-reflection rule are assumptions",
+      "The Hamiltonian realization, quasienergy winding number and Chern number are not implemented",
+      "A 4x4 lattice is far too small to demonstrate edge-state transport or scaling"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 9480,
+    "depth": 6120,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

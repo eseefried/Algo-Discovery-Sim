@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "23aa934a-9736-4cbe-b496-bc1bf3a51100",
+  "parent_run_id": "ec21a219-c599-49e6-9317-dce4b4efe76c",
+  "created_at": "2026-11-01T00:12:44.771788+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "9b9cfe5660fffe690c4cce9bb6e44228e6abc71bf7cccec276f91df6ac31f794",
+  "source_specification_sha256": "f5aa44914c3c911fedb07a7b034d10dc417a31b1d1f18fcffa42ac3e9908498d",
+  "source_python_sha256": "3d32268dd536f21d4fc7e644b217c4850ef01e2ae88e739b0b177eca166c45bf",
+  "elapsed_seconds": 61.044,
+  "usage": {
+    "input_tokens": 5808,
+    "output_tokens": 8303,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Unitary circuit for `steps` coined quantum-walk steps on a reflecting open chain of L=2^m sites with i.i.d. dynamic edge percolation. Each step uses fresh edge ancillas rotated by Ry(theta) with sin^2(theta/2)=p, then applies the Hadamard coin and a shift that moves across open edges and reflects with a coin flip at closed edges or boundaries. The shift is built as a fixed cyclic permutation T of the 2L (position, coin) states after a controlled swap Z that is conditioned on closed edges. Ancillas are left entangled and are never reset, so tracing them out gives the random-unitary channel Phi^n. The qubit cap limits how many steps fit (for L=4, at most 3). No state preparation or measurement is included.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _int_param(instance, key):\n    value = instance.get(key)\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(key + ' must be an integer')\n    return value\n\n\ndef _closed_edge_swaps(qc, pos, coin, edges, m, sites):\n    # Z: for each edge e, if closed (ancilla=0) swap |e,c=0> with |e+1,c=1>.\n    # Implemented as CX-conjugated multi-controlled X on the coin qubit (eq_2).\n    for e in range(sites - 1):\n        anc = edges[e]\n        diff = [i for i in range(m) if ((e >> i) & 1) != (((e + 1) >> i) & 1)]\n        for d in diff:\n            qc.cx(coin, pos[d])\n        zeros = [pos[i] for i in range(m) if not ((e >> i) & 1)]\n        for q in zeros:\n            qc.x(q)\n        qc.x(anc)\n        qc.mcx(list(pos) + [anc], coin)\n        qc.x(anc)\n        for q in zeros:\n            qc.x(q)\n        for d in diff:\n            qc.cx(coin, pos[d])\n\n\ndef _cycle_shift(qc, pos, coin, m):\n    # T: cyclic permutation (0,0)->(1,0)->...->(L-1,0)->(L-1,1)->...->(0,1)->(0,0) (eq_2).\n    # Encode k = x for c=0 and k = 2L-1-x for c=1 (CX from coin onto position),\n    # increment k mod 2L with the coin as most significant bit, then undo the encoding.\n    for q in pos:\n        qc.cx(coin, q)\n    qs = list(pos) + [coin]\n    for i in range(m, -1, -1):\n        ctrls = qs[:i]\n        if len(ctrls) == 0:\n            qc.x(qs[i])\n        elif len(ctrls) == 1:\n            qc.cx(ctrls[0], qs[i])\n        else:\n            qc.mcx(ctrls, qs[i])\n    for q in pos:\n        qc.cx(coin, q)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    m = _int_param(instance, 'num_position_qubits')\n    steps = _int_param(instance, 'steps')\n    p = instance.get('p')\n    if isinstance(p, bool) or not isinstance(p, (int, float)):\n        raise ValueError('p must be a number')\n    p = float(p)\n    if not (p == p) or p < 0.0 or p > 1.0:\n        raise ValueError('p must be in [0,1]')\n    if m < 1 or m > 3:\n        raise ValueError('num_position_qubits must be in 1..3')\n    if steps < 1:\n        raise ValueError('steps must be >= 1')\n    sites = 2 ** m\n    n_edges = sites - 1\n    total = m + 1 + n_edges * steps\n    if total > 12:\n        raise ValueError('total qubits would exceed 12')\n    pos_reg = QuantumRegister(m, 'pos')\n    coin_reg = QuantumRegister(1, 'coin')\n    edge_regs = [QuantumRegister(n_edges, 'edge' + str(s)) for s in range(steps)]\n    qc = QuantumCircuit(pos_reg, coin_reg, *edge_regs)\n    pos = list(pos_reg)\n    coin = coin_reg[0]\n    theta = 2.0 * math.asin(math.sqrt(p))\n    for s in range(steps):\n        edges = list(edge_regs[s])\n        # eq_3: fresh edge ancillas, open with probability p\n        for a in edges:\n            qc.ry(theta, a)\n        # eq_2: U_omega = S_omega (I x H)\n        qc.h(coin)\n        _closed_edge_swaps(qc, pos, coin, edges, m, sites)\n        _cycle_shift(qc, pos, coin, m)\n    return qc",
+    "example_instance_json": "{\"num_position_qubits\": 2, \"p\": 0.5, \"steps\": 3}",
+    "register_layout": [
+      "qubits 0..m-1: pos register, little-endian walker position x (m=2 in example: qubits 0,1)",
+      "qubit m: coin (c=0 moves right, c=1 moves left); qubit 2 in example",
+      "step s edge ancillas: qubit m+1+s*(2^m-1)+e is the ancilla for edge e between sites e and e+1 (1=open, 0=closed); example: step 0 qubits 3-5, step 1 qubits 6-8, step 2 qubits 9-11",
+      "total qubits = m+1+(2^m-1)*steps, capped at 12"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (fresh Ry-prepared edge ancillas per step controlling _closed_edge_swaps)",
+        "explanation": "The channel sum_omega p(omega) U_omega rho U_omega^dagger arises when the edge ancillas are traced out. The circuit is the coherent purification, with one fresh ancilla set per step and no reset."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_closed_edge_swaps and _cycle_shift, plus coin Hadamard in build_circuit",
+        "explanation": "U_omega = S_omega (I x H), with S_omega = T Z. Z swaps |e,0> and |e+1,1> when edge e is closed. T is the fixed cyclic permutation giving the open-edge move and the boundary reflection."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit (qc.ry(theta, a) with theta=2 asin(sqrt p))",
+        "explanation": "Each edge ancilla is prepared as cos(theta/2)|0>+sin(theta/2)|1>, so it is open with probability p."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Peripheral spectrum and the n->infinity limit are classical analysis of the superoperator. The circuit only provides finite-n evolution."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Position readout and comparison with P_infty involve measurement and post-processing, which are excluded from the operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The shift S_omega is factorized as T after Z, with Z a closed-edge controlled swap and T a fixed cyclic permutation on 2L states. A multi-controlled increment on an encoded index is used instead of per-site multi-controlled gates.",
+        "reason": "Gives an equivalent permutation (verified analytically: the images of the pair {|e,0>,|e+1,1>} are the same set for open and closed edges) with a compact construction."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3"
+        ],
+        "change": "Mid-circuit reset of ancillas is replaced by fresh ancillas for every step, and the number of steps is limited by the 12-qubit cap (for L=4, steps<=3).",
+        "reason": "Resets and dynamic circuits are not allowed, so the random-unitary averaging is realised by purification."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Generalised from the fixed 4-site chain to L=2^m sites with m in 1..3, with p and steps as parameters. The Hadamard coin and the equal-p i.i.d. edge model are kept fixed.",
+        "reason": "Allows varying valid instances while keeping the same construction; non-power-of-two chains would need extra encoding."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Superoperator spectral analysis, P_infty and the position measurement are excluded from the circuit.",
+        "reason": "The task requires a measurement-free unitary operation without simulation or post-processing."
+      }
+    ],
+    "assumptions": [
+      "Edge e joins sites e and e+1; ancilla value 1 means open, with probability p",
+      "Coin 0 moves right and coin 1 moves left; closed edges and boundaries reflect with a coin flip",
+      "Hadamard coin applied before the shift in each step",
+      "The runner prepares the initial state (for example pos=0, coin=0, ancillas |0>) and reduces over ancillas",
+      "Qubit order is little-endian with the coin as the most significant bit of the encoded cyclic index"
+    ],
+    "unresolved_issues": [
+      "The paper's exact coin, shift and boundary conventions are unknown, so this is a plausible reconstruction rather than the paper's model",
+      "The asymptotic state of the channel is analysed classically, not by this circuit",
+      "Long-time behaviour cannot be probed with the circuit at the 12-qubit cap because only a few steps fit",
+      "The 1D classification and 2D Grover results are not reconstructed"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 12,
+    "gate_count": 436,
+    "depth": 276,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

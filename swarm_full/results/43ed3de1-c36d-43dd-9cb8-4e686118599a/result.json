@@ -1,0 +1,110 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "43ed3de1-c36d-43dd-9cb8-4e686118599a",
+  "parent_run_id": "ed0f13c3-c880-4fae-87e6-79b8bd9373a3",
+  "created_at": "2026-10-31T21:39:25.922841+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "faedf1bab6ade7a4163284255f9f45530058d3923b7d13d2ce187f67a23fd65c",
+  "source_specification_sha256": "43be3eb272f8f15482a2d14d9b2b62d4343854fc97147122c6612705212669a7",
+  "source_python_sha256": "bf8324de2fec9ed75ea2ee6b547b8e8095529c5680e01c6f3aaa020ba38b875d",
+  "elapsed_seconds": 26.784,
+  "usage": {
+    "input_tokens": 4160,
+    "output_tokens": 3787,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Coined discrete-time quantum walk step U = S (I (x) C) repeated t times on a plain cycle C_N with N = 2^n nodes (C4, C8, C16). The walker has a 2-dimensional coin qubit and n node qubits. The shift is built from multi-controlled X gates: increment mod N on coin 0, decrement mod N on coin 1. The coin is selectable as Hadamard, Grover (X for degree 2) or a Y-rotation. The module builds only the walk operation, with no state preparation or measurement.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit\n\n\ndef _get_int(value, name, lo, hi):\n    if isinstance(value, bool) or not isinstance(value, int):\n        raise ValueError(name + \" must be an integer\")\n    if value < lo or value > hi:\n        raise ValueError(name + \" must be in [\" + str(lo) + \", \" + str(hi) + \"]\")\n    return value\n\n\ndef _apply_coin(qc, coin, theta):\n    # C acts on coin qubit 0 (part of eq_1)\n    if coin == \"hadamard\":\n        qc.h(0)\n    elif coin == \"grover\":\n        # Grover coin for degree 2: 2|s><s| - I = X\n        qc.x(0)\n    else:\n        qc.ry(theta, 0)\n\n\ndef _apply_shift(qc, n):\n    # S (part of eq_1): coin 0 -> node+1 mod 2^n, coin 1 -> node-1 mod 2^n\n    # node bit k is qubit 1+k\n    qc.x(0)\n    for k in reversed(range(n)):\n        lower = [1 + j for j in range(k)]\n        qc.mcx([0] + lower, 1 + k)\n    qc.x(0)\n    for k in reversed(range(n)):\n        lower = [1 + j for j in range(k)]\n        for q in lower:\n            qc.x(q)\n        qc.mcx([0] + lower, 1 + k)\n        for q in lower:\n            qc.x(q)\n\n\ndef build_circuit(instance):\n    \"\"\"Return t steps of the coined walk U = S (I (x) C) on the cycle C_{2^n}.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = _get_int(instance.get(\"node_qubits\"), \"node_qubits\", 2, 11)\n    steps = _get_int(instance.get(\"steps\"), \"steps\", 0, 256)\n    coin = instance.get(\"coin\", \"hadamard\")\n    if coin not in (\"hadamard\", \"grover\", \"rotation\"):\n        raise ValueError(\"coin must be hadamard, grover or rotation\")\n    theta = instance.get(\"theta\", 0.0)\n    if isinstance(theta, bool) or not isinstance(theta, (int, float)) or not math.isfinite(theta):\n        raise ValueError(\"theta must be a finite number\")\n    if n + 1 > 12:\n        raise ValueError(\"too many qubits\")\n    qc = QuantumCircuit(n + 1, name=\"dtqw_cycle\")\n    for _ in range(steps):\n        _apply_coin(qc, coin, float(theta))\n        _apply_shift(qc, n)\n    return qc",
+    "example_instance_json": "{\"node_qubits\": 3, \"steps\": 2, \"coin\": \"hadamard\", \"theta\": 0.0}",
+    "register_layout": [
+      "qubit 0: coin qubit (|0> = move +1, |1> = move -1 around the cycle)",
+      "qubits 1..n: node register, little-endian binary encoding of node x in 0..2^n-1 (qubit 1 is the least significant bit)",
+      "Total qubits = node_qubits + 1 (example: 4 qubits, cycle C8)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop over steps calling _apply_coin (C) then _apply_shift (S)",
+        "explanation": "One walk step U = S (I (x) C), with the coin acting on the coin qubit and the shift implemented as coin-controlled increment/decrement of the node register."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The fidelity F(t) is a measurement and post-processing quantity, so it is not part of the operation circuit. Software computes it after the circuit is built."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Narrowed to the plain unmodified cycle C_N with N = 2^n (C4, C8, C16). C6 and the modified cycles/graph families are not implemented.",
+        "reason": "The abstract does not specify the modifications, and a non-power-of-two node count does not map cleanly onto a qubit register without extra choices."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The three coins are replaced by a selectable set: Hadamard, Grover (equal to X for degree 2) and a Y-rotation with angle theta.",
+        "reason": "The abstract does not name the three coin operators."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The shift is the standard moving shift on the cycle (coin 0 increments the node, coin 1 decrements it). The operator order is coin first, then shift.",
+        "reason": "The shift convention is not given and is assumed."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The fidelity computation and the PST scan are excluded from the circuit.",
+        "reason": "The task requires a measurement-free operation and the runner prepares the inputs."
+      }
+    ],
+    "assumptions": [
+      "Coin dimension is 2 (degree-2 cycle) and is encoded in one qubit.",
+      "Node labelling is binary x with neighbours x±1 mod 2^n; the antipodal node of x is x + 2^(n-1).",
+      "The number of steps is capped at 256 and the node qubits at 11, so there are at most 12 qubits in total.",
+      "The runner prepares the initial state |a>|c0>."
+    ],
+    "unresolved_issues": [
+      "Exact cycle modifications, graph families and the three coins are unknown.",
+      "The decoherence model and the continuous-time walk are not implemented.",
+      "C6 is not representable as a plain power-of-two cycle here.",
+      "Antipodal PST for the plain cycle depends on the coin and initial state and is not asserted."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 206,
+    "depth": 154,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

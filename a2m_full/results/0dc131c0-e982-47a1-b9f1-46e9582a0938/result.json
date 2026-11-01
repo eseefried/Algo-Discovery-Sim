@@ -1,0 +1,143 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "0dc131c0-e982-47a1-b9f1-46e9582a0938",
+  "parent_run_id": "da8a1ce9-e4d3-4f62-840a-fa67688424a7",
+  "created_at": "2026-11-01T00:10:28.066785+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "f0790b5d222f1b7ae3c34f6c044896e3a3f21d300d9604567e0e0e39893b1d2a",
+  "source_specification_sha256": "a909774be7ed8faf35a18f1aa67d26fcd7fe7e229ba8553695345910d94a2479",
+  "source_python_sha256": "bdf438e1be37bc76e03c07327905c107afe9f93bd884ecfffd05426ae8d70dea",
+  "elapsed_seconds": 118.001,
+  "usage": {
+    "input_tokens": 5066,
+    "output_tokens": 15762,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds T repetitions of a discrete-time quantum-walk step on a balanced binary tree with 2^depth leaves (default depth 2, N=4 leaves) plus a path tail attached at the root. Each step applies one leaf phase oracle O_x, a per-vertex Grover coin, and a flip-flop edge shift. Only the unitary walk U^T is built. Tail plane-wave preparation, measurement, threshold and majority vote are left to the runner. The leaf rule is my own design, and the circuit is not claimed to compute NAND.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    depth = instance.get('depth')\n    x = instance.get('x')\n    tail = instance.get('tail_length')\n    steps = instance.get('steps')\n    if not _is_int(depth) or depth < 1 or depth > 3:\n        raise ValueError('depth must be an integer in 1..3')\n    if not isinstance(x, list) or len(x) != 2 ** depth:\n        raise ValueError('x must be a list of length 2**depth')\n    for b in x:\n        if not _is_int(b) or b not in (0, 1):\n            raise ValueError('x entries must be 0 or 1')\n    if not _is_int(tail) or tail < 1 or tail > 32:\n        raise ValueError('tail_length must be an integer in 1..32')\n    if not _is_int(steps) or steps < 0 or steps > 40:\n        raise ValueError('steps must be an integer in 0..40')\n    return depth, x, tail, steps\n\n\ndef _bits(v, n):\n    return [(v >> k) & 1 for k in range(n)]\n\n\ndef _pattern_x(qc, controls, values, target):\n    # X on target when controls match the given bit values (self-inverse)\n    for q, v in zip(controls, values):\n        if v == 0:\n            qc.x(q)\n    qc.mcx(list(controls), target)\n    for q, v in zip(controls, values):\n        if v == 0:\n            qc.x(q)\n\n\ndef _swap_states(qc, qubits, a_bits, b_bits):\n    # exchange two computational basis states of the listed qubits\n    n = len(qubits)\n    diff = [k for k in range(n) if a_bits[k] != b_bits[k]]\n    p = diff[0]\n    rest = diff[1:]\n    for k in rest:\n        qc.cx(qubits[p], qubits[k])\n    ctrl = []\n    vals = []\n    for k in range(n):\n        if k == p:\n            continue\n        ctrl.append(qubits[k])\n        vals.append(a_bits[k] ^ (a_bits[p] if k in rest else 0))\n    _pattern_x(qc, ctrl, vals, qubits[p])\n    for k in rest:\n        qc.cx(qubits[p], qubits[k])\n\n\ndef _flag(qc, vq, anc, verts):\n    # toggle anc on vertices in verts (apply twice to uncompute)\n    for v in verts:\n        _pattern_x(qc, vq, _bits(v, len(vq)), anc)\n\n\ndef _edges(depth, tail):\n    m = 2 ** (depth + 1) - 1\n    internal = 2 ** depth - 1\n    edges = []\n    for v in range(internal):\n        edges.append(((v, 1), (2 * v + 1, 0)))\n        edges.append(((v, 2), (2 * v + 2, 0)))\n    edges.append(((0, 0), (m, 1)))\n    for j in range(tail - 1):\n        edges.append(((m + j, 0), (m + j + 1, 1)))\n    return edges\n\n\ndef _step(qc, vq, cq, anc, depth, x, tail):\n    nv = len(vq)\n    m = 2 ** (depth + 1) - 1\n    internal = 2 ** depth - 1\n    alpha = 2.0 * math.asin(1.0 / math.sqrt(3.0))\n    # eq_2: one leaf phase oracle call, (-1)^{x_i} on leaf i\n    for i, b in enumerate(x):\n        if b == 1:\n            lb = _bits(internal + i, nv)\n            _pattern_x(qc, vq, lb, anc)\n            qc.z(anc)\n            _pattern_x(qc, vq, lb, anc)\n    # eq_3: Grover coin 2|phi><phi|-I on degree-3 vertices (internal nodes and root)\n    _flag(qc, vq, anc, range(internal))\n    qc.ch(cq[1], cq[0], ctrl_state=0)\n    qc.ry(-alpha, cq[1])\n    qc.z(anc)\n    qc.x(cq[0])\n    qc.x(cq[1])\n    qc.mcp(math.pi, [anc, cq[0]], cq[1])\n    qc.x(cq[0])\n    qc.x(cq[1])\n    qc.ry(alpha, cq[1])\n    qc.ch(cq[1], cq[0], ctrl_state=0)\n    _flag(qc, vq, anc, range(internal))\n    # degree-2 tail vertices: coin swaps slots 0 and 1\n    if tail > 1:\n        _flag(qc, vq, anc, range(m, m + tail - 1))\n        qc.x(cq[1])\n        qc.ccx(anc, cq[1], cq[0])\n        qc.x(cq[1])\n        _flag(qc, vq, anc, range(m, m + tail - 1))\n    # degree-1 vertices (leaves, tail end): identity coin\n    # flip-flop shift along tree/tail edges\n    qubits = list(vq) + list(cq)\n    for (v, c), (u, d) in _edges(depth, tail):\n        _swap_states(qc, qubits, _bits(v, nv) + _bits(c, 2), _bits(u, nv) + _bits(d, 2))\n\n\ndef build_circuit(instance):\n    depth, x, tail, steps = _validate(instance)\n    total_vertices = 2 ** (depth + 1) - 1 + tail\n    nv = max(2, (total_vertices - 1).bit_length())\n    if nv + 3 > 12:\n        raise ValueError('too many qubits')\n    vreg = QuantumRegister(nv, 'vertex')\n    creg = QuantumRegister(2, 'coin')\n    areg = QuantumRegister(1, 'anc')\n    qc = QuantumCircuit(vreg, creg, areg)\n    vq = list(vreg)\n    cq = list(creg)\n    for _ in range(steps):\n        _step(qc, vq, cq, areg[0], depth, x, tail)\n    return qc",
+    "example_instance_json": "{\"depth\":2,\"x\":[1,0,1,1],\"tail_length\":4,\"steps\":6}",
+    "register_layout": [
+      "Example (depth=2, tail_length=4: 7 tree vertices + 4 tail = 11 vertices, nv=4):",
+      "qubits 0-3: vertex register, little-endian (qubit 0 = LSB of vertex index)",
+      "vertex index: tree nodes in heap order, root=0, children of v are 2v+1 and 2v+2, leaf i = 2^depth-1+i (3..6 here), tail vertex j = (2^(depth+1)-1)+j (7..10), j=0 adjacent to root",
+      "qubits 4-5: coin register, little-endian slot index; slot 0 = parent (tail vertices: away from tree), slot 1 = left child (tail vertices: toward tree), slot 2 = right child, slot 3 unused",
+      "qubit 6: anc, query/flag ancilla, must be |0> on input and is returned to |0>",
+      "General: nv = max(2, ceil(log2(total vertices))), total qubits = nv+3 <= 12"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "NAND recursion defines the target function f(x). The circuit does not evaluate it classically, and nothing in the circuit is claimed to compute it."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_step: oracle block (leaf flag on anc, then Z on anc)",
+        "explanation": "The phase oracle (-1)^{x_i} on leaf vertex i is realized once per walk step as an x-dependent pattern-controlled phase on the vertex register, using anc as a leaf flag. It acts as identity on non-leaf vertices."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_step: coin blocks and flip-flop shift (_swap_states, _edges)",
+        "explanation": "One walk step is shift after coin after oracle. The coin is the Grover reflection 2|phi><phi|-I with uniform phi: a 3-slot coin on degree-3 vertices, a slot swap on degree-2 tail vertices, and identity on degree-1 vertices. The shift is a flip-flop permutation built from basis-state swaps on edge arcs."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Initial-state preparation is done by the runner, so the tail plane-wave state is not prepared in this operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop of `steps` calls to _step",
+        "explanation": "U^T is implemented with T = instance['steps'] and tail length L = instance['tail_length']. The readout p_refl, threshold theta and majority vote are classical and not part of the circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Leaf rule fixed as a pure phase reflection: the leaf coin is the identity and the oracle gives phase (-1)^{x_i}. The oracle is built as x-dependent phase gates from the bit string in the instance.",
+        "reason": "The abstract and spec do not give the leaf rule. This is a design choice that makes the oracle a known-string phase circuit, not a true black box. It is not claimed to implement the cited algorithm."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The shift is specified explicitly as flip-flop over arcs (v, slot) with slots 0=parent, 1=left, 2=right. Degree-2 tail vertices use slots 0 (away from tree) and 1 (toward tree). The coin on 2 qubits has one unused slot.",
+        "reason": "The spec leaves the shift and coin encoding unspecified. A concrete unitary permutation with standard gates is needed."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "Tail plane-wave state preparation excluded from the circuit.",
+        "reason": "The task requires an operation with inputs prepared by the runner. k is therefore not a circuit parameter."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Scope narrowed to the unitary U^T. Readout, threshold theta and majority voting are omitted. T and L are free instance parameters (steps <= 40, tail_length <= 32) rather than c*sqrt(N).",
+        "reason": "Measurements and classical postprocessing are forbidden in the circuit. The constants are unresolved."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Instance family limited to balanced trees of depth 1..3 (N = 2, 4 or 8 leaves). The arbitrary-formula algorithm (rebalancing, weighted edges, phase estimation) is excluded.",
+        "reason": "The spec's declared scope is the balanced binary tree, and the 12-qubit cap applies."
+      }
+    ],
+    "assumptions": [
+      "Coin vector is uniform over the real edges at each vertex",
+      "Tail is a path of tail_length vertices attached to the root, with a reflecting end",
+      "Anc is |0> on input and is restored to |0> by every flag compute/uncompute",
+      "The slot-3 coin state is never populated when the input has coin slots in 0..2 on valid vertices"
+    ],
+    "unresolved_issues": [
+      "The cited algorithm's true leaf rule, coin weights and readout are unknown, so no claim is made that this walk separates f=0 from f=1",
+      "Good values of tail_length, steps and wave number k, and the threshold, are untuned",
+      "Tail plane-wave initial state must be prepared by the runner, and amplitudes on invalid (vertex, slot) basis states are not handled",
+      "Oracle is built from the explicit string x, not a hidden black box"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 7,
+    "gate_count": 15036,
+    "depth": 12128,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

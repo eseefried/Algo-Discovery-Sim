@@ -1,0 +1,125 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "52c33bed-e575-443e-a2dd-4305df24cc9d",
+  "parent_run_id": "c96f7338-04cb-4948-bc96-f4bc56c36972",
+  "created_at": "2026-11-01T00:16:25.508536+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "90bcbea96d5df8f8f48036b21d19451eba1329321f0ff274652744c8a5d1123d",
+  "source_specification_sha256": "f0c57a5b6da4804b67cd7d60312fddeacef65d9f3dae0a89b1dc445a7fa72b4e",
+  "source_python_sha256": "ecb9144c6c75c5da09a7e23afb51e25ef170ff1e84945f23e0587e9d4108f3e2",
+  "elapsed_seconds": 30.77,
+  "usage": {
+    "input_tokens": 5176,
+    "output_tokens": 4708,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Single-step (N=1) Naimark dilation of a two-outcome qubit measurement with M0=U0 diag(a,b) V and M1=U1 diag(sqrt(1-a^2),sqrt(1-b^2)) V on a system qubit and a probe qubit. The circuit applies V on the system, then a system-controlled RY on the probe (angles 2*arccos(a) for s=0 and 2*arccos(b) for s=1), then probe-controlled U0 (p=0) and U1 (p=1) on the system. It is unitary and has no input preparation or measurement. The output state is sum_k (M_k psi) (x) |k>_p.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _num(obj, key):\n    if not isinstance(obj, dict) or key not in obj:\n        raise ValueError('missing parameter: ' + key)\n    v = obj[key]\n    if isinstance(v, bool) or not isinstance(v, (int, float)):\n        raise ValueError('parameter must be a real number: ' + key)\n    v = float(v)\n    if not math.isfinite(v):\n        raise ValueError('parameter must be finite: ' + key)\n    return v\n\n\ndef _unitary(instance, name):\n    p = instance.get(name)\n    if not isinstance(p, dict):\n        raise ValueError('missing unitary spec: ' + name)\n    th = _num(p, 'theta')\n    ph = _num(p, 'phi')\n    lam = _num(p, 'lam')\n    gamma = _num(p, 'gamma') if 'gamma' in p else 0.0\n    return th, ph, lam, gamma\n\n\ndef build_circuit(instance):\n    \"\"\"Dilation circuit: qubit 0 = system s, qubit 1 = probe p (starts in |0>).\n\n    instance: {\"a\": float, \"b\": float, \"V\": {theta, phi, lam[, gamma]},\n               \"U0\": {...}, \"U1\": {...}}\n    Each unitary is exp(i*gamma) * U(theta, phi, lam) (Qiskit U gate).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    a = _num(instance, 'a')\n    b = _num(instance, 'b')\n    if not (0.0 <= a <= 1.0) or not (0.0 <= b <= 1.0):\n        raise ValueError('a and b must lie in [0, 1]')\n    v_par = _unitary(instance, 'V')\n    u0_par = _unitary(instance, 'U0')\n    u1_par = _unitary(instance, 'U1')\n\n    # eq_2: cos(theta_z/2) = singular value, theta in [0, pi]\n    theta0 = 2.0 * math.acos(a)\n    theta1 = 2.0 * math.acos(b)\n\n    s = QuantumRegister(1, 's')\n    p = QuantumRegister(1, 'p')\n    qc = QuantumCircuit(s, p)\n\n    # eq_1 / eq_4: pre-rotation V on the system\n    qc.u(v_par[0], v_par[1], v_par[2], s[0])\n    qc.global_phase += v_par[3]\n\n    # eq_4: C = sum_z |z><z| (x) RY(theta_z) on probe\n    qc.x(s[0])\n    qc.cry(theta0, s[0], p[0])\n    qc.x(s[0])\n    qc.cry(theta1, s[0], p[0])\n\n    # eq_4: U_k on the system controlled on probe = k\n    qc.x(p[0])\n    qc.cu(u0_par[0], u0_par[1], u0_par[2], u0_par[3], p[0], s[0])\n    qc.x(p[0])\n    qc.cu(u1_par[0], u1_par[1], u1_par[2], u1_par[3], p[0], s[0])\n    return qc",
+    "example_instance_json": "{\"a\":0.9,\"b\":0.5,\"V\":{\"theta\":0.7,\"phi\":0.3,\"lam\":-0.4},\"U0\":{\"theta\":1.1,\"phi\":0.2,\"lam\":0.5},\"U1\":{\"theta\":0.4,\"phi\":-0.6,\"lam\":0.9}}",
+    "register_layout": [
+      "qubit 0: system s (input state psi, little-endian least significant bit)",
+      "qubit 1: probe p (input |0>); the output state is sum_k (M_k psi)_s (x) |k>_p",
+      "Basis index = s + 2*p"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: V gate, and U0/U1 parameters used in the controlled-U steps",
+        "explanation": "The Kraus operators M0, M1 are realized through V, the singular values a, b, and the feedback unitaries U0, U1, with each unitary given as exp(i*gamma)*U(theta,phi,lam)."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: theta0 = 2*acos(a), theta1 = 2*acos(b)",
+        "explanation": "The controlled-RY angles are set so that the probe |0> amplitude equals the singular value."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The Hamiltonian exp(-i g t Z(x)Y) is not synthesized. Its Z-conditioned RY form is implemented directly as controlled-RY gates with arbitrary angles. The extra pulses that would reach theta0 != +-theta1 are not specified."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: V, controlled-RY pair, then X-conjugated cu for U0 and cu for U1",
+        "explanation": "This realizes sum_k (U_k (x) |k><k|) C (V psi (x) |0>) with C = sum_z |z><z| (x) RY(theta_z)."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The Born-rule probabilities and post-measurement states are computed by the runner, not by the circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_4"
+        ],
+        "change": "Each unitary U0, U1, V is parametrized as exp(i*gamma)*U(theta,phi,lam), with gamma optional and defaulting to 0. U0 and U1 are applied as controlled-U gates (cu), which carry gamma as the controlled phase.",
+        "reason": "A concrete gate-level parametrization is required. The controlled phase affects the relative phase between branches, so it must be explicit."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The Z(x)Y Hamiltonian evolution is replaced by directly parametrized controlled-RY gates.",
+        "reason": "The paper's pulse sequence and normalization are not available, and the construction only needs conditioned probe rotations."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to a single dilation step (N=1). The two-singular-value proof and the N-step decomposition with fresh probes are not implemented.",
+        "reason": "The specification marks these as missing information."
+      }
+    ],
+    "assumptions": [
+      "a and b lie in [0,1], so theta in [0,pi] and sin(theta/2) = sqrt(1-a^2) is nonnegative (no sign issue).",
+      "a == b is accepted as a valid but trivial case.",
+      "Qiskit's RY convention RY(theta)|0> = cos(theta/2)|0> + sin(theta/2)|1> is used.",
+      "The probe starts in |0>, prepared by the runner.",
+      "Completeness of M0 and M1 holds by construction."
+    ],
+    "unresolved_issues": [
+      "The paper's Hamiltonian normalization and exact pulse sequence for reaching arbitrary (theta0, theta1) are unavailable.",
+      "The N-step continuous decomposition is not implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 27,
+    "depth": 22,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

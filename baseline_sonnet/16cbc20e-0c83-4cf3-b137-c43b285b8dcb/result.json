@@ -1,0 +1,124 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "16cbc20e-0c83-4cf3-b137-c43b285b8dcb",
+  "parent_run_id": "10e49165-0953-4f8e-922c-5a4887ac9adf",
+  "created_at": "2026-10-31T22:27:39.956541+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "63cedce71a4a47ad8907a47ae52bd5150775581f3788f12ad0953f74d3a59a4a",
+  "source_specification_sha256": "e8d617c4ba7a32ed770fb86556ec2f4c4644f08482a96527fb15b915c0366c2b",
+  "source_python_sha256": "52809cc31275f9fa3ca7befc2426a069c30eeb6f2f3e3ba527294812e6899dc8",
+  "elapsed_seconds": 26.793,
+  "usage": {
+    "input_tokens": 4704,
+    "output_tokens": 4057,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Trotterized continuous-time quantum walk search operator exp(-iHt) on the complete graph K_N with N=2^n and a single marked vertex w, where H=-gamma*A-|w><w|. For K_N, A=N|s><s|-I, so H splits into two exactly implementable phase-type exponentials. The circuit alternates exp(i*gamma*N*dt|s><s|) and exp(i*dt|w><w|) for r first-order Trotter steps, with global phase exp(-i*gamma*t). Input-state preparation and measurement are left to the runner. The paper's perturbation-theory diagrammatics are not implemented.",
+    "source_python": "from qiskit import QuantumCircuit\nimport math\n\n\ndef _phase_on_basis_state(qc, angle, n, value):\n    \"\"\"Apply exp(i*angle*|value><value|) on qubits 0..n-1 (qubit 0 is the LSB).\"\"\"\n    zeros = [q for q in range(n) if not ((value >> q) & 1)]\n    for q in zeros:\n        qc.x(q)\n    if n == 1:\n        qc.p(angle, 0)\n    else:\n        qc.mcp(angle, list(range(n - 1)), n - 1)\n    for q in zeros:\n        qc.x(q)\n\n\ndef _phase_on_uniform(qc, angle, n):\n    \"\"\"Apply exp(i*angle*|s><s|), |s>=H^n|0>, as H^n (phase on |0..0>) H^n.\"\"\"\n    for q in range(n):\n        qc.h(q)\n    _phase_on_basis_state(qc, angle, n, 0)\n    for q in range(n):\n        qc.h(q)\n\n\ndef _real(instance, key):\n    v = instance[key]\n    if isinstance(v, bool) or not isinstance(v, (int, float)):\n        raise ValueError(key + \" must be a real number\")\n    v = float(v)\n    if not math.isfinite(v):\n        raise ValueError(key + \" must be finite\")\n    return v\n\n\ndef _integer(instance, key):\n    v = instance[key]\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError(key + \" must be an integer\")\n    return v\n\n\ndef build_circuit(instance):\n    \"\"\"Trotterized exp(-i H t), H = -gamma*A_{K_N} - |w><w|, N = 2**n.\n\n    instance keys: n_qubits (1..12), marked (0..N-1), gamma (>0), time (>=0), trotter_steps (>=1).\n    Uses A = N|s><s| - I, so\n    -iHt = i*gamma*N*t|s><s| + i*t|w><w| - i*gamma*t*I.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    for key in (\"n_qubits\", \"marked\", \"gamma\", \"time\", \"trotter_steps\"):\n        if key not in instance:\n            raise ValueError(\"missing key: \" + key)\n    n = _integer(instance, \"n_qubits\")\n    if n < 1 or n > 12:\n        raise ValueError(\"n_qubits must be in 1..12\")\n    big_n = 2 ** n\n    w = _integer(instance, \"marked\")\n    if w < 0 or w >= big_n:\n        raise ValueError(\"marked out of range\")\n    gamma = _real(instance, \"gamma\")\n    if gamma <= 0:\n        raise ValueError(\"gamma must be positive\")\n    t = _real(instance, \"time\")\n    if t < 0:\n        raise ValueError(\"time must be non-negative\")\n    r = _integer(instance, \"trotter_steps\")\n    if r < 1 or r > 10000:\n        raise ValueError(\"trotter_steps must be in 1..10000\")\n    qc = QuantumCircuit(n, name=\"ctqw_search_complete_graph\")\n    dt = t / r\n    for _ in range(r):\n        _phase_on_uniform(qc, gamma * big_n * dt, n)\n        _phase_on_basis_state(qc, dt, n, w)\n    qc.global_phase = -gamma * t\n    return qc",
+    "example_instance_json": "{\"n_qubits\": 3, \"marked\": 5, \"gamma\": 0.125, \"time\": 4.4, \"trotter_steps\": 20}",
+    "register_layout": [
+      "Qubits 0..n-1: vertex register, computational-basis integer encoding of vertex x as |x>, qubit 0 is the least significant bit",
+      "N = 2^n vertices; no ancilla qubits",
+      "Marked vertex w is the integer 'marked' in the same encoding"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (complete-graph identity A=N|s><s|-I, split into _phase_on_uniform and _phase_on_basis_state)",
+        "explanation": "H=-gamma*A-|w><w| is implemented for the complete graph K_N with N=2^n, which is a choice of graph not given in the abstract. Adjacency form, single marked vertex."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit (Trotter loop and global_phase)",
+        "explanation": "The unitary exp(-iHt) is implemented as a first-order Trotter product. The initial uniform state |s> is prepared by the runner and is not part of the circuit."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The H0/V split is graph-specific and not given in the abstract. The circuit evolves under the full H, so no split is used."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Generic second-order effective Hamiltonian. It is an analysis tool, not a circuit operation, and is not implemented."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The paper's weighted self-loop graph reduction and its diagrammatic rules are not specified, and the subspace growing with N is not reconstructed."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Narrowed to the complete graph K_N with N=2^n, one marked vertex, and an adjustable gamma, instead of the paper's unspecified graph family.",
+        "reason": "A concrete graph is required to build a circuit. K_N admits an exact decomposition of H into two phase-type operators."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The exact exponential is replaced by an r-step first-order Trotter product. The error is O(t^2/r) because |s><s| and |w><w| do not commute.",
+        "reason": "The two terms are each cheap to exponentiate exactly, but exp(-iHt) as a whole would otherwise need a dense unitary."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The perturbation-theory and weighted-graph content is not built into the circuit.",
+        "reason": "The abstract does not specify the necessary details. The circuit applies the full evolution rather than an effective-Hamiltonian evolution."
+      }
+    ],
+    "assumptions": [
+      "Complete graph K_N with N a power of two",
+      "Adjacency-matrix Hamiltonian with a single marked vertex",
+      "gamma is supplied by the instance; gamma=1/N is the usual critical value for K_N",
+      "The runner prepares the initial state, e.g. the uniform superposition"
+    ],
+    "unresolved_issues": [
+      "The paper's actual graph family and Hamiltonian form (adjacency vs Laplacian) are unknown",
+      "The subspace whose dimension grows with N is not reconstructed",
+      "The diagrammatic rules and perturbation order are unknown",
+      "The Trotter step count is a free parameter chosen by the instance"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 800,
+    "depth": 560,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,142 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "7da91b8d-0a52-4796-a41c-7be218d5ddd5",
+  "parent_run_id": "dd21c7e9-1078-4219-b0d7-4834e54f2d7d",
+  "created_at": "2026-11-01T00:19:25.315819+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "5e2b8d163ea2110503b100b41a31e2a95675d530aa976e7dac7ffe3986709234",
+  "source_specification_sha256": "3b9b376664ed4f094e2f469cd1dcf4203ed1c298df09853af33f670737194f40",
+  "source_python_sha256": "ebbcbd99302252aa4ec9ab6099cfa20e8bbc25fb174ab1307079caf8751a47a1",
+  "elapsed_seconds": 27.449,
+  "usage": {
+    "input_tokens": 6208,
+    "output_tokens": 3905,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the n+1 qubit Hadamard-test operation for the influence of variable i. It applies CX(a->x_i), then a phase oracle U_f synthesized from a truth table, then CX(a->x_i), then H on the ancilla. The oracle uses X gates and one multi-controlled phase of pi per f(x)=1 input, with no dense unitary. Input preparation (H on the x qubits and the ancilla) and measurement are left to the runner. If the runner prepares |s>|+>, then P(ancilla=1)=Inf_i(f).",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n\ndef build_circuit(instance):\n    \"\"\"Hadamard-test influence operation.\n\n    instance: {\"n\": int 1..11, \"target\": int in [0,n), \"truth_table\": list of 2^n ints in {0,1}}\n    truth_table[x] = f(x), where bit j of x is x_j and is held by qubit j.\n    Qubits 0..n-1 are the input register; qubit n is the ancilla.\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    t = instance.get('target')\n    tt = instance.get('truth_table')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n + 1 > 12:\n        raise ValueError('n must be an integer in 1..11')\n    if isinstance(t, bool) or not isinstance(t, int) or t < 0 or t >= n:\n        raise ValueError('target must be an integer in [0, n)')\n    if not isinstance(tt, (list, tuple)) or len(tt) != 2 ** n:\n        raise ValueError('truth_table must have length 2^n')\n    for v in tt:\n        if isinstance(v, bool) or not isinstance(v, int) or v not in (0, 1):\n            raise ValueError('truth_table entries must be 0 or 1')\n    xr = QuantumRegister(n, 'x')\n    ar = QuantumRegister(1, 'a')\n    qc = QuantumCircuit(xr, ar)\n    anc = n\n    # eq_2: CX(a->x_i) before the oracle\n    qc.cx(anc, t)\n    # eq_2: phase oracle U_f |x> = (-1)^f(x) |x>, one phase flip per f(x)=1 input\n    for x in range(2 ** n):\n        if tt[x] != 1:\n            continue\n        zeros = [j for j in range(n) if not (x >> j) & 1]\n        for j in zeros:\n            qc.x(j)\n        if n == 1:\n            qc.p(3.141592653589793, 0)\n        else:\n            qc.mcp(3.141592653589793, list(range(n - 1)), n - 1)\n        for j in zeros:\n            qc.x(j)\n    # eq_2: CX(a->x_i) after the oracle\n    qc.cx(anc, t)\n    # eq_4: final Hadamard on the ancilla before the runner's readout\n    qc.h(anc)\n    return qc",
+    "example_instance_json": "{\"n\":3,\"target\":0,\"truth_table\":[0,0,0,1,0,0,0,1]}",
+    "register_layout": [
+      "qubit 0: x_0 (least significant input bit)",
+      "qubit 1: x_1",
+      "qubit 2: x_2",
+      "qubit 3: interference ancilla a (runner prepares |+>; read in the computational basis after the final H; P(1)=Inf_i)",
+      "Input register is expected in |s>=H^{(x)n}|0^n> and the ancilla in |+>, both prepared by the runner",
+      "Truth-table index x has bit j equal to x_j, stored on qubit j"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Influence definition. It is the target quantity and is not coded. The circuit only provides the interferometric readout."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: cx(anc,t), truth-table phase-oracle loop, cx(anc,t)",
+        "explanation": "The ancilla-controlled X_i conjugation around one unconditional U_f gives the branch state (|0>U_f|s> + |1>X_iU_fX_i|s>)/sqrt2 when the runner supplies |s>|+>."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Analytic identity for the overlap, derived from X_i|s>=|s>. It is not coded."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: final qc.h(anc)",
+        "explanation": "The final Hadamard on the ancilla makes P(a=1)=(1-Re overlap)/2=Inf_i. Measurement itself is left to the runner."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Hoeffding shot count and junta thresholding are classical postprocessing and sampling. The generated operation contains no measurement or sampling."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The initial Hadamards on the input qubits and the ancilla (the |s>|+> preparation in step 1) are excluded from the returned circuit.",
+        "reason": "The task requires an operation without input-state preparation. The runner must prepare |s>|+> for the stated probabilities to hold."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The opaque placeholder U_f is replaced by an explicit synthesis from a user-supplied truth table, using X gates and multi-controlled phase gates (mcp with angle pi).",
+        "reason": "Opaque or dense unitaries are disallowed. This gives a concrete, bound, unitary oracle, so the scope is narrowed to oracles given as truth tables."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The measurement of the ancilla into a classical bit is removed. The circuit ends after the ancilla Hadamard.",
+        "reason": "The returned circuit must be measurement-free."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Shot-count and junta-threshold postprocessing are not implemented.",
+        "reason": "They are classical statistics outside a unitary circuit."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The construction is the Hadamard-test influence estimator, not the paper's Bernstein-Vazirani circuit.",
+        "reason": "This follows the supplied specification. The BV-based algorithm is outside the specified scope."
+      }
+    ],
+    "assumptions": [
+      "f is indexed by the integer x=sum_j x_j 2^j, with x_j on qubit j.",
+      "The phase oracle convention is U_f|x>=(-1)^{f(x)}|x>. The global phase is exactly preserved because mcp(pi) on the all-ones pattern gives -1.",
+      "The runner prepares H on all input qubits and H on the ancilla (|s>|+>) before the circuit.",
+      "The cap is n<=11, so total qubits n+1<=12.",
+      "The example f is x0 AND x1 on 3 variables with target 0, so Inf_0=1/2."
+    ],
+    "unresolved_issues": [
+      "The paper's BV-based approximation algorithm, junta-learning algorithms and comparison with Floess et al. are not reconstructed.",
+      "The junta gap and threshold tau=2^{-k} are an assumption, and are not used in the circuit.",
+      "Synthesizing the oracle from a truth table needs up to 2^n multi-controlled gates, which is acceptable only for small n."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 31,
+    "depth": 27,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

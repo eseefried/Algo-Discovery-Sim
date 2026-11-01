@@ -1,0 +1,142 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "ae418ca5-b914-4443-b9d8-fd356b5b7263",
+  "parent_run_id": "7a853630-e1cd-4d1a-8a65-df4a3e5454c7",
+  "created_at": "2026-11-01T00:14:54.436531+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "64b66113f5d8be89c2b1fd5efb76d43f804de476220f25c3fc7a5383a0819429",
+  "source_specification_sha256": "2cee8710759d1fe4684ce6c3d1495b5ba0d84808aa755278b2db540154da411e",
+  "source_python_sha256": "65180f1b0edbd9c13a672b68427d9639927e2af65efb4c3213105a36a9069a1e",
+  "elapsed_seconds": 50.976,
+  "usage": {
+    "input_tokens": 5367,
+    "output_tokens": 7168,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Qiskit operation for perfect state transfer on an N-site XX+YY chain with Krawtchouk couplings J_j=sqrt(j(N-j)) at t=pi/2. This is a spin-chain stand-in for the abstract's coined quantum walk, not the walk itself. Default method 'exact' uses the closed form of the free-fermion evolution: qubit-order reversal, CZ on all pairs and a uniform phase gate per site. Method 'trotter' applies RXX*RYY bond gates in first-order Trotter steps. Option 'corrected' appends the inverse of the CZ and phase factors, so the net operation is the pure mirror reversal of the sites (site j goes to N-1-j). There is no state preparation or measurement.",
+    "source_python": "from __future__ import annotations\n\nimport math\n\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _is_int(v):\n    return isinstance(v, int) and not isinstance(v, bool)\n\n\ndef _pair_cz(qc, n):\n    # (-1)^(k(k-1)/2) for k excitations = product of CZ over all pairs\n    for i in range(n):\n        for j in range(i + 1, n):\n            qc.cz(i, j)\n\n\ndef _exact_evolution(qc, n):\n    # eq_2: exact many-body mirror transfer (free-fermion / Jordan-Wigner argument).\n    # One-excitation sector: |j> -> (-i)^(n-1) |n-1-j> (spin-(n-1)/2 rotation by pi about x).\n    # Many-body: mode reversal gives a sign (-1)^C(k,2) for k excitations -> CZ on all pairs.\n    for i in range(n // 2):\n        qc.swap(i, n - 1 - i)\n    _pair_cz(qc, n)\n    alpha = -math.pi * (n - 1) / 2.0\n    for q in range(n):\n        qc.p(alpha, q)\n\n\ndef _trotter_evolution(qc, n, steps):\n    # eq_1 and eq_3: H = 1/2 sum J_j (XX+YY); bond gate = RXX(theta) RYY(theta), theta = J_j * tau\n    tau = (math.pi / 2.0) / steps\n    for _ in range(steps):\n        for j in range(1, n):\n            theta = math.sqrt(j * (n - j)) * tau\n            qc.rxx(theta, j - 1, j)\n            qc.ryy(theta, j - 1, j)\n\n\ndef _undo_diagonal(qc, n):\n    # eq_4: remove the CZ-pair sign and the uniform phase, leaving pure site reversal\n    _pair_cz(qc, n)\n    alpha = math.pi * (n - 1) / 2.0\n    for q in range(n):\n        qc.p(alpha, q)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n_sites', 4)\n    method = instance.get('method', 'exact')\n    steps = instance.get('trotter_steps', 8)\n    corrected = instance.get('corrected', False)\n    if not _is_int(n) or n < 2 or n > 12:\n        raise ValueError('n_sites must be an integer in [2, 12]')\n    if method not in ('exact', 'trotter'):\n        raise ValueError('method must be exact or trotter')\n    if not _is_int(steps) or steps < 1 or steps > 200:\n        raise ValueError('trotter_steps must be an integer in [1, 200]')\n    if not isinstance(corrected, bool):\n        raise ValueError('corrected must be a bool')\n    qc = QuantumCircuit(QuantumRegister(n, 'site'))\n    if method == 'exact':\n        _exact_evolution(qc, n)\n    else:\n        _trotter_evolution(qc, n, steps)\n    if corrected:\n        _undo_diagonal(qc, n)\n    return qc",
+    "example_instance_json": "{\"n_sites\": 4, \"method\": \"exact\", \"trotter_steps\": 8, \"corrected\": false}",
+    "register_layout": [
+      "Single register 'site' of n_sites qubits; qubit i = chain site i (0-indexed), qubit 0 least significant.",
+      "Input two-qubit state is placed by the runner on qubits 0 and 1; it arrives on qubits n-1 and n-2 respectively (qubit 0 -> n-1, qubit 1 -> n-2).",
+      "Remaining qubits start in |0> and return to |0> (up to the phase structure) because the excitation count is conserved.",
+      "Encoding: computational basis, |1> = excitation (spin up in the XX+YY chain), no ancillas."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_trotter_evolution (couplings sqrt(j*(n-j)), total time pi/2); closed-form equivalent in _exact_evolution",
+        "explanation": "The chain Hamiltonian is realised either by first-order Trotterization of the bond terms, or by the exact closed-form many-body result that follows from it for the Krawtchouk couplings."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_exact_evolution",
+        "explanation": "Mirror transfer at t=pi/2, written as a site reversal, a uniform phase (-i)^(n-1) per excitation and a pairwise CZ sign from the Jordan-Wigner ordering. The phase law is corrected relative to the spec (see specification_changes)."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_trotter_evolution: qc.rxx(theta,j-1,j); qc.ryy(theta,j-1,j)",
+        "explanation": "Bond gate RXX(theta)RYY(theta) with theta=J_j*tau, tau=(pi/2)/trotter_steps. Both factors commute on one bond, so each bond gate is exact. Only the ordering of different bonds is approximate."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "_undo_diagonal and the 'corrected' option; register_layout",
+        "explanation": "With corrected=True the circuit is the site reversal (exact method), so site 0 goes to n-1 and site 1 to n-2. The phase correction is uniform p gates plus CZ on all pairs rather than site-dependent S gates."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Fidelity readout needs U_prep, U_prep^dagger and measurement, which are the runner's job. The module returns only the transfer operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_4"
+        ],
+        "change": "The single-excitation phase is uniform, (-i)^(N-1), not linear in j as in phi_j=phi_0+j*pi/2. The multi-excitation sectors get an extra sign (-1)^(k(k-1)/2), implemented as CZ on all pairs. The correction is therefore a global per-excitation phase plus CZ gates, not site-dependent S/Z rotations.",
+        "reason": "For a spin-s rotation by pi about x, exp(-i*pi*Jx)|s,m> = e^{-i*pi*s}|s,-m> with no m dependence. Reversing the fermion mode order contributes the pair sign."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The default method is an exact closed-form circuit, not Trotterization. Trotterization is kept as an option with first-order error.",
+        "reason": "The free-fermion structure gives the exact many-body unitary without a numerical compilation."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The output order is not swapped relative to the readout: qubit 0 maps to n-1 and qubit 1 maps to n-2, so reading (n-1, n-2) in that order recovers the original two-qubit state.",
+        "reason": "The mirror map j -> n-1-j preserves the pairing of the input qubits with their output qubits."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Preparation, undo-preparation and measurement are removed from the module.",
+        "reason": "The task requires an operation without state preparation or measurement."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed to a single-chain mirror transfer. The coined discrete-time quantum walk, multi-dimensional distribution, multi-qubit entangled state distribution and routing are not implemented. The chain size is extended to n_sites in 2..12 instead of 4..8.",
+        "reason": "The abstract gives no walk or coin operators, so the spin-chain stand-in from the specification is implemented."
+      }
+    ],
+    "assumptions": [
+      "Krawtchouk couplings J_j=sqrt(j*(n-j)) with sites indexed 1..N in the formula and 0..N-1 on qubits.",
+      "Jordan-Wigner convention sigma+_j sigma-_{j+1} = c_j^dagger c_{j+1}, so the XX+YY terms give positive hopping amplitudes.",
+      "Qiskit RXX(theta)=exp(-i theta XX/2), so the bond angle equals J_j*tau.",
+      "The runner supplies inputs on qubits 0 and 1 with the other qubits in |0>."
+    ],
+    "unresolved_issues": [
+      "The exact closed form (uniform phase and pairwise CZ sign) is derived analytically, not yet checked numerically.",
+      "The Trotter method has first-order error that decreases with trotter_steps.",
+      "The abstract's coined quantum-walk construction, hypercube distribution and routing are not reconstructed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 28,
+    "depth": 15,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "0701523f-ac2d-4177-800c-ebb1ec416a52",
+  "parent_run_id": "9f5358cb-6d33-42e4-8bfe-5b7ff5ebd3c3",
+  "created_at": "2026-10-31T22:22:36.495934+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "57997411de6d6f5fd0b22161e8b60ed19ca78ab269cb08b5c6a1226fbffd3a47",
+  "source_specification_sha256": "f2a6ad331002d28c6e3992d403e5218b98fc08a4e40b8b31515cd8cc59ae0f3a",
+  "source_python_sha256": "896e8777f4de5c643dd180d8010d15787763287a722a693218fe5206352ae79a",
+  "elapsed_seconds": 28.779,
+  "usage": {
+    "input_tokens": 5128,
+    "output_tokens": 4098,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "build_circuit(instance) synthesizes a diagonal Hermitian gate D=diag((-1)^f(x)) as a product of multiple-controlled Z gates. It solves the GF(2) system for the coefficients c_S with an in-place Moebius (algebraic normal form) transform, then emits Z, CZ, or H-MCX-H for each S with c_S=1. It covers n=1..12 and includes the specified n=2 case.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef build_circuit(instance):\n    \"\"\"Diagonal Hermitian gate -> product of multiple-controlled Z gates.\n\n    instance: {\"n\": int in [1,12], and exactly one of\n               \"f\": list of 2^n bits, or \"signs\": list of 2^n entries in {+1,-1}}\n    Entry index x is the computational-basis integer (Qiskit qubit 0 = LSB).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"n\")\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 12:\n        raise ValueError(\"n must be an integer in [1, 12]\")\n    size = 1 << n\n    has_f = \"f\" in instance\n    has_s = \"signs\" in instance\n    if has_f == has_s:\n        raise ValueError(\"provide exactly one of 'f' or 'signs'\")\n    raw = instance[\"f\"] if has_f else instance[\"signs\"]\n    if not isinstance(raw, list) or len(raw) != size:\n        raise ValueError(\"diagonal data must be a list of length 2^n\")\n    f = []\n    for v in raw:\n        if isinstance(v, bool) or not isinstance(v, int):\n            raise ValueError(\"entries must be integers\")\n        if has_f:\n            if v not in (0, 1):\n                raise ValueError(\"f entries must be 0 or 1\")\n            f.append(v)\n        else:\n            if v not in (1, -1):\n                raise ValueError(\"signs must be +1 or -1 (Hermitian unitary diagonal)\")\n            f.append(0 if v == 1 else 1)\n    # GF(2) solve in the MCZ basis: a[mask] = c_S (Moebius transform)\n    a = list(f)\n    for i in range(n):\n        bit = 1 << i\n        for x in range(size):\n            if x & bit:\n                a[x] ^= a[x ^ bit]\n    q = QuantumRegister(n, \"q\")\n    qc = QuantumCircuit(q)\n    if a[0] == 1:\n        qc.global_phase = math.pi  # f(0)=1 -> global factor -1\n    for mask in range(1, size):\n        if a[mask] == 0:\n            continue\n        qubits = [i for i in range(n) if (mask >> i) & 1]\n        if len(qubits) == 1:\n            qc.z(qubits[0])\n        elif len(qubits) == 2:\n            qc.cz(qubits[0], qubits[1])\n        else:\n            target = qubits[-1]\n            qc.h(target)\n            qc.mcx(qubits[:-1], target)\n            qc.h(target)\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"f\": [0, 1, 0, 0, 1, 1, 0, 1]}",
+    "register_layout": [
+      "Register q has n qubits (n<=12); Qiskit qubit i is bit i of the basis-state integer x (qubit 0 = LSB).",
+      "For n=2, the spec's qubit 1 (MSB) is Qiskit q[1] and spec's qubit 2 (LSB) is Qiskit q[0].",
+      "The f/signs list index x = sum_i x_i 2^i is the computational-basis integer.",
+      "No ancillas; no input preparation or measurement."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: validation of 'signs' entries (+1/-1) and conversion to f",
+        "explanation": "Diagonal entries restricted to +-1 for a Hermitian unitary diagonal gate."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: construction of list f from signs or f input",
+        "explanation": "The binary representation is taken to be the f-vector, indexed by basis integer x."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: emission loop using z, cz, and h+mcx+h",
+        "explanation": "MCZ_S is a phase -1 iff all qubits in S are 1. For |S|>=3 it is realized as H on the last qubit, multi-controlled X, then H."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: Moebius transform loop producing a[mask]=c_S, then the emission loop",
+        "explanation": "The GF(2) coefficients c_S are computed and D is emitted as the product of MCZ_S gates with c_S=1."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: Moebius transform loop (general n includes n=2)",
+        "explanation": "For n=2 the transform yields c_2=f(01), c_1=f(10), c_12=f(11)^f(01)^f(10), matching the triangular solution."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Generalized from the n=2 instance to arbitrary n in 1..12, with the coefficients computed by the in-place Moebius transform (the inverse of the triangular monomial basis matrix).",
+        "reason": "The same GF(2) monomial-basis construction applies for any n and contains the n=2 case. The paper's own basis and algorithm remain unknown."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "If f(0)=1, the circuit sets global_phase=pi instead of requiring f(0)=0.",
+        "reason": "The MCZ products cannot produce a -1 on |0...0>, so a global phase restores the exact operator, which stays unitary and measurement-free."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_5"
+        ],
+        "change": "Index order is made explicit: x is the Qiskit basis integer (qubit 0 = LSB). The spec's 'qubit 1 most significant' maps to Qiskit q[n-1].",
+        "reason": "Qiskit's little-endian convention; MCZ is symmetric so only the labeling is affected."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "MCZ with three or more qubits is built from H, MCX, and H, which is exactly equivalent. CZ-library cost optimization is not attempted.",
+        "reason": "This uses standard gates, and cost comparison is out of scope."
+      }
+    ],
+    "assumptions": [
+      "The binary representation is the f-vector (the paper's encoding may differ).",
+      "The GF(2) monomial (algebraic normal form) basis is used for the MCZ gates.",
+      "Input is either 'f' bits or 'signs' as a list of length 2^n.",
+      "Global phase is handled via circuit global_phase."
+    ],
+    "unresolved_issues": [
+      "The paper's exact binary representation, basis ordering, and construction are not known, so the decomposition may differ from the paper's gate ordering and counts.",
+      "No cost optimization or CZ versus CNOT cost comparison is implemented.",
+      "MCX with many controls is left to Qiskit's transpiler and is not decomposed explicitly into CZ."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 11,
+    "depth": 7,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

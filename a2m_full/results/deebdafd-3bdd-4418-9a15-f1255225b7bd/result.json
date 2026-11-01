@@ -1,0 +1,133 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "deebdafd-3bdd-4418-9a15-f1255225b7bd",
+  "parent_run_id": "c1fc37e7-41f7-4713-8ca8-e7a88691bc0e",
+  "created_at": "2026-11-01T00:34:07.896160+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "631536686882d52cbb009dfbe4dd980554232004b909e2db9a036b4b9ea8231a",
+  "source_specification_sha256": "d9093b31f870998200dcd9098ed2d74e49de8ff9610739ba2e6845c51050c444",
+  "source_python_sha256": "bdc1461549b3a4dfc7293603f7374350847edfc2482d68d2b3b999ca45e19051",
+  "elapsed_seconds": 69.899,
+  "usage": {
+    "input_tokens": 5874,
+    "output_tokens": 10083,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Hybrid qutrit+qubits QFT over Z_N with N=3*2^m (m=2 gives the specified Z_12 case on 4 physical qubits). The qutrit sits on qubits (0,1) with level l=q0+2*q1 and level 3 left fixed. F_3 is compiled exactly into standard gates: a controlled-H on levels 1,2, selective phases, and a controlled-Ry on levels 0,1. The circuit then applies qutrit-to-qubit controlled phases, a qubit QFT without swaps, and an optional inverse.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _h12(qc):\n    \"\"\"Hadamard acting on qutrit levels 1 and 2 (levels 0 and 3 fixed).\"\"\"\n    qc.cx(1, 0)\n    qc.ch(0, 1)\n    qc.cx(1, 0)\n\n\ndef _f3(qc):\n    \"\"\"Generalized Hadamard F_3 on qubits (0,1), identity on level 3 (eq_3).\n    F_3 = H12 . Ry01(theta) . (1 + W), with W = diag(-1,i).H on levels 1,2.\"\"\"\n    _h12(qc)\n    qc.x(1)\n    qc.cp(math.pi, 0, 1)\n    qc.x(1)\n    qc.x(0)\n    qc.cp(math.pi / 2, 0, 1)\n    qc.x(0)\n    theta = 2.0 * math.atan(math.sqrt(2.0))\n    qc.x(1)\n    qc.cry(theta, 1, 0)\n    qc.x(1)\n    _h12(qc)\n\n\ndef build_circuit(instance):\n    \"\"\"Hybrid QFT: one qutrit (2 qubits) plus m qubits. Z_N with N=3*2^m.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    for key in instance:\n        if key not in ('num_qubits', 'inverse'):\n            raise ValueError('unknown instance key')\n    m = instance.get('num_qubits')\n    if isinstance(m, bool) or not isinstance(m, int):\n        raise ValueError('num_qubits must be an integer')\n    if m < 1 or m + 2 > 12:\n        raise ValueError('num_qubits must be in 1..10')\n    inverse = instance.get('inverse', False)\n    if not isinstance(inverse, bool):\n        raise ValueError('inverse must be a bool')\n    qutrit = QuantumRegister(2, 'qutrit')\n    qubits = QuantumRegister(m, 'qubit')\n    qc = QuantumCircuit(qutrit, qubits)\n    # eq_3: generalized Hadamard on the qutrit\n    _f3(qc)\n    # eq_4: qutrit -> qubit k controlled phases, exp(2 pi i l x_k / (3*2^k)), l=q0+2*q1\n    for k in range(1, m + 1):\n        t = 1 + k\n        ang = 2.0 * math.pi / (3.0 * (2 ** k))\n        qc.cp(ang, 0, t)\n        qc.cp(2.0 * ang, 1, t)\n    # eq_3 (H) and eq_5 (qubit-qubit controlled phases), no final swaps\n    for i in range(1, m + 1):\n        qi = 1 + i\n        qc.h(qi)\n        for j in range(i + 1, m + 1):\n            qc.cp(2.0 * math.pi / (2 ** (j - i + 1)), 1 + j, qi)\n    if inverse:\n        qc = qc.inverse()\n    return qc",
+    "example_instance_json": "{\"num_qubits\": 2, \"inverse\": false}",
+    "register_layout": [
+      "qubit 0: qutrit bit q0 (level l = q0 + 2*q1; holds x_1 at input, y_1 at output)",
+      "qubit 1: qutrit bit q1 (level 3 = q0=q1=1 is unused and left fixed)",
+      "qubit 2: qubit digit 2 (x_2 at input, y_2 at output)",
+      "qubit 3: qubit digit 3 (x_3 at input, y_3 at output); for num_qubits=m the qubit digits are on qubits 2..m+1",
+      "Input integer x = 2^m*x_1 + 2^(m-1)*x_2 + ... + x_{m+1}; output y = y_1 + 3*(y_2 + 2*y_3 + ...); Qiskit basis index = x_1 + 4*x_2 + 8*x_3 + ..."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (whole circuit realizes the Z_N DFT on the valid subspace)",
+        "explanation": "The target transform is realized by the composition of F_3, the qutrit-qubit phases, and the qubit QFT without swaps, giving the digit-reversed output labelling."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit step ordering: _f3, then qutrit-to-qubit phase loop, then the qubit H/CP loop",
+        "explanation": "The mixed-radix phase factorization fixes the gate order. The qutrit digit is processed first and each qubit digit afterwards, with controlled phases from later input digits."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_f3 and the qc.h calls in build_circuit",
+        "explanation": "F_3 is compiled exactly as H on levels 1,2, phases -1 and i on levels 1 and 2, Ry on levels 0,1, then H on levels 1,2. Level 3 is untouched. The qubit Hadamard is qc.h."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop 'for k in range(1, m + 1)'",
+        "explanation": "Phase exp(2 pi i l x_k/(3*2^k)) is built from cp(ang, q0, target) and cp(2*ang, q1, target). For m=2 the angles are 2pi/6 and 2pi/12, with the q1 angles doubled."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit: inner loop 'for j in range(i + 1, m + 1)'",
+        "explanation": "Qubit-qubit controlled phases cp(2pi/2^(j-i+1)) are applied. For the two qubits of the specified case this is CP(pi/2)."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Generalized the single instance (3,2,2) to (3,2,...,2) with a parameter num_qubits=m. The qutrit-to-qubit angles are 2pi/(3*2^k) and the qubit-qubit angles are 2pi/2^(j-i+1). The default example m=2 is the specified Z_12 case. An optional 'inverse' flag returns the inverse circuit.",
+        "reason": "Gives a family of valid instance parameters with the same meaning. The m=2 case is exactly the specified construction."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Gave an explicit exact decomposition of F_3 into standard gates: controlled-H on levels 1,2 (CX-conjugated), phases -1 and i, controlled-Ry(2*atan(sqrt2)) on levels 0,1, then controlled-H on levels 1,2 again. The paper's NMR selective-rotation pulses are not reproduced.",
+        "reason": "The specification left the compilation to the builder. This decomposition was derived by two-level reduction of the F_3 matrix and acts as identity on level 3."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The output is in digit-reversed order, y = y_1 + 3*y_2 + 6*y_3 for m=2, with no final permutation to standard order.",
+        "reason": "This follows the specification's stated convention. The unitary is exact only on the valid subspace where the qutrit level is not 3."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The phase on the unused qutrit level 3 is whatever the CP gates give (l=3). Level 3 is not mapped to a defined output.",
+        "reason": "The spec states the action on level 3 is irrelevant and only the valid subspace is checked."
+      }
+    ],
+    "assumptions": [
+      "Qutrit levels 0,1,2 are encoded as q1q0 = 00, 01, 10 (l = q0 + 2*q1), and level 3 is unused",
+      "Qutrit is the most significant input digit",
+      "The runner prepares inputs only on the valid 12-dimensional subspace (qutrit level not 3)",
+      "Output labelling is the digit-reversed order y = y_1 + 3*y_2 + 6*y_3",
+      "Qiskit basis index is x_1 + 4*x_2 + 8*x_3, so digits must be converted"
+    ],
+    "unresolved_issues": [
+      "The runner's expected output ordering is unknown. If standard output order is needed, a digit permutation would have to be added.",
+      "The decomposition of F_3 was derived analytically and not verified here. Software verification will check it.",
+      "The behaviour on the unused level 3 is unspecified and not verified."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 65,
+    "depth": 51,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

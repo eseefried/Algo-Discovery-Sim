@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "24bcd7c1-082e-4cba-a2a7-dd073fd0eb24",
+  "parent_run_id": "5ede9bdc-d5d4-4c94-aa77-9005163ea773",
+  "created_at": "2026-10-31T22:26:56.960069+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "ea36415a591d45a164431a8ca1f220d72ffb559c97909589451067c1befce344",
+  "source_specification_sha256": "272708de8ddcfce55ecde1e237234b71ff9482ad0fba6ffa0fd0f3a8f449e10e",
+  "source_python_sha256": "cce2f58cb47e253947c7318a153f3c77b0ee310b7a1a6f116abad1b64273e660",
+  "elapsed_seconds": 30.794,
+  "usage": {
+    "input_tokens": 5235,
+    "output_tokens": 4582,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Unitary-dilation circuit for a 1D Hadamard discrete-time quantum walk on a periodic lattice of 2^n sites. Each step applies a coin and a QFT-based spin-dependent shift. Spin dephasing (probability p) and spatial dephasing (probability q) are implemented as phase-flip channels via fresh environment qubits, each rotated by RY and coupled by CZ. Initial state, measurement and tracing out the environment are left to the runner.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import QFTGate\nimport math\n\n\ndef _get_int(instance, key, lo, hi):\n    if key not in instance:\n        raise ValueError('missing parameter: ' + key)\n    v = instance[key]\n    if isinstance(v, bool) or not isinstance(v, int):\n        raise ValueError(key + ' must be an integer')\n    if v < lo or v > hi:\n        raise ValueError(key + ' out of range')\n    return v\n\n\ndef _get_prob(instance, key):\n    v = instance.get(key, 0.0)\n    if isinstance(v, bool) or not isinstance(v, (int, float)):\n        raise ValueError(key + ' must be a number')\n    v = float(v)\n    if not math.isfinite(v) or v < 0.0 or v > 1.0:\n        raise ValueError(key + ' must be in [0, 1]')\n    return v\n\n\ndef _shift(qc, spin, pos, n):\n    # eq_1: S = |up><up| (x) T_+ + |down><down| (x) T_-, up = |0>, cyclic lattice.\n    # Shift by +-1 is diagonal in the Fourier basis: phase exp(+-2 pi i k / N).\n    qc.append(QFTGate(n), pos)\n    for j in range(n):\n        theta = 2.0 * math.pi * (2 ** j) / (2 ** n)\n        qc.p(theta, pos[j])\n        qc.cp(-2.0 * theta, spin, pos[j])\n    qc.append(QFTGate(n).inverse(), pos)\n\n\ndef build_circuit(instance):\n    \"\"\"instance: {n_position_qubits, steps, p_spin, q_space}. Returns unitary dilation of the decohered walk.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _get_int(instance, 'n_position_qubits', 1, 10)\n    steps = _get_int(instance, 'steps', 1, 10)\n    p = _get_prob(instance, 'p_spin')\n    q = _get_prob(instance, 'q_space')\n    n_es = steps if p > 0.0 else 0\n    n_ep = steps if q > 0.0 else 0\n    if 1 + n + n_es + n_ep > 12:\n        raise ValueError('total qubits exceed 12')\n    spin_r = QuantumRegister(1, 'spin')\n    pos_r = QuantumRegister(n, 'pos')\n    regs = [spin_r, pos_r]\n    es_r = None\n    ep_r = None\n    if n_es:\n        es_r = QuantumRegister(n_es, 'env_spin')\n        regs.append(es_r)\n    if n_ep:\n        ep_r = QuantumRegister(n_ep, 'env_pos')\n        regs.append(ep_r)\n    qc = QuantumCircuit(*regs)\n    spin = spin_r[0]\n    pos = list(pos_r)\n    th_s = 2.0 * math.asin(math.sqrt(p))\n    th_q = 2.0 * math.asin(math.sqrt(q))\n    for t in range(steps):\n        # eq_1: U = S (C (x) 1), Hadamard coin then shift\n        qc.h(spin)\n        _shift(qc, spin, pos, n)\n        # eq_2: spin phase-flip channel with prob p (environment qubit dilation)\n        if n_es:\n            e = es_r[t]\n            qc.ry(th_s, e)\n            qc.cz(e, spin)\n        # eq_3: Z_x = (-1)^x = Z on position bit 0, applied with prob q\n        if n_ep:\n            e = ep_r[t]\n            qc.ry(th_q, e)\n            qc.cz(e, pos[0])\n    return qc",
+    "example_instance_json": "{\"n_position_qubits\": 3, \"steps\": 2, \"p_spin\": 0.1, \"q_space\": 0.1}",
+    "register_layout": [
+      "qubit 0: spin (|up>=|0>, |down>=|1>)",
+      "qubits 1..n: position register, little-endian binary x mod 2^n (qubit 1 is LSB); example n=3 -> qubits 1,2,3",
+      "next steps qubits (only if p_spin>0): env_spin, one fresh environment qubit per step; example qubits 4,5",
+      "next steps qubits (only if q_space>0): env_pos, one fresh environment qubit per step; example qubits 6,7",
+      "total qubits = 1 + n + steps*[p>0] + steps*[q>0], max 12"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (coin h) and _shift (QFT-based conditional shift)",
+        "explanation": "Hadamard coin followed by spin-controlled shift +-1 on a cyclic lattice, built as QFT, phases, inverse QFT."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: ry on env_spin qubit + cz(env, spin)",
+        "explanation": "Phase-flip channel (1-p)rho + p Z rho Z realised as a unitary dilation with a fresh environment qubit having P(1)=p."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: ry on env_pos qubit + cz(env, pos[0])",
+        "explanation": "Z_x=(-1)^x equals Z on the least significant position qubit; applied with probability q via a dilation."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit step loop",
+        "explanation": "Each step applies U, then the spin channel, then the spatial channel, repeated for 'steps' steps with constant p, q."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Position distribution is a measurement and post-processing, handled by the runner. The environment qubits must be traced out there; the circuit contains no measurement."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Non-unitary channels are implemented as unitary dilations with one fresh environment qubit per step per channel, each rotated by RY(2 asin(sqrt(prob))) from |0> and coupled by CZ. The reduced state on spin and position then equals the channel output only if the runner traces out the environment.",
+        "reason": "The circuit must be unitary and measurement-free, and reset is not allowed, so environment qubits cannot be reused. Qubit cap 12 limits steps."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Lattice is finite and periodic with 2^n sites (shift is mod 2^n) instead of the infinite line.",
+        "reason": "A finite register is needed. The walk matches the infinite line while the walker has not wrapped around."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Position distribution readout is excluded from the circuit.",
+        "reason": "The operation returns no measurement; the runner handles readout and the fitting is out of scope."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "The initial state |up>|x=0> is not prepared in the circuit. The runner must prepare it, with the environment in |0>.",
+        "reason": "The task requires an operation without state preparation."
+      }
+    ],
+    "assumptions": [
+      "Spin up = |0>, spin down = |1>.",
+      "Position x is encoded as little-endian binary on the position register, modulo 2^n.",
+      "The Hadamard coin and the phase-flip stand-in channels from the specification are used as given.",
+      "p_spin and q_space default to 0 if absent, which omits their environment qubits.",
+      "Coin first, then shift, then spin channel, then spatial channel at every step."
+    ],
+    "unresolved_issues": [
+      "The paper's actual decoherence model, coherence length and discrete Wigner function are not reconstructed.",
+      "The fitting of p and q to measured distributions is not implemented.",
+      "The lattice is periodic, and the qubit cap of 12 limits steps and lattice size when environment qubits are used."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 8,
+    "gate_count": 138,
+    "depth": 94,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

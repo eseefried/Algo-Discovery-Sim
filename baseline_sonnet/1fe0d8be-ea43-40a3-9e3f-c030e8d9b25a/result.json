@@ -1,0 +1,115 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "1fe0d8be-ea43-40a3-9e3f-c030e8d9b25a",
+  "parent_run_id": "8ab17e1e-03fc-4766-9741-aa33c71834c8",
+  "created_at": "2026-10-31T22:22:25.524924+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "f739dae24f9d37e6e867739675cb184631ad5a4217f963cb39ed9e1289fc69ae",
+  "source_specification_sha256": "3027bb6851b1008aa0f194321c25ecce46af30d9b50e3d5e06b19e76d3a0e9df",
+  "source_python_sha256": "7253048060f931ef2e2d0cba85abed88d891c42ba403ed99dd596010c35f724c",
+  "elapsed_seconds": 29.596,
+  "usage": {
+    "input_tokens": 4459,
+    "output_tokens": 4315,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Coined discrete-time quantum walk on a cycle of N=2^n sites, built as U_T...U_1 with U_t = S (C_t x I). The coin is one qubit with a per-step U(theta,phi,lam) gate. The shift S is a coin-controlled increment (coin 0) or decrement (coin 1) mod N, made from multi-controlled X gates. The scope is only the generic walk operation, with no state encoding and no paper-specific transfer protocol.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import XGate\n\n\ndef _real(v, name):\n    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):\n        raise ValueError(name + ' must be a finite real number')\n    return float(v)\n\n\ndef _int(v, name, lo, hi):\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError(name + ' must be an integer in [' + str(lo) + ',' + str(hi) + ']')\n    return v\n\n\ndef _shift(qc, coin, pos, n):\n    # Eq. eq_2: coin 0 -> x+1 mod N, coin 1 -> x-1 mod N\n    # Process bits from high to low so controls see the original lower bits.\n    for k in range(n - 1, -1, -1):\n        lower = [pos[j] for j in range(k)]\n        targets = [coin] + lower + [pos[k]]\n        inc = XGate().control(k + 1, ctrl_state=((1 << k) - 1) << 1)\n        qc.append(inc, targets)\n        dec = XGate().control(k + 1, ctrl_state=1)\n        qc.append(dec, targets)\n\n\ndef build_circuit(instance):\n    \"\"\"Walk operator U_T...U_1 on 1 coin qubit + n position qubits.\n    instance: {'position_qubits': n, 'steps': T, 'coins': [[theta,phi,lam], ...] (length T)}\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = _int(instance.get('position_qubits'), 'position_qubits', 1, 11)\n    steps = _int(instance.get('steps'), 'steps', 0, 64)\n    coins = instance.get('coins')\n    if not isinstance(coins, list) or len(coins) != steps:\n        raise ValueError('coins must be a list of length steps')\n    parsed = []\n    for c in coins:\n        if not isinstance(c, (list, tuple)) or len(c) != 3:\n            raise ValueError('each coin must be [theta, phi, lam]')\n        parsed.append([_real(c[0], 'theta'), _real(c[1], 'phi'), _real(c[2], 'lam')])\n    coin = QuantumRegister(1, 'coin')\n    pos = QuantumRegister(n, 'pos')\n    qc = QuantumCircuit(coin, pos)\n    for t in range(steps):\n        # Eq. eq_1: U_t = S (C_t x I)\n        qc.u(parsed[t][0], parsed[t][1], parsed[t][2], coin[0])\n        _shift(qc, coin[0], list(pos), n)\n    return qc",
+    "example_instance_json": "{\"position_qubits\": 2, \"steps\": 3, \"coins\": [[1.5707963267948966, 0.0, 3.141592653589793], [1.5707963267948966, 0.0, 3.141592653589793], [0.7853981633974483, 0.0, 0.0]]}",
+    "register_layout": [
+      "qubit 0: coin (computational basis |0>,|1>; coin 0 shifts +1, coin 1 shifts -1)",
+      "qubits 1..n: position register pos[0..n-1], little-endian integer x (qubit 1 is least significant bit), N=2^n sites",
+      "example: n=2 gives 3 qubits (q0 coin, q1-q2 position, N=4 cycle)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (loop over steps: coin gate then _shift)",
+        "explanation": "Per-step coin C_t as a U(theta,phi,lam) gate on the coin qubit, followed by the shift S; steps are composed in order U_1 first to U_T last."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_shift",
+        "explanation": "Coin-conditioned increment/decrement mod 2^n, built from multi-controlled X gates with ctrl_state; coin |0> gives x+1 and coin |1> gives x-1."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The transfer condition is a property to be checked and depends on an unspecified encoding and coin sequence. The circuit does no state encoding."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Fidelity is an analysis quantity, not part of the unitary operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Generalized the cycle length from the assumed N=4 to N=2^n for 1<=n<=11, with the default example at n=2.",
+        "reason": "A power-of-two cycle maps directly onto qubit registers, and one parametrized builder covers the N=4 case."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Coin C_t is parametrized as a general single-qubit unitary u(theta,phi,lam) supplied through the instance.",
+        "reason": "The abstract does not give the paper's coin settings, so they are left as inputs."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "Scope narrowed to the walk operator only. There is no two-qubit state encoding, no perfect-transfer protocol, no multi-qubit entanglement distribution, no routing, and no multi-dimensional network.",
+        "reason": "The abstract gives no coin sequence, encoding or geometry, so these cannot be reconstructed. The task also requires an operation rather than an experiment."
+      }
+    ],
+    "assumptions": [
+      "1D cycle with a single coin qubit.",
+      "Coin applied before the shift in each step, as in eq_1.",
+      "Increment applies for coin |0> and decrement for coin |1>.",
+      "Position labels use little-endian integer encoding."
+    ],
+    "unresolved_issues": [
+      "Coin settings that give perfect two-qubit state transfer are unknown.",
+      "The encoding of the two-qubit state into walk degrees of freedom is unspecified.",
+      "The network geometry, the multi-qubit entanglement distribution and the routing protocol are not reconstructed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 117,
+    "depth": 76,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

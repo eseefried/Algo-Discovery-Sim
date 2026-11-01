@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "e56f1c89-07e9-419f-b358-2eba78e020ac",
+  "parent_run_id": "cf8984ed-f7d8-47ae-91f2-20c7cb72b710",
+  "created_at": "2026-10-31T21:43:03.161203+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "2415be892620df97977e8ae8671e70080d78ea493ee6835e19e2cb4a4077608e",
+  "source_specification_sha256": "09dcd8c71bbb264c6271f97293688e6f7389016237e9e495de69da6f6e0b5877",
+  "source_python_sha256": "206701df9995255a019263c7d8fb9c41f0a1925a773ab827f22a56c901624058",
+  "elapsed_seconds": 37.791,
+  "usage": {
+    "input_tokens": 3991,
+    "output_tokens": 5471,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the conjugation structure U = Q^T P^T U' P Q from eq_1 as an n-qubit unitary circuit. P and Q are basis-state permutations given as ordered lists of transpositions, each implemented with CX networks and a multi-controlled X. U' is narrowed to a diagonal unitary with user-supplied phases, implemented with X-conjugated multi-controlled phase gates. Circuit order is Q, P, U', P^T, Q^T. The classical search for P and Q (eq_2) is not implemented.",
+    "source_python": "from __future__ import annotations\nimport math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _check_int(v, lo, hi, name):\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError(name + \" must be an integer in [\" + str(lo) + \", \" + str(hi) + \"]\")\n    return v\n\n\ndef _check_perm(perm, n, name):\n    if not isinstance(perm, (list, tuple)) or len(perm) > 64:\n        raise ValueError(name + \" must be a list of at most 64 transpositions\")\n    out = []\n    for pr in perm:\n        if not isinstance(pr, (list, tuple)) or len(pr) != 2:\n            raise ValueError(name + \" entries must be pairs\")\n        a = _check_int(pr[0], 0, 2 ** n - 1, name + \" state\")\n        b = _check_int(pr[1], 0, 2 ** n - 1, name + \" state\")\n        if a == b:\n            raise ValueError(name + \" transposition needs distinct states\")\n        out.append((a, b))\n    return out\n\n\ndef _swap_states(qc, qubits, n, a, b):\n    # Swap basis states |a> and |b> (little-endian indices).\n    d = a ^ b\n    t = (d & -d).bit_length() - 1\n    others = [j for j in range(n) if (d >> j) & 1 and j != t]\n    mask = 0\n    for j in others:\n        mask |= 1 << j\n    ap = a ^ mask if (a >> t) & 1 else a\n    for j in others:\n        qc.cx(qubits[t], qubits[j])\n    ctrls = [j for j in range(n) if j != t]\n    zeros = [j for j in ctrls if not (ap >> j) & 1]\n    for j in zeros:\n        qc.x(qubits[j])\n    if ctrls:\n        qc.mcx([qubits[j] for j in ctrls], qubits[t])\n    else:\n        qc.x(qubits[t])\n    for j in zeros:\n        qc.x(qubits[j])\n    for j in reversed(others):\n        qc.cx(qubits[t], qubits[j])\n\n\ndef _apply_perm(qc, qubits, n, pairs, transpose):\n    seq = list(reversed(pairs)) if transpose else list(pairs)\n    for a, b in seq:\n        _swap_states(qc, qubits, n, a, b)\n\n\ndef _diagonal(qc, qubits, n, phases):\n    # U'|k> = exp(i*phases[k])|k>\n    for k, th in enumerate(phases):\n        if abs(math.remainder(th, 2 * math.pi)) < 1e-12:\n            continue\n        zeros = [j for j in range(n) if not (k >> j) & 1]\n        for j in zeros:\n            qc.x(qubits[j])\n        if n == 1:\n            qc.p(th, qubits[0])\n        else:\n            qc.mcp(th, qubits[:-1], qubits[-1])\n        for j in zeros:\n            qc.x(qubits[j])\n\n\ndef build_circuit(instance):\n    \"\"\"Implements U = Q^T P^T U' P Q (eq_1) with P, Q products of basis-state\n    transpositions and U' a diagonal unitary. Applied order: Q, P, U', P^T, Q^T.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = _check_int(instance.get(\"n\"), 1, 6, \"n\")\n    p_pairs = _check_perm(instance.get(\"perm_P\", []), n, \"perm_P\")\n    q_pairs = _check_perm(instance.get(\"perm_Q\", []), n, \"perm_Q\")\n    ph = instance.get(\"phases\")\n    if not isinstance(ph, (list, tuple)) or len(ph) != 2 ** n:\n        raise ValueError(\"phases must be a list of length 2**n\")\n    phases = []\n    for v in ph:\n        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):\n            raise ValueError(\"phases must be finite real numbers\")\n        phases.append(float(v))\n    reg = QuantumRegister(n, \"q\")\n    qc = QuantumCircuit(reg)\n    qubits = list(range(n))\n    _apply_perm(qc, qubits, n, q_pairs, False)\n    _apply_perm(qc, qubits, n, p_pairs, False)\n    _diagonal(qc, qubits, n, phases)\n    _apply_perm(qc, qubits, n, p_pairs, True)\n    _apply_perm(qc, qubits, n, q_pairs, True)\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"perm_P\": [[0, 5], [1, 2]], \"perm_Q\": [[3, 6]], \"phases\": [0.0, 0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1]}",
+    "register_layout": [
+      "Qubits 0..n-1 form register q; qubit 0 is the least significant bit of the computational-basis index.",
+      "Basis state |x> has x = sum_j b_j 2^j with b_j the state of qubit j.",
+      "No ancilla qubits; total qubits = n <= 6."
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (with _apply_perm and _diagonal): applies Q, P, U', P^T, Q^T in that order",
+        "explanation": "The conjugation U = Q^T P^T U' P Q is built with P and Q as ordered products of basis-state transpositions. Transposes are the reversed transposition sequences. U' is narrowed to a diagonal unitary."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "This is a classical optimization objective (gate-count minimization over P and Q). It is not a quantum operation, and the search and MPI details are unspecified, so the circuit takes P and Q as inputs."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "U' is restricted to a diagonal unitary with user-supplied phases. P and Q are restricted to products of basis-state transpositions supplied in the instance. The target U is defined by the factorization and is not given as an input matrix.",
+        "reason": "A general dense U' cannot be implemented without an opaque dense unitary or an unspecified Qcompiler decomposition, and the abstract does not give the decomposition."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The gate-count minimization search is not implemented. P and Q are inputs rather than outputs of an optimizer.",
+        "reason": "The search algorithm and cost function are not specified, and the search is classical rather than a circuit operation."
+      }
+    ],
+    "assumptions": [
+      "Permutation matrices act as P|x> = |p(x)>, with P a product of transpositions applied in listed order; P^T is the reverse order.",
+      "Gate sets use standard gates only (X, CX, MCX, P, MCP) without optimization.",
+      "Qubit index 0 is the least significant bit.",
+      "n is capped at 6 to keep the 2^n multi-controlled-phase gate count small."
+    ],
+    "unresolved_issues": [
+      "Gate-count optimization and the choice of P and Q are not implemented.",
+      "General (non-diagonal) U' compilation as in Qcompiler is not implemented.",
+      "MPI parallelization is not represented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 223,
+    "depth": 171,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

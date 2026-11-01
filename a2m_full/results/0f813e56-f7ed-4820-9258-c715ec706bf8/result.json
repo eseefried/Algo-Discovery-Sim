@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "0f813e56-f7ed-4820-9258-c715ec706bf8",
+  "parent_run_id": "83d79914-df8e-4bf9-a709-ce05d0b540a1",
+  "created_at": "2026-11-01T00:09:13.205022+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "b0d331da52de1b722e0e93c31a3d8c9aaf5c581b8d5524c99c4552744a9d6dee",
+  "source_specification_sha256": "0d74cfa4e2a64e55940e1491ae5037ee9fb48f357af6f2373fbc3b8f1dfebdbd",
+  "source_python_sha256": "f05919b5b0ed9d15198b4b62ad51aa59845b31ba53d54bba1f139095bd6c601c",
+  "elapsed_seconds": 39.323,
+  "usage": {
+    "input_tokens": 6047,
+    "output_tokens": 5838,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements one scoped construction: the Hadamard-test circuit (eq_3) for comparing two small gate-list unitaries U and V on n data qubits. It uses one ancilla. The circuit applies H on the ancilla, then controlled-U, then controlled-V^dagger (V's gate list reversed with each gate inverted), then either H (X readout, Re<0|V^dagger U|0>) or Sdg then H (Y readout, Im). Inputs, measurement, sampling and the thresholding decision are left to the runner. The swap test, the Bell-pair test and the classification rule are not implemented.",
+    "source_python": "from qiskit import QuantumCircuit\nfrom qiskit.circuit.library import HGate, XGate, YGate, ZGate, SGate, SdgGate, TGate, TdgGate, CXGate, CZGate, SwapGate, RXGate, RYGate, RZGate, PhaseGate\nimport math\n\n\ndef _make(name, ps):\n    one = {'h': HGate, 'x': XGate, 'y': YGate, 'z': ZGate, 's': SGate, 'sdg': SdgGate, 't': TGate, 'tdg': TdgGate}\n    two = {'cx': CXGate, 'cz': CZGate, 'swap': SwapGate}\n    rot = {'rx': RXGate, 'ry': RYGate, 'rz': RZGate, 'p': PhaseGate}\n    if name in one and len(ps) == 0:\n        return one[name](), 1\n    if name in two and len(ps) == 0:\n        return two[name](), 2\n    if name in rot and len(ps) == 1:\n        return rot[name](float(ps[0])), 1\n    raise ValueError('unsupported gate or wrong parameter count: %r' % (name,))\n\n\ndef _parse(ops, n):\n    if not isinstance(ops, list) or len(ops) > 200:\n        raise ValueError('gate list must be a list of at most 200 gates')\n    out = []\n    for op in ops:\n        if not isinstance(op, dict):\n            raise ValueError('each gate must be an object')\n        name = op.get('name')\n        qs = op.get('qubits', [])\n        ps = op.get('params', [])\n        if not isinstance(name, str) or not isinstance(qs, list) or not isinstance(ps, list):\n            raise ValueError('malformed gate entry')\n        for p in ps:\n            if isinstance(p, bool) or not isinstance(p, (int, float)) or not math.isfinite(p):\n                raise ValueError('parameters must be finite numbers')\n        if name == 'gphase':\n            if len(ps) != 1 or len(qs) != 0:\n                raise ValueError('gphase takes one parameter and no qubits')\n            out.append((name, None, [], float(ps[0])))\n            continue\n        gate, nq = _make(name, ps)\n        if len(qs) != nq or len(set(qs)) != nq:\n            raise ValueError('wrong number of distinct qubits for gate')\n        for q in qs:\n            if isinstance(q, bool) or not isinstance(q, int) or q < 0 or q >= n:\n                raise ValueError('qubit index out of range')\n        out.append((name, gate, list(qs), 0.0))\n    return out\n\n\ndef _apply(qc, op, anc, inverse):\n    name, gate, qs, angle = op\n    if name == 'gphase':\n        qc.p(-angle if inverse else angle, anc)\n        return\n    g = gate.inverse() if inverse else gate\n    qc.append(g.control(1), [anc] + qs)\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be an object')\n    n = instance.get('n')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 11:\n        raise ValueError('n must be an integer in 1..11')\n    readout = instance.get('readout', 'X')\n    if readout not in ('X', 'Y'):\n        raise ValueError('readout must be X or Y')\n    u_ops = _parse(instance.get('U', []), n)\n    v_ops = _parse(instance.get('V', []), n)\n    anc = n\n    qc = QuantumCircuit(n + 1)\n    qc.h(anc)\n    for op in u_ops:\n        _apply(qc, op, anc, False)\n    for op in reversed(v_ops):\n        _apply(qc, op, anc, True)\n    if readout == 'Y':\n        qc.sdg(anc)\n    qc.h(anc)\n    return qc",
+    "example_instance_json": "{\"n\":1,\"readout\":\"X\",\"U\":[{\"name\":\"h\",\"qubits\":[0]}],\"V\":[{\"name\":\"h\",\"qubits\":[0]},{\"name\":\"z\",\"qubits\":[0]},{\"name\":\"z\",\"qubits\":[0]},{\"name\":\"gphase\",\"params\":[0.7]}]}",
+    "register_layout": [
+      "qubits 0..n-1: data register (data_A), little-endian, expected to hold |0^n> or another runner-prepared input",
+      "qubit n: ancilla (anc), expected |0> on input",
+      "data_B is not used (swap and Bell tests out of scope)",
+      "Total qubits = n+1, capped at 12 so n<=11",
+      "Readout: ancilla P0-P1 gives Re<0|V^dagger U|0> for readout X and Im for readout Y"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Swap test is not built. Only the Hadamard test is implemented in this artifact."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": "build_circuit / _apply: V^dagger is built by reversing V's gate list and inverting each gate",
+        "explanation": "The compute-uncompute measurement is not implemented. Its V^dagger U construction is reused inside the controlled-W of the Hadamard test."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: H on anc, controlled U, controlled V^dagger, then H (X) or Sdg then H (Y)",
+        "explanation": "The Hadamard-test circuit. After the circuit, the ancilla P0-P1 equals Re (X) or Im (Y) of <0^n|V^dagger U|0^n> when the data input is |0^n>. The readout itself is done by the runner."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The Bell-pair Choi test is not built, because it needs input-state preparation of Bell pairs. The circuit here is the Hadamard test on the data register only."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Threshold classification is classical post-processing and is not part of the unitary circuit."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Scope narrowed to the Hadamard test alone, on the data input supplied by the runner (nominally |0^n>). The first H on the ancilla is included as part of the test circuit. Compute-uncompute, swap and Bell variants are omitted.",
+        "reason": "The task asks for ONE construction, and the circuit must be an operation with no measurement and no input-state preparation."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Added a 'gphase' pseudo-gate to the gate-list format. Its controlled version is a phase gate p(angle) on the ancilla, and the inverse negates the angle.",
+        "reason": "Lets V = e^{i phi} H be expressed, so global-phase differences become observable as relative ancilla phase, as eq_3 intends."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Controlled-W is implemented as controlled-U followed by controlled-V^dagger, with V^dagger from the reversed, inverted gate list. Sign check: Sdg then H on (|0>+w|1>)/sqrt2 gives P0-P1 = Im w.",
+        "reason": "Matches the stated convention that the Y readout uses S^dagger before the final H."
+      }
+    ],
+    "assumptions": [
+      "Gate lists use the supported names h, x, y, z, s, sdg, t, tdg, cx, cz, swap, rx, ry, rz, p and gphase.",
+      "Each gate is controlled via the standard Gate.control(1) with the ancilla as control.",
+      "The runner prepares the data register in |0^n> and the ancilla in |0>.",
+      "The example circuit has n=1, U=H and V=H Z Z e^{0.7i}, so it is equal to U up to a global phase.",
+      "At most 200 gates per list."
+    ],
+    "unresolved_issues": [
+      "The paper's actual equivalence-checking algorithms (stabilizer, decision-diagram, tableau) and its benchmark circuits are not reconstructed.",
+      "Exact versus up-to-phase classification (eq_5) must be done outside the circuit by the runner.",
+      "The Hadamard test here is input-specific to |0^n>. Full-unitary phase equality needs the Bell register, which is not implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 23,
+    "depth": 20,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

@@ -1,0 +1,143 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "02072e6d-7ad7-4ac7-a2de-071c12b4196b",
+  "parent_run_id": "461b871e-51f4-4135-9bc4-400ffb7b0aac",
+  "created_at": "2026-11-01T00:18:17.514035+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "89ee2b21f70ede4cf84a252a931c1ffee4c001d8a9bafaa6ad3c4e76d8fe5dae",
+  "source_specification_sha256": "d9a68baaddd7f26d277285feac984cfd4e10e464095cc991474e3f9788bb88f8",
+  "source_python_sha256": "e1988e47e7198bb755a6f09148f912a796d8fb7c649563f44470c152fe14d1b1",
+  "elapsed_seconds": 49.088,
+  "usage": {
+    "input_tokens": 5182,
+    "output_tokens": 7034,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds T iterations of the coined quantum-walk search operator U = S C O on a twisted toroid with n = 2^(2m) nodes. The marked node is compiled in as a multi-controlled phase flip, the coin is the 2-qubit Grover coin, and the shift is a flip-flop shift built from controlled modular increments and decrements. Moving off the x-boundary also shifts y by the twist s. The circuit contains no state preparation or measurement. The runner must supply the uniform initial state.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _int(v, name, lo, hi):\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError(name + \" must be an integer in [\" + str(lo) + \",\" + str(hi) + \"]\")\n    return v\n\n\ndef _cond(qc, coin, c):\n    # X on coin qubits whose bit in c is 0, so an all-ones control means coin == c\n    for i in range(2):\n        if not (c >> i) & 1:\n            qc.x(coin[i])\n\n\ndef _inc(qc, reg, ctrls):\n    # controlled +1 mod 2^len(reg), cascade of MCX from the top bit down\n    for j in range(len(reg) - 1, -1, -1):\n        qc.mcx(list(ctrls) + list(reg[:j]), reg[j])\n\n\ndef _dec(qc, reg, ctrls):\n    # controlled -1 mod 2^len(reg), the inverse cascade\n    for j in range(len(reg)):\n        qc.mcx(list(ctrls) + list(reg[:j]), reg[j])\n\n\ndef _shift(qc, coin, x, y, s):\n    # eq_3: flip-flop twisted shift. Directions: 0:+x, 1:-x, 2:+y, 3:-y\n    xs = list(x)\n    cx = list(coin) + xs\n    cl = list(coin)\n    _cond(qc, coin, 0)\n    for _ in range(s):\n        _inc(qc, y, cx)  # wrap detect: x all ones, before x is incremented\n    _inc(qc, x, cl)\n    _cond(qc, coin, 0)\n    _cond(qc, coin, 1)\n    qc.x(xs)\n    for _ in range(s):\n        _dec(qc, y, cx)  # wrap detect: x == 0, before x is decremented\n    qc.x(xs)\n    _dec(qc, x, cl)\n    _cond(qc, coin, 1)\n    _cond(qc, coin, 2)\n    _inc(qc, y, cl)\n    _cond(qc, coin, 2)\n    _cond(qc, coin, 3)\n    _dec(qc, y, cl)\n    _cond(qc, coin, 3)\n    qc.x(coin[0])  # coin reversal c -> c XOR 1\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    m = _int(instance.get(\"m\"), \"m\", 1, 4)\n    n = 1 << (2 * m)\n    w = _int(instance.get(\"marked\"), \"marked\", 0, n - 1)\n    T = _int(instance.get(\"iterations\"), \"iterations\", 0, 1000)\n    s = _int(instance.get(\"twist\", 1), \"twist\", 0, (1 << m) - 1)\n    coin = QuantumRegister(2, \"coin\")\n    x = QuantumRegister(m, \"x\")\n    y = QuantumRegister(m, \"y\")\n    qc = QuantumCircuit(coin, x, y)\n    pos = list(x) + list(y)\n    zeros = [pos[i] for i in range(2 * m) if not (w >> i) & 1]\n    for _ in range(T):\n        # O: phase flip on marked position for all coin values (eq_2)\n        if zeros:\n            qc.x(zeros)\n        qc.mcp(math.pi, pos[:-1], pos[-1])\n        if zeros:\n            qc.x(zeros)\n        # C: Grover coin 2|s><s| - I = -(H H)(I - 2|00><00|)(H H) (eq_2)\n        qc.h(list(coin))\n        qc.x(list(coin))\n        qc.cz(coin[0], coin[1])\n        qc.x(list(coin))\n        qc.h(list(coin))\n        qc.global_phase = qc.global_phase + math.pi\n        # S: twisted flip-flop shift (eq_3)\n        _shift(qc, coin, x, y, s)\n    return qc",
+    "example_instance_json": "{\"m\": 2, \"marked\": 5, \"iterations\": 3, \"twist\": 1}",
+    "register_layout": [
+      "qubit 0: coin bit 0 (LSB of direction c)",
+      "qubit 1: coin bit 1 (c: 0=+x, 1=-x, 2=+y, 3=-y)",
+      "qubits 2..m+1: x coordinate, little-endian (x bit 0 is qubit 2)",
+      "qubits m+2..2m+1: y coordinate, little-endian",
+      "marked index w = x + 2^m * y",
+      "total qubits = 2m+2 (m=2 in the example gives 6 qubits)",
+      "the runner prepares the initial state, e.g. Hadamards on all qubits for the uniform state"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Initial uniform superposition is input-state preparation. The runner prepares it, so build_circuit contains no Hadamard preparation layer."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop: marking block (X on zero bits of w, mcp(pi)) and Grover coin block (H,X,CZ,X,H plus global phase pi)",
+        "explanation": "O is I - 2 I_c (x) |w><w| as a multi-controlled phase of pi. C is exactly 2|s><s| - I on the 2 coin qubits, with the -1 recorded as global phase."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_shift, with _inc and _dec",
+        "explanation": "Coin-conditioned modular increments and decrements of x and y. y moves by s when x wraps, detected before x is updated, and the sign follows the direction. The coin is then flipped with X on coin bit 0 (c XOR 1)."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop over T iterations",
+        "explanation": "The circuit implements U^T = (S C O)^T with U = S C O applied in the order O, C, S. T is supplied as instance['iterations']. The scan that maximizes P(T), and the readout, are not part of the circuit."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The O(sqrt(n) log n) gate-count claim is a target statement from the abstract. It is not implemented or verified here."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The Hadamard state-preparation step is excluded from the circuit.",
+        "reason": "The task requires an operation with no input-state preparation. The runner prepares the uniform state."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The ancilla register is dropped and the circuit uses 2m+2 qubits. Multi-controlled gates use Qiskit's ancilla-free MCX and MCP decompositions.",
+        "reason": "No ancilla is needed. This also keeps the qubit count within the 12-qubit cap, with m <= 4 giving at most 10 qubits."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The twist offset s is an optional instance parameter (default 1, range 0..2^m-1). The y shift is applied s times as repeated unit increments or decrements.",
+        "reason": "The spec leaves the twist size and direction as a guess. A parameter keeps the guess explicit and varyable."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The iteration count T is a required input (0..1000) and is not chosen inside the module. Selecting T by scanning P(T) is not implemented.",
+        "reason": "Choosing T needs simulation, which is not allowed in the generated module."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The Grover coin is implemented with its exact sign, -(HH)(I-2|00><00|)(HH), by adding a global phase of pi.",
+        "reason": "This preserves 2|s><s| - I exactly."
+      }
+    ],
+    "assumptions": [
+      "Marked node is given as the integer w = x + 2^m*y, and the phase flip applies to all coin values.",
+      "Twist is y +/- s on x wraparound only. The sign follows the direction of travel, +s for +x and -s for -x.",
+      "Flip-flop shift: the coin direction c is mapped to c XOR 1 after the move.",
+      "Direction encoding is 00:+x, 01:-x, 10:+y, 11:-y, using coin bit 0 as the LSB.",
+      "m is restricted to 1..4. The twist s must be less than 2^m."
+    ],
+    "unresolved_issues": [
+      "The exact twisted-toroid graph definition from the paper is unknown, so the twist is a plausible guess.",
+      "The paper's oracle and coin conventions are unknown.",
+      "The optimal T is not determined here. The external runner has to scan for it.",
+      "Gate-count scaling is not verified, and gate decompositions are not optimized.",
+      "The other graph families in the abstract are not implemented."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 6,
+    "gate_count": 2349,
+    "depth": 1467,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

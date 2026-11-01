@@ -1,0 +1,130 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "a8b3c3db-0c67-4565-80bd-b9bbb18f2a33",
+  "parent_run_id": "43cd7d75-9366-4347-ba77-5ae80013ff2e",
+  "created_at": "2026-11-01T00:13:54.553369+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "da75452944d287a8c736e6aaf49634f2fac9025761556093ba3a551726116de8",
+  "source_specification_sha256": "95aafd908660c50dd5913ce932285868b2b871cc20f12303c1d6b0d774545dac",
+  "source_python_sha256": "c6cecc04274bcda8656e7113545c7231b303d41ec16af8223ceb949ce945e8af",
+  "elapsed_seconds": 24.429,
+  "usage": {
+    "input_tokens": 5466,
+    "output_tokens": 3536,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Non-adaptive generalized Kitaev phase-encoding operation on M<=12 unentangled probe qubits. Qubit k receives n_k separate applications of the phase gate P(phi), then optional feedback offset P(theta_k), then an X-basis readout Hadamard. The runner prepares |+>^M and performs measurement and Bayesian post-processing. Lossless; the circuit is bound, unitary and measurement-free.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _is_int(x):\n    return isinstance(x, int) and not isinstance(x, bool)\n\n\ndef _is_real(x):\n    if isinstance(x, bool) or not isinstance(x, (int, float)):\n        return False\n    return math.isfinite(float(x))\n\n\ndef build_circuit(instance):\n    \"\"\"Phase encoding: n_k applications of P(phi) on probe qubit k (eq_1, eq_2),\n    optional offset P(theta_k) and readout Hadamard giving P(b0|phi)=(1+cos(n_k phi+theta_k))/2 (eq_3).\n    Instance keys: phi (real), n (list of positive ints), theta (optional list of reals),\n    readout_hadamard (optional bool, default True).\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    if not isinstance(n, (list, tuple)) or len(n) < 1:\n        raise ValueError('n must be a non-empty list of positive integers')\n    m = len(n)\n    if m > 12:\n        raise ValueError('at most 12 probe qubits are allowed')\n    for nk in n:\n        if not _is_int(nk) or nk < 1 or nk > 64:\n            raise ValueError('each n_k must be an integer in [1, 64]')\n    total = sum(n)\n    if total > 128:\n        raise ValueError('total number of gate applications N must be <= 128')\n    phi = instance.get('phi')\n    if not _is_real(phi):\n        raise ValueError('phi must be a finite real number')\n    phi = float(phi)\n    theta = instance.get('theta')\n    if theta is None:\n        theta = [0.0] * m\n    if not isinstance(theta, (list, tuple)) or len(theta) != m:\n        raise ValueError('theta must be a list with one entry per probe qubit')\n    for t in theta:\n        if not _is_real(t):\n            raise ValueError('theta entries must be finite reals')\n    readout = instance.get('readout_hadamard', True)\n    if not isinstance(readout, bool):\n        raise ValueError('readout_hadamard must be a bool')\n    qr = QuantumRegister(m, 'probe')\n    qc = QuantumCircuit(qr)\n    for k in range(m):\n        for _ in range(n[k]):\n            qc.p(phi, qr[k])\n        if float(theta[k]) != 0.0:\n            qc.p(float(theta[k]), qr[k])\n        if readout:\n            qc.h(qr[k])\n    return qc",
+    "example_instance_json": "{\"phi\": 0.7, \"n\": [1, 2, 2], \"theta\": [0, 0, 0], \"readout_hadamard\": true}",
+    "register_layout": [
+      "qubit 0 = probe 0 (b_0), receives n[0] phase gates",
+      "qubit 1 = probe 1 (b_1), receives n[1] phase gates",
+      "qubit k = probe k (b_k), receives n[k] phase gates; k=0..M-1, M=len(n)<=12",
+      "Runner should prepare each probe in |+> (H on |0>); no ancilla qubits; computational-basis little-endian, qubit 0 least significant bit"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit: loop of qc.p(phi, qr[k]) repeated n[k] times",
+        "explanation": "Acting on the runner-prepared |+> input, n_k applications of diag(1,e^{i phi}) give (|0>+e^{i n_k phi}|1>)/sqrt2."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: validation of n and total = sum(n)",
+        "explanation": "The distribution n_k determines N=sum n_k, the number of placed gates; the code validates that each n_k is a positive integer and caps N."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit: optional qc.p(theta[k]) and readout qc.h(qr[k])",
+        "explanation": "The offset and final Hadamard map the phase n_k phi+theta_k to the stated Z-basis outcome probabilities; the likelihood itself is a classical consequence, and sampling is left to the runner."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Classical grid Bayesian estimator; it is post-processing of measurement outcomes and not a quantum operation."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Circular error figure of merit is a classical average over outcomes and phases; no circuit is generated for it."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "|+> state preparation is not included in the circuit; the runner supplies the input state.",
+        "reason": "The task requires an operation without input-state preparation."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Measurement is omitted; only the pre-measurement readout Hadamard (switchable via readout_hadamard) is applied.",
+        "reason": "The circuit must be measurement-free; the Hadamard is a unitary basis change."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "The scope is narrowed to the lossless, non-adaptive case with a fixed user-supplied n_k vector and a bound numerical phi. The theta offsets are static inputs, not feedback computed from earlier outcomes.",
+        "reason": "Dynamic circuits are disallowed; loss, optimization of n_k and adaptivity are outside the specified instance."
+      },
+      {
+        "equation_ids": [
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Classical estimation and error evaluation are excluded.",
+        "reason": "They are not part of a unitary circuit operation."
+      }
+    ],
+    "assumptions": [
+      "The phase gate is diag(1,e^{i phi}), implemented as qc.p(phi, k) directly with no controlled-U or eigenstate ancilla.",
+      "Each repeated placement is an explicit separate gate, counted as one query.",
+      "Caps of n_k<=64 and N<=128 are implementation limits, not from the source.",
+      "The runner prepares |+>^M."
+    ],
+    "unresolved_issues": [
+      "The abstract does not give the optimal n_k distributions, the exact estimator or the loss model, so no optimal strategy is encoded.",
+      "Adaptive feedback schedules and entangled-strategy comparisons are not reconstructed."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 8,
+    "depth": 3,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

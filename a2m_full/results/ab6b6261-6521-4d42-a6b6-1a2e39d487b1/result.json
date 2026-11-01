@@ -1,0 +1,142 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "ab6b6261-6521-4d42-a6b6-1a2e39d487b1",
+  "parent_run_id": "1a4a0502-c454-4ac4-be94-c80d3472478f",
+  "created_at": "2026-11-01T00:33:11.489548+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "21fb101577702642b47b47cd352880566dc50f9a9e62094f24cbb2ab273abec6",
+  "source_specification_sha256": "8f2bb805f73e6489220155f0b19082c7ba7c6fce6844235d4c871aca43a1e2bf",
+  "source_python_sha256": "d3e2bcde82f8a011c5a8d9091f77a345a495e6f9b89bc05d5aa103c020b8f214",
+  "elapsed_seconds": 42.743,
+  "usage": {
+    "input_tokens": 5467,
+    "output_tokens": 6208,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Lossy-hop Grover walk on the complete graph with self-loops: T repetitions of [oracle phase flip U_w, then an ancilla-dilated hop]. Each hop uses a fresh ancilla rotated by Ry(theta) with sin(theta/2)=eps, and R_s=2|s><s|-I is applied on the search register controlled on ancilla=0, with the controlled global phase handled explicitly. Input |s> preparation, measurement, and the eps-scaling sweeps are left to the runner.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _mcz(qc, qubits):\n    \"\"\"Multi-controlled Z (phase -1 on all-ones) over the listed qubits.\"\"\"\n    if len(qubits) == 1:\n        qc.z(qubits[0])\n        return\n    qc.h(qubits[-1])\n    qc.mcx(list(qubits[:-1]), qubits[-1])\n    qc.h(qubits[-1])\n\n\ndef _oracle(qc, search, w):\n    \"\"\"eq_3: U_w = I - 2|w><w| on the search register (little-endian bits of w).\"\"\"\n    n = len(search)\n    for i in range(n):\n        if not (w >> i) & 1:\n            qc.x(search[i])\n    _mcz(qc, list(search))\n    for i in range(n):\n        if not (w >> i) & 1:\n            qc.x(search[i])\n\n\ndef _lossy_hop(qc, search, anc, theta):\n    \"\"\"eq_1/eq_2: V = (|0><0| (x) R_s + |1><1| (x) I)(Ry(theta) (x) I).\n    R_s = 2|s><s| - I = H^n (2|0><0| - I) H^n.\n    Controlled on anc=0, 2|0><0|-I has phase +1 on search=0 and -1 elsewhere.\n    Implemented as a -1 phase on anc=0 times a -1 phase on (search=0, anc=0).\"\"\"\n    n = len(search)\n    qc.ry(theta, anc)\n    for i in range(n):\n        qc.h(search[i])\n    qc.x(anc)\n    qc.z(anc)\n    for i in range(n):\n        qc.x(search[i])\n    _mcz(qc, list(search) + [anc])\n    for i in range(n):\n        qc.x(search[i])\n    qc.x(anc)\n    for i in range(n):\n        qc.h(search[i])\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a JSON object')\n    n = instance.get('n')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 2 or n > 4:\n        raise ValueError('n must be an integer in 2..4')\n    N = 2 ** n\n    w = instance.get('marked')\n    if isinstance(w, bool) or not isinstance(w, int) or w < 0 or w >= N:\n        raise ValueError('marked must be an integer in 0..N-1')\n    T = instance.get('steps')\n    if T is None:\n        T = int(math.floor(math.pi / 4.0 * math.sqrt(N)))\n    if isinstance(T, bool) or not isinstance(T, int) or T < 0:\n        raise ValueError('steps must be a nonnegative integer')\n    if n + T > 12:\n        raise ValueError('total qubits n + steps must be at most 12')\n    has_eps = instance.get('eps') is not None\n    has_c = instance.get('c') is not None\n    if has_eps == has_c:\n        raise ValueError('provide exactly one of eps or c')\n    if has_eps:\n        eps = instance['eps']\n        if isinstance(eps, bool) or not isinstance(eps, (int, float)):\n            raise ValueError('eps must be a real number')\n        eps = float(eps)\n    else:\n        c = instance['c']\n        if isinstance(c, bool) or not isinstance(c, (int, float)) or c < 0:\n            raise ValueError('c must be a nonnegative real number')\n        eps = float(c) / math.sqrt(N)\n    if not (eps >= 0.0 and eps <= 1.0):\n        raise ValueError('eps must lie in [0, 1]')\n    theta = 2.0 * math.asin(eps)\n    sr = QuantumRegister(n, 'search')\n    if T > 0:\n        ar = QuantumRegister(T, 'anc')\n        qc = QuantumCircuit(sr, ar)\n    else:\n        qc = QuantumCircuit(sr)\n    search = [sr[i] for i in range(n)]\n    for t in range(T):\n        _oracle(qc, search, w)\n        _lossy_hop(qc, search, ar[t], theta)\n    return qc",
+    "example_instance_json": "{\"n\":3,\"marked\":5,\"steps\":2,\"eps\":0.2}",
+    "register_layout": [
+      "Qubits 0..n-1: search register, little-endian (qubit i is bit i of the vertex index); runner prepares |s> here",
+      "Qubits n..n+T-1: one fresh hop-failure ancilla per step; qubit n+t is used in step t (starts |0>, |1> means the hop failed)",
+      "Example (n=3, steps=2): search = qubits 0,1,2; anc = qubits 3,4"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_lossy_hop (realized through the dilation)",
+        "explanation": "The lossy hop sqrt(1-eps^2) R_s + eps I is realized as the ancilla-dilated unitary. The ancilla=0 block gives sqrt(1-eps^2) R_s and the ancilla=1 block gives eps I."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_lossy_hop",
+        "explanation": "Ry(theta) with theta=2*asin(eps) on a fresh ancilla, followed by R_s on the search register controlled on ancilla=0, including the correct controlled global phase of R_s."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "_oracle and the loop in build_circuit",
+        "explanation": "Each walk step is U_w followed by the lossy hop, repeated T times. The oracle is the phase flip I-2|w><w| on the marked index given in the instance. The initial |s> preparation is left to the runner. P(w) is computed by the runner."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": "build_circuit (default steps)",
+        "explanation": "Ideal Grover analysis. It is used only to choose the default T=floor(pi/4*sqrt(N)) when steps is omitted. No rotation-angle formula is coded."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The scaling dichotomy and its proof are not constructed. The circuit only accepts eps directly or as c/sqrt(N) so that sweeps can be done outside the module."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The initial H^n preparation of |s> is omitted from the circuit.",
+        "reason": "The task requires an operation without input-state preparation. The runner must supply |s> on the search register, with ancillas in |0>."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "The black-box oracle U_w is implemented as an explicit phase flip on the marked index 'marked' from the instance, with one oracle per step.",
+        "reason": "A concrete gate-level operation is needed. The oracle is not a hardcoded output state."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "A fresh ancilla is used for every step and is never reset, measured, or recombined. The resulting operation is a unitary dilation. The exact product of H_eps operators appears only in the all-ancillas-0 post-selected block. Later steps act on the ancilla=1 failure branches as well, so the total state is not literally (H_eps U_w)^T|s>.",
+        "reason": "This follows the specification's fresh-ancilla option and the no-reset, no-dynamic-circuit rule. Postselection on all ancillas=0 can be done by the runner."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The controlled-R_s global phase is made explicit: the ancilla=0 branch applies D = 2|0><0| - I between Hadamard layers, built as a -1 phase on ancilla=0 combined with a -1 phase on (search=0, ancilla=0).",
+        "reason": "Controlling only the central multi-controlled Z would implement -R_s, which would flip the sign of the sqrt(1-eps^2) term relative to eps I."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2",
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope is narrowed to discrete-time walks with n in 2..4 search qubits, a single marked vertex, and n+T<=12. The eps sweeps, optimal-T search, and the continuous-time and physical barrier models are excluded.",
+        "reason": "Matches the stated reconstruction scope and the 12-qubit cap."
+      }
+    ],
+    "assumptions": [
+      "eps is the same at every step and lies in [0,1].",
+      "eps is given directly or as c/sqrt(N), with exactly one of eps or c supplied.",
+      "The barrier affects only the hop, not the oracle.",
+      "The runner prepares |s> on the search qubits and leaves the ancillas in |0>.",
+      "The default number of steps is floor(pi/4*sqrt(N)) when steps is omitted.",
+      "The marked index is little-endian, with qubit i holding bit i."
+    ],
+    "unresolved_issues": [
+      "The exact hop-failure model of the source paper (coherent versus incoherent) is unknown. The coherent ancilla dilation here is a modeling choice.",
+      "The scaling theorem and its constants are not reproduced.",
+      "The continuous-time version and the barrier-reduced hopping amplitude are not implemented.",
+      "The ancilla-per-step design limits the walk length to T<=12-n steps."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 5,
+    "gate_count": 138,
+    "depth": 82,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

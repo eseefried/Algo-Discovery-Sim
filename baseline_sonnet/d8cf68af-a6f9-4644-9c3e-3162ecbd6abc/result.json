@@ -1,0 +1,125 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "d8cf68af-a6f9-4644-9c3e-3162ecbd6abc",
+  "parent_run_id": "9f0afa01-2b4f-4a6c-bce4-0ddf618bb6fb",
+  "created_at": "2026-10-31T22:29:42.760705+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "654be53d4131eefaa40b0eeb33eaa5783dd6750d82d64edb05235cf652cd82ed",
+  "source_specification_sha256": "79cc78a2b2830134dae03a11724ba1f559fb602e1cbd43c65e2e9ec92c1c49a8",
+  "source_python_sha256": "25844736b9c3b1bd856d76c5fe7a48f9299ef6a9cbfa3719d0e9cb8f6c40cf33",
+  "elapsed_seconds": 29.746,
+  "usage": {
+    "input_tokens": 4580,
+    "output_tokens": 4491,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements eq_5 for a small binary RBM: a unitary that maps |0...0> to the Gibbs-state encoding sum_{v,h} sqrt(P(v,h))|v>|h>. The energy (eq_1) and Gibbs weights (eq_2) are evaluated classically from the instance parameters W, b, d. The state is built with a standard binary tree of multi-controlled Ry rotations, so every amplitude is non-negative and no phases are needed. This is a classical-compute state-preparation circuit, not the paper's quantum training algorithm.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nfrom qiskit.circuit.library import RYGate\nimport numpy as np\nimport math\n\nMAX_TOTAL = 8\n\n\ndef _as_int(x, name):\n    if isinstance(x, bool) or not isinstance(x, (int, np.integer)):\n        raise ValueError(name + ' must be an integer')\n    return int(x)\n\n\ndef _as_array(x, shape, name):\n    try:\n        a = np.array(x, dtype=float)\n    except Exception:\n        raise ValueError(name + ' is not numeric')\n    if a.shape != shape:\n        raise ValueError(name + ' must have shape ' + str(shape))\n    if not np.all(np.isfinite(a)) or np.max(np.abs(a), initial=0.0) > 50.0:\n        raise ValueError(name + ' must be finite with |entries| <= 50')\n    return a\n\n\ndef _gibbs_probs(nv, nh, W, b, d):\n    # eq_1 energy and eq_2 Gibbs distribution; basis index x: visible bit i = qubit i, hidden bit j = qubit nv+j\n    n = nv + nh\n    E = np.zeros(2 ** n)\n    for x in range(2 ** n):\n        v = np.array([(x >> i) & 1 for i in range(nv)], dtype=float)\n        h = np.array([(x >> (nv + j)) & 1 for j in range(nh)], dtype=float)\n        E[x] = -float(v @ b) - float(h @ d) - float(v @ W @ h)\n    w = np.exp(-(E - E.min()))\n    return w / w.sum()\n\n\ndef build_circuit(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    nv = _as_int(instance.get('n_v'), 'n_v')\n    nh = _as_int(instance.get('n_h'), 'n_h')\n    if nv < 1 or nh < 1 or nv + nh > MAX_TOTAL:\n        raise ValueError('need n_v>=1, n_h>=1, n_v+n_h<=' + str(MAX_TOTAL))\n    W = _as_array(instance.get('W'), (nv, nh), 'W')\n    b = _as_array(instance.get('b'), (nv,), 'b')\n    d = _as_array(instance.get('d'), (nh,), 'd')\n    n = nv + nh\n    P = _gibbs_probs(nv, nh, W, b, d)\n    vis = QuantumRegister(nv, 'v')\n    hid = QuantumRegister(nh, 'h')\n    qc = QuantumCircuit(vis, hid)\n    # eq_5: amplitudes sqrt(P) via a tree of multiplexed Ry rotations, most significant qubit first\n    for q in range(n - 1, -1, -1):\n        m = P.reshape(2 ** (n - q - 1), 2, 2 ** q).sum(axis=2)\n        for pre in range(2 ** (n - q - 1)):\n            p0 = float(m[pre, 0])\n            p1 = float(m[pre, 1])\n            if p0 + p1 <= 1e-300:\n                continue\n            theta = 2.0 * math.atan2(math.sqrt(p1), math.sqrt(p0))\n            if abs(theta) < 1e-14:\n                continue\n            ctrls = list(range(q + 1, n))\n            if not ctrls:\n                qc.ry(theta, q)\n            else:\n                g = RYGate(theta).control(len(ctrls), ctrl_state=pre)\n                qc.append(g, ctrls + [q])\n    return qc",
+    "example_instance_json": "{\"n_v\":2,\"n_h\":2,\"W\":[[0.5,-0.3],[0.2,0.8]],\"b\":[0.1,-0.2],\"d\":[0.3,0.0]}",
+    "register_layout": [
+      "qubit 0..n_v-1: visible units v_0..v_{n_v-1} (qubit i = v_i, qubit 0 least significant)",
+      "qubit n_v..n_v+n_h-1: hidden units h_0..h_{n_h-1} (qubit n_v+j = h_j)",
+      "Example: q0=v0, q1=v1, q2=h0, q3=h1; basis index x = v0 + 2 v1 + 4 h0 + 8 h1; no ancillas",
+      "Encoding: computational basis, amplitude of |x> = sqrt(P(v,h)); intended input |0...0>"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_gibbs_probs (energy loop E[x])",
+        "explanation": "RBM energy computed classically for every basis configuration from W, b, d."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_gibbs_probs (exp(-(E-Emin)) normalized)",
+        "explanation": "Gibbs probabilities computed classically; the shift by E.min() cancels in the normalization and only aids numerical stability."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Log-likelihood objective is not part of the circuit; it is context for why the model distribution is needed."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Gradient is classical post-processing from samples and is not implemented. The circuit only prepares the state whose measurement would give the model term."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "build_circuit (multiplexed Ry tree loop)",
+        "explanation": "Prepares sum sqrt(P(v,h))|v>|h> from |0...0> using controlled Ry rotations whose angles come from marginal probabilities."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "The Gibbs-state encoding is realized as an explicit state-preparation unitary from |0...0> with classically computed rotation angles. This is not a quantum Gibbs-sampling or paper-specific algorithm.",
+        "reason": "The abstract gives no preparation method. A generic exact amplitude-encoding tree is the only defensible way to realize eq_5 with standard gates."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "The energy and Gibbs weights are evaluated classically at build time, so the circuit angles depend on the full distribution (including Z).",
+        "reason": "eq_5 needs the amplitudes sqrt(P). A circuit without classical knowledge of P would require the unspecified quantum method."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4",
+          "eq_5"
+        ],
+        "change": "Scope narrowed: total qubits n_v+n_h capped at 8, below the global cap of 12. Measurement, sampling, gradient estimation and training are excluded.",
+        "reason": "The multi-controlled tree needs 2^n-1 gates, so a cap of 8 keeps it practical. Measurement and training are outside an operation-only module."
+      }
+    ],
+    "assumptions": [
+      "Binary units in {0,1} with temperature 1",
+      "Visible unit i is qubit i and hidden unit j is qubit n_v+j",
+      "The runner supplies |0...0> as input",
+      "Parameters are bounded to |entries| <= 50 and must be finite"
+    ],
+    "unresolved_issues": [
+      "The paper's actual quantum training algorithm, state preparation and gradient estimation are not specified in the abstract and are not implemented",
+      "The state-preparation cost is exponential in n_v+n_h, so it offers no speedup",
+      "The full Boltzmann machine and multi-layer models are not covered",
+      "The data-dependent (clamped visible) term of the gradient is not implemented"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 4,
+    "gate_count": 575,
+    "depth": 403,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

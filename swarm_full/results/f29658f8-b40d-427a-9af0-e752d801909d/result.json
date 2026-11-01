@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "f29658f8-b40d-427a-9af0-e752d801909d",
+  "parent_run_id": "9440bbf3-4773-41c7-b442-bf7b6c4708b5",
+  "created_at": "2026-10-31T21:47:21.983602+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "60b2b33604e67695d4568e20a1cb0bc23914380d6eb1c91244aa9e3b9190616f",
+  "source_specification_sha256": "b267ee6c0fb3895d0c32e0a500a5f540a164d6668309746c89cc6162f5bc1d01",
+  "source_python_sha256": "5b3a31ea12c391cdd0df7a59ab6d01c0b681c74da44c29cb99639cb042be2927",
+  "elapsed_seconds": 30.39,
+  "usage": {
+    "input_tokens": 4007,
+    "output_tokens": 4217,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Implements only eq_1: the permutation operator U_sigma|j> = |sigma(j)> on an n-qubit register (default 2 qubits = one ququart) as a unitary circuit built from CX, X and multi-controlled X gates. The one-step parity-determining algorithm and the linear-optics layout are not specified in the abstract, so they are not implemented.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\n\n\ndef _transposition(qc, n, a, b):\n    # Swap basis states |a> and |b>: CX conjugation makes them differ in one bit t, then a multi-controlled X on t.\n    d = a ^ b\n    t = (d & -d).bit_length() - 1\n    others = [k for k in range(n) if k != t]\n    diffs = [k for k in others if (d >> k) & 1]\n    alpha = (a >> t) & 1\n    for k in diffs:\n        qc.cx(t, k)\n    ap = a\n    for k in diffs:\n        ap ^= alpha << k\n    zeros = [k for k in others if not ((ap >> k) & 1)]\n    for k in zeros:\n        qc.x(k)\n    if others:\n        qc.mcx(others, t)\n    else:\n        qc.x(t)\n    for k in zeros:\n        qc.x(k)\n    for k in reversed(diffs):\n        qc.cx(t, k)\n\n\ndef build_circuit(instance):\n    \"\"\"Permutation operator U_sigma|j> = |sigma(j)> on n qubits (eq_1). Qubit 0 is the LSB of j.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('num_qubits', 2)\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 4:\n        raise ValueError('num_qubits must be an integer in 1..4')\n    dim = 2 ** n\n    perm = instance.get('permutation')\n    if not isinstance(perm, (list, tuple)) or len(perm) != dim:\n        raise ValueError('permutation must be a list of length 2**num_qubits')\n    for v in perm:\n        if isinstance(v, bool) or not isinstance(v, int):\n            raise ValueError('permutation entries must be integers')\n    if sorted(perm) != list(range(dim)):\n        raise ValueError('permutation must be a permutation of 0..2**num_qubits-1')\n    reg = QuantumRegister(n, 'q')\n    qc = QuantumCircuit(reg)\n    seen = [False] * dim\n    for start in range(dim):\n        if seen[start]:\n            continue\n        cycle = []\n        j = start\n        while not seen[j]:\n            seen[j] = True\n            cycle.append(j)\n            j = perm[j]\n        # cycle c0->c1->...->c_{k-1}->c0; apply swaps (c_{k-2},c_{k-1}) first down to (c0,c1)\n        for i in range(len(cycle) - 2, -1, -1):\n            _transposition(qc, n, cycle[i], cycle[i + 1])\n    return qc",
+    "example_instance_json": "{\"num_qubits\": 2, \"permutation\": [1, 2, 3, 0]}",
+    "register_layout": [
+      "q[0]: least significant bit of ququart index j",
+      "q[1]: most significant bit of ququart index j (j = q0 + 2*q1)",
+      "Computational basis |j>, j in {0,1,2,3}, stands for the ququart (2 polarization x 2 spatial modes) encoding"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "build_circuit (cycle decomposition) and _transposition (basis-state swaps)",
+        "explanation": "U_sigma|j>=|sigma(j)> is realized by decomposing sigma into cycles, then into transpositions of basis states. Each transposition is a CX-conjugated multi-controlled X."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The permutation sign is a classical definition. The circuit does not compute or encode parity, because the abstract does not give the one-step quantum mechanism."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "Scope narrowed to the permutation operator on a qubit-encoded register (2 qubits for the ququart by default, optionally up to 4 qubits). The linear-optics encoding (polarization x path) is replaced by a 2-qubit register.",
+        "reason": "The abstract gives no optical layout, and a circuit model needs a qubit encoding."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The parity-determining algorithm (input state, interference, measurement mapping) is not implemented.",
+        "reason": "The specification lists the quantum mechanism for one-step parity determination as missing information, and inventing it would not preserve the source."
+      }
+    ],
+    "assumptions": [
+      "Ququart basis |j> maps to the 2-qubit computational basis with j = q0 + 2*q1",
+      "Permutation is supplied as the list sigma with sigma[j] the image of j",
+      "Default is S_4 on 2 qubits; the generalization to n<=4 qubits is an extension",
+      "No input-state preparation or measurement is included, as the runner prepares inputs"
+    ],
+    "unresolved_issues": [
+      "The one-step quantum parity determination algorithm is not reconstructed",
+      "The input state, the interferometric parity-encoding step and the detection-to-parity mapping are unknown",
+      "The mapping from the actual photonic implementation to qubit gates is not specified"
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 7,
+    "depth": 7,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

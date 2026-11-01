@@ -1,0 +1,148 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "88c65c95-5537-4bce-879c-13944ba2300e",
+  "parent_run_id": "596f02ef-5389-4931-96d1-1e3e127f0f11",
+  "created_at": "2026-11-01T00:32:26.148097+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "1c759b38327ec3287afdd53d40de1f00f072a7545d49ad9cffbf170756f8d00c",
+  "source_specification_sha256": "49aac6dd3ef21da0332ee71b4272db86e9a080638e9f9e25b948d5dacd354ab7",
+  "source_python_sha256": "52567d159eb768e00526493c8038fdcc538ad36aa98fdfdb7edb69f559523445",
+  "elapsed_seconds": 51.179,
+  "usage": {
+    "input_tokens": 5824,
+    "output_tokens": 7217,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the Grover amplitude-amplification operator around a one-sided monotonicity edge checker for a small Boolean function f on n in {2,3} bits. The checker is U_check: Hadamards on x and edge-direction i, then f is queried at x with bit i forced to 0 and to 1 through XOR-oracle ancillas, flag F is set to f(lo) AND NOT f(hi), and the queries are uncomputed. The circuit then applies k iterations of Q = -U S_0 U^dagger S_flag. No input preparation or measurement is included.",
+    "source_python": "import math\nfrom qiskit import QuantumCircuit\n\n\ndef _validate(instance):\n    if not isinstance(instance, dict):\n        raise ValueError('instance must be a dict')\n    n = instance.get('n')\n    k = instance.get('iterations')\n    tt = instance.get('truth_table')\n    if isinstance(n, bool) or not isinstance(n, int) or n < 2:\n        raise ValueError('n must be an integer >= 2')\n    if isinstance(k, bool) or not isinstance(k, int) or k < 0 or k > 16:\n        raise ValueError('iterations must be an integer in [0,16]')\n    m = (n - 1).bit_length()\n    if 2 * n + m + 3 > 12:\n        raise ValueError('too many qubits: need 2n+ceil(log2 n)+3 <= 12')\n    if not isinstance(tt, list) or len(tt) != 2 ** n:\n        raise ValueError('truth_table must be a list of length 2^n')\n    for v in tt:\n        if isinstance(v, bool) or not isinstance(v, int) or v not in (0, 1):\n            raise ValueError('truth_table entries must be 0 or 1')\n    return n, m, k, list(tt)\n\n\ndef _oracle(qc, y, target, tt):\n    # XOR oracle: target ^= f(y); y[j] is bit j of the argument\n    for v, val in enumerate(tt):\n        if val == 1:\n            qc.mcx(list(y), target, ctrl_state=v)\n\n\ndef _force(qc, x, ireg, y, b):\n    # Y ^= (x with bit i forced to b); self-inverse (all gates are XORs onto Y)\n    n = len(x)\n    m = len(ireg)\n    for j in range(n):\n        qc.cx(x[j], y[j])\n    for j in range(n):\n        qc.mcx(list(ireg) + [x[j]], y[j], ctrl_state=j | (1 << m))\n        if b == 1:\n            qc.mcx(list(ireg), y[j], ctrl_state=j)\n\n\ndef _checker(total, x, ireg, y, a, f, tt):\n    u = QuantumCircuit(total)\n    for q in list(x) + list(ireg):\n        u.h(q)\n    for b in (0, 1):\n        _force(u, x, ireg, y, b)\n        _oracle(u, y, a[b], tt)\n        _force(u, x, ireg, y, b)\n    # flag = f(lo) AND NOT f(hi): controls [a0,a1], state a0=1,a1=0 -> ctrl_state=1\n    u.mcx([a[0], a[1]], f, ctrl_state=1)\n    for b in (1, 0):\n        _force(u, x, ireg, y, b)\n        _oracle(u, y, a[b], tt)\n        _force(u, x, ireg, y, b)\n    return u\n\n\ndef build_circuit(instance):\n    \"\"\"Grover iterations Q=-U S0 U^dag S_flag around the monotonicity edge checker.\"\"\"\n    n, m, k, tt = _validate(instance)\n    total = 2 * n + m + 3\n    x = list(range(n))\n    ireg = list(range(n, n + m))\n    y = list(range(n + m, 2 * n + m))\n    a = [2 * n + m, 2 * n + m + 1]\n    f = 2 * n + m + 2\n    qc = QuantumCircuit(total)\n    u = _checker(total, x, ireg, y, a, f, tt)\n    ud = u.inverse()\n    # U_check (state preparation of the amplitude-amplification operator)\n    qc.compose(u, inplace=True)\n    allq = list(range(total))\n    for _ in range(k):\n        qc.z(f)  # S_flag\n        qc.compose(ud, inplace=True)\n        for q in allq:\n            qc.x(q)\n        qc.h(allq[-1])\n        qc.mcx(allq[:-1], allq[-1])\n        qc.h(allq[-1])\n        for q in allq:\n            qc.x(q)\n        qc.compose(u, inplace=True)\n        qc.global_phase = qc.global_phase + math.pi\n    return qc",
+    "example_instance_json": "{\"n\":3,\"truth_table\":[0,1,0,0,0,0,0,0],\"iterations\":1}",
+    "register_layout": [
+      "Qubits 0..n-1: X register (input x, qubit j = bit j, little-endian); n=3 -> qubits 0,1,2",
+      "Qubits n..n+m-1: I register (edge direction i, m=ceil(log2 n), little-endian); n=3 -> qubits 3,4",
+      "Qubits n+m..2n+m-1: Y work register (copy of x with bit i forced to 0/1, returned to |0>); n=3 -> qubits 5,6,7",
+      "Qubits 2n+m, 2n+m+1: A ancillas holding f(lo), f(hi), returned to |0>; n=3 -> qubits 8,9",
+      "Qubit 2n+m+2: F flag holding v(x,i); n=3 -> qubit 10",
+      "Truth table index y = sum_j y_j 2^j; the circuit takes no prepared inputs and the runner supplies |0...0> with U_check applied as the first operation"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "implemented",
+        "code_location": "_checker (calls _force, _oracle, then mcx on [a0,a1] -> F with ctrl_state=1)",
+        "explanation": "The flag is computed as f(x^{i->0}) AND NOT f(x^{i->1}), using the XOR oracle at both forced endpoints. The ancillas are then uncomputed."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "_checker and the initial qc.compose(u) in build_circuit",
+        "explanation": "H on X and I, then the flag computation with all junk uncomputed. For n=3 the I register has an unused value 3, for which no forcing occurs so f(lo)=f(hi) and v=0 automatically. This matches the spec's convention that padded indices are non-violating."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "implemented",
+        "code_location": "build_circuit loop: z(F), U^dagger, reflection about |0..0>, U, global phase pi",
+        "explanation": "Each iteration applies Q = -U S_0 U^dagger S_flag. The iteration count k is supplied in the instance; the sin^2((2k+1)theta) formula is not evaluated in the code."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "The edge-density lower bound p >= eps/sqrt(n) comes from external analyses, and the complexity bound is not encoded in the circuit. k is simply an input."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Measurement, classical recheck of the returned edge, and the decision rule are post-processing and are excluded from the operation."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "Restricted to n in {2,3}. The total qubit count is 2n+ceil(log2 n)+3, which must be <= 12, so n=4 (13 qubits) is rejected with ValueError.",
+        "reason": "The 12-qubit cap combined with the work-register design."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_2"
+        ],
+        "change": "Work registers are a Y register of n qubits plus 2 ancillas A. The endpoints are processed sequentially, reusing Y, instead of the 'about 2 to 4' work qubits in the spec. The oracle f is realised as a truth-table XOR oracle (one multi-controlled X per f=1 input), supplied via instance['truth_table'].",
+        "reason": "A concrete standard-gate implementation of the placeholder oracle is needed, and the specified work qubits cannot hold a forced copy of x."
+      },
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "For n=3 the success probability is p = (#violated (x,i) pairs)/(4*2^n), i.e. rescaled by n/4 from the spec's n*2^n normalisation. For n=2 the index is uniform with no padding.",
+        "reason": "The I register spans 2^m values, so padded index values dilute the amplitude. These padded values are non-violating."
+      },
+      {
+        "equation_ids": [
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "k is a user-given instance parameter (0..16) rather than derived from eps or p.",
+        "reason": "The abstract gives no concrete rule, and the circuit is an operation with fixed gate count."
+      },
+      {
+        "equation_ids": [
+          "eq_5"
+        ],
+        "change": "Measurement and classical verification are removed from the circuit.",
+        "reason": "The task requires a measurement-free unitary operation."
+      },
+      {
+        "equation_ids": [
+          "eq_3"
+        ],
+        "change": "Global phase of pi per Grover iteration is added to represent the leading minus sign in Q.",
+        "reason": "This reproduces Q = -U S_0 U^dagger S_flag exactly. It is physically irrelevant."
+      }
+    ],
+    "assumptions": [
+      "The circuit applies U_check to the all-zero input as its first operation, so the runner should supply |0...0>.",
+      "truth_table has 2^n entries in {0,1} indexed by sum_j y_j 2^j.",
+      "Qubits are little-endian and bit j of x is X qubit j.",
+      "S_0 reflects about |0...0> over all qubits, which is valid because the Y and A work registers are returned to |0> by U_check.",
+      "The mcx gates are decomposed by Qiskit without extra ancillas, so there are no extra qubits beyond the stated layout."
+    ],
+    "unresolved_issues": [
+      "The actual algorithm of the paper (the n^{1/4} eps^{-1/2} polylog tester, path/line tester, and handling of unknown eps) is not reconstructed.",
+      "Only a tiny edge-tester amplification model is implemented, with n limited to 2 or 3.",
+      "The query count is not asymptotically meaningful at this size."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 11,
+    "gate_count": 4584,
+    "depth": 2813,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

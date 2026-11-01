@@ -1,0 +1,117 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "a8b62a97-086c-4e45-bfdf-c6b9ff73cdac",
+  "parent_run_id": "a8167d8e-8389-4850-a01c-a85e073b7f94",
+  "created_at": "2026-10-31T21:43:31.564765+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "013a8cf963ba33d169ea35201acea1f0c6d68335c74d3bdeae85eb1ab988182c",
+  "source_specification_sha256": "feebfb418002927bfb701ce7de7223b885b33c3e4319430351ecb7f3f00eba48",
+  "source_python_sha256": "488406e35663a47cb0b854c934ee786e66c21dce5df732f4dcf9a81b51c0ea14",
+  "elapsed_seconds": 24.608,
+  "usage": {
+    "input_tokens": 4642,
+    "output_tokens": 3395,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Bernstein-Vazirani operation H^n, then a phase oracle (-1)^{f(x)} built from a truth table, then H^n, on an n-qubit register. The oracle is ancilla-free: phase flips are applied directly with multi-controlled phase gates, which is equivalent to kickback from an ancilla in |->. Measuring qubit i afterwards would give Bernoulli(Inf_i) samples, but measurement, repetition and estimation are left to the runner.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef build_circuit(instance):\n    \"\"\"Return H^n . O_f . H^n with phase oracle O_f|x> = (-1)^{f(x)}|x>.\n\n    instance: {\"n\": int in 1..8, \"truth_table\": list of 2^n ints in {0,1}},\n    where truth_table[x] = f(x) and x = sum_i x_i 2^i (qubit i holds x_i).\n    \"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    n = instance.get(\"n\")\n    if isinstance(n, bool) or not isinstance(n, int) or n < 1 or n > 8:\n        raise ValueError(\"n must be an integer in 1..8\")\n    tt = instance.get(\"truth_table\")\n    if not isinstance(tt, list) or len(tt) != 2 ** n:\n        raise ValueError(\"truth_table must be a list of length 2^n\")\n    for v in tt:\n        if isinstance(v, bool) or not isinstance(v, int) or v not in (0, 1):\n            raise ValueError(\"truth_table entries must be 0 or 1\")\n    reg = QuantumRegister(n, \"x\")\n    qc = QuantumCircuit(reg)\n    # step 1: Hadamards on the input register (eq_2)\n    for q in range(n):\n        qc.h(q)\n    # step 2: phase oracle (-1)^{f(x)} (eq_2); flip the phase of each basis state x with f(x)=1\n    for x, v in enumerate(tt):\n        if v != 1:\n            continue\n        zeros = [q for q in range(n) if not (x >> q) & 1]\n        for q in zeros:\n            qc.x(q)\n        if n == 1:\n            qc.p(math.pi, 0)\n        else:\n            qc.mcp(math.pi, list(range(n - 1)), n - 1)\n        for q in zeros:\n            qc.x(q)\n    # step 3: final Hadamards (eq_2)\n    for q in range(n):\n        qc.h(q)\n    return qc",
+    "example_instance_json": "{\"n\": 3, \"truth_table\": [0, 1, 0, 1, 0, 1, 1, 0]}",
+    "register_layout": [
+      "qubit i (i=0..n-1) = input variable x_i, with qubit 0 the least significant bit; truth_table index x = sum_i x_i 2^i",
+      "output bit y_i is read from qubit i after the circuit",
+      "no ancilla qubit; total qubits = n <= 8 (within the 12-qubit cap)",
+      "example: n=3 uses qubits 0,1,2, with f = x0 XOR (x1 AND x2)"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Property of the measured output of the circuit (Pr[y_i=1]=Inf_i). The circuit does not compute it; the runner can check it by measuring qubit i."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit: H layer, truth-table phase oracle, H layer",
+        "explanation": "The unitary H^n O_f H^n yields Pr[y=s]=fhat(s)^2 when applied to |0^n>. The runner prepares the input; the module only builds the operation."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Fourier expression for influence, used to link eq_1 and eq_2. It is a mathematical identity and needs no circuit."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "Empirical averaging over N repeated runs is classical post-processing involving measurement and sampling, which build_circuit must not contain."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The ancilla in |-> and kickback were replaced by a direct ancilla-free phase oracle on the n-qubit register.",
+        "reason": "The ancilla would have to be prepared in |1> and Hadamard-transformed (input-state preparation), which the operation must not include. The direct phase oracle implements the same (-1)^{f(x)} action."
+      },
+      {
+        "equation_ids": [
+          "eq_2"
+        ],
+        "change": "The oracle is specified by an explicit truth table, and n is capped at 8.",
+        "reason": "The abstract gives no oracle construction. A truth-table phase oracle works for any f, and its gate count grows as 2^n, so n is limited."
+      },
+      {
+        "equation_ids": [
+          "eq_1",
+          "eq_3",
+          "eq_4"
+        ],
+        "change": "The scope is narrowed to the single-run BV unitary. Influence estimation, thresholding and junta learning are not implemented.",
+        "reason": "They are classical post-processing or statistical claims, and the abstract does not detail the junta-learning algorithms."
+      }
+    ],
+    "assumptions": [
+      "Phase-oracle form of Bernstein-Vazirani",
+      "Truth-table index x = sum_i x_i 2^i, with x_i on qubit i",
+      "Runner prepares |0^n> and measures qubits afterwards",
+      "Influence normalization is as in the specification (sum of fhat(s)^2 over s_i=1)"
+    ],
+    "unresolved_issues": [
+      "Influence normalization is not fixed by the abstract. The identity Pr[y_i=1]=Inf_i depends on the paper's definition, which may differ from the standard one by a factor.",
+      "Sample complexity, error and confidence parameters, and the junta-learning algorithm are unspecified and not implemented.",
+      "The truth-table oracle uses O(2^n) multi-controlled gates, which is inefficient for larger n."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 3,
+    "gate_count": 68,
+    "depth": 53,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

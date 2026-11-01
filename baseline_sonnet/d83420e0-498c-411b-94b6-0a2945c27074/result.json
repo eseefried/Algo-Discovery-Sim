@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "stage": "equations_to_qiskit",
+  "run_id": "d83420e0-498c-411b-94b6-0a2945c27074",
+  "parent_run_id": "ead4019f-04fe-40dd-b1c4-8bbcdc527c16",
+  "created_at": "2026-10-31T22:26:13.517997+00:00",
+  "model": "claude-sonnet-5-5",
+  "response_model": "claude-sonnet-5-5",
+  "prompt_version": "equations-to-qiskit-v1",
+  "prompt_sha256": "465ba20ecd5c3a78b213d35f979248182c351c3d9758a55de621d8679e066b17",
+  "request_sha256": "f639b4dd79328cd39343739d74389e9c085273d11bdd860e5ead2140dbe81e06",
+  "source_specification_sha256": "38630350f43ec11f6b4d16d24b7d471f7b5a8a84789a82c366cac7aeede39255",
+  "source_python_sha256": "48e57d5bb95fb366d29fad2b61c7491c2bb428a95cebe5110933a6b3746384dc",
+  "elapsed_seconds": 25.82,
+  "usage": {
+    "input_tokens": 4946,
+    "output_tokens": 3642,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "stop_reason": "end_turn",
+  "parameters": {
+    "max_tokens": 16384,
+    "effort": "high",
+    "timeout_seconds": 180.0
+  },
+  "static_checks_passed": true,
+  "artifact": {
+    "status": "generated",
+    "summary": "Builds the standard Grover/amplitude-amplification operator G^L, with G = -A S_0 A^dagger S_g, on n search qubits (n <= 12). A is the Hadamard layer, so the initial state is the uniform superposition. S_g is a multi-controlled phase flip on each marked basis state. The default example is n=2, one marked state, L=1, which is the eq_5 instance (lambda=1/4). The paper's fixed-point scheme is NOT implemented.",
+    "source_python": "from qiskit import QuantumCircuit, QuantumRegister\nimport math\n\n\ndef _int_in(v, name, lo, hi):\n    if isinstance(v, bool) or not isinstance(v, int) or v < lo or v > hi:\n        raise ValueError(name + \" must be an integer in [\" + str(lo) + \", \" + str(hi) + \"]\")\n    return v\n\n\ndef _flip_state(qc, qubits, value):\n    \"\"\"Apply I - 2|value><value| on qubits (qubit k holds bit k of value).\"\"\"\n    zeros = [q for k, q in enumerate(qubits) if not (value >> k) & 1]\n    for q in zeros:\n        qc.x(q)\n    if len(qubits) == 1:\n        qc.z(qubits[0])\n    else:\n        qc.mcp(math.pi, list(qubits[:-1]), qubits[-1])\n    for q in zeros:\n        qc.x(q)\n\n\ndef build_circuit(instance):\n    \"\"\"Return G^L with G = -A S_0 A^dagger S_g (eq_2); A = H^n.\"\"\"\n    if not isinstance(instance, dict):\n        raise ValueError(\"instance must be a dict\")\n    for key in (\"n\", \"marked\", \"L\"):\n        if key not in instance:\n            raise ValueError(\"missing key \" + key)\n    n = _int_in(instance[\"n\"], \"n\", 1, 12)\n    L = _int_in(instance[\"L\"], \"L\", 0, 256)\n    marked = instance[\"marked\"]\n    if not isinstance(marked, (list, tuple)) or len(marked) == 0:\n        raise ValueError(\"marked must be a non-empty list\")\n    marked = [_int_in(m, \"marked element\", 0, 2 ** n - 1) for m in marked]\n    if len(set(marked)) != len(marked):\n        raise ValueError(\"marked states must be distinct\")\n    reg = QuantumRegister(n, \"search\")\n    qc = QuantumCircuit(reg)\n    qubits = list(reg)\n    for _ in range(L):\n        # oracle S_g = I - 2 sum_{g} |g><g|\n        for m in marked:\n            _flip_state(qc, qubits, m)\n        # A^dagger (A = Hadamard layer)\n        for q in qubits:\n            qc.h(q)\n        # S_0 = I - 2|0><0|\n        _flip_state(qc, qubits, 0)\n        # A\n        for q in qubits:\n            qc.h(q)\n        # overall minus sign of G\n        qc.global_phase += math.pi\n    return qc",
+    "example_instance_json": "{\"n\": 2, \"marked\": [3], \"L\": 1}",
+    "register_layout": [
+      "qubits 0..n-1: register 'search'; qubit k is bit k (little-endian) of the basis-state integer",
+      "marked integers use the same little-endian convention",
+      "no ancilla qubits; total qubits = n <= 12",
+      "input state A|0> (or any state) is prepared by the runner; the circuit applies only G^L"
+    ],
+    "equation_mapping": [
+      {
+        "equation_id": "eq_1",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Defines the decomposition and lambda. The circuit does not prepare |psi>; the runner supplies the input. With the Hadamard-layer A and k marked states, lambda = k/2^n."
+      },
+      {
+        "equation_id": "eq_2",
+        "disposition": "implemented",
+        "code_location": "build_circuit (loop body) and _flip_state",
+        "explanation": "One iterate G = -A S_0 A^dagger S_g per loop pass. S_g and S_0 are multi-controlled phase flips built with X conjugation and mcp(pi). A = H^n. The -1 is added as global phase."
+      },
+      {
+        "equation_id": "eq_3",
+        "disposition": "background",
+        "code_location": null,
+        "explanation": "Analytic success probability sin^2((2L+1)theta) for the iterate. It is a property of the implemented circuit when the input is A|0>, not separate circuit code."
+      },
+      {
+        "equation_id": "eq_4",
+        "disposition": "out_of_scope",
+        "code_location": null,
+        "explanation": "The fixed-point failure-bound requirement over [lambda_0,1] needs the paper's unspecified phase schedule, which is not reconstructed. Standard Grover does not satisfy it."
+      },
+      {
+        "equation_id": "eq_5",
+        "disposition": "implemented",
+        "code_location": "example_instance_json with build_circuit",
+        "explanation": "The example instance n=2, marked=[3], L=1 gives lambda=1/4 and one iteration. It is realised by parameters, not by dedicated code."
+      }
+    ],
+    "specification_changes": [
+      {
+        "equation_ids": [
+          "eq_2",
+          "eq_3"
+        ],
+        "change": "Implemented the standard Grover iterate with fixed pi phases, not the paper's fixed-point amplitude amplification. A is fixed to the Hadamard layer and the oracle to a phase flip on an explicit list of marked basis states.",
+        "reason": "The paper's fixed-point phase schedule is not given in the specification, so it cannot be reconstructed. The concrete A and oracle make the operation well defined."
+      },
+      {
+        "equation_ids": [
+          "eq_4"
+        ],
+        "change": "The fixed-point requirement and the query-count scaling are not implemented or enforced.",
+        "reason": "Essential details (phase schedule, query count, range) are missing from the specification."
+      },
+      {
+        "equation_ids": [
+          "eq_1"
+        ],
+        "change": "The initial state A|0> is not prepared inside the circuit.",
+        "reason": "The task requires operations only, with inputs prepared by the runner. A appears only inside G."
+      }
+    ],
+    "assumptions": [
+      "A = H^n and the oracle marks an explicit list of distinct computational-basis states.",
+      "Qubit k is bit k of each marked integer (little-endian).",
+      "The oracle is applied directly as a phase flip, with no ancilla.",
+      "L is capped at 256 and n at 12 for size safety.",
+      "If all 2^n states are marked, the circuit is still built and G acts trivially up to phase."
+    ],
+    "unresolved_issues": [
+      "The paper's fixed-point amplitude amplification with quadratic speedup is not implemented.",
+      "Phase schedule, query count versus lambda_0 and delta, and the optimal lambda range remain unspecified.",
+      "The generic oracle/ancilla layout from the specification is replaced by a direct phase-flip oracle."
+    ]
+  },
+  "validation": {
+    "status": "build_passed",
+    "detail": "Circuit built and transpiled successfully; no independent correctness reference selected.",
+    "reference": "none",
+    "worker_image_id": "sha256:2b126d393cdfad766bb5154c0edfa95f68288d1cf56bc922836c8799ebb08c48",
+    "qiskit_version": "2.6.1",
+    "num_qubits": 2,
+    "gate_count": 18,
+    "depth": 13,
+    "basis_states_checked": 0,
+    "basis_probabilities_passed": null,
+    "full_operator_error": null,
+    "superposition_fidelity": null,
+    "paper_fidelity_verified": false
+  }
+}

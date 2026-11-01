@@ -4,10 +4,14 @@ import json
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import anthropic
+import httpx
 from pydantic import ValidationError
+
+from a2m.llm.client import LLM, Budget, LLMError
 
 from .code_prompt import PROMPT_VERSION, SYSTEM_PROMPT, code_messages
 from .code_schemas import CircuitArtifact, CircuitValidation, CodeRequest, CodeResult
@@ -51,6 +55,9 @@ def check_mapping(artifact: CircuitArtifact, request: CodeRequest) -> None:
 
 def generate_code(request: CodeRequest, settings: Settings, *, client=None) -> CodeResult:
     if client is None:
+        if settings.backend == "local":
+            with httpx.Client(timeout=settings.timeout_seconds) as owned_client:
+                return generate_code(request, settings, client=owned_client)
         with anthropic.Anthropic(
             api_key=settings.api_key,
             base_url=settings.base_url,
@@ -61,14 +68,26 @@ def generate_code(request: CodeRequest, settings: Settings, *, client=None) -> C
     messages = code_messages(request)
     started = time.monotonic()
     try:
-        response = client.messages.parse(
-            model=settings.model,
-            max_tokens=settings.max_tokens,
-            system=SYSTEM_PROMPT,
-            messages=messages,
-            output_format=CircuitArtifact,
-            output_config={"effort": settings.effort},
-        )
+        if settings.backend == "local":
+            budget = Budget(None)
+            llm = LLM(settings.model, budget, "local", max_tokens=settings.max_tokens,
+                      client=client, base_url=settings.base_url, api_key=settings.api_key)
+            parsed = llm.call("qiskit", SYSTEM_PROMPT, "", CircuitArtifact.model_json_schema(),
+                              messages=messages)
+            response = SimpleNamespace(
+                parsed_output=parsed, model=llm.response_model, stop_reason="end_turn",
+                usage=SimpleNamespace(input_tokens=budget.input_tokens,
+                                      output_tokens=budget.output_tokens),
+            )
+        else:
+            response = client.messages.parse(
+                model=settings.model,
+                max_tokens=settings.max_tokens,
+                system=SYSTEM_PROMPT,
+                messages=messages,
+                output_format=CircuitArtifact,
+                output_config={"effort": settings.effort},
+            )
         if response.stop_reason != "end_turn":
             raise GenerationError(
                 "Model did not complete a structured code artifact; no code accepted.",
@@ -81,6 +100,8 @@ def generate_code(request: CodeRequest, settings: Settings, *, client=None) -> C
             )
         artifact = CircuitArtifact.model_validate(response.parsed_output)
         check_mapping(artifact, request)
+    except LLMError as exc:
+        raise GenerationError(str(exc), "invalid_output") from None
     except anthropic.APIStatusError as exc:
         raise GenerationError(
             f"Claude API returned HTTP {exc.status_code}. Check credentials, model access, "
@@ -88,9 +109,15 @@ def generate_code(request: CodeRequest, settings: Settings, *, client=None) -> C
         ) from None
     except anthropic.APIConnectionError:
         raise GenerationError("Claude API connection failed or timed out.") from None
-    except (ValidationError, ValueError):
+    except ValidationError as exc:
+        # Field paths and messages only, so model output is never echoed.
+        fields = "; ".join(".".join(map(str, e["loc"])) + ": " + e["msg"] for e in exc.errors()[:3])
         raise GenerationError(
-            "Code artifact failed schema or equation-mapping validation.", "invalid_output"
+            "Code artifact failed schema validation: " + fields[:400], "invalid_output"
+        ) from None
+    except ValueError as exc:
+        raise GenerationError(
+            "Code artifact failed equation-mapping validation: " + str(exc)[:200], "invalid_output"
         ) from None
 
     validation = CircuitValidation(
@@ -122,6 +149,7 @@ def generate_code(request: CodeRequest, settings: Settings, *, client=None) -> C
             )
 
     result = CodeResult(
+        backend=settings.backend,
         run_id=str(uuid4()),
         parent_run_id=request.equation_result.run_id,
         created_at=datetime.now(UTC).isoformat(),
